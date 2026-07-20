@@ -1,0 +1,74 @@
+# Optional mow config — copy to $MOW_HOME/config.yaml (default ~/.mow/config.yaml)
+# or pass -config path. Set MOW_HOME to relocate the whole user data root.
+#
+# Env always wins for secrets and common overrides:
+#   OPENAI_BASE_URL / MOW_BASE_URL
+#   OPENAI_API_KEY  / MOW_API_KEY
+#   OPENAI_MODEL    / MOW_MODEL
+
+workspace: .
+
+llm:
+  # Client wire. Default: openai-chat-completions.
+  wire: openai-chat-completions
+  # wire: anthropic-messages
+  # base_url: https://api.openai.com/v1   # or any OpenAI-compatible /v1
+  # api_key_env: OPENAI_API_KEY
+  # model: deepseek-v4-flash          # chat agent loop (tools + reasoning)
+  # stream: true
+
+  # Side-lane model ids (same base_url/key as chat). Chat stays on `model` above.
+  # generate.* / understand.* → tools generate_* / understand_*
+  # generate:
+  #   image: grok-imagine-image-quality
+  #   speech: eleven_v3
+  #   speech_voice: LcvlyuBGMjj1h4uAtQjo   # ElevenLabs voice_id (optional; built-in default if omitted)
+  #   video: grok-imagine-video
+  # understand:
+  #   image: qwen3-vl-plus
+  #   voice: whisper-large-v3-turbo
+  #   video: qwen-vl-plus
+
+tools:
+  # Secure default when omitted: read, glob, grep
+  enable:
+    - read
+    - glob
+    - grep
+  # Power tools: CLI --allow-write / --allow-shell, or list them here:
+  #   - write
+  #   - edit
+  #   - bash
+  # Media (also set matching llm.generate.* / llm.understand.* model ids):
+  #   - generate_image
+  #   - generate_speech
+  #   - generate_video
+  #   - understand_image
+  #   - understand_voice
+  #   - understand_video
+
+policy:
+  max_turns: 40
+  bash_timeout_sec: 60
+  max_read_bytes: 524288          # 512 KiB per read (default)
+  max_context_chars: 100000       # soft history compaction (default); -1 disables
+  max_tool_result_chars: 24000    # cap each tool result in model history (default)
+
+skills:
+  # dirs: [/path/to/skills]   # *.md files appended to system prompt
+  # Project skills: workspace/.mow/skills when .mow/trust exists (or MOW_TRUST_PROJECT=1)
+  # Project config: workspace/.mow/config.yaml only when trusted
+  # hashline: true   # optional N:hash|line read + line_hash edit
+
+session:
+  # dir: # default $MOW_HOME/sessions
+
+# Optional packs — packages under ext/<name>; config key extensions.<name>
+# extensions:
+#   acp:
+#     agents:                         # registers acp_delegate before mow.New
+#       - name: peer
+#         command: [peer-agent, --acp]
+#         # dir: /abs/path              # default: workspace
+#         # timeout_sec: 600
+

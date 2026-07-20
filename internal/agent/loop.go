@@ -1,0 +1,291 @@
+// Package agent runs the tool-calling loop.
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/subosito/mow/internal/llm"
+)
+
+// ErrMaxTurns is returned when the agent loop hits Options.MaxTurns.
+var ErrMaxTurns = errors.New("agent: max turns exceeded")
+
+// Tool is a host-executed function.
+type Tool interface {
+	Name() string
+	Description() string
+	// Parameters is a JSON Schema object for arguments.
+	Parameters() json.RawMessage
+	Exec(ctx context.Context, args json.RawMessage) (string, error)
+}
+
+// ChatFn is the LLM chat primitive (injectable for tests).
+type ChatFn func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error)
+
+// Options configures a Loop run.
+type Options struct {
+	System   string
+	MaxTurns int
+	Tools    []Tool
+	// PriorMessages, if non-empty, seed history before the new user prompt
+	// (session resume). System is still prepended when set and not already first.
+	PriorMessages []llm.Message
+	// AllowTool is called before Exec; nil means always allow.
+	AllowTool func(name string) error
+	// Hooks optional lifecycle callbacks.
+	Hooks Hooks
+	// OnToken is content deltas when the ChatFn streams (optional).
+	OnToken func(delta string)
+	// MaxContextChars soft-limits history via Compact before each LLM call (0 = off).
+	MaxContextChars int
+	// MaxToolResultChars caps each tool result in history (0 = DefaultMaxToolResultChars).
+	MaxToolResultChars int
+}
+
+// Result is the final assistant text and message history.
+type Result struct {
+	Text     string
+	Messages []llm.Message
+}
+
+// Run executes the agent loop until the model returns text without tool calls or max turns.
+func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Result, error) {
+	if chat == nil {
+		return Result{}, fmt.Errorf("agent: chat function required")
+	}
+	if strings.TrimSpace(userPrompt) == "" {
+		return Result{}, fmt.Errorf("agent: empty prompt")
+	}
+	maxTurns := opt.MaxTurns
+	if maxTurns <= 0 {
+		maxTurns = 40
+	}
+
+	var messages []llm.Message
+	sys := strings.TrimSpace(opt.System)
+	if len(opt.PriorMessages) > 0 {
+		messages = append(messages, opt.PriorMessages...)
+		// Inject or refresh system (UserPrompt/SessionStart may have appended).
+		if sys != "" {
+			if len(messages) == 0 || messages[0].Role != "system" {
+				messages = append([]llm.Message{{Role: "system", Content: sys}}, messages...)
+			} else if messages[0].Content != sys {
+				// Copy-on-write so we do not mutate the caller's PriorMessages backing array.
+				messages[0].Content = sys
+			}
+		}
+	} else if sys != "" {
+		messages = append(messages, llm.Message{Role: "system", Content: sys})
+	}
+	messages = append(messages, llm.Message{Role: "user", Content: userPrompt})
+
+	toolSpecs := make([]llm.ToolSpec, 0, len(opt.Tools))
+	byName := map[string]Tool{}
+	for _, t := range opt.Tools {
+		if t == nil {
+			continue
+		}
+		name := t.Name()
+		byName[name] = t
+		params := t.Parameters()
+		if len(params) == 0 {
+			params = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		toolSpecs = append(toolSpecs, llm.ToolSpec{
+			Type: "function",
+			Function: llm.ToolSpecFunction{
+				Name:        name,
+				Description: t.Description(),
+				Parameters:  params,
+			},
+		})
+	}
+
+	for turn := 0; turn < maxTurns; turn++ {
+		if err := ctx.Err(); err != nil {
+			return Result{Messages: messages}, err
+		}
+		var specs []llm.ToolSpec
+		if len(toolSpecs) > 0 {
+			specs = toolSpecs
+		}
+		send, err := applyCompact(ctx, messages, opt)
+		if err != nil {
+			return Result{Messages: messages}, err
+		}
+		msg, err := chat(ctx, send, specs)
+		if err != nil {
+			return Result{Messages: messages}, err
+		}
+		messages = append(messages, msg)
+		for _, h := range opt.Hooks.AfterTurn {
+			if h != nil {
+				h(ctx, AfterTurnEvent{
+					AssistantText: msg.Content,
+					HasToolCalls:  len(msg.ToolCalls) > 0,
+				})
+			}
+		}
+
+		if len(msg.ToolCalls) == 0 {
+			return Result{Text: strings.TrimSpace(msg.Content), Messages: messages}, nil
+		}
+
+		for _, tc := range msg.ToolCalls {
+			name := tc.Function.Name
+			if opt.AllowTool != nil {
+				if err := opt.AllowTool(name); err != nil {
+					messages = append(messages, llm.Message{
+						Role:       "tool",
+						ToolCallID: tc.ID,
+						Name:       name,
+						Content:    "error: " + err.Error(),
+					})
+					continue
+				}
+			}
+			tool, ok := byName[name]
+			if !ok {
+				messages = append(messages, llm.Message{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Name:       name,
+					Content:    fmt.Sprintf("error: unknown tool %q", name),
+				})
+				continue
+			}
+			args := json.RawMessage(tc.Function.Arguments)
+			if len(args) == 0 {
+				args = json.RawMessage(`{}`)
+			}
+
+			out, err := runTool(ctx, tool, name, tc.ID, args, opt.Hooks)
+			if err != nil {
+				return Result{Messages: messages}, err
+			}
+			out = TruncateToolResult(out, toolResultLimit(opt))
+			messages = append(messages, llm.Message{
+				Role:       "tool",
+				ToolCallID: tc.ID,
+				Name:       name,
+				Content:    out,
+			})
+		}
+	}
+	return Result{Messages: messages}, fmt.Errorf("%w: %d", ErrMaxTurns, maxTurns)
+}
+
+func toolResultLimit(opt Options) int {
+	if opt.MaxToolResultChars > 0 {
+		return opt.MaxToolResultChars
+	}
+	return DefaultMaxToolResultChars
+}
+
+func applyCompact(ctx context.Context, messages []llm.Message, opt Options) ([]llm.Message, error) {
+	toolLim := toolResultLimit(opt)
+	// Always trim oversized tool bodies before the LLM call (cheap, high impact).
+	messages = trimAllToolResults(messages, toolLim, toolLim/2)
+
+	if opt.MaxContextChars <= 0 {
+		return messages, nil
+	}
+	est := estChars(messages)
+	if est <= opt.MaxContextChars {
+		return messages, nil
+	}
+	summary := ""
+	for _, h := range opt.Hooks.PreCompact {
+		if h == nil {
+			continue
+		}
+		d, err := h(ctx, PreCompactEvent{EstChars: est, MaxChars: opt.MaxContextChars})
+		if err != nil {
+			return nil, err
+		}
+		if d.Skip {
+			return messages, nil
+		}
+		if d.Summary != "" {
+			summary = d.Summary
+		}
+	}
+	return CompactOpts(messages, opt.MaxContextChars, summary, toolLim), nil
+}
+
+// runTool applies PreTool → Exec (or deny) → PostTool and returns the model-visible result.
+// A non-nil error aborts the whole agent Run (hook hard-fail).
+func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawMessage, hooks Hooks) (string, error) {
+	var extra string
+	denied := false
+	denyMsg := ""
+
+	for _, h := range hooks.PreTool {
+		if h == nil {
+			continue
+		}
+		d, err := h(ctx, PreToolEvent{Name: name, Args: args, ToolCallID: callID})
+		if err != nil {
+			return "", err
+		}
+		if d.RewriteArgs && len(d.Args) > 0 {
+			args = d.Args
+		}
+		if d.AdditionalContext != "" {
+			if extra != "" {
+				extra += "\n"
+			}
+			extra += d.AdditionalContext
+		}
+		if d.Deny {
+			denied = true
+			if d.Message != "" {
+				denyMsg = d.Message
+			} else {
+				denyMsg = "denied by hook"
+			}
+			// Keep walking remaining hooks so later ones can still rewrite / annotate;
+			// first deny sticks unless a later deny supplies a clearer Message.
+		}
+	}
+
+	var out string
+	var execErr error
+	if denied {
+		out = "error: " + denyMsg
+	} else {
+		out, execErr = tool.Exec(ctx, args)
+		if execErr != nil {
+			out = "error: " + execErr.Error()
+		}
+	}
+
+	if extra != "" {
+		out = extra + "\n" + out
+	}
+
+	for _, h := range hooks.PostTool {
+		if h == nil {
+			continue
+		}
+		d, err := h(ctx, PostToolEvent{
+			Name:       name,
+			Args:       args,
+			ToolCallID: callID,
+			Result:     out,
+			Denied:     denied,
+			ExecErr:    execErr,
+		})
+		if err != nil {
+			return "", err
+		}
+		if d.Rewrite {
+			out = d.Result
+		}
+	}
+	return out, nil
+}

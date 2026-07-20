@@ -1,0 +1,202 @@
+package goal
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"text/tabwriter"
+
+	"github.com/subosito/mow/cliutil"
+	"github.com/subosito/mow/ext"
+)
+
+func init() {
+	ext.RegisterCommand(ext.Command{
+		Name:    "goal",
+		Summary: "Outer-loop goals (multi-step Prompt; headless)",
+		Run:     runCmd,
+	})
+}
+
+func runCmd(args []string) int {
+	if len(args) == 0 {
+		printGoalUsage()
+		return 2
+	}
+	switch args[0] {
+	case "new":
+		return cmdNew(args[1:])
+	case "run":
+		return cmdRun(args[1:])
+	case "status":
+		return cmdStatus(args[1:])
+	case "list":
+		return cmdList(args[1:])
+	case "help", "-h", "--help":
+		printGoalUsage()
+		return 0
+	default:
+		fmt.Fprintf(os.Stderr, "mow goal: unknown subcommand %q\n", args[0])
+		printGoalUsage()
+		return 2
+	}
+}
+
+func printGoalUsage() {
+	fmt.Fprintf(os.Stderr, `mow goal — multi-step goals over Engine.Prompt
+
+Subcommands:
+  new    --id NAME --goal "..." [--max-steps N]   create pending goal
+  run    --id NAME | --goal "..." [engine flags]  run until done/fail/max
+  status --id NAME                               show saved state
+  list                                           list goals under $MOW_HOME/goals
+
+Engine flags (run): same as other packs (--config --model --workspace … --continue)
+
+Completion: goal_report status=done summary="…" (preferred), or GOAL_DONE / GOAL_FAILED markers.
+Result: mow goal status --id …  or  $MOW_HOME/goals/<id>.json field summary
+
+`)
+}
+
+func cmdNew(args []string) int {
+	fs := cliutil.NewFlagSet("goal new")
+	id := fs.String("id", "", "goal id (slug)")
+	goalText := fs.String("goal", "", "natural-language objective")
+	maxSteps := fs.Int("max-steps", 8, "max Prompt iterations")
+	dir := fs.String("dir", "", "store dir (default $MOW_HOME/goals)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	r := &Runner{Store: &Store{Dir: *dir}}
+	st, err := r.Create(Spec{ID: *id, Goal: *goalText, MaxSteps: *maxSteps})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mow goal new: %v\n", err)
+		return 1
+	}
+	fmt.Printf("created %s status=%s max_steps=%d\n", st.ID, st.Status, st.MaxSteps)
+	fmt.Printf("  %s\n", st.Goal)
+	return 0
+}
+
+func cmdRun(args []string) int {
+	fs := cliutil.NewFlagSet("goal run")
+	var ef cliutil.EngineFlags
+	ef.Bind(fs)
+	id := fs.String("id", "", "existing goal id")
+	goalText := fs.String("goal", "", "one-shot goal text (creates/resumes id)")
+	maxSteps := fs.Int("max-steps", 8, "max steps when using --goal")
+	dir := fs.String("dir", "", "store dir (default $MOW_HOME/goals)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	eng, err := ef.NewEngine()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mow goal run: %v\n", err)
+		return 1
+	}
+	r := &Runner{
+		Engine: eng,
+		Store:  &Store{Dir: *dir},
+		OnEvent: func(e Event) {
+			fmt.Fprintf(os.Stderr, "goal %s %s step=%d/%d %s\n",
+				e.State.ID, e.Kind, e.State.Step, e.State.MaxSteps, e.Text)
+		},
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	var st State
+	switch {
+	case strings.TrimSpace(*goalText) != "":
+		st, err = r.RunSpec(ctx, Spec{ID: *id, Goal: *goalText, MaxSteps: *maxSteps})
+	case strings.TrimSpace(*id) != "":
+		st, err = r.Run(ctx, *id)
+	default:
+		fmt.Fprintln(os.Stderr, "mow goal run: need --id or --goal")
+		return 2
+	}
+	if err != nil && st.Status != StatusDone {
+		fmt.Fprintf(os.Stderr, "mow goal run: %v\n", err)
+		printState(st)
+		return 1
+	}
+	printState(st)
+	if st.Status != StatusDone {
+		return 1
+	}
+	return 0
+}
+
+func cmdStatus(args []string) int {
+	fs := cliutil.NewFlagSet("goal status")
+	id := fs.String("id", "", "goal id")
+	dir := fs.String("dir", "", "store dir")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if strings.TrimSpace(*id) == "" {
+		fmt.Fprintln(os.Stderr, "mow goal status: --id required")
+		return 2
+	}
+	store := &Store{Dir: *dir}
+	st, err := store.Load(*id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mow goal status: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  looked in %s (set MOW_HOME or --dir if goals were created elsewhere)\n", store.DirPath())
+		return 1
+	}
+	printState(st)
+	return 0
+}
+
+func cmdList(args []string) int {
+	fs := cliutil.NewFlagSet("goal list")
+	dir := fs.String("dir", "", "store dir")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	list, err := (&Store{Dir: *dir}).List()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mow goal list: %v\n", err)
+		return 1
+	}
+	if len(list) == 0 {
+		fmt.Println("(no goals)")
+		return 0
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tSTATUS\tSTEP\tUPDATED\tGOAL")
+	for _, st := range list {
+		g := st.Goal
+		if len(g) > 48 {
+			g = g[:45] + "…"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%d/%d\t%s\t%s\n",
+			st.ID, st.Status, st.Step, st.MaxSteps,
+			st.UpdatedAt.Local().Format("2006-01-02 15:04"), g)
+	}
+	_ = tw.Flush()
+	return 0
+}
+
+func printState(st State) {
+	fmt.Printf("id=%s status=%s step=%d/%d session=%s\n",
+		st.ID, st.Status, st.Step, st.MaxSteps, st.SessionID)
+	fmt.Printf("goal: %s\n", st.Goal)
+	if st.Error != "" {
+		fmt.Printf("error: %s\n", st.Error)
+	}
+	if s := strings.TrimSpace(st.Summary); s != "" {
+		fmt.Printf("summary:\n%s\n", s)
+	}
+	// last_reply is often just GOAL_DONE; only show if it differs from summary.
+	if lr := strings.TrimSpace(st.LastReply); lr != "" && lr != strings.TrimSpace(st.Summary) {
+		fmt.Printf("last_reply:\n%s\n", lr)
+	}
+}

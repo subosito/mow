@@ -1,0 +1,16 @@
+# devenv / direnv
+.devenv
+.direnv
+devenv.local.nix
+
+# build
+bin/
+/tmp/
+
+# local config / secrets
+.env
+.mow/
+*.local.yaml
+
+# go
+# (keep go.sum tracked once dependencies exist)
