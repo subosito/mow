@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/llm"
@@ -190,8 +191,9 @@ func TestCancelAbortsRemainingToolsInBatch(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := agent.Run(ctx, chat, "hi", agent.Options{
-			MaxTurns: 3,
-			Tools:    []agent.Tool{first, second},
+			MaxTurns:         3,
+			MaxParallelTools: 1, // sequential: second must not start while first holds
+			Tools:            []agent.Tool{first, second},
 		})
 		errCh <- err
 	}()
@@ -225,8 +227,9 @@ func TestCancelBetweenToolsSkipsRest(t *testing.T) {
 	first := &countingTool{name: "a", n: &n1, onExec: cancel} // cancel after first starts (before return)
 	second := &countingTool{name: "b", n: &n2}
 	_, err := agent.Run(ctx, chat, "hi", agent.Options{
-		MaxTurns: 3,
-		Tools:    []agent.Tool{first, second},
+		MaxTurns:         3,
+		MaxParallelTools: 1,
+		Tools:            []agent.Tool{first, second},
 	})
 	// First may complete (soft or hard); second must not run.
 	if !errors.Is(err, context.Canceled) {
@@ -258,4 +261,175 @@ func TestCancelBeforeTurnSkipsChat(t *testing.T) {
 	if n.Load() != 0 {
 		t.Fatalf("tool runs=%d want 0", n.Load())
 	}
+}
+
+func TestParallelToolsRunConcurrently(t *testing.T) {
+	var started atomic.Int32
+	bothIn := make(chan struct{})
+	var tools []agent.Tool
+	for _, name := range []string{"a", "b"} {
+		name := name
+		tools = append(tools, &syncTool{
+			name: name,
+			fn: func(ctx context.Context) (string, error) {
+				if started.Add(1) == 2 {
+					close(bothIn)
+				}
+				select {
+				case <-bothIn:
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+				select {
+				case <-time.After(20 * time.Millisecond):
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+				return name, nil
+			},
+		})
+	}
+
+	step := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		step++
+		if step == 1 {
+			return llm.Message{
+				Role: "assistant",
+				ToolCalls: []llm.ToolCall{
+					{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "a", Arguments: `{}`}},
+					{ID: "2", Type: "function", Function: llm.FunctionCall{Name: "b", Arguments: `{}`}},
+				},
+			}, nil
+		}
+		// Order preserved: first tool message then second.
+		var order []string
+		for _, m := range messages {
+			if m.Role == "tool" {
+				order = append(order, m.Content)
+			}
+		}
+		if len(order) < 2 || order[0] != "a" || order[1] != "b" {
+			t.Fatalf("tool order=%v want [a b]", order)
+		}
+		return llm.Message{Role: "assistant", Content: "done"}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := agent.Run(ctx, chat, "hi", agent.Options{
+		MaxTurns:         5,
+		MaxParallelTools: 4,
+		Tools:            tools,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != "done" {
+		t.Fatalf("text=%q", res.Text)
+	}
+	if started.Load() != 2 {
+		t.Fatalf("started=%d want 2", started.Load())
+	}
+}
+
+func TestParallelCancelFailFast(t *testing.T) {
+	// One tool blocks; sibling may start but must not soft-complete after cancel.
+	entered := make(chan struct{})
+	var n1, n2 atomic.Int32
+	t1 := &syncTool{name: "a", fn: func(ctx context.Context) (string, error) {
+		n1.Add(1)
+		close(entered)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}}
+	t2 := &syncTool{name: "b", fn: func(ctx context.Context) (string, error) {
+		n2.Add(1)
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(2 * time.Second):
+			return "late", nil // must not win
+		}
+	}}
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{
+				{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "a", Arguments: `{}`}},
+				{ID: "2", Type: "function", Function: llm.FunctionCall{Name: "b", Arguments: `{}`}},
+			},
+		}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := agent.Run(ctx, chat, "hi", agent.Options{
+			MaxTurns:         3,
+			MaxParallelTools: 4,
+			Tools:            []agent.Tool{t1, t2},
+		})
+		errCh <- err
+	}()
+	<-entered
+	cancel()
+	err := <-errCh
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v want context.Canceled", err)
+	}
+	if n1.Load() != 1 {
+		t.Fatalf("n1=%d", n1.Load())
+	}
+}
+
+func TestPostToolReceivesDuration(t *testing.T) {
+	var got time.Duration
+	step := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		step++
+		if step == 1 {
+			return llm.Message{
+				Role: "assistant",
+				ToolCalls: []llm.ToolCall{{
+					ID: "1", Type: "function",
+					Function: llm.FunctionCall{Name: "echo", Arguments: `{"text":"x"}`},
+				}},
+			}, nil
+		}
+		return llm.Message{Role: "assistant", Content: "ok"}, nil
+	}
+	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+		MaxTurns: 5,
+		Tools:    []agent.Tool{echoTool{}},
+		Hooks: agent.Hooks{
+			PostTool: []agent.PostToolFunc{
+				func(ctx context.Context, e agent.PostToolEvent) (agent.PostToolDecision, error) {
+					got = e.Duration
+					return agent.PostToolDecision{}, nil
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got <= 0 {
+		t.Fatalf("duration=%v want >0", got)
+	}
+}
+
+// syncTool is a named tool with a custom Exec body (for concurrency tests).
+type syncTool struct {
+	name string
+	fn   func(ctx context.Context) (string, error)
+}
+
+func (t *syncTool) Name() string        { return t.name }
+func (t *syncTool) Description() string { return t.name }
+func (t *syncTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (t *syncTool) Exec(ctx context.Context, _ json.RawMessage) (string, error) {
+	return t.fn(ctx)
 }

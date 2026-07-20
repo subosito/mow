@@ -90,7 +90,7 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `ext/rpc` | JSON-lines embed protocol + `mow rpc` |
 | `ext/acp` | ACP agent + client + `acp_delegate` + `mow acp` |
 | `ext/goal` | Outer multi-step goals + `mow goal` |
-| `ext/schedule` | Interval / cron jobs + `mow schedule serve` |
+| `ext/job` | Interval / cron jobs + `mow job` |
 | `ext/mcp` | MCP servers → tools (config opt-in) |
 | `ext/lsp` | `lsp_hover` / `lsp_definition` via gopls etc. (config opt-in) |
 | `cmd/mow` | Thin shell: core commands + blank-import packs |
@@ -118,18 +118,31 @@ state = [system, …history, user]
 for turn in 1..max_turns:
   resp = llm.Chat(state, tools=enabled_schemas)
   if resp has tool_calls:
-    for each call:
-      if policy denies → tool error result to model
-      else result = tool.Exec(call)
-      append tool results to state
+    run tool batch (up to max_parallel_tools concurrent):
+      if policy denies → soft tool error result
+      else result = tool.Exec(call)   # PreTool → Exec → PostTool
+    append soft results in call order
+    on hard error / ctx cancel → fail-fast (cancel siblings), stop run
     continue
   else:
     append assistant text
     return final text
 ```
 
-**Limits:** `max_turns`, bash timeout, max read bytes, **tool result cap**, soft history compaction (on by default).  
-**Abort:** context cancel (Ctrl+C / ACP `session/cancel`).
+**Limits:** `max_turns`, bash timeout, max read bytes, **tool result cap**, **parallel tools**, soft history compaction (on by default).
+
+### Abort / cancel
+
+| Source | Behavior |
+|--------|----------|
+| `context` cancel (`Engine.Cancel`, Ctrl+C, ACP `session/cancel`) | Hard-abort the run |
+| Mid-batch | Remaining / sibling tools are cancelled (fail-fast); finished soft results still append in order |
+| Soft tool errors | Model-visible `"error: …"` string; batch continues |
+| Child-only timeout (e.g. bash 60s) | Soft error if parent ctx still alive |
+| `mow repl` Ctrl+C | Cancels **current turn only**; REPL stays up for the next prompt |
+| `mow run` Ctrl+C | Exit code 130 |
+
+Lifecycle slog (`mow run/tool start|end`) is **Debug** by default. Stock CLI prints compact progress on stderr (`→ read path`, `→ grep pattern`) via `OnEvent`; use `--verbose` for Debug logs.
 
 ### Token efficiency (defaults)
 
@@ -138,9 +151,12 @@ for turn in 1..max_turns:
 | `policy.max_context_chars` | `100000` | Soft-compact history before each LLM call; set `-1` to disable |
 | `policy.max_tool_result_chars` | `24000` | Cap each tool result stored for the model (~6k tokens) |
 | `policy.max_read_bytes` | `512KiB` | Cap `read` tool raw file size |
+| `policy.max_parallel_tools` | `8` | Concurrent tool Exec per assistant batch; `1` = sequential |
 | Loop truncate | always | Oversized tools trimmed even under context budget |
 
 Compaction is **character-estimate**, not a real tokenizer. It keeps the system message + recent turns (aligned on a user boundary), stubs the middle, and shrinks older tool bodies first. Use `RegisterPostTool` for smarter summarization when needed.
+
+**Hooks concurrency:** when `max_parallel_tools > 1`, PreTool/PostTool may run on multiple tools at once. Keep hooks non-blocking and concurrency-safe (the built-in event emitter is).
 
 ---
 

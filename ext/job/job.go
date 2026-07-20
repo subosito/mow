@@ -1,9 +1,9 @@
-// Package schedule runs interval or cron jobs that invoke goals or one-shot prompts.
+// Package job runs interval or cron jobs that invoke goals or one-shot prompts.
 //
-//	import _ "github.com/subosito/mow/ext/schedule"
+//	import _ "github.com/subosito/mow/ext/job"
 //
-// Config: extensions.schedule or $MOW_HOME/schedule/jobs.yaml.
-package schedule
+// Config: extensions.job.schedules or $MOW_HOME/job/schedules.yaml.
+package job
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 	"github.com/subosito/mow/ext/goal"
 )
 
-// Job is one recurring unit of work.
+// Job is one recurring unit of work (an entry under schedules).
 type Job struct {
 	ID string `yaml:"id"`
 	// Every is a Go duration string, e.g. "1h", "30m".
@@ -36,20 +36,20 @@ type Job struct {
 	Enabled *bool `yaml:"enabled"`
 }
 
-// Config is extensions.schedule.
+// Config is extensions.job (list key is schedules, not jobs).
 type Config struct {
-	Jobs []Job `yaml:"jobs"`
+	Schedules []Job `yaml:"schedules"`
 }
 
-// DefaultJobsPath is $MOW_HOME/schedule/jobs.yaml.
-func DefaultJobsPath() string {
-	return filepath.Join(mow.Home(), "schedule", "jobs.yaml")
+// DefaultSchedulesPath is $MOW_HOME/job/schedules.yaml.
+func DefaultSchedulesPath() string {
+	return filepath.Join(mow.Home(), "job", "schedules.yaml")
 }
 
-// LoadJobs reads YAML from path (or DefaultJobsPath).
-func LoadJobs(path string) ([]Job, error) {
+// LoadSchedules reads YAML from path (or DefaultSchedulesPath).
+func LoadSchedules(path string) ([]Job, error) {
 	if strings.TrimSpace(path) == "" {
-		path = DefaultJobsPath()
+		path = DefaultSchedulesPath()
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -59,25 +59,25 @@ func LoadJobs(path string) ([]Job, error) {
 	if err := yaml.Unmarshal(raw, &c); err != nil {
 		return nil, err
 	}
-	return c.Jobs, nil
+	return c.Schedules, nil
 }
 
-// LoadJobsFromEngine reads extensions.schedule from the engine config.
-func LoadJobsFromEngine(eng *mow.Engine) ([]Job, error) {
+// LoadSchedulesFromEngine reads extensions.job from the engine config.
+func LoadSchedulesFromEngine(eng *mow.Engine) ([]Job, error) {
 	if eng == nil {
-		return nil, fmt.Errorf("schedule: nil engine")
+		return nil, fmt.Errorf("job: nil engine")
 	}
 	var c Config
-	if err := eng.Extension("schedule", &c); err != nil {
+	if err := eng.Extension("job", &c); err != nil {
 		return nil, err
 	}
-	return c.Jobs, nil
+	return c.Schedules, nil
 }
 
-// Daemon runs jobs until ctx is cancelled.
+// Daemon runs schedules until ctx is cancelled.
 type Daemon struct {
 	NewEngine func() (*mow.Engine, error)
-	Jobs      []Job
+	Schedules []Job
 	OnLog     func(string)
 	GoalStore *goal.Store
 }
@@ -85,11 +85,11 @@ type Daemon struct {
 // Start blocks until ctx done.
 func (d *Daemon) Start(ctx context.Context) error {
 	if d == nil || d.NewEngine == nil {
-		return fmt.Errorf("schedule: NewEngine required")
+		return fmt.Errorf("job: NewEngine required")
 	}
-	jobs := d.Jobs
+	jobs := d.Schedules
 	if len(jobs) == 0 {
-		return fmt.Errorf("schedule: no jobs")
+		return fmt.Errorf("job: no schedules")
 	}
 	var wg sync.WaitGroup
 	started := 0
@@ -134,7 +134,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 		}(j, dur)
 	}
 	if started == 0 {
-		return fmt.Errorf("schedule: no runnable jobs")
+		return fmt.Errorf("job: no runnable schedules")
 	}
 	wg.Wait()
 	return ctx.Err()
@@ -187,7 +187,7 @@ func (d *Daemon) fire(ctx context.Context, j Job) {
 	}
 	if g := strings.TrimSpace(j.Goal); g != "" {
 		store := d.goalStore()
-		// Recurring schedules should re-run completed goals each tick.
+		// Recurring jobs should re-run completed goals each tick.
 		if prev, err := store.Load(g); err == nil && prev.Status == goal.StatusDone {
 			prev.Status = goal.StatusPending
 			prev.Step = 0
@@ -248,5 +248,5 @@ func (d *Daemon) log(s string) {
 		d.OnLog(s)
 		return
 	}
-	fmt.Fprintln(os.Stderr, "schedule:", s)
+	fmt.Fprintln(os.Stderr, "job:", s)
 }

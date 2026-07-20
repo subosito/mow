@@ -28,7 +28,8 @@ No separate lint step. Format with `gofmt`. Do not invent Make/npm scripts.
 policy jail (`internal/policy`) → session JSONL. Study **`engine.go`** +
 **`engine_prompt.go`** first, then `internal/agent/loop.go`.
 
-Events: `OnEvent` / `AddOnEvent` / `Emit` (`event.go`). Cancel: `Engine.Cancel()`.
+Events: `OnEvent` / `AddOnEvent` / `Emit` (`event.go`; `tool.end` includes `duration_ms`).
+Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool batches: `policy.max_parallel_tools` (default 8).
 
 ## Layout
 
@@ -37,7 +38,7 @@ Events: `OnEvent` / `AddOnEvent` / `Emit` (`event.go`). Cancel: `Engine.Cancel()
 | `mow` (root `*.go`) | Public Engine API (`engine_*.go`, `run.go`, `hooks.go`, `event.go`) |
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
 | `packcfg/` | Decode `extensions.<name>` (**not** a pack) |
-| `ext/` | Registration (`ext.go`) + packs: acp, rpc, goal, mcp, lsp, schedule |
+| `ext/` | Registration (`ext.go`) + packs: acp, rpc, goal, mcp, lsp, job |
 | `internal/` | Implementation — **not** an integrator import surface |
 | `cmd/mow/` | Thin CLI; blank-imports packs |
 | `docs/` | architecture, harness, extensions |

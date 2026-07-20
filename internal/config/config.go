@@ -79,6 +79,9 @@ type PolicyConfig struct {
 	// MaxToolResultChars caps each tool result stored in history (default 24k).
 	// Protects the model from huge read/bash dumps.
 	MaxToolResultChars int `yaml:"max_tool_result_chars"`
+	// MaxParallelTools caps concurrent tool Exec in one assistant batch (default 8).
+	// Set to 1 for sequential execution.
+	MaxParallelTools int `yaml:"max_parallel_tools"`
 }
 
 type SessionConfig struct {
@@ -149,6 +152,7 @@ func defaults() *File {
 			MaxReadBytes:       512 << 10, // 512 KiB — enough for code files; loop also caps tool results
 			MaxContextChars:    100_000,   // soft compaction on by default (~25–30k tokens rough)
 			MaxToolResultChars: 24_000,    // ~6k tokens max per tool result in history
+			MaxParallelTools:   8,         // concurrent tools per assistant batch
 		},
 		Session: SessionConfig{
 			Dir: "",
@@ -193,6 +197,9 @@ func mergeFile(dst *File, path string) error {
 	}
 	if overlay.Policy.MaxToolResultChars > 0 {
 		dst.Policy.MaxToolResultChars = overlay.Policy.MaxToolResultChars
+	}
+	if overlay.Policy.MaxParallelTools > 0 {
+		dst.Policy.MaxParallelTools = overlay.Policy.MaxParallelTools
 	}
 	if overlay.LLM.Stream {
 		dst.LLM.Stream = true
@@ -349,6 +356,9 @@ func (f *File) normalize() error {
 	}
 	if f.Policy.MaxToolResultChars <= 0 {
 		f.Policy.MaxToolResultChars = 24_000
+	}
+	if f.Policy.MaxParallelTools <= 0 {
+		f.Policy.MaxParallelTools = 8
 	}
 	if f.Session.Dir == "" {
 		f.Session.Dir = SessionsDir()

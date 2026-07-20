@@ -68,6 +68,8 @@ type Event struct {
 	Result     string          `json:"result,omitempty"` // may be truncated for size
 	Denied     bool            `json:"denied,omitempty"`
 	Error      string          `json:"error,omitempty"`
+	// DurationMs is wall time for the tool (tool.end only).
+	DurationMs int64 `json:"duration_ms,omitempty"`
 
 	// Turn / run completion
 	HasToolCalls bool   `json:"has_tool_calls,omitempty"`

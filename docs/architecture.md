@@ -74,13 +74,13 @@ Integrators should not import `internal/*`. Custom tools use `ext.Tool` / `mow.T
 | **rpc** | `mow rpc` | **ext/rpc** JSONL control plane (prompt + event stream + cancel/status) |
 | **acp** | `mow acp` | **ext/acp** (Agent Client Protocol agent) |
 | **goal** | `mow goal` | **ext/goal** (outer multi-step loop) |
-| **schedule** | `mow schedule serve` | **ext/schedule** (interval / cron jobs) |
+| **job** | `mow job` | **ext/job** (interval / cron jobs) |
 
 ### Integration matrix (hosts / orchestrators)
 
 | Host need | Use |
 |-----------|-----|
-| In-process Go | `Engine.Prompt` + `Options.OnEvent` / `SetOnEvent` |
+| In-process Go | `Engine.Prompt` + `Options.OnEvent` / `SetOnEvent` (`tool.end` has `duration_ms`) |
 | Scripts / local tools | `mow rpc` — `prompt`, `cancel`, `status`, `event` notifications |
 | Editors | `mow acp` |
 | Peer harnesses | tool `acp_delegate` (session reused; chunks as `delegate.chunk` events) |
@@ -96,7 +96,7 @@ _ "github.com/subosito/mow/ext/goal"
 _ "github.com/subosito/mow/ext/lsp"
 _ "github.com/subosito/mow/ext/mcp"
 _ "github.com/subosito/mow/ext/rpc"
-_ "github.com/subosito/mow/ext/schedule"
+_ "github.com/subosito/mow/ext/job"
 ```
 
 Remove an import → that pack’s subcommand and tools (if any) leave the binary. Help lists linked packs dynamically.

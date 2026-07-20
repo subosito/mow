@@ -45,7 +45,7 @@ Customization modes (see [harness.md](harness.md)):
 |-------|------|
 | **Public core** | `Engine.Prompt`, secure defaults, sessions, stream, skills, media tools (when configured) |
 | **ext registration** | Tools, hooks, CLI commands, BeforeNew hooks |
-| **Packs** | ACP, RPC, goal, MCP, LSP, schedule, … |
+| **Packs** | ACP, RPC, goal, MCP, LSP, job, … |
 | **Host UI** | Goals board, collab, multi-agent roster (unless promoted to a pack) |
 
 ---
@@ -61,7 +61,7 @@ ext/
   rpc/                 # pack: JSON-lines + subcommand "rpc"
   acp/                 # pack: ACP + "acp" + acp_delegate
   goal/                # pack: outer-loop goals + "goal"
-  schedule/            # pack: interval jobs (`mow schedule serve`)
+  job/                 # pack: interval jobs (`mow job`)
   mcp/                 # pack: MCP → tools
   lsp/                 # pack: LSP hover/definition (gopls, …)
 cmd/mow/               # thin binary: run/repl + blank-import packs
@@ -104,7 +104,7 @@ _ "github.com/subosito/mow/ext/goal"
 _ "github.com/subosito/mow/ext/lsp"
 _ "github.com/subosito/mow/ext/mcp"
 _ "github.com/subosito/mow/ext/rpc"
-_ "github.com/subosito/mow/ext/schedule"
+_ "github.com/subosito/mow/ext/job"
 ```
 
 | Action | Effect |
@@ -130,7 +130,7 @@ extensions:
       - name: peer
         command: [peer-agent, --acp]
         # timeout_sec: 600
-  # other packs: schedule, mcp, lsp, …
+  # other packs: job, mcp, lsp, …
 ```
 
 - Stored as YAML nodes under `extensions` (internal config).  
@@ -171,11 +171,11 @@ Completion (any of):
 
 See result: `mow goal status --id …` or `jq -r .summary $MOW_HOME/goals/<id>.json`.
 
-### `ext/schedule`
+### `ext/job`
 
 ```yaml
-# $MOW_HOME/schedule/jobs.yaml  OR  extensions.schedule in config
-jobs:
+# $MOW_HOME/job/schedules.yaml  OR  extensions.job in config
+schedules:
   - id: hourly
     every: 1h
     goal: fix-ci
@@ -185,7 +185,8 @@ jobs:
 ```
 
 ```bash
-mow schedule serve
+mow job                       # default: run the daemon until Ctrl+C
+mow job --schedules path.yaml
 ```
 
 ### `ext/mcp` / `ext/lsp` (supported; opt-in via config)
@@ -256,7 +257,7 @@ ACP agent supports **terminal/** PTY methods when `-allow-shell` (`create` / `ou
 | Soft context compaction | On by default (`max_context_chars` ~100k); tool results capped (`max_tool_result_chars` ~24k) |
 | Media side-lanes when configured | `generate_*` / `understand_*` |
 
-Not core: RPC, ACP, MCP, LSP, schedule, goals — **packs or hosts**.
+Not core: RPC, ACP, MCP, LSP, job, goals — **packs or hosts**.
 
 ---
 
@@ -327,6 +328,8 @@ mow loop ──acp_delegate──▶ peer ACP agent (other harness)
 
 JSONL on stdio. Methods: `prompt`, `cancel`, `status`, `session`, `version`, `ping`.  
 During `prompt`, server may write notifications `{"method":"event","params":{…Event}}` (`run.start`, `token`, `reasoning`, `tool.start`, `tool.end`, `turn`, `delegate.chunk`, `run.end`). Final response includes `run_id` and `stop_reason`.
+
+`tool.end` includes `duration_ms` (wall time for that tool). Tool batches may run up to `policy.max_parallel_tools` concurrent Exec calls (default 8); soft results append in call order. See [harness.md](harness.md) § Abort / cancel.
 ---
 
 ## Custom tools

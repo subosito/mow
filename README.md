@@ -39,7 +39,7 @@ export OPENAI_MODEL=gpt-4.1-mini
 ./bin/mow run -p "Reply with exactly: hi"
 ./bin/mow repl
 ./bin/mow goal run --goal "Make CI green"   # ext/goal — multi-step
-./bin/mow schedule serve         # interval jobs (goals/prompts)
+./bin/mow job                    # interval jobs (goals/prompts)
 ./bin/mow acp                    # ext/acp — editors
 ./bin/mow rpc                    # ext/rpc — JSON-lines
 ./bin/mow help                   # lists linked packs dynamically
@@ -67,7 +67,7 @@ Secure default tools: **read**, **glob**, **grep**. Power tools need `--allow-wr
 ## Extensions
 
 Blank-import packs into a custom binary, or `ext.RegisterTool` in `init`.  
-Stock `cmd/mow` already links acp/rpc/goal/mcp/lsp/schedule.
+Stock `cmd/mow` already links acp/rpc/goal/mcp/lsp/job.
 
 Config: `extensions.<pack>` (see `internal/config/mow.yaml.example`).  
 Docs: [docs/extensions.md](docs/extensions.md).

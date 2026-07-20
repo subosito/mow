@@ -1,4 +1,4 @@
-package schedule
+package job
 
 import (
 	"fmt"

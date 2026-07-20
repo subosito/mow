@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // PreToolEvent is emitted before a tool Exec.
@@ -32,6 +33,8 @@ type PostToolEvent struct {
 	Result     string
 	Denied     bool
 	ExecErr    error
+	// Duration is wall time for this tool (hooks + Exec), when measured.
+	Duration time.Duration
 }
 
 // PostToolDecision may replace the tool result string shown to the model.

@@ -1,4 +1,4 @@
-package schedule
+package job
 
 import (
 	"context"
@@ -15,38 +15,43 @@ import (
 
 func init() {
 	ext.RegisterCommand(ext.Command{
-		Name:    "schedule",
+		Name:    "job",
 		Summary: "Run interval jobs (goals or prompts) until stopped",
 		Run:     runCmd,
 	})
 }
 
 func runCmd(args []string) int {
+	// Default action: run the daemon (short CLI surface).
 	if len(args) == 0 {
-		printUsage()
-		return 2
+		return cmdRun(nil)
 	}
 	switch args[0] {
 	case "serve", "run":
-		return cmdServe(args[1:])
+		return cmdRun(args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "mow schedule: unknown %q\n", args[0])
+		// Flags for the daemon, e.g. mow job --schedules path
+		if strings.HasPrefix(args[0], "-") {
+			return cmdRun(args)
+		}
+		fmt.Fprintf(os.Stderr, "mow job: unknown %q\n", args[0])
 		printUsage()
 		return 2
 	}
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `mow schedule — in-process interval jobs
+	fmt.Fprintf(os.Stderr, `mow job — in-process interval jobs
 
-  serve [--jobs path] [engine flags]
+  mow job [--schedules path] [engine flags]
+  mow job run|serve [--schedules path] [engine flags]   # same as default
 
-Jobs YAML (default $MOW_HOME/schedule/jobs.yaml) or extensions.schedule:
+Schedules YAML (default $MOW_HOME/job/schedules.yaml) or extensions.job:
 
-  jobs:
+  schedules:
     - id: hourly-ci
       every: 1h                 # Go duration; first tick runs immediately
       goal: fix-ci
@@ -60,55 +65,55 @@ Each tick logs "result:" with the prompt reply or goal summary (stderr).
 `)
 }
 
-func cmdServe(args []string) int {
-	fs := cliutil.NewFlagSet("schedule serve")
+func cmdRun(args []string) int {
+	fs := cliutil.NewFlagSet("job")
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
-	jobsPath := fs.String("jobs", "", "jobs yaml path (default $MOW_HOME/schedule/jobs.yaml)")
+	schedPath := fs.String("schedules", "", "schedules yaml path (default $MOW_HOME/job/schedules.yaml)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
 	var jobs []Job
 	var err error
-	path := strings.TrimSpace(*jobsPath)
+	path := strings.TrimSpace(*schedPath)
 	if path == "" {
-		path = DefaultJobsPath()
+		path = DefaultSchedulesPath()
 	}
 	if _, statErr := os.Stat(path); statErr == nil {
-		jobs, err = LoadJobs(path)
+		jobs, err = LoadSchedules(path)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "mow schedule: load jobs: %v\n", err)
+			fmt.Fprintf(os.Stderr, "mow job: load schedules: %v\n", err)
 			return 1
 		}
 	} else {
 		eng, eerr := ef.NewEngine()
 		if eerr != nil {
-			fmt.Fprintf(os.Stderr, "mow schedule: %v (or create %s)\n", eerr, DefaultJobsPath())
+			fmt.Fprintf(os.Stderr, "mow job: %v (or create %s)\n", eerr, DefaultSchedulesPath())
 			return 1
 		}
-		jobs, err = LoadJobsFromEngine(eng)
+		jobs, err = LoadSchedulesFromEngine(eng)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "mow schedule: extension config: %v\n", err)
+			fmt.Fprintf(os.Stderr, "mow job: extension config: %v\n", err)
 			return 1
 		}
 	}
 	if len(jobs) == 0 {
-		fmt.Fprintln(os.Stderr, "mow schedule: no jobs configured")
+		fmt.Fprintln(os.Stderr, "mow job: no schedules configured")
 		return 1
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	d := &Daemon{
-		Jobs: jobs,
+		Schedules: jobs,
 		NewEngine: func() (*mow.Engine, error) {
 			return ef.NewEngine()
 		},
 	}
-	fmt.Fprintf(os.Stderr, "schedule: %d job(s); ctrl+c to stop\n", len(jobs))
+	fmt.Fprintf(os.Stderr, "job: %d schedule(s); ctrl+c to stop\n", len(jobs))
 	if err := d.Start(ctx); err != nil && ctx.Err() == nil {
-		fmt.Fprintf(os.Stderr, "mow schedule: %v\n", err)
+		fmt.Fprintf(os.Stderr, "mow job: %v\n", err)
 		return 1
 	}
 	return 0

@@ -53,6 +53,7 @@ policy:
   max_read_bytes: 524288          # 512 KiB per read (default)
   max_context_chars: 100000       # soft history compaction (default); -1 disables
   max_tool_result_chars: 24000    # cap each tool result in model history (default)
+  max_parallel_tools: 8           # concurrent tools per assistant batch; 1 = sequential
 
 skills:
   # dirs: [/path/to/skills]   # *.md files appended to system prompt
@@ -71,4 +72,9 @@ session:
 #         command: [peer-agent, --acp]
 #         # dir: /abs/path              # default: workspace
 #         # timeout_sec: 600
+#   job:
+#     schedules:
+#       - id: hourly
+#         every: 1h
+#         goal: fix-ci
 

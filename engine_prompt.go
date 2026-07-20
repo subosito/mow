@@ -42,10 +42,12 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	maxTurns := 0
 	maxCtx := 0
 	maxToolRes := 0
+	maxPar := 0
 	if e.cfg != nil {
 		maxTurns = e.cfg.Policy.MaxTurns
 		maxCtx = e.cfg.Policy.MaxContextChars
 		maxToolRes = e.cfg.Policy.MaxToolResultChars
+		maxPar = e.cfg.Policy.MaxParallelTools
 	}
 	if e.opt.MaxContextChars > 0 {
 		maxCtx = e.opt.MaxContextChars
@@ -153,6 +155,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		OnToken:            onTok,
 		MaxContextChars:    maxCtx,
 		MaxToolResultChars: maxToolRes,
+		MaxParallelTools:   maxPar,
 		AllowTool: func(name string) error {
 			if opt.ReadOnly {
 				switch strings.ToLower(name) {
@@ -234,12 +237,13 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 		if ev.ExecErr != nil {
 			errStr = ev.ExecErr.Error()
 		}
+		durMs := ev.Duration.Milliseconds()
 		e.Emit(Event{
 			Type: EventToolEnd, RunID: runID, SessionID: sid,
 			Tool: ev.Name, ToolCallID: ev.ToolCallID, Args: ev.Args,
-			Result: res, Denied: ev.Denied, Error: errStr,
+			Result: res, Denied: ev.Denied, Error: errStr, DurationMs: durMs,
 		})
-		slog.Debug("mow tool end", "run_id", runID, "tool", ev.Name, "denied", ev.Denied, "error", errStr)
+		slog.Debug("mow tool end", "run_id", runID, "tool", ev.Name, "denied", ev.Denied, "error", errStr, "duration_ms", durMs)
 		return agent.PostToolDecision{}, nil
 	}}, post...)
 	after = append([]agent.AfterTurnFunc{func(ctx context.Context, ev agent.AfterTurnEvent) {

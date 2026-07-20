@@ -7,12 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/subosito/mow/internal/llm"
 )
 
 // ErrMaxTurns is returned when the agent loop hits Options.MaxTurns.
 var ErrMaxTurns = errors.New("agent: max turns exceeded")
+
+// DefaultMaxParallelTools is used when Options.MaxParallelTools is unset (0).
+const DefaultMaxParallelTools = 8
 
 // Tool is a host-executed function.
 type Tool interface {
@@ -37,6 +42,8 @@ type Options struct {
 	// AllowTool is called before Exec; nil means always allow.
 	AllowTool func(name string) error
 	// Hooks optional lifecycle callbacks.
+	// PreTool/PostTool may run concurrently across tools in a batch when
+	// MaxParallelTools > 1 — keep them non-blocking and concurrency-safe.
 	Hooks Hooks
 	// OnToken is content deltas when the ChatFn streams (optional).
 	OnToken func(delta string)
@@ -44,6 +51,9 @@ type Options struct {
 	MaxContextChars int
 	// MaxToolResultChars caps each tool result in history (0 = DefaultMaxToolResultChars).
 	MaxToolResultChars int
+	// MaxParallelTools caps concurrent Exec in one assistant tool batch.
+	// 0 → DefaultMaxParallelTools; 1 → sequential (legacy).
+	MaxParallelTools int
 }
 
 // Result is the final assistant text and message history.
@@ -135,52 +145,165 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			return Result{Text: strings.TrimSpace(msg.Content), Messages: messages}, nil
 		}
 
-		for _, tc := range msg.ToolCalls {
-			// Abort between tools so cancel does not drain the rest of the batch.
-			if err := ctx.Err(); err != nil {
-				return Result{Messages: messages}, err
-			}
-			name := tc.Function.Name
-			if opt.AllowTool != nil {
-				if err := opt.AllowTool(name); err != nil {
-					messages = append(messages, llm.Message{
-						Role:       "tool",
-						ToolCallID: tc.ID,
-						Name:       name,
-						Content:    "error: " + err.Error(),
-					})
-					continue
-				}
-			}
-			tool, ok := byName[name]
-			if !ok {
-				messages = append(messages, llm.Message{
-					Role:       "tool",
-					ToolCallID: tc.ID,
-					Name:       name,
-					Content:    fmt.Sprintf("error: unknown tool %q", name),
-				})
-				continue
-			}
-			args := json.RawMessage(tc.Function.Arguments)
-			if len(args) == 0 {
-				args = json.RawMessage(`{}`)
-			}
-
-			out, err := runTool(ctx, tool, name, tc.ID, args, opt.Hooks)
-			if err != nil {
-				return Result{Messages: messages}, err
-			}
-			out = TruncateToolResult(out, toolResultLimit(opt))
-			messages = append(messages, llm.Message{
-				Role:       "tool",
-				ToolCallID: tc.ID,
-				Name:       name,
-				Content:    out,
-			})
+		toolMsgs, err := runToolBatch(ctx, msg.ToolCalls, byName, opt)
+		messages = append(messages, toolMsgs...)
+		if err != nil {
+			return Result{Messages: messages}, err
 		}
 	}
 	return Result{Messages: messages}, fmt.Errorf("%w: %d", ErrMaxTurns, maxTurns)
+}
+
+// toolSlot is one resolved call in a batch (soft result or hard error).
+type toolSlot struct {
+	msg  llm.Message
+	ok   bool // soft result ready to append
+	hard error
+}
+
+func parallelLimit(opt Options) int {
+	if opt.MaxParallelTools > 0 {
+		return opt.MaxParallelTools
+	}
+	return DefaultMaxParallelTools
+}
+
+// runToolBatch executes all tool calls for one assistant turn.
+// Soft results are returned in call order. The first hard error cancels
+// siblings (fail-fast); finished soft results still append.
+func runToolBatch(ctx context.Context, calls []llm.ToolCall, byName map[string]Tool, opt Options) ([]llm.Message, error) {
+	if len(calls) == 0 {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	limit := parallelLimit(opt)
+	if len(calls) == 1 || limit == 1 {
+		return runToolBatchSequential(ctx, calls, byName, opt)
+	}
+	return runToolBatchParallel(ctx, calls, byName, opt, limit)
+}
+
+func runToolBatchSequential(ctx context.Context, calls []llm.ToolCall, byName map[string]Tool, opt Options) ([]llm.Message, error) {
+	var out []llm.Message
+	for _, tc := range calls {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		slot := execOneTool(ctx, tc, byName, opt)
+		if slot.ok {
+			out = append(out, slot.msg)
+		}
+		if slot.hard != nil {
+			return out, slot.hard
+		}
+	}
+	return out, nil
+}
+
+func runToolBatchParallel(ctx context.Context, calls []llm.ToolCall, byName map[string]Tool, opt Options, limit int) ([]llm.Message, error) {
+	batchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	slots := make([]toolSlot, len(calls))
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	var hardMu sync.Mutex
+	var hardErr error
+
+	for i, tc := range calls {
+		i, tc := i, tc
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-batchCtx.Done():
+				slots[i].hard = batchCtx.Err()
+				return
+			}
+			if err := batchCtx.Err(); err != nil {
+				slots[i].hard = err
+				return
+			}
+			slot := execOneTool(batchCtx, tc, byName, opt)
+			slots[i] = slot
+			if slot.hard != nil {
+				hardMu.Lock()
+				if hardErr == nil {
+					hardErr = slot.hard
+				}
+				hardMu.Unlock()
+				cancel() // fail-fast: stop siblings
+			}
+		}()
+	}
+	wg.Wait()
+
+	var out []llm.Message
+	for i := range slots {
+		if slots[i].ok {
+			out = append(out, slots[i].msg)
+		}
+	}
+	if hardErr != nil {
+		return out, hardErr
+	}
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// execOneTool resolves allow/unknown and runs hooks+Exec for one call.
+func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, opt Options) toolSlot {
+	name := tc.Function.Name
+	if opt.AllowTool != nil {
+		if err := opt.AllowTool(name); err != nil {
+			return toolSlot{
+				ok: true,
+				msg: llm.Message{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Name:       name,
+					Content:    "error: " + err.Error(),
+				},
+			}
+		}
+	}
+	tool, ok := byName[name]
+	if !ok {
+		return toolSlot{
+			ok: true,
+			msg: llm.Message{
+				Role:       "tool",
+				ToolCallID: tc.ID,
+				Name:       name,
+				Content:    fmt.Sprintf("error: unknown tool %q", name),
+			},
+		}
+	}
+	args := json.RawMessage(tc.Function.Arguments)
+	if len(args) == 0 {
+		args = json.RawMessage(`{}`)
+	}
+	out, err := runTool(ctx, tool, name, tc.ID, args, opt.Hooks)
+	if err != nil {
+		return toolSlot{hard: err}
+	}
+	out = TruncateToolResult(out, toolResultLimit(opt))
+	return toolSlot{
+		ok: true,
+		msg: llm.Message{
+			Role:       "tool",
+			ToolCallID: tc.ID,
+			Name:       name,
+			Content:    out,
+		},
+	}
 }
 
 func toolResultLimit(opt Options) int {
@@ -228,6 +351,7 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	start := time.Now()
 
 	var extra string
 	denied := false
@@ -282,6 +406,7 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 		out = extra + "\n" + out
 	}
 
+	dur := time.Since(start)
 	for _, h := range hooks.PostTool {
 		if h == nil {
 			continue
@@ -293,6 +418,7 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 			Result:     out,
 			Denied:     denied,
 			ExecErr:    execErr,
+			Duration:   dur,
 		})
 		if err != nil {
 			return "", err
