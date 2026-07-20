@@ -173,6 +173,13 @@ See result: `mow goal status --id …` or `jq -r .summary $MOW_HOME/goals/<id>.j
 
 `mow goal run` uses the same compact tool progress as `run`/`repl` (`→ tool target` on stderr). On exit it prints `file: …/goals/<id>.json` and resume hints (`goal run --id`, optional `repl --session`).
 
+| Status | Re-run |
+|--------|--------|
+| pending / running / failed | `mow goal run --id NAME` resumes state |
+| done | `mow goal reset --id NAME` then `run --id` (or `delete` and create again) |
+
+Also: `mow goal delete --id NAME`.
+
 ### `ext/job`
 
 ```yaml
@@ -187,9 +194,13 @@ schedules:
 ```
 
 ```bash
-mow job                       # default: run the daemon until Ctrl+C
+mow job                       # daemon until Ctrl+C
+mow job list                  # table of schedules + next fire
+mow job check                 # validate; exit 1 if any bad
 mow job --schedules path.yaml
 ```
+
+Same id never overlaps a previous tick (skip if still running). Not HA — use host cron for production redundancy.
 
 ### `ext/mcp` / `ext/lsp` (supported; opt-in via config)
 

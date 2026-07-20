@@ -74,12 +74,63 @@ func LoadSchedulesFromEngine(eng *mow.Engine) ([]Job, error) {
 	return c.Schedules, nil
 }
 
+// ValidateJob checks one schedule is runnable (id, every/cron, goal/prompt).
+func ValidateJob(j Job) error {
+	if strings.TrimSpace(j.ID) == "" {
+		return fmt.Errorf("missing id")
+	}
+	if strings.TrimSpace(j.Goal) == "" && strings.TrimSpace(j.Prompt) == "" {
+		return fmt.Errorf("need goal or prompt")
+	}
+	if j.Enabled != nil && !*j.Enabled {
+		return fmt.Errorf("disabled")
+	}
+	cronExpr := strings.TrimSpace(j.Cron)
+	everyExpr := strings.TrimSpace(j.Every)
+	if cronExpr != "" {
+		if _, err := parseCron(cronExpr); err != nil {
+			return err
+		}
+		return nil
+	}
+	if everyExpr == "" {
+		return fmt.Errorf("need every or cron")
+	}
+	dur, err := time.ParseDuration(everyExpr)
+	if err != nil || dur <= 0 {
+		return fmt.Errorf("bad every %q", j.Every)
+	}
+	return nil
+}
+
+// NextFire returns a human next-fire hint (cron next time, or every interval).
+func NextFire(j Job, from time.Time) string {
+	if cronExpr := strings.TrimSpace(j.Cron); cronExpr != "" {
+		sched, err := parseCron(cronExpr)
+		if err != nil {
+			return "invalid cron"
+		}
+		next, err := sched.nextAfter(from)
+		if err != nil {
+			return err.Error()
+		}
+		return next.Format(time.RFC3339)
+	}
+	if every := strings.TrimSpace(j.Every); every != "" {
+		return "every " + every + " (first tick immediate when daemon starts)"
+	}
+	return ""
+}
+
 // Daemon runs schedules until ctx is cancelled.
 type Daemon struct {
 	NewEngine func() (*mow.Engine, error)
 	Schedules []Job
 	OnLog     func(string)
 	GoalStore *goal.Store
+
+	// fireMu serializes fires per job id so a slow tick cannot overlap the next.
+	fireMu sync.Map // id -> *sync.Mutex
 }
 
 // Start blocks until ctx done.
@@ -179,6 +230,15 @@ func (d *Daemon) runCronLoop(ctx context.Context, j Job, sched *cronSched) {
 }
 
 func (d *Daemon) fire(ctx context.Context, j Job) {
+	// One in-flight fire per schedule id (skip if still running).
+	muAny, _ := d.fireMu.LoadOrStore(j.ID, &sync.Mutex{})
+	mu := muAny.(*sync.Mutex)
+	if !mu.TryLock() {
+		d.log(fmt.Sprintf("job %s skip: previous tick still running", j.ID))
+		return
+	}
+	defer mu.Unlock()
+
 	d.log(fmt.Sprintf("job %s tick", j.ID))
 	eng, err := d.NewEngine()
 	if err != nil {

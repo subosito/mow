@@ -2,14 +2,12 @@ package llm
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // DeltaFn is called with content token deltas during streaming (may be empty for tool-only chunks).
@@ -55,7 +53,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	if err != nil {
 		return Message{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	req, err := newJSONRequest(ctx, http.MethodPost, url, raw)
 	if err != nil {
 		return Message{}, err
 	}
@@ -66,15 +64,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		req.Header.Set(k, v)
 	}
 
-	hc := c.HTTP
-	if hc == nil {
-		hc = &http.Client{Timeout: 0} // stream can be long
-	}
-	// Prefer a client without global timeout for streams.
-	if c.HTTP == nil {
-		hc = &http.Client{Timeout: 5 * time.Minute}
-	}
-	res, err := hc.Do(req)
+	res, err := c.doHTTPStream(req)
 	if err != nil {
 		return Message{}, err
 	}

@@ -1,14 +1,12 @@
 package llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // chatAnthropic maps OpenAI-shaped messages/tools to Anthropic Messages API.
@@ -37,7 +35,7 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 	if err != nil {
 		return Message{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	req, err := newJSONRequest(ctx, http.MethodPost, url, raw)
 	if err != nil {
 		return Message{}, err
 	}
@@ -47,11 +45,7 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
-	hc := c.HTTP
-	if hc == nil {
-		hc = &http.Client{Timeout: 120 * time.Second}
-	}
-	res, err := hc.Do(req)
+	res, err := c.doHTTP(req)
 	if err != nil {
 		return Message{}, err
 	}

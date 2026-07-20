@@ -232,6 +232,10 @@ Default: new session. Resume: `--continue` (latest) or `--session ID` (loads age
 
 Works on **`mow run`** and **`mow repl`** (same `Options.Continue` / `SessionID`). REPL prints `session=…` at start (and a short transcript when resuming) and again on exit with a resume hint (`mow repl --session <id>` or `--continue`).
 
+**Cancel mid tool batch:** hard-abort fails fast (siblings cancelled). Soft results already finished still append to history in call order; incomplete tools are omitted. Session prior keeps whatever was appended before cancel (`StopReason=cancelled`).
+
+**LLM HTTP:** chat/stream requests retry up to 3 times on 429 / 5xx / transient network errors (honours `Retry-After` when present).
+
 ---
 
 ## 9. Extending

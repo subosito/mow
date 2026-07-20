@@ -2,7 +2,6 @@ package llm
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 )
 
 type anthToolAcc struct {
@@ -44,7 +42,7 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 	if err != nil {
 		return Message{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	req, err := newJSONRequest(ctx, http.MethodPost, url, raw)
 	if err != nil {
 		return Message{}, err
 	}
@@ -57,11 +55,7 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 		req.Header.Set(k, v)
 	}
 
-	hc := c.HTTP
-	if hc == nil {
-		hc = &http.Client{Timeout: 5 * time.Minute}
-	}
-	res, err := hc.Do(req)
+	res, err := c.doHTTPStream(req)
 	if err != nil {
 		return Message{}, err
 	}

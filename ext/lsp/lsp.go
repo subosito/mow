@@ -66,6 +66,8 @@ func registerAll(configPaths ...string) error {
 	}
 	ext.RegisterTool(&hoverTool{c: rc})
 	ext.RegisterTool(&defTool{c: rc})
+	cmd := strings.TrimSpace(c.Command)
+	fmt.Fprintf(os.Stderr, "lsp: registered hover + definition via %q\n", cmd)
 	return nil
 }
 

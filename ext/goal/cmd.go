@@ -36,6 +36,10 @@ func runCmd(args []string) int {
 		return cmdStatus(args[1:])
 	case "list":
 		return cmdList(args[1:])
+	case "delete":
+		return cmdDelete(args[1:])
+	case "reset":
+		return cmdReset(args[1:])
 	case "help", "-h", "--help":
 		printGoalUsage()
 		return 0
@@ -54,12 +58,17 @@ Subcommands:
   run    --id NAME | --goal "..." [engine flags]  run until done/fail/max
   status --id NAME                               show saved state
   list                                           list goals under $MOW_HOME/goals
+  reset  --id NAME                               clear progress (pending); re-run with run --id
+  delete --id NAME                               remove goal file
 
 Engine flags (run): same as other packs (--config --model --workspace … --continue)
 
 Completion: goal_report status=done summary="…" (preferred), or GOAL_DONE / GOAL_FAILED markers.
 Result: mow goal status --id …  or  $MOW_HOME/goals/<id>.json field summary
-Resume: mow goal run --id …  (and mow repl --session <session> when a session was used)
+Resume incomplete/failed: mow goal run --id … (reuses state; done goals need reset first)
+Session chat: mow repl --session <session> when a session was used
+
+Failed → re-run: mow goal run --id NAME resumes failed/pending/running; for done use reset then run.
 
 `)
 }
@@ -190,6 +199,47 @@ func cmdList(args []string) int {
 			st.UpdatedAt.Local().Format("2006-01-02 15:04"), g)
 	}
 	_ = tw.Flush()
+	return 0
+}
+
+func cmdDelete(args []string) int {
+	fs := cliutil.NewFlagSet("goal delete")
+	id := fs.String("id", "", "goal id")
+	dir := fs.String("dir", "", "store dir")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if strings.TrimSpace(*id) == "" {
+		fmt.Fprintln(os.Stderr, "mow goal delete: --id required")
+		return 2
+	}
+	store := &Store{Dir: *dir}
+	if err := store.Delete(*id); err != nil {
+		fmt.Fprintf(os.Stderr, "mow goal delete: %v\n", err)
+		return 1
+	}
+	fmt.Printf("deleted %s\n", *id)
+	return 0
+}
+
+func cmdReset(args []string) int {
+	fs := cliutil.NewFlagSet("goal reset")
+	id := fs.String("id", "", "goal id")
+	dir := fs.String("dir", "", "store dir")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if strings.TrimSpace(*id) == "" {
+		fmt.Fprintln(os.Stderr, "mow goal reset: --id required")
+		return 2
+	}
+	store := &Store{Dir: *dir}
+	st, err := store.Reset(*id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mow goal reset: %v\n", err)
+		return 1
+	}
+	fmt.Printf("reset %s status=%s step=0 (run: mow goal run --id %s)\n", st.ID, st.Status, st.ID)
 	return 0
 }
 

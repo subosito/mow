@@ -80,6 +80,37 @@ func (s *Store) Load(id string) (State, error) {
 	return st, nil
 }
 
+// Delete removes a goal file by id. Missing file is not an error.
+func (s *Store) Delete(id string) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
+	err := os.Remove(s.path(id))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// Reset clears progress so the goal can be re-run (pending, step 0).
+// Keeps Goal, MaxSteps, and last Summary. Clears session, error, last_reply.
+func (s *Store) Reset(id string) (State, error) {
+	st, err := s.Load(id)
+	if err != nil {
+		return State{}, err
+	}
+	st.Status = StatusPending
+	st.Step = 0
+	st.Error = ""
+	st.SessionID = ""
+	st.LastReply = ""
+	// keep Summary as last successful result until overwritten
+	if err := s.Save(st); err != nil {
+		return State{}, err
+	}
+	return st, nil
+}
+
 // List returns all goals sorted by UpdatedAt descending.
 func (s *Store) List() ([]State, error) {
 	dir := s.dir()

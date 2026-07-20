@@ -107,6 +107,7 @@ func RegisterServers(servers []ServerConfig) error {
 			_ = tr.Close()
 			return fmt.Errorf("mcp %s list: %w", name, err)
 		}
+		n := 0
 		for _, t := range tools {
 			ext.RegisterTool(&mcpTool{
 				client: tr,
@@ -115,7 +116,9 @@ func RegisterServers(servers []ServerConfig) error {
 				desc:   t.Description,
 				schema: t.InputSchema,
 			})
+			n++
 		}
+		fmt.Fprintf(os.Stderr, "mcp: registered %d tool(s) from %q\n", n, name)
 	}
 	return nil
 }

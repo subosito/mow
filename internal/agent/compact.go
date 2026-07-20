@@ -60,7 +60,20 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 
 	stub := summary
 	if stub == "" {
-		stub = fmt.Sprintf("[context compacted: dropped %d earlier messages to fit limit]", len(dropped))
+		// Count dropped roles so the model knows what vanished (tools vs dialogue).
+		var nUser, nAsst, nTool int
+		for _, m := range dropped {
+			switch m.Role {
+			case "user":
+				nUser++
+			case "assistant":
+				nAsst++
+			case "tool":
+				nTool++
+			}
+		}
+		stub = fmt.Sprintf("[context compacted: dropped %d messages (%d user, %d assistant, %d tool) to fit limit; older tool bodies trimmed]",
+			len(dropped), nUser, nAsst, nTool)
 	}
 	summaryMsg := llm.Message{
 		Role:    "user",
