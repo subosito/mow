@@ -4,4 +4,9 @@
   languages.go.enable = true;
 
   packages = [ pkgs.just pkgs.openssl ];
+
+  # just build → bin/mow; put it first so `mow` resolves after a local build.
+  enterShell = ''
+    export PATH="$DEVENV_ROOT/bin:$PATH"
+  '';
 }

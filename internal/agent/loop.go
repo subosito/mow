@@ -136,6 +136,10 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		}
 
 		for _, tc := range msg.ToolCalls {
+			// Abort between tools so cancel does not drain the rest of the batch.
+			if err := ctx.Err(); err != nil {
+				return Result{Messages: messages}, err
+			}
 			name := tc.Function.Name
 			if opt.AllowTool != nil {
 				if err := opt.AllowTool(name); err != nil {
@@ -218,8 +222,13 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options) ([]l
 }
 
 // runTool applies PreTool → Exec (or deny) → PostTool and returns the model-visible result.
-// A non-nil error aborts the whole agent Run (hook hard-fail).
+// A non-nil error aborts the whole agent Run (hook hard-fail or parent ctx done).
+// Tool timeouts that leave parent ctx alive stay soft (model-visible error string).
 func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawMessage, hooks Hooks) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	var extra string
 	denied := false
 	denyMsg := ""
@@ -259,6 +268,11 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 		out = "error: " + denyMsg
 	} else {
 		out, execErr = tool.Exec(ctx, args)
+		// Parent cancelled/deadline: hard-abort (do not soft-wrap and continue the batch).
+		// Child-only timeouts (e.g. bash 60s) leave ctx alive → still soft below.
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		if execErr != nil {
 			out = "error: " + execErr.Error()
 		}

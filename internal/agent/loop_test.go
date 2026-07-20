@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/subosito/mow/internal/agent"
@@ -142,5 +143,119 @@ func TestAllowToolDeniesExec(t *testing.T) {
 	}
 	if res.Text != "handled" {
 		t.Fatalf("text=%q", res.Text)
+	}
+}
+
+// countingTool records Exec calls; optional block until ctx done / after-callback.
+type countingTool struct {
+	name   string
+	n      *atomic.Int32
+	block  bool
+	onExec func() // called once Exec starts (before block/return)
+}
+
+func (t *countingTool) Name() string        { return t.name }
+func (t *countingTool) Description() string { return "count" }
+func (t *countingTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (t *countingTool) Exec(ctx context.Context, _ json.RawMessage) (string, error) {
+	t.n.Add(1)
+	if t.onExec != nil {
+		t.onExec()
+	}
+	if t.block {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	return "ok", nil
+}
+
+func TestCancelAbortsRemainingToolsInBatch(t *testing.T) {
+	var n1, n2 atomic.Int32
+	entered := make(chan struct{})
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{
+				{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "a", Arguments: `{}`}},
+				{ID: "2", Type: "function", Function: llm.FunctionCall{Name: "b", Arguments: `{}`}},
+			},
+		}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first := &countingTool{name: "a", n: &n1, block: true, onExec: func() { close(entered) }}
+	second := &countingTool{name: "b", n: &n2}
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := agent.Run(ctx, chat, "hi", agent.Options{
+			MaxTurns: 3,
+			Tools:    []agent.Tool{first, second},
+		})
+		errCh <- err
+	}()
+	<-entered
+	cancel()
+	err := <-errCh
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v want context.Canceled", err)
+	}
+	if n1.Load() != 1 {
+		t.Fatalf("first tool runs=%d want 1", n1.Load())
+	}
+	if n2.Load() != 0 {
+		t.Fatalf("second tool runs=%d want 0 (cancel must not drain batch)", n2.Load())
+	}
+}
+
+func TestCancelBetweenToolsSkipsRest(t *testing.T) {
+	var n1, n2 atomic.Int32
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{
+				{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "a", Arguments: `{}`}},
+				{ID: "2", Type: "function", Function: llm.FunctionCall{Name: "b", Arguments: `{}`}},
+			},
+		}, nil
+	}
+	first := &countingTool{name: "a", n: &n1, onExec: cancel} // cancel after first starts (before return)
+	second := &countingTool{name: "b", n: &n2}
+	_, err := agent.Run(ctx, chat, "hi", agent.Options{
+		MaxTurns: 3,
+		Tools:    []agent.Tool{first, second},
+	})
+	// First may complete (soft or hard); second must not run.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v want context.Canceled", err)
+	}
+	if n1.Load() != 1 {
+		t.Fatalf("first tool runs=%d want 1", n1.Load())
+	}
+	if n2.Load() != 0 {
+		t.Fatalf("second tool runs=%d want 0", n2.Load())
+	}
+}
+
+func TestCancelBeforeTurnSkipsChat(t *testing.T) {
+	var n atomic.Int32
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		t.Fatal("chat should not run on cancelled ctx")
+		return llm.Message{}, nil
+	}
+	_, err := agent.Run(ctx, chat, "hi", agent.Options{
+		MaxTurns: 2,
+		Tools:    []agent.Tool{&countingTool{name: "a", n: &n}},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v want context.Canceled", err)
+	}
+	if n.Load() != 0 {
+		t.Fatalf("tool runs=%d want 0", n.Load())
 	}
 }

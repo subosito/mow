@@ -23,6 +23,7 @@ type EngineFlags struct {
 	SessionID  string
 	Continue   bool
 	Stream     bool
+	Verbose    bool
 }
 
 // Bind registers flags on fs.
@@ -38,6 +39,7 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.SessionID, "session", "", "session id")
 	fs.BoolVar(&f.Continue, "continue", false, "resume latest session")
 	fs.BoolVar(&f.Stream, "stream", false, "stream token deltas")
+	fs.BoolVar(&f.Verbose, "verbose", false, "debug lifecycle logs (run/tool) on stderr")
 }
 
 // ConfigPaths returns paths for mow.New.
