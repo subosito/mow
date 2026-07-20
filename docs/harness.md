@@ -230,6 +230,8 @@ Example template: [`internal/config/mow.yaml.example`](../internal/config/mow.ya
 JSONL under `session.dir` (default `$MOW_HOME/sessions/<project-hash>/`).  
 Default: new session. Resume: `--continue` (latest) or `--session ID` (loads agent prior). `--no-session` for tests/CI. Agent prior uses the last full message snapshot.
 
+Works on **`mow run`** and **`mow repl`** (same `Options.Continue` / `SessionID`). REPL prints `session=…` at start (and a short transcript when resuming) and again on exit with a resume hint (`mow repl --session <id>` or `--continue`).
+
 ---
 
 ## 9. Extending

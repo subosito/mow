@@ -30,8 +30,13 @@ func (s *Store) dir() string {
 	return DefaultDir()
 }
 
-// Dir returns the resolved goals directory (for error messages).
+// DirPath returns the resolved goals directory (for error messages).
 func (s *Store) DirPath() string { return s.dir() }
+
+// Path returns the JSON file path for a goal id (for operator hints).
+func (s *Store) Path(id string) string {
+	return s.path(id)
+}
 
 func (s *Store) path(id string) string {
 	return filepath.Join(s.dir(), id+".json")

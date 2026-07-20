@@ -6,10 +6,8 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,10 +22,10 @@ import (
 	// Remove an import to drop that pack (and its subcommand) from this binary.
 	_ "github.com/subosito/mow/ext/acp"
 	_ "github.com/subosito/mow/ext/goal"
+	_ "github.com/subosito/mow/ext/job"
 	_ "github.com/subosito/mow/ext/lsp"
 	_ "github.com/subosito/mow/ext/mcp"
 	_ "github.com/subosito/mow/ext/rpc"
-	_ "github.com/subosito/mow/ext/job"
 )
 
 func main() {
@@ -161,12 +159,7 @@ func runCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "mow run: prompt required (-p or args)")
 		return 2
 	}
-	enableVerbose(ef.Verbose)
-	opt := ef.Options()
-	if ef.Stream {
-		opt.OnToken = func(d string) { fmt.Fprint(os.Stderr, d) }
-	}
-	opt.OnEvent = toolProgressOnEvent(ef.Stream)
+	opt := ef.OptionsCLI()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	res, err := mow.Run(ctx, prompt, opt)
@@ -195,14 +188,7 @@ func replCmd(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	enableVerbose(ef.Verbose)
-	opt := ef.Options()
-	if ef.Stream {
-		opt.Stream = true
-		opt.OnToken = func(d string) { fmt.Fprint(os.Stderr, d) }
-	}
-	// Compact tool progress on stderr; lifecycle slog stays Debug unless --verbose.
-	opt.OnEvent = toolProgressOnEvent(ef.Stream)
+	opt := ef.OptionsCLI()
 	eng, err := mow.New(opt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mow repl: %v\n", err)
@@ -212,6 +198,8 @@ func replCmd(args []string) int {
 	if ef.Stream {
 		fmt.Fprintln(os.Stderr, "(token stream on stderr via --stream)")
 	}
+	// --continue / --session use the same Options path as mow run; surface that here.
+	printReplSession(eng, ef)
 	sc := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Fprint(os.Stderr, "mow> ")
@@ -243,112 +231,60 @@ func replCmd(args []string) int {
 			fmt.Println(res.Text)
 		}
 	}
+	printReplSessionExit(eng, ef)
 	return 0
 }
 
-// enableVerbose turns on Debug slog so demoted run/tool lifecycle lines appear.
-func enableVerbose(on bool) {
-	if !on {
+// printReplSession announces session id and any resumed transcript (stderr).
+// --continue works on repl the same as run (Options.Continue → load latest prior);
+// without this banner it looks like a blank new chat.
+func printReplSession(eng *mow.Engine, ef cliutil.EngineFlags) {
+	if eng == nil || ef.NoSession {
 		return
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
-}
-
-// toolProgressOnEvent prints short tool lines on stderr (not full slog dumps).
-// Includes a one-line target hint (path / pattern / command) so you can see
-// what the agent is doing without dumping full args.
-func toolProgressOnEvent(stream bool) mow.EventFunc {
-	return func(ev mow.Event) {
-		switch ev.Type {
-		case mow.EventToolStart:
-			if stream {
-				fmt.Fprint(os.Stderr, "\n")
+	sid := eng.SessionID()
+	if sid == "" {
+		return
+	}
+	wantResume := ef.Continue || strings.TrimSpace(ef.SessionID) != ""
+	tr := eng.Transcript()
+	if wantResume && len(tr) > 0 {
+		fmt.Fprintf(os.Stderr, "session=%s resumed (%d message(s))\n", sid, len(tr))
+		for _, m := range tr {
+			role := m.Role
+			if role == "" {
+				role = "?"
 			}
-			fmt.Fprintf(os.Stderr, "→ %s\n", formatToolProgress(ev.Tool, ev.Args))
-		case mow.EventToolEnd:
-			if ev.Denied || ev.Error != "" {
-				msg := ev.Error
-				if msg == "" {
-					msg = "denied"
-				}
-				fmt.Fprintf(os.Stderr, "✗ %s: %s\n", formatToolProgress(ev.Tool, ev.Args), msg)
+			text := strings.Join(strings.Fields(m.Content), " ")
+			const max = 160
+			if utf8.RuneCountInString(text) > max {
+				r := []rune(text)
+				text = string(r[:max-1]) + "…"
 			}
+			fmt.Fprintf(os.Stderr, "  %s: %s\n", role, text)
 		}
+		return
 	}
+	if wantResume {
+		// Continue/session set but no UI transcript (empty or missing file).
+		fmt.Fprintf(os.Stderr, "session=%s (no prior turns to show)\n", sid)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "session=%s\n", sid)
 }
 
-// formatToolProgress → "read engine.go", "glob **/*.go", "grep foo in pkg/".
-func formatToolProgress(tool string, args json.RawMessage) string {
-	tool = strings.TrimSpace(tool)
-	if tool == "" {
-		tool = "?"
+// printReplSessionExit reminds how to resume this chat next time.
+func printReplSessionExit(eng *mow.Engine, ef cliutil.EngineFlags) {
+	if eng == nil || ef.NoSession {
+		return
 	}
-	if d := toolProgressDetail(tool, args); d != "" {
-		return tool + " " + d
+	sid := eng.SessionID()
+	if sid == "" {
+		return
 	}
-	return tool
-}
-
-// toolProgressDetail picks a short human target from common tool args.
-func toolProgressDetail(tool string, args json.RawMessage) string {
-	if len(args) == 0 {
-		return ""
-	}
-	var m map[string]any
-	if err := json.Unmarshal(args, &m); err != nil || len(m) == 0 {
-		return ""
-	}
-	str := func(k string) string {
-		v, ok := m[k]
-		if !ok || v == nil {
-			return ""
-		}
-		s, ok := v.(string)
-		if !ok {
-			return ""
-		}
-		return strings.TrimSpace(s)
-	}
-	switch strings.ToLower(tool) {
-	case "read", "write", "edit":
-		return clipRunes(str("path"), 72)
-	case "glob":
-		return clipRunes(str("pattern"), 72)
-	case "grep":
-		pat := clipRunes(str("pattern"), 40)
-		if pat == "" {
-			return ""
-		}
-		if p := str("path"); p != "" && p != "." {
-			return pat + " in " + clipRunes(p, 40)
-		}
-		return pat
-	case "bash":
-		return clipRunes(str("command"), 64)
-	default:
-		// Pack/MCP tools: prefer a familiar key if present.
-		for _, k := range []string{"path", "pattern", "command", "query", "name", "file", "url"} {
-			if v := str(k); v != "" {
-				return clipRunes(v, 64)
-			}
-		}
-		return ""
-	}
-}
-
-func clipRunes(s string, max int) string {
-	s = strings.Join(strings.Fields(s), " ") // collapse whitespace/newlines
-	if max <= 0 || s == "" {
-		return s
-	}
-	if utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	r := []rune(s)
-	if max < 2 {
-		return string(r[:max])
-	}
-	return string(r[:max-1]) + "…"
+	fmt.Fprintf(os.Stderr, "session=%s\n", sid)
+	fmt.Fprintf(os.Stderr, "resume: mow repl --session %s\n", sid)
+	fmt.Fprintf(os.Stderr, "        mow repl --continue\n")
 }
 
 func printUsage() {

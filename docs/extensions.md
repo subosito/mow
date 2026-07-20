@@ -171,6 +171,8 @@ Completion (any of):
 
 See result: `mow goal status --id …` or `jq -r .summary $MOW_HOME/goals/<id>.json`.
 
+`mow goal run` uses the same compact tool progress as `run`/`repl` (`→ tool target` on stderr). On exit it prints `file: …/goals/<id>.json` and resume hints (`goal run --id`, optional `repl --session`).
+
 ### `ext/job`
 
 ```yaml

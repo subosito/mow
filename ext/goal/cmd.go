@@ -2,6 +2,7 @@ package goal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -58,6 +59,7 @@ Engine flags (run): same as other packs (--config --model --workspace … --cont
 
 Completion: goal_report status=done summary="…" (preferred), or GOAL_DONE / GOAL_FAILED markers.
 Result: mow goal status --id …  or  $MOW_HOME/goals/<id>.json field summary
+Resume: mow goal run --id …  (and mow repl --session <session> when a session was used)
 
 `)
 }
@@ -94,14 +96,16 @@ func cmdRun(args []string) int {
 		return 2
 	}
 
-	eng, err := ef.NewEngine()
+	// Tool progress + stream/verbose same as mow run/repl.
+	eng, err := ef.NewEngineCLI()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mow goal run: %v\n", err)
 		return 1
 	}
+	store := &Store{Dir: *dir}
 	r := &Runner{
 		Engine: eng,
-		Store:  &Store{Dir: *dir},
+		Store:  store,
 		OnEvent: func(e Event) {
 			fmt.Fprintf(os.Stderr, "goal %s %s step=%d/%d %s\n",
 				e.State.ID, e.Kind, e.State.Step, e.State.MaxSteps, e.Text)
@@ -122,11 +126,15 @@ func cmdRun(args []string) int {
 		return 2
 	}
 	if err != nil && st.Status != StatusDone {
-		fmt.Fprintf(os.Stderr, "mow goal run: %v\n", err)
-		printState(st)
+		if errors.Is(err, context.Canceled) {
+			fmt.Fprintln(os.Stderr, "mow goal run: cancelled")
+		} else {
+			fmt.Fprintf(os.Stderr, "mow goal run: %v\n", err)
+		}
+		printState(st, store)
 		return 1
 	}
-	printState(st)
+	printState(st, store)
 	if st.Status != StatusDone {
 		return 1
 	}
@@ -151,7 +159,7 @@ func cmdStatus(args []string) int {
 		fmt.Fprintf(os.Stderr, "  looked in %s (set MOW_HOME or --dir if goals were created elsewhere)\n", store.DirPath())
 		return 1
 	}
-	printState(st)
+	printState(st, &Store{Dir: *dir})
 	return 0
 }
 
@@ -185,7 +193,7 @@ func cmdList(args []string) int {
 	return 0
 }
 
-func printState(st State) {
+func printState(st State, store *Store) {
 	fmt.Printf("id=%s status=%s step=%d/%d session=%s\n",
 		st.ID, st.Status, st.Step, st.MaxSteps, st.SessionID)
 	fmt.Printf("goal: %s\n", st.Goal)
@@ -199,4 +207,21 @@ func printState(st State) {
 	if lr := strings.TrimSpace(st.LastReply); lr != "" && lr != strings.TrimSpace(st.Summary) {
 		fmt.Printf("last_reply:\n%s\n", lr)
 	}
+	if store != nil && strings.TrimSpace(st.ID) != "" {
+		fmt.Printf("file: %s\n", store.Path(st.ID))
+	}
+	printGoalResume(st)
+}
+
+// printGoalResume writes copy-paste resume hints on stderr.
+func printGoalResume(st State) {
+	id := strings.TrimSpace(st.ID)
+	if id == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "resume: mow goal run --id %s\n", id)
+	if sid := strings.TrimSpace(st.SessionID); sid != "" {
+		fmt.Fprintf(os.Stderr, "        mow repl --session %s\n", sid)
+	}
+	fmt.Fprintf(os.Stderr, "status: mow goal status --id %s\n", id)
 }

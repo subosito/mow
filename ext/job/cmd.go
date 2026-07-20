@@ -108,7 +108,8 @@ func cmdRun(args []string) int {
 	d := &Daemon{
 		Schedules: jobs,
 		NewEngine: func() (*mow.Engine, error) {
-			return ef.NewEngine()
+			// Same tool progress / stream UX as run, repl, and goal.
+			return ef.NewEngineCLI()
 		},
 	}
 	fmt.Fprintf(os.Stderr, "job: %d schedule(s); ctrl+c to stop\n", len(jobs))
