@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -156,12 +157,21 @@ var (
 )
 
 // RegisterTool adds a tool available to integrators and the default registry merge.
+// Re-registering a name replaces the earlier tool — BeforeNew may run once per
+// Engine, and duplicate specs would otherwise reach the model.
 func RegisterTool(t Tool) {
 	if t == nil {
 		return
 	}
 	mu.Lock()
 	defer mu.Unlock()
+	name := strings.ToLower(strings.TrimSpace(t.Name()))
+	for i, ex := range tools {
+		if strings.ToLower(strings.TrimSpace(ex.Name())) == name {
+			tools[i] = t
+			return
+		}
+	}
 	tools = append(tools, t)
 }
 

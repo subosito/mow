@@ -13,6 +13,9 @@ func TestLoadDefaultsSecureTools(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("OPENAI_MODEL", "m")
 	t.Setenv("OPENAI_BASE_URL", "http://example.com/v1")
+	t.Setenv("MOW_API_KEY", "")
+	t.Setenv("MOW_MODEL", "")
+	t.Setenv("MOW_BASE_URL", "")
 	// clear power env
 
 	f, err := config.Load()
@@ -42,6 +45,9 @@ func TestLoadYAMLAndEnv(t *testing.T) {
 	}
 	t.Setenv("OPENAI_API_KEY", "k")
 	t.Setenv("OPENAI_MODEL", "from-env") // env wins after file in applyEnv
+	t.Setenv("MOW_API_KEY", "")
+	t.Setenv("MOW_MODEL", "")
+	t.Setenv("MOW_BASE_URL", "")
 	f, err := config.Load(path)
 	if err != nil {
 		t.Fatal(err)

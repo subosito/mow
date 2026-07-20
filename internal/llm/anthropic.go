@@ -9,6 +9,15 @@ import (
 	"strings"
 )
 
+// anthropicMaxTokens is c.MaxTokens with the historical 8192 default, so
+// zero-value Clients keep working.
+func (c *Client) anthropicMaxTokens() int {
+	if c.MaxTokens > 0 {
+		return c.MaxTokens
+	}
+	return 8192
+}
+
 // chatAnthropic maps OpenAI-shaped messages/tools to Anthropic Messages API.
 func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []ToolSpec) (Message, error) {
 	if c.APIKey == "" {
@@ -22,7 +31,7 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 	system, anthMsgs := toAnthropicMessages(messages)
 	body := map[string]any{
 		"model":      c.Model,
-		"max_tokens": 8192,
+		"max_tokens": c.anthropicMaxTokens(),
 		"messages":   anthMsgs,
 	}
 	if system != "" {
@@ -65,6 +74,11 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 			Name  string `json:"name,omitempty"`
 			Input any    `json:"input,omitempty"`
 		} `json:"content"`
+		StopReason string `json:"stop_reason"`
+		Usage      struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 		Error *struct {
 			Message string `json:"message"`
 		} `json:"error"`
@@ -75,7 +89,11 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 	if parsed.Error != nil && parsed.Error.Message != "" {
 		return Message{}, fmt.Errorf("llm: %s", parsed.Error.Message)
 	}
-	msg := Message{Role: "assistant"}
+	msg := Message{Role: "assistant", StopReason: parsed.StopReason}
+	msg.Usage = Usage{
+		InputTokens:  parsed.Usage.InputTokens,
+		OutputTokens: parsed.Usage.OutputTokens,
+	}
 	var textParts []string
 	for _, b := range parsed.Content {
 		switch b.Type {

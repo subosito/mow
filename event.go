@@ -74,6 +74,10 @@ type Event struct {
 	// Turn / run completion
 	HasToolCalls bool   `json:"has_tool_calls,omitempty"`
 	StopReason   string `json:"stop_reason,omitempty"`
+	// Provider-reported token totals for the whole run (run.end only; zero
+	// when the provider sent no usage).
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
 	// Delegate
 	Agent string `json:"agent,omitempty"`
 }

@@ -35,11 +35,16 @@ type Client struct {
 	textMu sync.Mutex
 	text   strings.Builder
 	// OnChunk receives agent_message_chunk deltas while Prompt is in flight.
+	// Set it via SetOnChunk; direct writes race with the read loop.
 	OnChunk func(delta string)
 	// sessionID from last successful Start (for reuse).
 	SessionID string
+	// procMu guards started/exited/cmd across Start, Close, and Alive.
+	procMu sync.Mutex
 	// started is true after Start until Close.
 	started bool
+	// exited is closed by the reaper goroutine once the process exits.
+	exited chan struct{}
 }
 
 // Start launches the peer process and completes initialize + session/new.
@@ -52,31 +57,9 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 	if c.started && c.SessionID != "" {
 		return c.SessionID, nil
 	}
-	c.pending = map[string]chan response{}
-	// Long-lived peer: do not use CommandContext(ctx) so Prompt timeout does not kill the process.
-	c.cmd = exec.Command(c.Command[0], c.Command[1:]...)
-	if c.Dir != "" {
-		c.cmd.Dir = c.Dir
-	}
-	if len(c.Env) > 0 {
-		c.cmd.Env = append(os.Environ(), c.Env...)
-	}
-	stdin, err := c.cmd.StdinPipe()
-	if err != nil {
+	if err := c.startProcess(); err != nil {
 		return "", err
 	}
-	stdout, err := c.cmd.StdoutPipe()
-	if err != nil {
-		return "", err
-	}
-	c.cmd.Stderr = io.Discard
-	c.stdin = stdin
-	c.stdout = stdout
-	if err := c.cmd.Start(); err != nil {
-		return "", fmt.Errorf("acp client start: %w", err)
-	}
-	c.started = true
-	go c.readLoop()
 
 	_, err = c.call(ctx, "initialize", map[string]any{
 		"protocolVersion": ProtocolVersion,
@@ -115,6 +98,47 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 	return out.SessionID, nil
 }
 
+// startProcess launches the peer and starts the read loop plus a reaper
+// goroutine that owns cmd.Wait, so Alive() can observe process exit.
+func (c *Client) startProcess() error {
+	c.pending = map[string]chan response{}
+	// Long-lived peer: do not use CommandContext(ctx) so Prompt timeout does not kill the process.
+	c.cmd = exec.Command(c.Command[0], c.Command[1:]...)
+	if c.Dir != "" {
+		c.cmd.Dir = c.Dir
+	}
+	if len(c.Env) > 0 {
+		c.cmd.Env = append(os.Environ(), c.Env...)
+	}
+	stdin, err := c.cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	stdout, err := c.cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	c.cmd.Stderr = io.Discard
+	c.stdin = stdin
+	c.stdout = stdout
+	if err := c.cmd.Start(); err != nil {
+		return fmt.Errorf("acp client start: %w", err)
+	}
+	exited := make(chan struct{})
+	c.procMu.Lock()
+	c.started = true
+	c.exited = exited
+	cmd := c.cmd
+	c.procMu.Unlock()
+	// Reaper owns cmd.Wait; Close waits on exited instead of Wait-ing itself.
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
+	go c.readLoop()
+	return nil
+}
+
 // Prompt runs session/prompt and returns concatenated agent message text + stop reason.
 // OnChunk (if set) receives each agent_message_chunk delta as it arrives.
 func (c *Client) Prompt(ctx context.Context, sessionID, text string) (reply string, stopReason string, err error) {
@@ -148,28 +172,58 @@ func (c *Client) Cancel(sessionID string) {
 
 // Close terminates the peer process.
 func (c *Client) Close() error {
+	c.procMu.Lock()
 	c.started = false
+	cmd := c.cmd
+	exited := c.exited
+	c.cmd = nil
+	c.exited = nil
+	c.procMu.Unlock()
 	c.SessionID = ""
+	c.encMu.Lock()
 	if c.stdin != nil {
 		_ = c.stdin.Close()
 		c.stdin = nil
 	}
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
-		_, _ = c.cmd.Process.Wait()
+	c.encMu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+		if exited != nil {
+			// The reaper goroutine owns cmd.Wait; wait for it to finish.
+			<-exited
+		} else {
+			_, _ = cmd.Process.Wait()
+		}
 	}
-	c.cmd = nil
 	return nil
 }
 
 // Alive reports whether the peer process is still running.
 func (c *Client) Alive() bool {
-	if c == nil || c.cmd == nil || c.cmd.Process == nil || !c.started {
+	if c == nil {
 		return false
 	}
-	// Non-blocking check: Signal(0) is not portable; use ProcessState after Wait.
-	// If ProcessState is set, process has exited.
-	return c.cmd.ProcessState == nil
+	c.procMu.Lock()
+	started, exited := c.started, c.exited
+	c.procMu.Unlock()
+	if !started || exited == nil {
+		return false
+	}
+	select {
+	case <-exited:
+		return false // reaper saw the process exit
+	default:
+		return true
+	}
+}
+
+// SetOnChunk installs (or clears, with nil) the delta callback. It must be
+// used instead of writing OnChunk directly: the read loop reads the field
+// concurrently under the same lock.
+func (c *Client) SetOnChunk(fn func(delta string)) {
+	c.textMu.Lock()
+	c.OnChunk = fn
+	c.textMu.Unlock()
 }
 
 func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -217,6 +271,9 @@ func (c *Client) notify(method string, params any) {
 func (c *Client) write(v any) error {
 	c.encMu.Lock()
 	defer c.encMu.Unlock()
+	if c.stdin == nil {
+		return fmt.Errorf("acp client: closed")
+	}
 	enc := json.NewEncoder(c.stdin)
 	return enc.Encode(v)
 }
@@ -271,9 +328,10 @@ func (c *Client) onNotification(n notification) {
 		delta := p.Update.Content.Text
 		c.textMu.Lock()
 		c.text.WriteString(delta)
+		fn := c.OnChunk
 		c.textMu.Unlock()
-		if c.OnChunk != nil && delta != "" {
-			c.OnChunk(delta)
+		if fn != nil && delta != "" {
+			fn(delta)
 		}
 	}
 }

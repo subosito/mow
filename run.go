@@ -2,7 +2,9 @@
 //
 // Public surface:
 //   - mow.New / Engine / Run — programmatic harness
-//   - mow.Tool / Hooks / ChatFunc — integration types
+//   - mow.Provider — swap the LLM backend (streaming + usage preserved)
+//   - mow.Tool / Options.Tools / Hooks — integration types (per-engine tools)
+//   - RunResult.Usage / Event tokens — provider-reported token accounting
 //   - ext / ext/* — optional packs (acp, rpc, mcp, lsp, …)
 //   - cliutil / packcfg — host helpers (not packs)
 //
@@ -33,7 +35,19 @@ type Options struct {
 	MaxTurns int
 	// Extra system text appended after AGENTS.md.
 	SystemAppend string
-	// Chat injects a fake LLM (tests).
+	// Tools are engine-scoped custom tools, unlike the process-global
+	// ext.RegisterTool: two Engines in one process can run different toolsets.
+	// A per-engine tool overrides a registry tool of the same name; colliding
+	// with a builtin name is an error (the jailed builtins cannot be
+	// replaced). Implement `ReadOnly() bool` to stay usable in read-only
+	// prompts.
+	Tools []Tool
+	// Provider swaps the LLM backend (streaming, tool calls, usage all work).
+	// Implement the optional ModelLister/ModelSwitcher extensions to keep
+	// ListModels/SetModel functional. Takes precedence over Chat.
+	Provider Provider
+	// Chat injects a bare chat function (tests / quick fakes). Streaming
+	// callbacks never fire on this path — prefer Provider for real backends.
 	Chat ChatFunc
 	// Stream enables SSE token deltas when using the default OpenAI client.
 	Stream bool
@@ -59,6 +73,15 @@ type RunResult struct {
 	SessionID  string
 	RunID      string // correlates with Event.RunID for this Prompt
 	StopReason string // completed | cancelled | max_turns | error
+	// Usage is provider-reported tokens summed across every LLM call in the
+	// run (zero when the provider sent none).
+	Usage Usage
+}
+
+// Usage is provider-reported token counts.
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
 }
 
 // PromptOpts configures a single Prompt call (not Engine lifetime).
@@ -66,7 +89,10 @@ type PromptOpts struct {
 	// SystemAppend is merged into the system prompt for this call only
 	// (after config/skills/SessionStart appends).
 	SystemAppend string
-	// ReadOnly denies write/edit/bash for this call only (ACP "ask" mode).
+	// ReadOnly allows only side-effect-free tools for this call (ACP "ask"
+	// mode): builtin read/glob/grep, understand_*, and ext tools that declare
+	// ReadOnly() true (e.g. MCP tools with readOnlyHint). Everything else —
+	// including pack and MCP tools without the marker — is denied.
 	ReadOnly bool
 }
 

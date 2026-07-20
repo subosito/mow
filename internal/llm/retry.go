@@ -3,9 +3,13 @@ package llm
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -108,11 +112,25 @@ func retryableNetErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	if err == context.Canceled || err == context.DeadlineExceeded {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
+	// Belt-and-braces for errors that stringify context cancellation without wrapping it.
 	s := err.Error()
 	if strings.Contains(s, "context canceled") || strings.Contains(s, "context deadline") {
+		return false
+	}
+	// Permanent failures — retrying cannot help.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+		return false
+	}
+	var tlsVerify *tls.CertificateVerificationError
+	var unknownCA x509.UnknownAuthorityError
+	var certInvalid x509.CertificateInvalidError
+	var hostname x509.HostnameError
+	if errors.As(err, &tlsVerify) || errors.As(err, &unknownCA) ||
+		errors.As(err, &certInvalid) || errors.As(err, &hostname) {
 		return false
 	}
 	return true
@@ -129,8 +147,10 @@ func retryDelay(attempt int, res *http.Response) time.Duration {
 				return d
 			}
 			if t, err := http.ParseTime(ra); err == nil {
-				d := time.Until(t)
-				if d > 0 && d < 30*time.Second {
+				if d := time.Until(t); d > 0 {
+					if d > 30*time.Second {
+						d = 30 * time.Second
+					}
 					return d
 				}
 			}

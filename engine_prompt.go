@@ -61,6 +61,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	hooks := e.hooks
 	pol := e.pol
 	cfg := e.cfg
+	readOnlyExt := e.readOnlyExt
 	e.mu.Unlock()
 
 	// Cancellable run context + stable id for hosts/orchestrators.
@@ -112,7 +113,9 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	}
 
 	if sess != nil {
-		_ = sess.Append(session.Event{Type: "user", Role: "user", Content: text})
+		if aerr := sess.Append(session.Event{Type: "user", Role: "user", Content: text}); aerr != nil {
+			slog.Warn("mow: session append failed (resume history incomplete)", "err", aerr)
+		}
 	}
 
 	slog.Debug("mow run start", "run_id", runID, "session_id", sid, "workspace", ws)
@@ -157,11 +160,11 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		MaxToolResultChars: maxToolRes,
 		MaxParallelTools:   maxPar,
 		AllowTool: func(name string) error {
-			if opt.ReadOnly {
-				switch strings.ToLower(name) {
-				case "write", "edit", "bash":
-					return fmt.Errorf("tool %q denied: read-only prompt", name)
-				}
+			// Read-only prompts allow only known side-effect-free tools.
+			// Ext/MCP tools are denied unless they declared ReadOnly() —
+			// an editor "ask" session must not write through an extension.
+			if opt.ReadOnly && !isReadOnlyTool(name, readOnlyExt) {
+				return fmt.Errorf("tool %q denied: read-only prompt", name)
 			}
 			if isBuiltin(name) && cfg != nil && !cfg.ToolEnabled(name) {
 				return fmt.Errorf("tool %q not enabled", name)
@@ -185,21 +188,29 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	e.mu.Unlock()
 
 	if sess != nil {
+		var aerr error
 		if res.Text != "" {
-			_ = sess.Append(session.Event{Type: "assistant", Role: "assistant", Content: res.Text})
+			aerr = sess.Append(session.Event{Type: "assistant", Role: "assistant", Content: res.Text})
 		}
 		// Full message dump for agent resume (LoadMessages keeps only the last snapshot).
 		for _, m := range res.Messages {
 			mm := m
-			_ = sess.Append(session.Event{Type: "message", Message: &mm})
+			if perr := sess.Append(session.Event{Type: "message", Message: &mm}); perr != nil && aerr == nil {
+				aerr = perr
+			}
+		}
+		if aerr != nil {
+			slog.Warn("mow: session append failed (resume history incomplete)", "err", aerr)
 		}
 	}
 
 	stop := stopReasonFrom(err)
-	out = RunResult{Text: res.Text, SessionID: sid, RunID: runID, StopReason: stop}
+	usage := Usage{InputTokens: res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens}
+	out = RunResult{Text: res.Text, SessionID: sid, RunID: runID, StopReason: stop, Usage: usage}
 	e.Emit(Event{
 		Type: EventRunEnd, RunID: runID, SessionID: sid,
 		Text: res.Text, StopReason: stop, Error: errString(err),
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 	})
 	slog.Debug("mow run end", "run_id", runID, "session_id", sid, "stop_reason", stop, "err", err)
 

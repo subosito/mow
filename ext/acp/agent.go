@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/subosito/mow"
+	"github.com/subosito/mow/internal/policy"
 )
 
 // AgentOptions configures ACP agent mode over an Engine.
@@ -79,6 +80,8 @@ type acpSession struct {
 
 func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 	a.sessions = map[string]*acpSession{}
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
 	for sc.Scan() {
@@ -109,7 +112,18 @@ func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 			a.write(response{JSONRPC: "2.0", Error: &rpcError{Code: errInvalid, Message: err.Error()}})
 			continue
 		}
-		a.handleRequest(ctx, req)
+		switch req.Method {
+		case "session/prompt", "terminal/wait_for_exit", "terminal/waitForExit":
+			// Long-blocking methods run off the read loop so session/cancel
+			// (and other traffic) is still read while they are in flight.
+			wg.Add(1)
+			go func(req request) {
+				defer wg.Done()
+				a.handleRequest(ctx, req)
+			}(req)
+		default:
+			a.handleRequest(ctx, req)
+		}
 	}
 	return sc.Err()
 }
@@ -613,16 +627,14 @@ func (a *agentServer) write(v any) {
 }
 
 func (a *agentServer) jailPath(p string) (full string, err error) {
-	ws := a.eng.Workspace()
-	full = p
-	if !filepath.IsAbs(full) {
-		full = filepath.Join(ws, full)
-	}
-	rel, err := filepath.Rel(ws, full)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("path outside workspace")
-	}
-	return full, nil
+	return resolveInWorkspace(a.eng.Workspace(), p)
+}
+
+// resolveInWorkspace joins p to workspace ws, resolves symlinks, and ensures
+// the result stays inside ws (same jail as engine tool paths).
+func resolveInWorkspace(ws, p string) (string, error) {
+	pol := &policy.Policy{Workspace: ws}
+	return pol.ResolvePath(p)
 }
 
 func (a *agentServer) readWorkspaceFile(p string) (string, error) {

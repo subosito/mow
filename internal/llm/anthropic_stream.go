@@ -28,7 +28,7 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 	system, anthMsgs := toAnthropicMessages(messages)
 	body := map[string]any{
 		"model":      c.Model,
-		"max_tokens": 8192,
+		"max_tokens": c.anthropicMaxTokens(),
 		"messages":   anthMsgs,
 		"stream":     true,
 	}
@@ -194,6 +194,43 @@ func applyAnthropicSSE(data, event string, msg *Message, toolsByIdx map[int]*ant
 			if a := toolsByIdx[ev.Index]; a != nil {
 				a.args += ev.Delta.PartialJSON
 			}
+		}
+	case "message_start":
+		// Carries input token usage (and any initial output count).
+		var ev struct {
+			Message struct {
+				Usage struct {
+					InputTokens  int `json:"input_tokens"`
+					OutputTokens int `json:"output_tokens"`
+				} `json:"usage"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			return nil
+		}
+		if ev.Message.Usage.InputTokens > 0 {
+			msg.Usage.InputTokens = ev.Message.Usage.InputTokens
+		}
+		if ev.Message.Usage.OutputTokens > 0 {
+			msg.Usage.OutputTokens = ev.Message.Usage.OutputTokens
+		}
+	case "message_delta":
+		var ev struct {
+			Delta struct {
+				StopReason string `json:"stop_reason"`
+			} `json:"delta"`
+			Usage struct {
+				OutputTokens int `json:"output_tokens"` // cumulative
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			return nil
+		}
+		if ev.Delta.StopReason != "" {
+			msg.StopReason = ev.Delta.StopReason
+		}
+		if ev.Usage.OutputTokens > 0 {
+			msg.Usage.OutputTokens = ev.Usage.OutputTokens
 		}
 	}
 	return nil

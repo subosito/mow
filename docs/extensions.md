@@ -156,7 +156,7 @@ Multi-step goals **around** `Engine.Prompt` — not a second core agent loop.
 ```bash
 mow goal new --id fix-ci --goal "Make CI green"
 mow goal run --id fix-ci --model …        # or: mow goal run --goal "…"
-mow goal status -id fix-ci
+mow goal status --id fix-ci
 mow goal list
 ```
 
@@ -438,7 +438,7 @@ mow stays minimal by default. Heavier features (hashline edit, DAP, memory, brow
 ## Skills (config-only)
 
 Markdown under `skills.dirs`, `$MOW_HOME/skills` (default `~/.mow/skills`), and trusted `workspace/.mow/skills`.  
-Project config/skills require `.mow/trust` or `MOW_TRUST_PROJECT=1`.
+Project config/skills require `mow trust` (out-of-band, `$MOW_HOME/trusted`) or `MOW_TRUST_PROJECT=1`.
 
 ---
 

@@ -111,9 +111,12 @@ func Load(paths ...string) (*File, error) {
 	if err := f.normalize(); err != nil {
 		return nil, err
 	}
-	// Project-local config only when trusted (.mow/trust or MOW_TRUST_PROJECT).
+	// Project-local config only when trusted (MOW_TRUST_PROJECT or the
+	// out-of-band trust list — see trust.go). Even then the merge is
+	// restricted: project files may never set credentials, endpoints, or
+	// power tools (mergeProjectFile).
 	if ProjectConfigAllowed(f.Workspace) {
-		_ = mergeFile(f, filepath.Join(f.Workspace, ".mow", "config.yaml"))
+		_ = mergeProjectFile(f, filepath.Join(f.Workspace, ".mow", "config.yaml"))
 		// re-apply env so env still wins
 		applyEnv(f)
 		_ = f.normalize()
@@ -121,18 +124,11 @@ func Load(paths ...string) (*File, error) {
 	return f, nil
 }
 
-// ProjectConfigAllowed is set from contextload.ProjectTrusted to avoid import cycle.
-// Default: check env + .mow/trust here.
+// ProjectConfigAllowed reports whether workspace/.mow/config.yaml may load.
+// Trust is stored out-of-band (Home()/trusted, `mow trust`) — never inside
+// the workspace, where a cloned repo could grant itself trust.
 func ProjectConfigAllowed(workspace string) bool {
-	if v := strings.ToLower(strings.TrimSpace(os.Getenv("MOW_TRUST_PROJECT"))); v == "1" || v == "true" || v == "yes" {
-		return true
-	}
-	ws, err := filepath.Abs(workspace)
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(filepath.Join(ws, ".mow", "trust"))
-	return err == nil
+	return WorkspaceTrusted(workspace)
 }
 
 func defaults() *File {
@@ -172,6 +168,52 @@ func mergeFile(dst *File, path string) error {
 	if err := yaml.Unmarshal(raw, &overlay); err != nil {
 		return fmt.Errorf("config %s: %w", path, err)
 	}
+	mergeOverlay(dst, &overlay)
+	return nil
+}
+
+// mergeProjectFile merges a workspace-local config with a reduced privilege
+// set: a project file may tune policy, skills, and extensions, but never
+// credentials, the LLM endpoint, headers, session location, or power tools —
+// a trusted-but-hostile repo must not be able to redirect the API key or
+// grant itself shell.
+func mergeProjectFile(dst *File, path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var overlay File
+	if err := yaml.Unmarshal(raw, &overlay); err != nil {
+		return fmt.Errorf("config %s: %w", path, err)
+	}
+	overlay.Workspace = ""
+	overlay.LLM.BaseURL = ""
+	overlay.LLM.APIKey = ""
+	overlay.LLM.APIKeyEnv = ""
+	overlay.LLM.Headers = nil
+	overlay.Session.Dir = ""
+	overlay.Tools.Enable = dropPowerTools(overlay.Tools.Enable)
+	mergeOverlay(dst, &overlay)
+	return nil
+}
+
+// dropPowerTools filters write/edit/bash out of a project enable list.
+func dropPowerTools(enable []string) []string {
+	var out []string
+	for _, t := range enable {
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "write", "edit", "bash":
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+func mergeOverlay(dst *File, overlay *File) {
 	if strings.TrimSpace(overlay.Workspace) != "" {
 		dst.Workspace = overlay.Workspace
 	}
@@ -208,7 +250,6 @@ func mergeFile(dst *File, path string) error {
 		dst.Skills.Dirs = append([]string(nil), overlay.Skills.Dirs...)
 	}
 	mergeExtensions(dst, overlay.Extensions)
-	return nil
 }
 
 // mergeExtensions replaces whole named sections from overlay (last writer wins).
@@ -298,18 +339,30 @@ func mergeLLM(dst *LLMConfig, o LLMConfig) {
 
 // applyEnv applies only home-adjacent and LLM credential/model envs.
 // Power tools, media models, stream, and workspace use yaml or CLI flags.
+//
+// The wire decides provider-env precedence: on anthropic-messages the
+// ANTHROPIC_* variables win over OPENAI_*, so having both keys exported never
+// sends the OpenAI key to an Anthropic endpoint. MOW_* always wins.
 func applyEnv(f *File) {
-	if v := firstEnv("MOW_BASE_URL", "OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"); v != "" {
-		f.LLM.BaseURL = v
-	}
-	if v := firstEnv("MOW_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"); v != "" {
-		f.LLM.APIKey = v
-	}
-	if v := firstEnv("MOW_MODEL", "OPENAI_MODEL", "ANTHROPIC_MODEL"); v != "" {
-		f.LLM.Model = v
-	}
 	if v := firstEnv("MOW_WIRE"); v != "" {
 		f.LLM.Wire = v
+	}
+	keyEnvs := []string{"MOW_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"}
+	baseEnvs := []string{"MOW_BASE_URL", "OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"}
+	modelEnvs := []string{"MOW_MODEL", "OPENAI_MODEL", "ANTHROPIC_MODEL"}
+	if strings.ToLower(strings.TrimSpace(f.LLM.Wire)) == "anthropic-messages" {
+		keyEnvs = []string{"MOW_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"}
+		baseEnvs = []string{"MOW_BASE_URL", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL"}
+		modelEnvs = []string{"MOW_MODEL", "ANTHROPIC_MODEL", "OPENAI_MODEL"}
+	}
+	if v := firstEnv(baseEnvs...); v != "" {
+		f.LLM.BaseURL = v
+	}
+	if v := firstEnv(keyEnvs...); v != "" {
+		f.LLM.APIKey = v
+	}
+	if v := firstEnv(modelEnvs...); v != "" {
+		f.LLM.Model = v
 	}
 }
 

@@ -3,6 +3,7 @@ package mow
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // Lifecycle hooks for the agent loop. Extensions register via ext.Register*
@@ -46,6 +47,8 @@ type PostToolEvent struct {
 	Result     string
 	Denied     bool
 	ExecErr    error
+	// Duration is wall time for this tool (hooks + Exec), when measured.
+	Duration time.Duration
 }
 
 // PostToolDecision may replace the tool result string shown to the model.

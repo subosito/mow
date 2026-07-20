@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/subosito/mow"
-	"github.com/subosito/mow/ext"
 )
 
 // EngineFlags are common flags for any command that constructs a mow.Engine.
@@ -51,10 +50,10 @@ func (f *EngineFlags) ConfigPaths() []string {
 }
 
 // Options builds mow.Options from flags (explicit overrides, no process env mutation).
-// Calls ext.BeforeNew so packs that register config-driven tools can run before mow.New.
+// mow.New runs ext.BeforeNew itself (and surfaces its errors), so no pack
+// setup happens here.
 func (f *EngineFlags) Options() mow.Options {
 	paths := f.ConfigPaths()
-	_ = ext.BeforeNew(paths...)
 	return mow.Options{
 		ConfigPaths: paths,
 		Workspace:   f.Workspace,

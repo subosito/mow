@@ -28,7 +28,9 @@ No separate lint step. Format with `gofmt`. Do not invent Make/npm scripts.
 policy jail (`internal/policy`) → session JSONL. Study **`engine.go`** +
 **`engine_prompt.go`** first, then `internal/agent/loop.go`.
 
-Events: `OnEvent` / `AddOnEvent` / `Emit` (`event.go`; `tool.end` includes `duration_ms`).
+Events: `OnEvent` / `AddOnEvent` / `Emit` (`event.go`; `tool.end` includes `duration_ms`,
+`run.end` includes token usage). Inline `<think>` CoT is stripped by the loop
+(`internal/agent/think.go`) — committed history/sessions are always tag-free.
 Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool batches: `policy.max_parallel_tools` (default 8).
 
 ## Layout
@@ -65,6 +67,9 @@ do not tell them to import `internal/`.
 - Default tools: **read, glob, grep** only. Write/shell require `--allow-write` /
   `--allow-shell` or config.
 - Workspace path jail on FS tools.
+- Workspace trust is out-of-band (`$MOW_HOME/trusted`, `mow trust`) — never a
+  marker inside the workspace. Project config may not set credentials,
+  `llm.base_url`, headers, `session.dir`, or power tools.
 - No secrets in logs. Config paths under `$MOW_HOME` (default `~/.mow`).
 - Optional HTTP attribution labels: `X-Mow-*` (ignored by plain providers).
 

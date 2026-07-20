@@ -93,9 +93,45 @@ func (s *Store) LoadMessages() ([]llm.Message, error) {
 		}
 	}
 	if hasSystem && len(snapshot) > 0 {
-		return snapshot, nil
+		return repairToolCalls(snapshot), nil
 	}
 	return simple, nil
+}
+
+// repairToolCalls synthesizes results for assistant tool_calls that have no
+// matching tool message. A cancelled or failed tool batch can persist an
+// assistant message with N calls and fewer results; replaying that verbatim is
+// rejected by both wires (tool_use without tool_result → HTTP 400), bricking
+// the session. Filling the gaps keeps resume valid and tells the model what
+// happened.
+func repairToolCalls(msgs []llm.Message) []llm.Message {
+	var out []llm.Message
+	for i := 0; i < len(msgs); i++ {
+		m := msgs[i]
+		out = append(out, m)
+		if m.Role != "assistant" || len(m.ToolCalls) == 0 {
+			continue
+		}
+		// Copy the contiguous run of tool results that follows, then fill gaps.
+		answered := make(map[string]bool, len(m.ToolCalls))
+		for i+1 < len(msgs) && msgs[i+1].Role == "tool" {
+			i++
+			out = append(out, msgs[i])
+			answered[msgs[i].ToolCallID] = true
+		}
+		for _, tc := range m.ToolCalls {
+			if tc.ID == "" || answered[tc.ID] {
+				continue
+			}
+			out = append(out, llm.Message{
+				Role:       "tool",
+				ToolCallID: tc.ID,
+				Name:       tc.Function.Name,
+				Content:    "error: interrupted before a result was recorded (run cancelled or failed)",
+			})
+		}
+	}
+	return out
 }
 
 // LoadTranscript returns user/assistant turns for UI display (no tool dumps,

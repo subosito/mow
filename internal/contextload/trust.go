@@ -1,21 +1,13 @@
 package contextload
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
+	"github.com/subosito/mow/internal/config"
 )
 
 // ProjectTrusted reports whether the workspace has opted into project-local
-// config/skills power (file .mow/trust or MOW_TRUST_PROJECT=1/true).
+// config/skills power. Trust is stored out-of-band under $MOW_HOME (`mow
+// trust`) or granted per-invocation via MOW_TRUST_PROJECT=1 — never by a
+// marker inside the workspace, which a cloned repo could ship.
 func ProjectTrusted(workspace string) bool {
-	if v := strings.ToLower(strings.TrimSpace(os.Getenv("MOW_TRUST_PROJECT"))); v == "1" || v == "true" || v == "yes" {
-		return true
-	}
-	ws, err := filepath.Abs(workspace)
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(filepath.Join(ws, ".mow", "trust"))
-	return err == nil
+	return config.WorkspaceTrusted(workspace)
 }

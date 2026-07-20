@@ -59,6 +59,75 @@ func TestAgentRoundTrip(t *testing.T) {
 	_ = aw.Close()
 }
 
+func TestSessionCancelDuringPrompt(t *testing.T) {
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			// Block until the prompt context is cancelled (by session/cancel).
+			<-ctx.Done()
+			return mow.Message{}, ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	go func() {
+		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
+		_ = cw.Close()
+	}()
+
+	cl := newPipeClient(cr, aw)
+	go cl.readLoop()
+
+	if err := cl.callOK(ctx, "initialize", map[string]any{"protocolVersion": 1}); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	sid, err := cl.sessionNew(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("session/new: %v", err)
+	}
+
+	type res struct {
+		stop string
+		err  error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		stop, err := cl.prompt(ctx, sid, "hang")
+		ch <- res{stop, err}
+	}()
+
+	// The read loop must keep serving while the prompt blocks; resend cancel
+	// until the prompt returns (first send may race cancel registration).
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case r := <-ch:
+			if r.err != nil {
+				t.Fatalf("prompt: %v", r.err)
+			}
+			if r.stop != "cancelled" {
+				t.Fatalf("stop=%q, want cancelled", r.stop)
+			}
+			cancel()
+			_ = aw.Close()
+			return
+		case <-tick.C:
+			_ = cl.notify("session/cancel", map[string]any{"sessionId": sid})
+		case <-ctx.Done():
+			t.Fatal("timeout: session/cancel never unblocked session/prompt")
+		}
+	}
+}
+
 type pipeClient struct {
 	in      io.Reader
 	out     io.Writer
@@ -96,6 +165,14 @@ func (c *pipeClient) readLoop() {
 			ch <- msg
 		}
 	}
+}
+
+func (c *pipeClient) notify(method string, params any) error {
+	raw, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "method": method, "params": params,
+	})
+	_, err := c.out.Write(append(raw, '\n'))
+	return err
 }
 
 func (c *pipeClient) callOK(ctx context.Context, method string, params any) error {

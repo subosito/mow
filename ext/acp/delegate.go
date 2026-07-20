@@ -116,10 +116,17 @@ func indexAgents(list []AgentSpec) map[string]AgentSpec {
 
 // peerSlot holds a long-lived ACP client + session for reuse across tool calls.
 type peerSlot struct {
+	// mu serializes use of the peer (a peer is a single stdio conversation):
+	// held for the whole delegate call, covering OnChunk set/clear and Prompt.
+	mu        sync.Mutex
 	client    *Client
 	sessionID string
 	dir       string
-	lastUsed  time.Time
+	// lastUsed is guarded by delegateTool.peersMu.
+	lastUsed time.Time
+	// starting is non-nil while the peer is being spawned (reserved slot);
+	// closed when the spawn finishes. Guarded by delegateTool.peersMu.
+	starting chan struct{}
 }
 
 type delegateTool struct {
@@ -175,13 +182,14 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	} else if !filepath.IsAbs(dir) {
 		dir = filepath.Join(t.workspace, dir)
 	}
-	// Stay inside workspace when possible.
+	// Stay inside workspace when possible (symlink-resolving jail; a plain
+	// prefix check would let sibling dirs like /ws-evil pass for /ws).
 	if t.workspace != "" {
-		absWS, _ := filepath.Abs(t.workspace)
-		absDir, _ := filepath.Abs(dir)
-		if absWS != "" && absDir != "" && !strings.HasPrefix(absDir, absWS) {
+		resolved, err := resolveInWorkspace(t.workspace, dir)
+		if err != nil {
 			return "", fmt.Errorf("acp_delegate: cwd %q escapes workspace", dir)
 		}
+		dir = resolved
 	}
 
 	to := time.Duration(spec.TimeoutSec) * time.Second
@@ -193,8 +201,13 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 		return "", err
 	}
 
+	// One delegate call at a time per peer: a peer is a single stdio
+	// conversation, so OnChunk and the reply accumulator must not be shared.
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+
 	agentName := spec.Name
-	slot.client.OnChunk = func(delta string) {
+	slot.client.SetOnChunk(func(delta string) {
 		if eng := mow.EngineFromContext(ctx); eng != nil {
 			eng.Emit(mow.Event{
 				Type:  mow.EventDelegateChunk,
@@ -202,15 +215,17 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 				Delta: delta,
 			})
 		}
-	}
-	defer func() { slot.client.OnChunk = nil }()
+	})
+	defer slot.client.SetOnChunk(nil)
 
 	reply, stop, err := slot.client.Prompt(pctx, slot.sessionID, prompt)
+	t.peersMu.Lock()
 	slot.lastUsed = time.Now()
+	t.peersMu.Unlock()
 	if err != nil {
 		// Drop dead peer so next call restarts.
 		if !slot.client.Alive() || pctx.Err() != nil {
-			t.dropPeer(spec.Name, dir)
+			t.dropPeer(peerKey(spec.Name, dir), slot)
 		}
 		return "", err
 	}
@@ -222,39 +237,83 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 
 func (t *delegateTool) getOrStart(ctx context.Context, spec AgentSpec, dir string) (*peerSlot, error) {
 	key := peerKey(spec.Name, dir)
-	t.peersMu.Lock()
-	defer t.peersMu.Unlock()
-	if t.peers == nil {
-		t.peers = map[string]*peerSlot{}
-	}
-	t.evictIdleLocked(time.Now())
+	for {
+		t.peersMu.Lock()
+		if t.peers == nil {
+			t.peers = map[string]*peerSlot{}
+		}
+		t.evictIdleLocked(time.Now())
 
-	if slot, ok := t.peers[key]; ok && slot != nil && slot.client != nil && slot.client.Alive() && slot.sessionID != "" {
-		slot.lastUsed = time.Now()
-		return slot, nil
+		slot := t.peers[key]
+		if slot != nil && slot.starting != nil {
+			// Another caller is spawning this peer: wait outside the lock.
+			starting := slot.starting
+			t.peersMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-starting:
+			}
+			continue // re-check: slot was published or removed
+		}
+		if slot != nil && slot.client != nil && slot.client.Alive() && slot.sessionID != "" {
+			slot.lastUsed = time.Now()
+			t.peersMu.Unlock()
+			return slot, nil
+		}
+		// Dead or missing — reserve the key, then spawn without holding
+		// peersMu so a slow peer start does not stall other delegations.
+		if slot != nil {
+			delete(t.peers, key)
+			if slot.client != nil && slot.mu.TryLock() {
+				_ = slot.client.Close()
+				slot.mu.Unlock()
+			} // busy dead slot: its user drops it when Prompt errors
+		}
+		res := &peerSlot{dir: dir, starting: make(chan struct{})}
+		t.peers[key] = res
+		t.peersMu.Unlock()
+
+		cl := &Client{Command: append([]string(nil), spec.Command...), Dir: dir}
+		sid, err := cl.Start(ctx)
+
+		t.peersMu.Lock()
+		done := res.starting
+		res.starting = nil
+		if err != nil {
+			if t.peers[key] == res {
+				delete(t.peers, key)
+			}
+			close(done)
+			t.peersMu.Unlock()
+			return nil, err
+		}
+		res.client = cl
+		res.sessionID = sid
+		res.lastUsed = time.Now()
+		close(done)
+		t.peersMu.Unlock()
+		return res, nil
 	}
-	// Dead or missing — (re)start.
-	if slot, ok := t.peers[key]; ok && slot != nil && slot.client != nil {
-		_ = slot.client.Close()
-		delete(t.peers, key)
-	}
-	cl := &Client{Command: append([]string(nil), spec.Command...), Dir: dir}
-	sid, err := cl.Start(ctx)
-	if err != nil {
-		return nil, err
-	}
-	slot := &peerSlot{client: cl, sessionID: sid, dir: dir, lastUsed: time.Now()}
-	t.peers[key] = slot
-	return slot, nil
 }
 
 // evictIdleLocked drops peers idle longer than peerIdle, or not Alive().
-// Caller holds peersMu.
+// Caller holds peersMu. Slots mid-spawn or in use by a delegate call are skipped.
 func (t *delegateTool) evictIdleLocked(now time.Time) {
 	for k, slot := range t.peers {
-		if slot == nil || slot.client == nil {
+		if slot == nil {
 			delete(t.peers, k)
 			continue
+		}
+		if slot.starting != nil {
+			continue // reserved, spawn in flight
+		}
+		if slot.client == nil {
+			delete(t.peers, k)
+			continue
+		}
+		if !slot.mu.TryLock() {
+			continue // in use by a delegate call
 		}
 		dead := !slot.client.Alive()
 		idle := t.peerIdle > 0 && !slot.lastUsed.IsZero() && now.Sub(slot.lastUsed) > t.peerIdle
@@ -262,17 +321,22 @@ func (t *delegateTool) evictIdleLocked(now time.Time) {
 			_ = slot.client.Close()
 			delete(t.peers, k)
 		}
+		slot.mu.Unlock()
 	}
 }
 
-func (t *delegateTool) dropPeer(agent, dir string) {
-	key := peerKey(agent, dir)
+// dropPeer removes slot (the exact instance the caller used) and closes its
+// client. The map entry is only deleted if it still points at that instance.
+func (t *delegateTool) dropPeer(key string, slot *peerSlot) {
+	if slot == nil {
+		return
+	}
 	t.peersMu.Lock()
-	defer t.peersMu.Unlock()
-	if slot, ok := t.peers[key]; ok && slot != nil {
-		if slot.client != nil {
-			_ = slot.client.Close()
-		}
+	if cur, ok := t.peers[key]; ok && cur == slot {
 		delete(t.peers, key)
+	}
+	t.peersMu.Unlock()
+	if slot.client != nil {
+		_ = slot.client.Close()
 	}
 }

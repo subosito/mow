@@ -142,6 +142,7 @@ func adaptPostTool(fn PostToolFunc) agent.PostToolFunc {
 		d, err := fn(ctx, PostToolEvent{
 			Name: e.Name, Args: e.Args, ToolCallID: e.ToolCallID,
 			Result: e.Result, Denied: e.Denied, ExecErr: e.ExecErr,
+			Duration: e.Duration,
 		})
 		if err != nil {
 			return agent.PostToolDecision{}, err
@@ -226,6 +227,8 @@ func toPublicMessages(in []llm.Message) []Message {
 func toPublicMessage(m llm.Message) Message {
 	pm := Message{
 		Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID, Name: m.Name,
+		StopReason: m.StopReason,
+		Usage:      Usage{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens},
 	}
 	for _, tc := range m.ToolCalls {
 		pm.ToolCalls = append(pm.ToolCalls, ToolCall{
@@ -239,6 +242,8 @@ func toPublicMessage(m llm.Message) Message {
 func toInternalMessage(m Message) llm.Message {
 	im := llm.Message{
 		Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID, Name: m.Name,
+		StopReason: m.StopReason,
+		Usage:      llm.Usage{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens},
 	}
 	for _, tc := range m.ToolCalls {
 		im.ToolCalls = append(im.ToolCalls, llm.ToolCall{
@@ -271,6 +276,20 @@ func isBuiltin(name string) bool {
 	default:
 		return false
 	}
+}
+
+// isReadOnlyTool reports whether a tool may run in a read-only prompt:
+// builtin read tools, understand_* (side-effect free), and ext tools that
+// declared ReadOnly() true at registration. generate_* writes media files and
+// is excluded.
+func isReadOnlyTool(name string, extRO map[string]bool) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch n {
+	case "read", "glob", "grep",
+		"understand_image", "understand_voice", "understand_video":
+		return true
+	}
+	return extRO[n]
 }
 
 func toolPresent(list []agent.Tool, name string) bool {

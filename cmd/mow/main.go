@@ -47,6 +47,8 @@ func run(args []string) int {
 		return runCmd(args[1:])
 	case "repl":
 		return replCmd(args[1:])
+	case "trust":
+		return trustCmd(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println(mow.VersionString())
 		return 0
@@ -80,7 +82,7 @@ func suggestCommand(name string) string {
 	if name == "" {
 		return ""
 	}
-	cands := []string{"run", "repl", "version", "help"}
+	cands := []string{"run", "repl", "trust", "version", "help"}
 	for _, c := range ext.Commands() {
 		cands = append(cands, c.Name)
 	}
@@ -178,6 +180,39 @@ func runCmd(args []string) int {
 	if res.SessionID != "" && !ef.NoSession {
 		fmt.Fprintf(os.Stderr, "session=%s\n", res.SessionID)
 	}
+	return 0
+}
+
+// trustCmd manages the out-of-band workspace trust list ($MOW_HOME/trusted).
+// Trust gates project-local .mow/config.yaml and skills; it is stored under
+// the user home so a cloned repo can never grant itself trust.
+func trustCmd(args []string) int {
+	fs := cliutil.NewFlagSet("trust")
+	list := fs.Bool("list", false, "show trusted workspaces")
+	revoke := fs.Bool("revoke", false, "revoke trust instead of granting it")
+	dir := fs.String("workspace", ".", "workspace to trust/revoke")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *list {
+		for _, ws := range mow.TrustedWorkspaces() {
+			fmt.Println(ws)
+		}
+		return 0
+	}
+	if *revoke {
+		if err := mow.RevokeWorkspaceTrust(*dir); err != nil {
+			fmt.Fprintf(os.Stderr, "mow trust: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "mow: workspace untrusted: %s\n", *dir)
+		return 0
+	}
+	if err := mow.TrustWorkspace(*dir); err != nil {
+		fmt.Fprintf(os.Stderr, "mow trust: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "mow: workspace trusted (project .mow/config.yaml and skills will load): %s\n", *dir)
 	return 0
 }
 
@@ -298,6 +333,7 @@ API:
 Core:
   mow run -p "prompt" [flags]   one-shot
   mow repl [flags]              line REPL
+  mow trust [--revoke|--list]   trust workspace for project .mow config/skills
   mow version | help
 
 `)
@@ -323,7 +359,7 @@ Env (supported):
   MOW_MODEL / OPENAI_MODEL / ANTHROPIC_MODEL
   MOW_BASE_URL / OPENAI_BASE_URL / ANTHROPIC_BASE_URL
   MOW_WIRE                         openai-chat-completions | anthropic-messages
-  MOW_TRUST_PROJECT=1              trust project .mow/config (or create .mow/trust)
+  MOW_TRUST_PROJECT=1              trust project .mow/config this run (or: mow trust)
 
 Secure default tools: read, glob, grep. Power tools: --allow-write / --allow-shell.
 

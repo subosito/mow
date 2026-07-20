@@ -1,10 +1,12 @@
 # Optional mow config — copy to $MOW_HOME/config.yaml (default ~/.mow/config.yaml)
-# or pass -config path. Set MOW_HOME to relocate the whole user data root.
+# or pass --config path. Set MOW_HOME to relocate the whole user data root.
 #
-# Env always wins for secrets and common overrides:
-#   OPENAI_BASE_URL / MOW_BASE_URL
-#   OPENAI_API_KEY  / MOW_API_KEY
-#   OPENAI_MODEL    / MOW_MODEL
+# Env always wins for secrets and common overrides (ANTHROPIC_* preferred on
+# the anthropic-messages wire; MOW_* always wins):
+#   OPENAI_BASE_URL / ANTHROPIC_BASE_URL / MOW_BASE_URL
+#   OPENAI_API_KEY  / ANTHROPIC_API_KEY  / MOW_API_KEY
+#   OPENAI_MODEL    / ANTHROPIC_MODEL    / MOW_MODEL
+#   MOW_WIRE (openai-chat-completions | anthropic-messages)
 
 workspace: .
 
@@ -57,7 +59,7 @@ policy:
 
 skills:
   # dirs: [/path/to/skills]   # *.md files appended to system prompt
-  # Project skills: workspace/.mow/skills when .mow/trust exists (or MOW_TRUST_PROJECT=1)
+  # Project skills: workspace/.mow/skills when trusted (mow trust, or MOW_TRUST_PROJECT=1)
   # Project config: workspace/.mow/config.yaml only when trusted
   # hashline: true   # optional N:hash|line read + line_hash edit
 

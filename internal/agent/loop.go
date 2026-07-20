@@ -60,6 +60,9 @@ type Options struct {
 type Result struct {
 	Text     string
 	Messages []llm.Message
+	// Usage is provider-reported tokens summed across every LLM call in the
+	// run (zero when the provider sent none).
+	Usage llm.Usage
 }
 
 // Run executes the agent loop until the model returns text without tool calls or max turns.
@@ -93,6 +96,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	}
 	messages = append(messages, llm.Message{Role: "user", Content: userPrompt})
 
+	var usage llm.Usage
 	toolSpecs := make([]llm.ToolSpec, 0, len(opt.Tools))
 	byName := map[string]Tool{}
 	for _, t := range opt.Tools {
@@ -117,7 +121,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 
 	for turn := 0; turn < maxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
-			return Result{Messages: messages}, err
+			return Result{Messages: messages, Usage: usage}, err
 		}
 		var specs []llm.ToolSpec
 		if len(toolSpecs) > 0 {
@@ -125,13 +129,21 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		}
 		send, err := applyCompact(ctx, messages, opt)
 		if err != nil {
-			return Result{Messages: messages}, err
+			return Result{Messages: messages, Usage: usage}, err
 		}
 		msg, err := chat(ctx, send, specs)
 		if err != nil {
-			return Result{Messages: messages}, err
+			return Result{Messages: messages, Usage: usage}, err
+		}
+		// Inline CoT normalization: models that wrap thinking in <think>-style
+		// tags (instead of the reasoning channel) must never leak it into
+		// committed history, sessions, or Result.Text. Stripping here also
+		// keeps prior-turn CoT out of the next request's context.
+		if vis, th, unclosed := extractThinking(msg.Content); th != "" || unclosed {
+			msg.Content = strings.TrimSpace(vis)
 		}
 		messages = append(messages, msg)
+		usage = usage.Add(msg.Usage)
 		for _, h := range opt.Hooks.AfterTurn {
 			if h != nil {
 				h(ctx, AfterTurnEvent{
@@ -142,16 +154,16 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		}
 
 		if len(msg.ToolCalls) == 0 {
-			return Result{Text: strings.TrimSpace(msg.Content), Messages: messages}, nil
+			return Result{Text: strings.TrimSpace(msg.Content), Messages: messages, Usage: usage}, nil
 		}
 
 		toolMsgs, err := runToolBatch(ctx, msg.ToolCalls, byName, opt)
 		messages = append(messages, toolMsgs...)
 		if err != nil {
-			return Result{Messages: messages}, err
+			return Result{Messages: messages, Usage: usage}, err
 		}
 	}
-	return Result{Messages: messages}, fmt.Errorf("%w: %d", ErrMaxTurns, maxTurns)
+	return Result{Messages: messages, Usage: usage}, fmt.Errorf("%w: %d", ErrMaxTurns, maxTurns)
 }
 
 // toolSlot is one resolved call in a batch (soft result or hard error).

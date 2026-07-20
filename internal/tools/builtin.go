@@ -195,15 +195,8 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		if info.Size() > int64(t.p.MaxReadBytes) && t.p.MaxReadBytes > 0 {
 			return nil
 		}
-		// skip binary-ish
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		if bytes.IndexByte(data, 0) >= 0 {
-			return nil
-		}
-		// jail check
+		// jail check before reading: a symlink to outside the workspace must
+		// not even pull bytes into memory
 		if _, err := t.p.ResolvePath(path); err != nil {
 			relp, rerr := filepath.Rel(t.p.Workspace, path)
 			if rerr != nil {
@@ -212,6 +205,14 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 			if _, err := t.p.ResolvePath(relp); err != nil {
 				return nil
 			}
+		}
+		// skip binary-ish
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		if bytes.IndexByte(data, 0) >= 0 {
+			return nil
 		}
 		lines := strings.Split(string(data), "\n")
 		relp, _ := filepath.Rel(t.p.Workspace, path)

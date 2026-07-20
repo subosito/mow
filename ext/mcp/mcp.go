@@ -34,9 +34,12 @@ type ServerConfig struct {
 	Args    []string          `yaml:"args"`
 	Env     map[string]string `yaml:"env"`
 	// URL enables Streamable HTTP (POST JSON-RPC; SSE response optional).
-	// When set, Command is ignored.
-	URL     string            `yaml:"url"`
-	Headers map[string]string `yaml:"headers"`
+	// When set, Command is ignored. https is required except for loopback
+	// hosts — set insecure: true to allow plain http elsewhere (tokens go
+	// over the wire in clear text).
+	URL      string            `yaml:"url"`
+	Insecure bool              `yaml:"insecure"`
+	Headers  map[string]string `yaml:"headers"`
 	// Auth: bearer token or oauth2 client_credentials (HTTP only).
 	Auth AuthConfig `yaml:"auth"`
 }
@@ -110,11 +113,12 @@ func RegisterServers(servers []ServerConfig) error {
 		n := 0
 		for _, t := range tools {
 			ext.RegisterTool(&mcpTool{
-				client: tr,
-				prefix: name,
-				name:   t.Name,
-				desc:   t.Description,
-				schema: t.InputSchema,
+				client:   tr,
+				prefix:   name,
+				name:     t.Name,
+				desc:     t.Description,
+				schema:   t.InputSchema,
+				readOnly: t.Annotations.ReadOnlyHint,
 			})
 			n++
 		}
@@ -134,6 +138,11 @@ type toolInfo struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"`
+	// Annotations carries the MCP tool hints; readOnlyHint lets a tool run in
+	// mow's read-only prompts.
+	Annotations struct {
+		ReadOnlyHint bool `json:"readOnlyHint"`
+	} `json:"annotations"`
 }
 
 // reconnectingClient restarts the stdio process after a failed call.
@@ -352,12 +361,17 @@ func (c *client) Close() error {
 }
 
 type mcpTool struct {
-	client toolTransport
-	prefix string
-	name   string
-	desc   string
-	schema json.RawMessage
+	client   toolTransport
+	prefix   string
+	name     string
+	desc     string
+	schema   json.RawMessage
+	readOnly bool
 }
+
+// ReadOnly reports the server's readOnlyHint annotation; mow only lets tools
+// that declare it run in read-only prompts.
+func (t *mcpTool) ReadOnly() bool { return t.readOnly }
 
 func (t *mcpTool) Name() string {
 	return "mcp_" + t.prefix + "_" + sanitize(t.name)

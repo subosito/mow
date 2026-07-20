@@ -64,3 +64,25 @@ func TestHTTPTransportJSON(t *testing.T) {
 		t.Fatalf("%q %v", out, err)
 	}
 }
+
+func TestCheckURLScheme(t *testing.T) {
+	cases := []struct {
+		url      string
+		insecure bool
+		wantErr  bool
+	}{
+		{"https://mcp.example.com/rpc", false, false},
+		{"http://127.0.0.1:8080/rpc", false, false},
+		{"http://localhost:8080/rpc", false, false},
+		{"http://[::1]:8080/rpc", false, false},
+		{"http://mcp.example.com/rpc", false, true},
+		{"http://mcp.example.com/rpc", true, false},
+		{"ftp://mcp.example.com/rpc", false, true},
+	}
+	for _, c := range cases {
+		err := checkURLScheme(c.url, c.insecure)
+		if (err != nil) != c.wantErr {
+			t.Errorf("checkURLScheme(%q, insecure=%v) err=%v wantErr=%v", c.url, c.insecure, err, c.wantErr)
+		}
+	}
+}

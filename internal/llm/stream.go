@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -27,6 +28,13 @@ type streamReq struct {
 	Messages []Message  `json:"messages"`
 	Tools    []ToolSpec `json:"tools,omitempty"`
 	Stream   bool       `json:"stream"`
+	// StreamOptions asks for a final usage chunk (OpenAI spec since 2024;
+	// compatible gateways ignore unknown request fields).
+	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 // ChatStreamHooks is like Chat but uses SSE, with separate content and
@@ -48,7 +56,10 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		url = base
 	}
 
-	body := streamReq{Model: c.Model, Messages: messages, Tools: tools, Stream: true}
+	body := streamReq{
+		Model: c.Model, Messages: messages, Tools: tools, Stream: true,
+		StreamOptions: &streamOptions{IncludeUsage: true},
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return Message{}, err
@@ -112,7 +123,12 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 						} `json:"function"`
 					} `json:"tool_calls"`
 				} `json:"delta"`
+				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
+			Usage *struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+			} `json:"usage"`
 			Error *struct {
 				Message string `json:"message"`
 			} `json:"error"`
@@ -123,8 +139,18 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		if chunk.Error != nil && chunk.Error.Message != "" {
 			return Message{}, fmt.Errorf("llm: %s", chunk.Error.Message)
 		}
+		// The usage chunk arrives with empty choices — read it before the guard.
+		if chunk.Usage != nil {
+			msg.Usage = Usage{
+				InputTokens:  chunk.Usage.PromptTokens,
+				OutputTokens: chunk.Usage.CompletionTokens,
+			}
+		}
 		if len(chunk.Choices) == 0 {
 			continue
+		}
+		if fr := chunk.Choices[0].FinishReason; fr != "" {
+			msg.StopReason = fr
 		}
 		d := chunk.Choices[0].Delta
 		if d.Content != "" {
@@ -162,22 +188,26 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	if err := sc.Err(); err != nil {
 		return Message{}, err
 	}
-	// order tool calls by index
-	if len(toolsAcc) > 0 {
-		for i := 0; i < len(toolsAcc); i++ {
-			a := toolsAcc[i]
-			if a == nil {
-				continue
-			}
-			msg.ToolCalls = append(msg.ToolCalls, ToolCall{
-				ID:   a.id,
-				Type: "function",
-				Function: FunctionCall{
-					Name:      a.name,
-					Arguments: a.args,
-				},
-			})
+	// Order tool calls by index. Some gateways send non-contiguous indices (or
+	// start above 0), so iterate the actual keys in order — never 0..len-1.
+	idxs := make([]int, 0, len(toolsAcc))
+	for i := range toolsAcc {
+		idxs = append(idxs, i)
+	}
+	sort.Ints(idxs)
+	for _, i := range idxs {
+		a := toolsAcc[i]
+		if a == nil {
+			continue
 		}
+		msg.ToolCalls = append(msg.ToolCalls, ToolCall{
+			ID:   a.id,
+			Type: "function",
+			Function: FunctionCall{
+				Name:      a.name,
+				Arguments: a.args,
+			},
+		})
 	}
 	return msg, nil
 }

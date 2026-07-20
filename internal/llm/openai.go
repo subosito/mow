@@ -17,6 +17,35 @@ type Message struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
+	// StopReason is why the provider stopped generating (OpenAI finish_reason /
+	// Anthropic stop_reason). "max_tokens" or "length" means the reply was
+	// truncated at the token limit. Response-only; never sent on the wire.
+	StopReason string `json:"-"`
+	// Usage is provider-reported token counts for the call that produced this
+	// message (zero when the provider sent none). Response-only.
+	Usage Usage `json:"-"`
+}
+
+// Usage counts provider-reported tokens for one chat call.
+type Usage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+// Zero reports whether no counts were recorded (provider sent no usage).
+func (u Usage) Zero() bool { return u.InputTokens == 0 && u.OutputTokens == 0 }
+
+// Add returns the element-wise sum (accumulating usage across loop turns).
+func (u Usage) Add(o Usage) Usage {
+	return Usage{
+		InputTokens:  u.InputTokens + o.InputTokens,
+		OutputTokens: u.OutputTokens + o.OutputTokens,
+	}
+}
+
+// Truncated reports whether the provider cut the reply at its token limit.
+func (m Message) Truncated() bool {
+	return m.StopReason == "max_tokens" || m.StopReason == "length"
 }
 
 // ToolCall is a model-requested tool invocation.
@@ -56,6 +85,9 @@ type Client struct {
 	ExtraHeaders map[string]string
 	// Stream enables SSE token deltas when supported by the wire.
 	Stream bool
+	// MaxTokens caps the response length on wires that require it
+	// (anthropic-messages). Zero means the default (8192).
+	MaxTokens int
 }
 
 // ChatRequest is the outbound chat body (subset).
@@ -68,8 +100,13 @@ type ChatRequest struct {
 // ChatResponse is the inbound chat body (subset).
 type ChatResponse struct {
 	Choices []struct {
-		Message Message `json:"message"`
+		Message      Message `json:"message"`
+		FinishReason string  `json:"finish_reason"`
 	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
@@ -158,6 +195,11 @@ func (c *Client) chatOpenAI(ctx context.Context, messages []Message, tools []Too
 	msg := parsed.Choices[0].Message
 	if msg.Role == "" {
 		msg.Role = "assistant"
+	}
+	msg.StopReason = parsed.Choices[0].FinishReason
+	msg.Usage = Usage{
+		InputTokens:  parsed.Usage.PromptTokens,
+		OutputTokens: parsed.Usage.CompletionTokens,
 	}
 	return msg, nil
 }

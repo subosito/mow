@@ -8,6 +8,13 @@ CLI (run/repl) ────┼──▶  mow.Engine  ──▶  LLM HTTP (any co
 ext packs ─────────┘     (acp · rpc · goal · mcp · …)
 ```
 
+**Why mow:** two runtime dependencies (pty, yaml) — no SDK, no framework; any
+OpenAI- or Anthropic-compatible endpoint over plain HTTP; packs (acp, rpc,
+goal, mcp, lsp, job) detach by removing a blank import; secure defaults
+(read-only tools, workspace path jail, out-of-band project trust).
+
+> Pre-1.0: the `mow` and `ext` API may change between minor versions.
+
 ## Library
 
 ```go
@@ -22,12 +29,16 @@ res, err := eng.Prompt(ctx, "list go files")
 ```
 
 One-shot: `mow.Run(ctx, prompt, opt)`.
+Custom backends: `Options.Provider` (streaming + usage preserved); per-engine
+tools: `Options.Tools`; token counts: `RunResult.Usage` / run.end events.
 
 ## Try it
 
 ```bash
 devenv shell -- just verify
 devenv shell -- just build    # → bin/mow
+# or, with plain Go (no devenv/nix needed):
+go build -o bin/mow ./cmd/mow
 
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_API_KEY=sk-…
@@ -52,6 +63,7 @@ export OPENAI_MODEL=gpt-4.1-mini
 **Pack-owned subcommands:** stock `cmd/mow` blank-imports packs. Remove an import (e.g. `_ "…/ext/acp"`) and that subcommand disappears from the binary and help.
 
 Secure default tools: **read**, **glob**, **grep**. Power tools need `--allow-write` / `--allow-shell`.
+Project `.mow` config/skills load only after `mow trust` (stored out-of-band under `$MOW_HOME`, so a cloned repo cannot trust itself), and never set credentials, endpoints, or power tools.
 
 ## Layout
 

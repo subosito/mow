@@ -74,3 +74,37 @@ func TestAnthropicStreamToolsKeepOrder(t *testing.T) {
 		t.Fatalf("order=%q,%q", msg.ToolCalls[0].ID, msg.ToolCalls[1].ID)
 	}
 }
+
+func TestAnthropicStreamMaxTokensStopSurfaced(t *testing.T) {
+	// message_delta carries stop_reason; max_tokens means truncation and must
+	// reach the caller alongside the partial content.
+	const body = "" +
+		"event: content_block_start\n" +
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n" +
+		"event: content_block_delta\n" +
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n" +
+		"event: message_delta\n" +
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":8192}}\n\n" +
+		"event: message_stop\n" +
+		"data: {\"type\":\"message_stop\"}\n\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client()}
+	msg, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+		OnContent: func(string) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Content != "partial" {
+		t.Fatalf("content=%q", msg.Content)
+	}
+	if msg.StopReason != "max_tokens" || !msg.Truncated() {
+		t.Fatalf("StopReason=%q Truncated=%v want max_tokens/true", msg.StopReason, msg.Truncated())
+	}
+}

@@ -3,7 +3,30 @@ package mow
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/subosito/mow/internal/agent"
+	"github.com/subosito/mow/internal/policy"
 )
+
+// IsPowerTool reports whether name is gated behind --allow-write/--allow-shell
+// (write, edit, bash). Hosts building approval UIs should use this instead of
+// hardcoding the list, so a new power tool cannot bypass their gate.
+func IsPowerTool(name string) bool {
+	return policy.IsPowerTool(name)
+}
+
+// ExtractThinking splits inline chain-of-thought wrappers (<think>…</think>
+// and known dialects) out of answer text. unclosed reports an open tag with no
+// close yet (still streaming). The agent loop already strips committed turns;
+// this export is for UIs doing live-stream display.
+func ExtractThinking(s string) (visible, thinking string, unclosed bool) {
+	return agent.ExtractThinking(s)
+}
+
+// StripThinking is ExtractThinking for finished text (trims outer whitespace).
+func StripThinking(s string) (visible, thinking string) {
+	return agent.StripThinking(s)
+}
 
 // Tool is a host-executed function available to the agent loop.
 // Extension packs implement this and register via ext.RegisterTool.
@@ -25,6 +48,11 @@ type Message struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
+	// StopReason and Usage are response-only metadata set by providers
+	// ("max_tokens"/"length" = truncated; usage zero = not reported). They are
+	// never serialized onto the wire.
+	StopReason string `json:"-"`
+	Usage      Usage  `json:"-"`
 }
 
 // ToolCall is a model-requested tool invocation.

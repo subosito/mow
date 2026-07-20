@@ -3,9 +3,12 @@ package mow
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/internal/agent"
@@ -35,7 +38,8 @@ type Engine struct {
 	pol        *policy.Policy
 	tools      []agent.Tool
 	chat       agent.ChatFn
-	client     *llm.Client // nil when Options.Chat is injected
+	client     *llm.Client // nil when Options.Provider/Chat is injected
+	provider   Provider    // set when Options.Provider is used
 	sys        string
 	opt        Options
 	sess       *session.Store
@@ -45,6 +49,9 @@ type Engine struct {
 	noSess     bool
 	hooks      agent.Hooks
 	life       lifeHooks
+	// readOnlyExt marks ext tools that declared ReadOnly() true; only these
+	// (plus builtin read tools) run under PromptOpts.ReadOnly.
+	readOnlyExt map[string]bool
 
 	onTokenMu   sync.Mutex
 	onToken     func(string)
@@ -72,6 +79,13 @@ type lifeHooks struct {
 
 // New builds an Engine from Options (config, tools, optional session resume).
 func New(opt Options) (*Engine, error) {
+	// Packs that register config-driven tools (mcp, lsp) run before
+	// construction; without this a library embedder that blank-imports a pack
+	// would silently get none of its tools. Re-registration is safe —
+	// ext.RegisterTool replaces by name.
+	if err := ext.BeforeNew(opt.ConfigPaths...); err != nil {
+		return nil, fmt.Errorf("extension init: %w", err)
+	}
 	cfg, err := config.Load(opt.ConfigPaths...)
 	if err != nil {
 		return nil, err
@@ -106,14 +120,53 @@ func New(opt Options) (*Engine, error) {
 
 	enabled := cfg.Tools.Enable
 	toolList := tools.Registry(pol, enabled)
+	readOnlyExt := map[string]bool{}
 	for _, t := range ext.Tools() {
 		toolList = append(toolList, adaptTool(t))
+		// Ext tools may declare themselves side-effect free; only those run
+		// in read-only prompts (see isReadOnlyTool).
+		if ro, ok := t.(interface{ ReadOnly() bool }); ok && ro.ReadOnly() {
+			readOnlyExt[strings.ToLower(strings.TrimSpace(t.Name()))] = true
+		}
+	}
+	// Per-engine tools (Options.Tools): engine-scoped, unlike the global
+	// registry. Same name overrides a registry tool; a builtin name is an
+	// error — the jailed builtins must never be silently replaced.
+	for _, t := range opt.Tools {
+		if t == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(t.Name()))
+		if name == "" {
+			return nil, fmt.Errorf("options.tools: tool with empty name")
+		}
+		if isBuiltin(name) {
+			return nil, fmt.Errorf("options.tools: %q collides with a builtin tool", name)
+		}
+		replaced := false
+		for i, existing := range toolList {
+			if strings.ToLower(strings.TrimSpace(existing.Name())) == name {
+				toolList[i] = adaptTool(t)
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			toolList = append(toolList, adaptTool(t))
+		}
+		if ro, ok := t.(interface{ ReadOnly() bool }); ok && ro.ReadOnly() {
+			readOnlyExt[name] = true
+		} else {
+			delete(readOnlyExt, name) // an override may drop the marker
+		}
 	}
 
 	sys, _ := contextload.Load(cfg.Workspace)
 	skillDirs := append([]string(nil), cfg.Skills.Dirs...)
 	if contextload.ProjectTrusted(cfg.Workspace) {
 		skillDirs = append(skillDirs, filepath.Join(cfg.Workspace, ".mow", "skills"))
+	} else if _, serr := os.Stat(filepath.Join(cfg.Workspace, ".mow")); serr == nil {
+		slog.Info("mow: project .mow present but untrusted; run `mow trust` to load project config/skills")
 	}
 	skillDirs = append([]string{config.SkillsDir()}, skillDirs...)
 	if sk := contextload.LoadSkills(skillDirs); sk != "" {
@@ -146,12 +199,36 @@ func New(opt Options) (*Engine, error) {
 		life:        life,
 		onToken:     opt.OnToken,
 		onReasoning: opt.OnReasoning,
+		readOnlyExt: readOnlyExt,
 	}
 	if opt.OnEvent != nil {
 		e.AddOnEvent(opt.OnEvent)
 	}
 	var mediaClient *llm.MediaClient
-	if opt.Chat != nil {
+	switch {
+	case opt.Provider != nil:
+		prov := opt.Provider
+		e.provider = prov
+		e.chat = func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+			// Hooks are read per call so SetOnToken/Prompt wrappers apply to
+			// custom providers exactly like the built-in client.
+			e.onTokenMu.Lock()
+			hooks := ChatHooks{OnToken: e.onToken, OnReasoning: e.onReasoning}
+			e.onTokenMu.Unlock()
+			out, err := prov.Chat(ctx, toPublicMessages(messages), toPublicToolSpecs(tools), hooks)
+			if err != nil {
+				return llm.Message{}, err
+			}
+			return toInternalMessage(out), nil
+		}
+		if key := cfg.ResolveAPIKey(); key != "" {
+			mediaClient = &llm.MediaClient{
+				BaseURL:      cfg.LLM.BaseURL,
+				APIKey:       key,
+				ExtraHeaders: withActorHeaders(cfg.LLM.Headers, "mow"),
+			}
+		}
+	case opt.Chat != nil:
 		e.chat = adaptChat(opt.Chat)
 		if key := cfg.ResolveAPIKey(); key != "" {
 			mediaClient = &llm.MediaClient{
@@ -160,7 +237,7 @@ func New(opt Options) (*Engine, error) {
 				ExtraHeaders: withActorHeaders(cfg.LLM.Headers, "mow"),
 			}
 		}
-	} else {
+	default:
 		key := cfg.ResolveAPIKey()
 		if key == "" {
 			return nil, fmt.Errorf("api key required (OPENAI_API_KEY / MOW_API_KEY / ANTHROPIC_API_KEY or llm.api_key)")
@@ -186,7 +263,12 @@ func New(opt Options) (*Engine, error) {
 			e.onTokenMu.Lock()
 			hooks := llm.StreamHooks{OnContent: e.onToken, OnReasoning: e.onReasoning}
 			e.onTokenMu.Unlock()
-			return client.ChatWithStream(ctx, messages, tools, hooks)
+			// Snapshot by value: SetModel/SetWire mutate e.client under e.mu
+			// while a run may be in flight; the copy keeps this call race-free.
+			e.mu.Lock()
+			c := *e.client
+			e.mu.Unlock()
+			return c.ChatWithStream(ctx, messages, tools, hooks)
 		}
 	}
 
@@ -366,21 +448,43 @@ func (e *Engine) AllowShell() bool {
 }
 
 // AddPreTool appends a PreTool hook (deny / rewrite args / additional context).
-func (e *Engine) AddPreTool(fn PreToolFunc) {
+// The returned unsubscribe detaches the hook (safe to call once, effective for
+// in-flight runs too) — hosts like TUIs must detach on shutdown or a later
+// headless Prompt would stall in an approval hook nobody answers.
+func (e *Engine) AddPreTool(fn PreToolFunc) (unsubscribe func()) {
 	if e == nil || fn == nil {
-		return
+		return func() {}
+	}
+	h := adaptPreTool(fn)
+	var off atomic.Bool
+	wrapped := func(ctx context.Context, ev agent.PreToolEvent) (agent.PreToolDecision, error) {
+		if off.Load() {
+			return agent.PreToolDecision{}, nil
+		}
+		return h(ctx, ev)
 	}
 	e.mu.Lock()
-	e.hooks.PreTool = append(e.hooks.PreTool, adaptPreTool(fn))
+	e.hooks.PreTool = append(e.hooks.PreTool, wrapped)
 	e.mu.Unlock()
+	return func() { off.Store(true) }
 }
 
 // AddPostTool appends a PostTool hook (rewrite tool result shown to the model).
-func (e *Engine) AddPostTool(fn PostToolFunc) {
+// The returned unsubscribe detaches the hook (safe to call once).
+func (e *Engine) AddPostTool(fn PostToolFunc) (unsubscribe func()) {
 	if e == nil || fn == nil {
-		return
+		return func() {}
+	}
+	h := adaptPostTool(fn)
+	var off atomic.Bool
+	wrapped := func(ctx context.Context, ev agent.PostToolEvent) (agent.PostToolDecision, error) {
+		if off.Load() {
+			return agent.PostToolDecision{}, nil
+		}
+		return h(ctx, ev)
 	}
 	e.mu.Lock()
-	e.hooks.PostTool = append(e.hooks.PostTool, adaptPostTool(fn))
+	e.hooks.PostTool = append(e.hooks.PostTool, wrapped)
 	e.mu.Unlock()
+	return func() { off.Store(true) }
 }

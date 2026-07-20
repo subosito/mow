@@ -117,16 +117,20 @@ func (f fieldSet) match(v int) bool {
 }
 
 func (c *cronSched) match(t time.Time) bool {
-	// Use local time for operator-friendly schedules.
-	t = t.Local()
-	if !c.min.match(t.Minute()) || !c.hour.match(t.Hour()) {
+	// Schedules are wall-clock: evaluated in t's location (callers pass
+	// local time.Now(), so this is operator-friendly local time).
+	return c.matchFields(t.Minute(), t.Hour(), t.Day(), int(t.Month()), int(t.Weekday()))
+}
+
+func (c *cronSched) matchFields(min, hour, day, mon, dow int) bool {
+	if !c.min.match(min) || !c.hour.match(hour) {
 		return false
 	}
-	if !c.mon.match(int(t.Month())) {
+	if !c.mon.match(mon) {
 		return false
 	}
-	domOK := c.dom.match(t.Day())
-	dowOK := c.dow.match(int(t.Weekday())) // Sunday=0
+	domOK := c.dom.match(day)
+	dowOK := c.dow.match(dow) // Sunday=0
 	// Standard: if both dom and dow are restricted, either may match (OR).
 	if !c.dom.any && !c.dow.any {
 		return domOK || dowOK
@@ -135,14 +139,56 @@ func (c *cronSched) match(t time.Time) bool {
 }
 
 // nextAfter returns the next minute strictly after t that matches (search up to 2 years).
+//
+// DST is handled vixie-cron style. The scan advances by absolute minutes and
+// watches the zone offset between consecutive steps:
+//   - Spring forward (offset grows): the wall clock jumps past a window of
+//     nonexistent minutes. A schedule matching inside that window (e.g. "30 2"
+//     when 02:00 jumps to 03:00) fires at the first instant after the
+//     transition instead of silently skipping to the next day.
+//   - Fall back (offset shrinks): the wall clock repeats a window, so the
+//     absolute-time scan visits the same wall minutes twice. Vixie runs
+//     wall-clock jobs at the first occurrence only, so matches during the
+//     second pass are suppressed.
 func (c *cronSched) nextAfter(t time.Time) (time.Time, error) {
-	t = t.Local().Truncate(time.Minute).Add(time.Minute)
+	prev := t.Truncate(time.Minute)
+	t = prev.Add(time.Minute)
 	limit := t.AddDate(2, 0, 0)
+	var skipUntil time.Time // end of a fall-back repeated window (second pass)
 	for !t.After(limit) {
-		if c.match(t) {
+		_, prevOff := prev.Zone()
+		_, off := t.Zone()
+		if off > prevOff {
+			// Spring forward: wall minutes strictly between prev and t do
+			// not exist. If the schedule matches one, fire right after the gap.
+			if c.matchesInGap(prev, t) {
+				return t, nil
+			}
+		} else if off < prevOff {
+			// Fall back: the next (prevOff-off) of absolute time repeats
+			// wall minutes that already ran on the first pass.
+			skipUntil = t.Add(time.Duration(prevOff-off) * time.Second)
+		}
+		if c.match(t) && !t.Before(skipUntil) {
 			return t, nil
 		}
+		prev = t
 		t = t.Add(time.Minute)
 	}
 	return time.Time{}, fmt.Errorf("cron: no match within 2 years")
+}
+
+// matchesInGap reports whether the schedule matches any wall-clock minute
+// strictly between prev and next across a spring-forward gap. Those wall
+// times do not exist in the schedule's location, so walk them in UTC where
+// minute arithmetic is pure wall-clock.
+func (c *cronSched) matchesInGap(prev, next time.Time) bool {
+	w := time.Date(prev.Year(), prev.Month(), prev.Day(), prev.Hour(), prev.Minute(), 0, 0, time.UTC)
+	end := time.Date(next.Year(), next.Month(), next.Day(), next.Hour(), next.Minute(), 0, 0, time.UTC)
+	for w = w.Add(time.Minute); w.Before(end); w = w.Add(time.Minute) {
+		if c.matchFields(w.Minute(), w.Hour(), w.Day(), int(w.Month()), int(w.Weekday())) {
+			return true
+		}
+	}
+	return false
 }

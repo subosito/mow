@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -65,6 +67,8 @@ type tokenSource struct {
 	token  string
 	expiry time.Time
 	client *http.Client
+	// authURLFn overrides printing the authorize URL to stderr (tests).
+	authURLFn func(string)
 }
 
 func newTokenSource(cfg AuthConfig) *tokenSource {
@@ -323,13 +327,20 @@ func (t *tokenSource) authCodeAccessToken(ctx context.Context) (string, error) {
 		if redirect == "" {
 			redirect = "http://127.0.0.1/callback"
 		}
-		return t.exchangeAuthCode(ctx, code, redirect, clientID, tokenURL)
+		return t.exchangeAuthCode(ctx, code, redirect, clientID, tokenURL, "")
 	}
 
-	state := randomHex(16)
+	state, err := randomHex(16)
+	if err != nil {
+		return "", err
+	}
+	// PKCE (RFC 7636): required for public clients per RFC 8252.
+	verifier, challenge, err := pkceVerifier()
+	if err != nil {
+		return "", err
+	}
 	redirect := strings.TrimSpace(t.cfg.RedirectURI)
 	var ln net.Listener
-	var err error
 	if redirect == "" {
 		ln, err = net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -374,6 +385,8 @@ func (t *tokenSource) authCodeAccessToken(ctx context.Context) (string, error) {
 	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirect)
 	q.Set("state", state)
+	q.Set("code_challenge", challenge)
+	q.Set("code_challenge_method", "S256")
 	if t.cfg.Scope != "" {
 		q.Set("scope", t.cfg.Scope)
 	}
@@ -383,7 +396,11 @@ func (t *tokenSource) authCodeAccessToken(ctx context.Context) (string, error) {
 	} else {
 		fullAuth += "?" + q.Encode()
 	}
-	fmt.Fprintf(os.Stderr, "mow mcp: open this URL to authorize:\n  %s\n", fullAuth)
+	if t.authURLFn != nil {
+		t.authURLFn(fullAuth)
+	} else {
+		fmt.Fprintf(os.Stderr, "mow mcp: open this URL to authorize:\n  %s\n", fullAuth)
+	}
 
 	var code string
 	select {
@@ -395,16 +412,19 @@ func (t *tokenSource) authCodeAccessToken(ctx context.Context) (string, error) {
 	case <-time.After(10 * time.Minute):
 		return "", fmt.Errorf("mcp auth: auth code login timed out")
 	}
-	return t.exchangeAuthCode(ctx, code, redirect, clientID, tokenURL)
+	return t.exchangeAuthCode(ctx, code, redirect, clientID, tokenURL, verifier)
 }
 
-func (t *tokenSource) exchangeAuthCode(ctx context.Context, code, redirect, clientID, tokenURL string) (string, error) {
+func (t *tokenSource) exchangeAuthCode(ctx context.Context, code, redirect, clientID, tokenURL, verifier string) (string, error) {
 
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
 	form.Set("redirect_uri", redirect)
 	form.Set("client_id", clientID)
+	if verifier != "" {
+		form.Set("code_verifier", verifier)
+	}
 	if t.cfg.ClientSecret != "" {
 		form.Set("client_secret", t.cfg.ClientSecret)
 	}
@@ -440,10 +460,22 @@ func (t *tokenSource) exchangeAuthCode(ctx context.Context, code, redirect, clie
 	return t.token, nil
 }
 
-func randomHex(n int) string {
+func randomHex(n int) (string, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		return "", fmt.Errorf("mcp auth: rand: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
+}
+
+// pkceVerifier returns a fresh RFC 7636 code_verifier (43-char base64url of 32
+// random bytes) and its S256 code_challenge.
+func pkceVerifier() (verifier, challenge string, err error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", fmt.Errorf("mcp auth: rand: %w", err)
+	}
+	verifier = base64.RawURLEncoding.EncodeToString(b)
+	sum := sha256.Sum256([]byte(verifier))
+	return verifier, base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }

@@ -2,12 +2,16 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -103,6 +107,144 @@ func TestOAuth2AuthCode(t *testing.T) {
 	}
 	if got := req.Header.Get("Authorization"); got != "Bearer code-tok" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestOAuth2AuthCodePKCE(t *testing.T) {
+	var mu sync.Mutex
+	var challenge string // code_challenge seen on the authorize URL
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("grant_type") != "authorization_code" || r.Form.Get("code") != "abc" {
+			http.Error(w, "bad", 400)
+			return
+		}
+		v := r.Form.Get("code_verifier")
+		if v == "" {
+			http.Error(w, "missing code_verifier", 400)
+			return
+		}
+		sum := sha256.Sum256([]byte(v))
+		mu.Lock()
+		want := challenge
+		mu.Unlock()
+		if base64.RawURLEncoding.EncodeToString(sum[:]) != want {
+			http.Error(w, "code_verifier does not match code_challenge", 400)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "pkce-tok",
+			"expires_in":   3600,
+		})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ts := newTokenSource(AuthConfig{
+		Type:         "oauth2_auth_code",
+		AuthorizeURL: "http://example.com/authorize",
+		TokenURL:     srv.URL + "/token",
+		ClientID:     "cid",
+	})
+	ts.authURLFn = func(authURL string) {
+		u, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("parse authorize url: %v", err)
+			return
+		}
+		q := u.Query()
+		if q.Get("code_challenge_method") != "S256" {
+			t.Errorf("code_challenge_method=%q want S256", q.Get("code_challenge_method"))
+		}
+		ch := q.Get("code_challenge")
+		if len(ch) != 43 { // base64url(SHA256) without padding
+			t.Errorf("code_challenge=%q want 43 chars", ch)
+		}
+		mu.Lock()
+		challenge = ch
+		mu.Unlock()
+		// Simulate the provider redirecting the browser to the loopback callback.
+		res, err := http.Get(q.Get("redirect_uri") + "?code=abc&state=" + url.QueryEscape(q.Get("state")))
+		if err != nil {
+			t.Errorf("callback: %v", err)
+			return
+		}
+		res.Body.Close()
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://x", nil)
+	if err := ts.apply(req); err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer pkce-tok" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestOAuth2AuthCodeUniqueStateAndVerifier(t *testing.T) {
+	var mu sync.Mutex
+	var verifiers []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		mu.Lock()
+		verifiers = append(verifiers, r.Form.Get("code_verifier"))
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "tok",
+			"expires_in":   3600,
+		})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ts := newTokenSource(AuthConfig{
+		Type:         "oauth2_auth_code",
+		AuthorizeURL: "http://example.com/authorize",
+		TokenURL:     srv.URL + "/token",
+		ClientID:     "cid",
+	})
+	var states, challenges []string
+	ts.authURLFn = func(authURL string) {
+		u, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("parse authorize url: %v", err)
+			return
+		}
+		q := u.Query()
+		states = append(states, q.Get("state"))
+		challenges = append(challenges, q.Get("code_challenge"))
+		res, err := http.Get(q.Get("redirect_uri") + "?code=abc&state=" + url.QueryEscape(q.Get("state")))
+		if err != nil {
+			t.Errorf("callback: %v", err)
+			return
+		}
+		res.Body.Close()
+	}
+	for i := 0; i < 2; i++ {
+		// Force a fresh login each round.
+		ts.mu.Lock()
+		ts.token = ""
+		ts.expiry = time.Time{}
+		ts.mu.Unlock()
+		req, _ := http.NewRequest(http.MethodGet, "http://x", nil)
+		if err := ts.apply(req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(states) != 2 || len(challenges) != 2 {
+		t.Fatalf("flows=%d want 2", len(states))
+	}
+	if states[0] == states[1] {
+		t.Fatalf("state reused across flows: %q", states[0])
+	}
+	if challenges[0] == challenges[1] {
+		t.Fatalf("code_challenge reused across flows: %q", challenges[0])
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(verifiers) != 2 || verifiers[0] == "" || verifiers[0] == verifiers[1] {
+		t.Fatalf("verifiers=%q want 2 unique non-empty", verifiers)
 	}
 }
 

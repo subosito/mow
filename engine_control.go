@@ -156,13 +156,16 @@ func (e *Engine) beginRun(parent context.Context) (ctx context.Context, runID st
 
 func (e *Engine) endRun() {
 	e.runMu.Lock()
-	if e.runCancel != nil {
-		// Do not call cancel here — run already finished; just clear.
-		e.runCancel = nil
-	}
+	cancel := e.runCancel
+	e.runCancel = nil
 	e.busy = false
 	e.runID = ""
 	e.runMu.Unlock()
+	if cancel != nil {
+		// Release the run context's registration in its parent; without this a
+		// long-lived host Prompting on one parent ctx accumulates children.
+		cancel()
+	}
 }
 
 func newRunID() string {

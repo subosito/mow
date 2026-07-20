@@ -25,6 +25,14 @@ var powerTools = map[string]string{
 	"bash":  "shell",
 }
 
+// IsPowerTool reports whether name is gated behind allow-write/allow-shell.
+// Exported so hosts (approval UIs) share one vocabulary instead of hardcoding
+// the list and drifting when a power tool is added.
+func IsPowerTool(name string) bool {
+	_, ok := powerTools[strings.ToLower(strings.TrimSpace(name))]
+	return ok
+}
+
 // AllowTool reports whether the named tool may run under this policy.
 // Read-only tools always pass the power-tool gate; write/edit/bash need flags.
 func (p *Policy) AllowTool(name string) error {

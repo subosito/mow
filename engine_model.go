@@ -37,7 +37,17 @@ func (e *Engine) SetModel(id string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.client == nil {
-		return fmt.Errorf("mow: model switch requires live LLM client (not available with custom Chat)")
+		// Custom providers may opt in via the ModelSwitcher extension.
+		if sw, ok := e.provider.(ModelSwitcher); ok {
+			if err := sw.SetModel(id); err != nil {
+				return err
+			}
+			if e.cfg != nil {
+				e.cfg.LLM.Model = id
+			}
+			return nil
+		}
+		return fmt.Errorf("mow: model switch requires the built-in client or a Provider implementing ModelSwitcher")
 	}
 	e.client.Model = id
 	if e.cfg != nil {
@@ -107,6 +117,10 @@ func (e *Engine) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	e.mu.Unlock()
 
 	if client == nil {
+		// Custom providers may opt in via the ModelLister extension.
+		if ml, ok := e.provider.(ModelLister); ok {
+			return ml.ListModels(ctx)
+		}
 		if current != "" {
 			return []ModelInfo{{ID: current}}, nil
 		}

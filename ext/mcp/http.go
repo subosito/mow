@@ -7,11 +7,40 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
 )
+
+// checkURLScheme requires https for non-loopback MCP endpoints so bearer and
+// OAuth tokens never travel in clear text; insecure: true opts out explicitly.
+func checkURLScheme(raw string, insecure bool) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("mcp url %q: %w", raw, err)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return nil
+	case "http":
+		if insecure {
+			return nil
+		}
+		host := u.Hostname()
+		if host == "localhost" {
+			return nil
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return nil
+		}
+		return fmt.Errorf("mcp url %q: http to a non-loopback host sends tokens in clear text (use https, or set insecure: true)", raw)
+	default:
+		return fmt.Errorf("mcp url %q: unsupported scheme %q", raw, u.Scheme)
+	}
+}
 
 // httpTransport implements MCP Streamable HTTP: POST JSON-RPC to a single URL.
 // Accepts application/json or text/event-stream responses.
@@ -28,6 +57,9 @@ func newHTTPTransport(s ServerConfig) (*httpTransport, error) {
 	u := strings.TrimSpace(s.URL)
 	if u == "" {
 		return nil, fmt.Errorf("empty url")
+	}
+	if err := checkURLScheme(u, s.Insecure); err != nil {
+		return nil, err
 	}
 	h := &httpTransport{
 		url:     u,

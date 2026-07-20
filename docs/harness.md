@@ -202,11 +202,11 @@ tools:
 
 ## 7. Config and trust
 
-Load order: defaults → explicit `-config` paths → `$MOW_HOME/config.yaml` (default `~/.mow/config.yaml`) → env → trusted project `.mow/config.yaml`.
+Load order: defaults → explicit `--config` paths → `$MOW_HOME/config.yaml` (default `~/.mow/config.yaml`) → env → trusted project `.mow/config.yaml`.
 
 `MOW_HOME` relocates the user data root (config, sessions, skills, global `AGENTS.md`). Default is `~/.mow`. Useful for tests/CI: `MOW_HOME=$(mktemp -d)`.
 
-Project trust: `.mow/trust` or env `MOW_TRUST_PROJECT=1` enables project config and `.mow/skills` (workspace-local, not under `MOW_HOME`).
+Project trust: `mow trust` (stored out-of-band in `$MOW_HOME/trusted`) or env `MOW_TRUST_PROJECT=1` enables project config and `.mow/skills`. Trust is never read from inside the workspace — a cloned repo cannot grant itself trust. Even trusted, project config may not set `llm.base_url`, credentials, headers, `session.dir`, or enable power tools.
 
 **Supported env (slim set):**
 
@@ -217,7 +217,7 @@ Project trust: `.mow/trust` or env `MOW_TRUST_PROJECT=1` enables project config 
 | `MOW_MODEL` / `OPENAI_MODEL` / `ANTHROPIC_MODEL` | Chat model |
 | `MOW_BASE_URL` / `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` | LLM endpoint |
 | `MOW_WIRE` | Wire id (optional) |
-| `MOW_TRUST_PROJECT` | Trust project `.mow/*` without a trust file |
+| `MOW_TRUST_PROJECT` | Trust project `.mow/*` for this invocation (persistent: `mow trust`) |
 
 Workspace, power tools, stream, media models → **yaml** and/or **CLI flags** (`--workspace`, `--allow-write`, `--stream`, …). MCP OAuth automation may use `MOW_MCP_AUTH_CODE` (pack-only).
 
@@ -256,4 +256,17 @@ See [extensions.md](extensions.md) for ACP, media, and pack decisions.
 ## See also
 
 - [architecture.md](architecture.md)  
-- [extensions.md](extensions.md)  
+- [extensions.md](extensions.md)
+
+## Usage accounting & inline thinking
+
+Every LLM call's provider-reported token usage is parsed on both wires
+(streaming included — OpenAI via `stream_options.include_usage`, Anthropic via
+`message_start`/`message_delta`) and summed per run: `RunResult.Usage`, and
+`input_tokens`/`output_tokens` on the `run.end` event. Zero means the provider
+sent none.
+
+Models that emit chain-of-thought inline as `<think>…</think>` (and known
+dialects) are normalized by the loop: committed history, session files, and
+`Result.Text` are always tag-free. UIs needing live-stream extraction use
+`mow.ExtractThinking` / `mow.StripThinking`.

@@ -2,9 +2,15 @@ package llm
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -70,6 +76,58 @@ func TestDoWithRetryHonoursRetryAfter(t *testing.T) {
 	}
 	if n.Load() != 2 {
 		t.Fatalf("attempts=%d", n.Load())
+	}
+}
+
+func TestRetryableNetErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"context canceled", context.Canceled, false},
+		{"wrapped canceled", fmt.Errorf("do: %w", context.Canceled), false},
+		{"deadline exceeded", context.DeadlineExceeded, false},
+		{"dns not found", &net.DNSError{Err: "no such host", IsNotFound: true}, false},
+		{"dns not found in url.Error", &url.Error{Op: "Post", URL: "https://x", Err: &net.DNSError{Err: "no such host", IsNotFound: true}}, false},
+		{"dns timeout", &net.DNSError{Err: "i/o timeout", IsTimeout: true}, true},
+		{"unknown authority", x509.UnknownAuthorityError{}, false},
+		{"cert invalid", x509.CertificateInvalidError{Cert: &x509.Certificate{}, Reason: x509.Expired}, false},
+		{"hostname mismatch", x509.HostnameError{Certificate: &x509.Certificate{}, Host: "x"}, false},
+		{"tls verification", &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}, false},
+		{"connection refused", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}, true},
+		{"generic transient", errors.New("unexpected EOF"), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := retryableNetErr(tc.err); got != tc.want {
+				t.Fatalf("retryableNetErr(%v)=%v want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRetryDelayRetryAfterDate(t *testing.T) {
+	// Date form must behave like the seconds form: honour near-future dates,
+	// cap far-future dates at 30s (not fall through to the 200ms base).
+	cases := []struct {
+		name     string
+		after    time.Duration
+		min, max time.Duration
+	}{
+		{"near future", 5 * time.Second, 2 * time.Second, 5 * time.Second},
+		{"far future capped", 10 * time.Minute, 25 * time.Second, 30 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := &http.Response{Header: http.Header{}}
+			res.Header.Set("Retry-After", time.Now().Add(tc.after).UTC().Format(http.TimeFormat))
+			d := retryDelay(1, res)
+			if d < tc.min || d > tc.max {
+				t.Fatalf("delay=%v want between %v and %v", d, tc.min, tc.max)
+			}
+		})
 	}
 }
 

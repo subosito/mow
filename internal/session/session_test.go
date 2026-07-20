@@ -123,3 +123,43 @@ func TestValidateID(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadMessagesRepairsDanglingToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: dir, ID: "t2"}
+	// Snapshot from a cancelled run: assistant issued two tool calls, only one
+	// result was recorded before the batch aborted.
+	dump := []llm.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "do things"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{
+			{ID: "call_1", Type: "function", Function: llm.FunctionCall{Name: "read", Arguments: "{}"}},
+			{ID: "call_2", Type: "function", Function: llm.FunctionCall{Name: "bash", Arguments: "{}"}},
+		}},
+		{Role: "tool", ToolCallID: "call_1", Name: "read", Content: "ok"},
+	}
+	for i := range dump {
+		if err := s.Append(Event{Type: "message", Message: &dump[i]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.LoadMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("len=%d want 5 (synthesized result missing?): %+v", len(got), got)
+	}
+	syn := got[4]
+	if syn.Role != "tool" || syn.ToolCallID != "call_2" {
+		t.Fatalf("synthesized=%+v", syn)
+	}
+	if syn.Content == "" {
+		t.Fatal("synthesized result should explain the interruption")
+	}
+	// A complete snapshot passes through untouched.
+	answered := &llm.Message{Role: "tool", ToolCallID: "call_2", Name: "bash", Content: "done"}
+	if err := s.Append(Event{Type: "message", Message: answered}); err != nil {
+		t.Fatal(err)
+	}
+}
