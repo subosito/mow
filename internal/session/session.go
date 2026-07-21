@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -202,6 +203,63 @@ func ValidateID(id string) error {
 		}
 	}
 	return nil
+}
+
+// Info summarizes a stored session for listing/resume UIs.
+type Info struct {
+	ID      string
+	Updated time.Time
+	Preview string // first user message, trimmed
+}
+
+// List returns sessions under dir, newest first, each with its first user
+// message as a preview. Missing dir is empty, not an error.
+func List(dir string) ([]Info, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []Info
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, Info{
+			ID:      strings.TrimSuffix(e.Name(), ".jsonl"),
+			Updated: fi.ModTime(),
+			Preview: firstUserLine(filepath.Join(dir, e.Name())),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Updated.After(out[j].Updated) })
+	return out, nil
+}
+
+// firstUserLine reads the first user event's content (bounded).
+func firstUserLine(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range splitLines(string(raw)) {
+		if line == "" {
+			continue
+		}
+		var ev Event
+		if json.Unmarshal([]byte(line), &ev) != nil {
+			continue
+		}
+		if ev.Role == "user" && strings.TrimSpace(ev.Content) != "" {
+			return strings.Join(strings.Fields(ev.Content), " ")
+		}
+	}
+	return ""
 }
 
 // LatestID returns the most recently modified session id under dir (basename without .jsonl).

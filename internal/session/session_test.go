@@ -163,3 +163,36 @@ func TestLoadMessagesRepairsDanglingToolCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestListSessions(t *testing.T) {
+	dir := t.TempDir()
+	// Two sessions with user previews; b newer than a.
+	a := &Store{Dir: dir, ID: "aaa"}
+	if err := a.Append(Event{Type: "user", Role: "user", Content: "first goal here"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	b := &Store{Dir: dir, ID: "bbb"}
+	if err := b.Append(Event{Type: "user", Role: "user", Content: "second thing"}); err != nil {
+		t.Fatal(err)
+	}
+	infos, err := List(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("len=%d want 2", len(infos))
+	}
+	// Newest first.
+	if infos[0].ID != "bbb" || infos[1].ID != "aaa" {
+		t.Fatalf("order: %s, %s", infos[0].ID, infos[1].ID)
+	}
+	if infos[0].Preview != "second thing" || infos[1].Preview != "first goal here" {
+		t.Fatalf("previews: %q, %q", infos[0].Preview, infos[1].Preview)
+	}
+	// Missing dir is empty, not an error.
+	empty, err := List(filepath.Join(dir, "nope"))
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("missing dir: %v %v", empty, err)
+	}
+}

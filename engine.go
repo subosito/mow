@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/internal/agent"
@@ -413,6 +414,31 @@ func (e *Engine) SessionID() string {
 		return ""
 	}
 	return e.sid
+}
+
+// SessionInfo summarizes a stored session (listing / resume UIs).
+type SessionInfo struct {
+	ID      string
+	Updated time.Time
+	Preview string // first user message
+}
+
+// Sessions lists stored sessions for this Engine's project, newest first.
+// Empty when NoSession or none exist. Resuming a different id is out-of-band
+// (build a new Engine with Options.SessionID).
+func (e *Engine) Sessions() ([]SessionInfo, error) {
+	if e == nil || e.sess == nil || strings.TrimSpace(e.sess.Dir) == "" {
+		return nil, nil
+	}
+	infos, err := session.List(e.sess.Dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SessionInfo, len(infos))
+	for i, s := range infos {
+		out[i] = SessionInfo{ID: s.ID, Updated: s.Updated, Preview: s.Preview}
+	}
+	return out, nil
 }
 
 // Transcript returns user/assistant turns for UI display (session resume).
