@@ -469,6 +469,27 @@ func (e *Engine) AddPreTool(fn PreToolFunc) (unsubscribe func()) {
 	return func() { off.Store(true) }
 }
 
+// AddAfterTurn appends a hook that fires after each LLM turn inside a Prompt
+// (HasToolCalls reports whether a tool batch follows). UIs use it to commit
+// intermediate assistant text at turn boundaries instead of losing it when
+// the run ends. The returned unsubscribe detaches the hook.
+func (e *Engine) AddAfterTurn(fn AfterTurnFunc) (unsubscribe func()) {
+	if e == nil || fn == nil {
+		return func() {}
+	}
+	var off atomic.Bool
+	wrapped := func(ctx context.Context, ev agent.AfterTurnEvent) {
+		if off.Load() {
+			return
+		}
+		fn(ctx, AfterTurnEvent{AssistantText: ev.AssistantText, HasToolCalls: ev.HasToolCalls})
+	}
+	e.mu.Lock()
+	e.hooks.AfterTurn = append(e.hooks.AfterTurn, wrapped)
+	e.mu.Unlock()
+	return func() { off.Store(true) }
+}
+
 // AddPostTool appends a PostTool hook (rewrite tool result shown to the model).
 // The returned unsubscribe detaches the hook (safe to call once).
 func (e *Engine) AddPostTool(fn PostToolFunc) (unsubscribe func()) {
