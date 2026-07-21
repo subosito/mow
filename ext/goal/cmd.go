@@ -63,10 +63,13 @@ Subcommands:
 
 Engine flags (run): same as other packs (--config --model --workspace … --continue)
 
-Completion: goal_report status=done summary="…" (preferred), or GOAL_DONE / GOAL_FAILED markers.
-Result: mow goal status --id …  or  $MOW_HOME/goals/<id>.json field summary
+Completion: goal_report status=done summary="…" (preferred). Multi-part goals: first
+  goal_report status=continue plan=[{id,title,status:pending}…], then item_id/item_status,
+  then status=done when the checklist is complete. Also: GOAL_DONE / GOAL_FAILED markers.
+Result: mow goal status --id …  or  $MOW_HOME/goals/<id>.json (summary + plan)
+Events: $MOW_HOME/goals/<id>/events.jsonl
+Processes: goal_process_start|status|stop (long-lived servers for the goal)
 Resume incomplete/failed: mow goal run --id … (reuses state; done goals need reset first)
-Session chat: mow repl --session <session> when a session was used
 
 Failed → re-run: mow goal run --id NAME resumes failed/pending/running; for done use reset then run.
 
@@ -250,6 +253,9 @@ func printState(st State, store *Store) {
 		fmt.Printf("tokens: %d in / %d out\n", st.InputTokens, st.OutputTokens)
 	}
 	fmt.Printf("goal: %s\n", st.Goal)
+	if st.Plan.HasItems() {
+		fmt.Printf("plan:\n%s\n", st.Plan.Format())
+	}
 	if st.Error != "" {
 		fmt.Printf("error: %s\n", st.Error)
 	}
@@ -262,6 +268,7 @@ func printState(st State, store *Store) {
 	}
 	if store != nil && strings.TrimSpace(st.ID) != "" {
 		fmt.Printf("file: %s\n", store.Path(st.ID))
+		fmt.Printf("events: %s\n", store.eventsPath(st.ID))
 	}
 	printGoalResume(st)
 }

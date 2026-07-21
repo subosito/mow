@@ -9,27 +9,20 @@ import (
 	"github.com/subosito/mow/internal/llm"
 )
 
-// Exploration thrash guards.
-//
-// Real coding goals need many read/grep/bash turns before the first write.
-// Killing after N explore-only turns aborts legitimate work. We instead stop
-// when exploration is unproductive: re-reading the same paths and replaying
-// the same glob/grep/bash, with a high hard ceiling as a last resort.
+// Soft exploration helpers — no hard kill. Long autonomous runs (hours/days)
+// stop on: model finishes, ctx cancel, or MaxTurns when the user set one.
+// These only (1) stub re-reads and (2) inject occasional wrap-up nudges.
 const (
-	// unproductiveStopAfter consecutive explore turns that add no new path /
-	// query / command → ErrStuck (true thrash).
-	unproductiveStopAfter = 10
-	// exploreHardCap total consecutive explore-only turns (even if productive)
-	// → ErrStuck. Backstop when MaxTurns is unlimited.
-	exploreHardCap = 80
 	// exploreWarnEvery injects a wrap-up nudge every N explore-only turns.
-	exploreWarnEvery = 15
+	exploreWarnEvery = 20
 	// rereadLimit: after this many successful reads of the same path in one
 	// Prompt, further reads return a short stub instead of the full file.
 	rereadLimit = 1
+	// sameToolWarnAfter injects a nudge when the identical tool batch repeats.
+	sameToolWarnAfter = 3
 )
 
-// thrashState tracks per-Prompt exploration abuse.
+// thrashState tracks per-Prompt exploration for soft hints only.
 type thrashState struct {
 	mu sync.Mutex
 	// path → times successfully read this Prompt
@@ -38,8 +31,6 @@ type thrashState struct {
 	calls map[string]int
 	// consecutive turns whose tools were all explore-only
 	exploreStreak int
-	// consecutive explore turns that introduced nothing new
-	unproductive int
 }
 
 func newThrashState() *thrashState {
@@ -70,64 +61,17 @@ func batchExploreOnly(calls []llm.ToolCall) bool {
 	return true
 }
 
-// noteTurn updates explore/unproductive streaks. Productive means at least one
-// call targets a path/query/command not seen earlier this Prompt.
-// Returns (warn, stop).
-func (s *thrashState) noteTurn(calls []llm.ToolCall) (warn, stop bool) {
-	if s == nil {
-		return false, false
-	}
-	if !batchExploreOnly(calls) {
-		s.exploreStreak = 0
-		s.unproductive = 0
-		return false, false
-	}
-	s.exploreStreak++
-	if s.turnProductive(calls) {
-		s.unproductive = 0
-	} else {
-		s.unproductive++
-	}
-	if s.unproductive >= unproductiveStopAfter {
-		return false, true
-	}
-	if s.exploreStreak >= exploreHardCap {
-		return false, true
-	}
-	if s.exploreStreak%exploreWarnEvery == 0 {
-		return true, false
-	}
-	return false, false
-}
-
-// turnProductive reports whether any call in the batch is new this Prompt.
-// Must run before tools execute (reads/calls maps hold prior turns only).
-func (s *thrashState) turnProductive(calls []llm.ToolCall) bool {
+// noteTurn updates explore streak. Returns whether to inject a soft wrap-up warn.
+func (s *thrashState) noteTurn(calls []llm.ToolCall) (warn bool) {
 	if s == nil {
 		return false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, tc := range calls {
-		name := strings.ToLower(strings.TrimSpace(tc.Function.Name))
-		args := json.RawMessage(tc.Function.Arguments)
-		switch name {
-		case "read":
-			path := strings.TrimSpace(toolArgString(args, "path"))
-			if path == "" {
-				continue
-			}
-			if _, seen := s.reads[path]; !seen {
-				return true
-			}
-		case "glob", "grep", "bash":
-			fp := name + "=" + strings.TrimSpace(string(args))
-			if _, seen := s.calls[fp]; !seen {
-				return true
-			}
-		}
+	if !batchExploreOnly(calls) {
+		s.exploreStreak = 0
+		return false
 	}
-	return false
+	s.exploreStreak++
+	return s.exploreStreak > 0 && s.exploreStreak%exploreWarnEvery == 0
 }
 
 // maybeDedupeRead short-circuits repeated reads of the same path.
@@ -150,19 +94,14 @@ func (s *thrashState) maybeDedupeRead(args json.RawMessage) (string, bool) {
 	}
 	return fmt.Sprintf(
 		"(already read %q this prompt — content unchanged; do not re-read. "+
-			"Use the earlier result, then act (edit/write) or finish with goal_report.)",
+			"Use the earlier result, then act (edit/write) or finish.)",
 		key,
 	), true
 }
 
 // annotateRepeat notes repeated identical name+args for non-read tools (soft footer).
-// Also records the call fingerprint for productivity detection on later turns.
 func (s *thrashState) annotateRepeat(name string, args json.RawMessage, out string) string {
-	if s == nil || !isExploreTool(name) {
-		return out
-	}
-	if name == "read" {
-		// path already tracked in maybeDedupeRead / first successful read
+	if s == nil || !isExploreTool(name) || name == "read" {
 		return out
 	}
 	fp := name + "=" + strings.TrimSpace(string(args))
@@ -180,11 +119,6 @@ func (s *thrashState) annotateRepeat(name string, args json.RawMessage, out stri
 	)
 }
 
-// recordRead marks a path as seen (first successful read that was not short-circuited).
-// maybeDedupeRead already increments; this is for the first read path after Exec
-// when maybeDedupeRead returned false — actually maybeDedupeRead increments always.
-// No separate record needed for read.
-
 func toolArgString(args json.RawMessage, key string) string {
 	if len(args) == 0 {
 		return ""
@@ -197,19 +131,18 @@ func toolArgString(args json.RawMessage, key string) string {
 	return strings.TrimSpace(v)
 }
 
-func exploreStopMessage(streak int) string {
+func exploreWarnMessage(streak int) string {
 	return fmt.Sprintf(
-		"stopped after unproductive exploration (streak=%d: re-reading / repeating the same tools) — "+
-			"change approach, write/edit, or finish with goal_report",
+		"Note: %d explore-only tool turns so far. Prefer acting (write/edit/test) or finishing "+
+			"over re-reading files you already have. This is a hint only — the run continues.",
 		streak,
 	)
 }
 
-func exploreWarnMessage(streak int) string {
+func sameToolWarnMessage(n int) string {
 	return fmt.Sprintf(
-		"Note: %d explore-only tool turns so far. Prefer acting (write/edit) or finishing "+
-			"(goal_report) over re-reading files you already have. New files/queries are fine; "+
-			"repeating the same read/bash will eventually abort.",
-		streak,
+		"You repeated the same tool call(s) %d times. Change args, act (write/edit), or finish — "+
+			"the run is not stopped; avoid tight loops.",
+		n,
 	)
 }

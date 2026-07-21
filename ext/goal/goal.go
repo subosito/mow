@@ -45,7 +45,11 @@ type State struct {
 	LastReply string    `json:"last_reply,omitempty"`
 	Summary   string    `json:"summary,omitempty"`
 	Error     string    `json:"error,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// Plan is an optional checklist. When set, status=done requires all items done/skipped.
+	Plan Plan `json:"plan,omitempty"`
+	// CurrentItem is the plan item id this step should focus (hint; empty = next pending).
+	CurrentItem string `json:"current_item,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
 	// InputTokens / OutputTokens are cumulative across all steps (zero when
 	// the provider reports no usage).
 	InputTokens  int `json:"input_tokens,omitempty"`
@@ -225,19 +229,34 @@ func contentWithoutMarkers(text string) string {
 
 // SystemAppend is injected each step (via PromptOpts) for the outer-loop protocol.
 func SystemAppend(st State) string {
-	return fmt.Sprintf(
-		"You are working toward THIS goal only (outer loop step %d of %d):\n%s\n\n"+
-			"The summary you report must answer THIS goal — ignore unrelated prior chat or git leftovers.\n\n"+
-			"Finish protocol (required):\n"+
-			"- When THIS goal is met, call tool goal_report with status=done AND summary= the "+
-			"user-facing result for this goal. That ends the step — do not keep calling tools after.\n"+
-			"- Prefer goal_report over bare %s. "+
-			"Alternatively end with ```goal-status {\"status\":\"done\",\"summary\":\"…\"} ```.\n"+
-			"- If blocked, goal_report status=failed with reason (or %s <reason>).\n\n"+
-			"Working rules:\n"+
-			"- Make focused progress; do not re-read or re-list files you already inspected.\n"+
-			"- Avoid endless bash explore loops (find/ls/cat cycles). Read what you need, then act or finish.\n"+
-			"- Do not claim done until THIS goal is actually met.",
-		st.Step+1, st.MaxSteps, st.Goal, MarkerDone, MarkerFailed,
-	)
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are working toward THIS goal only (outer loop step %d of %d):\n%s\n\n",
+		st.Step+1, st.MaxSteps, st.Goal)
+	b.WriteString("The summary you report must answer THIS goal — ignore unrelated prior chat or git leftovers.\n\n")
+	if st.Plan.HasItems() {
+		b.WriteString("Checklist:\n")
+		b.WriteString(st.Plan.Format())
+		b.WriteString("\n\n")
+		if item, ok := st.Plan.NextPending(); ok {
+			fmt.Fprintf(&b, "Focus this step on: [%s] %s\n", item.ID, item.Title)
+			b.WriteString("When that item is done: goal_report status=continue item_id=" + item.ID + " item_status=done item_note=…\n")
+			b.WriteString("When ALL items are done/skipped: goal_report status=done summary=…\n\n")
+		} else if st.Plan.AllDone() {
+			b.WriteString("All checklist items are done — call goal_report status=done summary=…\n\n")
+		}
+	} else {
+		b.WriteString("No checklist yet. Early in the goal, call goal_report status=continue with plan=[{id,title,status:pending},…] " +
+			"to break the goal into concrete items (recommended for multi-part work).\n")
+		b.WriteString("Or if the goal is trivial, goal_report status=done summary=… immediately.\n\n")
+	}
+	fmt.Fprintf(&b,
+		"Finish protocol:\n"+
+			"- goal_report status=done summary=… (preferred over bare %s). Checklist must be complete if present.\n"+
+			"- goal_report status=failed reason=… (or %s <reason>).\n"+
+			"- goal_report status=continue for progress / plan / item updates.\n"+
+			"- Long-lived servers: goal_process_start / status / stop (not bare bash &).\n"+
+			"- Do not nest another `mow run` or `mow goal` inside bash.\n"+
+			"- Do not claim done until THIS goal is actually met.\n",
+		MarkerDone, MarkerFailed)
+	return b.String()
 }

@@ -3,7 +3,6 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -78,59 +77,12 @@ func TestRereadShortCircuit(t *testing.T) {
 	}
 }
 
-type namedTool struct {
-	name string
-	n    int
-}
-
-func (t *namedTool) Name() string                { return t.name }
-func (t *namedTool) Description() string         { return t.name }
-func (t *namedTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
-func (t *namedTool) Exec(context.Context, json.RawMessage) (string, error) {
-	t.n++
-	return "ok", nil
-}
-
-// Same bash command over and over is unproductive thrash → stop.
-func TestUnproductiveBashRepeatStops(t *testing.T) {
-	bash := &namedTool{name: "bash"}
+// Unlimited MaxTurns must not hit a silent safety cap — loop until the model finishes.
+func TestUnlimitedRunsUntilDone(t *testing.T) {
 	n := 0
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
 		n++
-		return llm.Message{
-			Role: "assistant",
-			ToolCalls: []llm.ToolCall{{
-				ID:   fmt.Sprintf("c%d", n),
-				Type: "function",
-				Function: llm.FunctionCall{
-					Name:      "bash",
-					Arguments: `{"command":"find . -name x"}`, // identical every turn
-				},
-			}},
-		}, nil
-	}
-	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
-		MaxTurns:         0,
-		MaxParallelTools: 1,
-		Tools:            []agent.Tool{bash},
-	})
-	if err == nil || !errors.Is(err, agent.ErrStuck) {
-		t.Fatalf("err=%v want ErrStuck", err)
-	}
-	// Identical tool fingerprint stalls after 3 turns (before unproductive counter).
-	// Two execs run; the third turn trips stall before Exec.
-	if bash.n < 2 || bash.n > 4 {
-		t.Fatalf("bash execs=%d want ~2–3", bash.n)
-	}
-}
-
-// New files every turn is legitimate exploration — must not hit stuck quickly.
-func TestProductiveReadsDoNotStuckEarly(t *testing.T) {
-	rt := &readOnceTool{}
-	n := 0
-	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
-		n++
-		if n > 20 {
+		if n > 60 {
 			return llm.Message{Role: "assistant", Content: "done"}, nil
 		}
 		return llm.Message{
@@ -139,24 +91,21 @@ func TestProductiveReadsDoNotStuckEarly(t *testing.T) {
 				ID:   fmt.Sprintf("c%d", n),
 				Type: "function",
 				Function: llm.FunctionCall{
-					Name:      "read",
-					Arguments: fmt.Sprintf(`{"path":"file%d.go"}`, n), // always new
+					Name:      "echo",
+					Arguments: fmt.Sprintf(`{"text":"%d"}`, n),
 				},
 			}},
 		}, nil
 	}
 	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
-		MaxTurns:         0,
+		MaxTurns:         0, // unlimited
 		MaxParallelTools: 1,
-		Tools:            []agent.Tool{rt},
+		Tools:            []agent.Tool{echoTool{}},
 	})
 	if err != nil {
-		t.Fatalf("productive exploration should not stuck: %v", err)
+		t.Fatalf("unlimited should not error: %v", err)
 	}
-	if res.Text != "done" {
-		t.Fatalf("text=%q", res.Text)
-	}
-	if rt.n != 20 {
-		t.Fatalf("reads=%d want 20", rt.n)
+	if res.Text != "done" || n != 61 {
+		t.Fatalf("text=%q n=%d", res.Text, n)
 	}
 }

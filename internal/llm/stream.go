@@ -9,7 +9,54 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 )
+
+// streamIdleTimeout fails a hung SSE body if no bytes arrive for this long.
+// Overall stream length is unbounded; only silence is fatal (gateway wedged).
+const streamIdleTimeout = 5 * time.Minute
+
+// idleReader wraps an io.Reader and fails if a single Read blocks longer than idle
+// or if the parent ctx is cancelled. Used for SSE so Timeout:0 clients cannot hang forever.
+type idleReader struct {
+	r    io.Reader
+	idle time.Duration
+	ctx  context.Context
+}
+
+func (i *idleReader) Read(p []byte) (int, error) {
+	if i == nil || i.r == nil {
+		return 0, io.EOF
+	}
+	if i.ctx != nil {
+		if err := i.ctx.Err(); err != nil {
+			return 0, err
+		}
+	}
+	type result struct {
+		n   int
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		n, err := i.r.Read(p)
+		ch <- result{n, err}
+	}()
+	idle := i.idle
+	if idle <= 0 {
+		idle = streamIdleTimeout
+	}
+	timer := time.NewTimer(idle)
+	defer timer.Stop()
+	select {
+	case <-i.ctx.Done():
+		return 0, i.ctx.Err()
+	case <-timer.C:
+		return 0, fmt.Errorf("llm: stream idle timeout after %s (no data from upstream)", idle)
+	case res := <-ch:
+		return res.n, res.err
+	}
+}
 
 // DeltaFn is called with content token deltas during streaming (may be empty for tool-only chunks).
 type DeltaFn func(delta string)
@@ -92,7 +139,10 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	}
 	toolsAcc := map[int]*acc{}
 
-	sc := bufio.NewScanner(res.Body)
+	// Stream HTTP client has Timeout:0 so long generations work; without an idle
+	// bound a silent upstream hangs forever (UI stuck on the last → tool line).
+	streamBody := &idleReader{r: res.Body, idle: streamIdleTimeout, ctx: ctx}
+	sc := bufio.NewScanner(streamBody)
 	sc.Buffer(make([]byte, 0, 64*1024), 2<<20)
 	for sc.Scan() {
 		line := sc.Text()

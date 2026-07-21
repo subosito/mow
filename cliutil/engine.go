@@ -68,10 +68,11 @@ func (m *maxTurnsFlag) Set(s string) error {
 
 // ConfigPaths returns paths for mow.New.
 func (f *EngineFlags) ConfigPaths() []string {
-	if strings.TrimSpace(f.Config) == "" {
+	p := strings.TrimSpace(f.Config)
+	if p == "" {
 		return nil
 	}
-	return []string{f.Config}
+	return []string{p}
 }
 
 // Options builds mow.Options from flags (explicit overrides, no process env mutation).

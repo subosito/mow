@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestChatStreamHooksSeparatesReasoningAndContent(t *testing.T) {
@@ -220,4 +221,76 @@ func TestUsageParsedAcrossPaths(t *testing.T) {
 			t.Fatalf("usage=%+v want {12 9}", msg.Usage)
 		}
 	})
+}
+
+func TestIdleReaderTimesOut(t *testing.T) {
+	// A wedged upstream that sends a header line then goes silent must fail
+	// instead of hanging forever. Use a tiny idle window to keep the test fast.
+	r := &idleReader{
+		r:    &neverReader{},
+		idle: 50 * time.Millisecond,
+		ctx:  context.Background(),
+	}
+	start := time.Now()
+	_, err := r.Read(make([]byte, 16))
+	if err == nil {
+		t.Fatal("expected idle timeout error")
+	}
+	if !strings.Contains(err.Error(), "stream idle timeout") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("idle timeout took too long: %s", elapsed)
+	}
+}
+
+func TestIdleReaderRespectsContextCancel(t *testing.T) {
+	// Cancellation must win over the idle timer so Engine.Cancel unblocks a
+	// hung stream immediately.
+	r := &idleReader{
+		r:    &neverReader{},
+		idle: 10 * time.Second,
+		ctx:  context.Background(),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r.ctx = ctx
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	_, err := r.Read(make([]byte, 16))
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	// context cancellation surfaces as the ctx.Err(); the select arms on
+	// i.ctx.Done() and returns i.ctx.Err().
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestIdleReaderPassesThroughData(t *testing.T) {
+	// Normal data flow must be unaffected: the idle reader only fails on
+	// silence, not on a prompt producer.
+	r := &idleReader{
+		r:    strings.NewReader("data: hello\n\n"),
+		idle: 5 * time.Second,
+		ctx:  context.Background(),
+	}
+	buf := make([]byte, 64)
+	n, err := r.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(buf[:n]), "data: hello") {
+		t.Fatalf("got %q", buf[:n])
+	}
+}
+
+// neverReader blocks on Read until interrupted — simulates a wedged upstream.
+type neverReader struct{}
+
+func (*neverReader) Read(p []byte) (int, error) {
+	time.Sleep(time.Hour)
+	return 0, io.EOF
 }

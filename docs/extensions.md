@@ -149,9 +149,15 @@ extensions:
 
 When agents are present, `RegisterFromConfig` (via `BeforeNew`) registers tool **`acp_delegate`**.
 
-### `ext/goal` (outer loop)
+### `ext/goal` (outer loop + executor)
 
 Multi-step goals **around** `Engine.Prompt` — not a second core agent loop.
+
+```text
+Runner (durable state, checklist, events)
+  → Executor.RunStep (one Prompt + tools)
+      → Engine.PromptWith + goal_report / process tools
+```
 
 ```bash
 mow goal new --id fix-ci --goal "Make CI green"
@@ -160,23 +166,35 @@ mow goal status --id fix-ci
 mow goal list
 ```
 
-State: `$MOW_HOME/goals/<id>.json` (`summary`, `last_reply`, `session_id`).  
-Embed: `goal.Runner{Engine, Store}.RunSpec(ctx, spec)`; hosts may `goal.Subscribe` for progress.
+State: `$MOW_HOME/goals/<id>.json` (`summary`, `plan`, `session_id`, tokens).  
+Events: `$MOW_HOME/goals/<id>/events.jsonl`.  
+Embed: `goal.Runner{Engine, Store}.RunSpec(ctx, spec)`; optional `goal.Executor` for hosts.
 
-Completion (any of):
+**Checklist (recommended for multi-part goals):**
 
-- tool **`goal_report`** (injected only during `goal run` steps) with `status=done` and **`summary`** (user-facing result — preferred). Not available in plain `repl`/`run`, so the model cannot “finish a goal” on the wrong chat turn.
-- fenced **`goal-status`** JSON `{"status":"done","summary":"…"}`
-- line markers `GOAL_DONE` / `GOAL_FAILED:` (summary then taken from the best assistant prose in the transcript, not the bare marker)
+1. `goal_report status=continue plan=[{id,title,status:pending},…]`
+2. Work one item → `goal_report status=continue item_id=… item_status=done`
+3. When all items done/skipped → `goal_report status=done summary=…`  
+   (`status=done` is **rejected** while checklist items remain pending.)
 
-See result: `mow goal status --id …` or `jq -r .summary $MOW_HOME/goals/<id>.json`.
+**Completion (any of):**
 
-`mow goal run` uses the same compact tool progress as `run`/`repl` (`→ tool target` on stderr). On exit it prints `file: …/goals/<id>.json` and resume hints (`goal run --id`, optional `repl --session`).
+- tool **`goal_report`** (only during `goal run` steps) — preferred  
+- fenced **`goal-status`** JSON  
+- markers `GOAL_DONE` / `GOAL_FAILED:`
+
+**Long-lived processes (servers, mocks):**
+
+- `goal_process_start` / `goal_process_status` / `goal_process_stop`  
+  (pid + log under `$MOW_HOME/goals/<id>/procs/`)  
+- Do not nest `mow run` inside bash; do not leave servers in the bash foreground.
+
+`mow goal run` prints tool progress on stderr; on exit prints `file:` / `events:` and resume hints.
 
 | Status | Re-run |
 |--------|--------|
-| pending / running / failed | `mow goal run --id NAME` resumes state |
-| done | `mow goal reset --id NAME` then `run --id` (or `delete` and create again) |
+| pending / running / failed | `mow goal run --id NAME` resumes state (plan kept) |
+| done | `mow goal reset --id NAME` then `run --id` |
 
 Also: `mow goal delete --id NAME`.
 

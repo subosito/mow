@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/subosito/mow/internal/policy"
 	"github.com/subosito/mow/internal/tools"
@@ -116,6 +117,77 @@ func TestEditReturnsDiffWithPath(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(root, "f.go"))
 	if !strings.Contains(string(data), "func B()") {
 		t.Fatalf("file not updated: %q", data)
+	}
+}
+
+func TestBashTimeoutSoftReturns(t *testing.T) {
+	// BashTimeoutSec caps each exec and soft-returns a clear message rather
+	// than erroring — the agent loop must keep going and self-correct.
+	root := t.TempDir()
+	p := &policy.Policy{Workspace: root, AllowShell: true, BashTimeoutSec: 1}
+	reg := tools.Registry(p, []string{"bash"})
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"sleep 30"}`))
+	if err != nil {
+		t.Fatalf("timeout must soft-return, not error: %v", err)
+	}
+	if !strings.Contains(out, "timed out after 1s") {
+		t.Fatalf("expected timeout message, got %q", out)
+	}
+}
+
+func TestBashTimeoutKillsProcessGroup(t *testing.T) {
+	// A child started by a timed-out command must not survive as an orphan.
+	// The process-group SIGKILL reaps it: a child scheduled to write a marker
+	// file after the parent's sleep gets killed before it can write.
+	root := t.TempDir()
+	marker := filepath.Join(root, "survived.txt")
+	p := &policy.Policy{Workspace: root, AllowShell: true, BashTimeoutSec: 1}
+	reg := tools.Registry(p, []string{"bash"})
+	// Child outlives the timeout window: it would write the marker ~5s in, but
+	// the group kill at 1s must stop it first.
+	cmd := "(sleep 5; echo yes > " + marker + ") & disown; sleep 30"
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":`+jsonQuote(cmd)+`}`))
+	if err != nil {
+		t.Fatalf("timeout must soft-return: %v", err)
+	}
+	if !strings.Contains(out, "timed out") {
+		t.Fatalf("expected timeout, got %q", out)
+	}
+	// Wait past the child's scheduled write to prove it was reaped.
+	time.Sleep(1500 * time.Millisecond)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("orphan child survived timeout and wrote marker — process-group kill failed")
+	}
+}
+
+func jsonQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+func TestBashCustomTimeoutFromPolicy(t *testing.T) {
+	// BashTimeoutSec=0 (unset) defaults to 60s; an explicit small value wins.
+	root := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		sec  int
+	}{
+		{"default when zero", 0},
+		{"explicit two", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &policy.Policy{Workspace: root, AllowShell: true, BashTimeoutSec: tc.sec}
+			reg := tools.Registry(p, []string{"bash"})
+			// Fast command completes well under any timeout; confirms wiring
+			// does not regress the happy path.
+			out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"echo fast"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out, "fast") {
+				t.Fatalf("got %q", out)
+			}
+		})
 	}
 }
 

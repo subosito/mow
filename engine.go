@@ -116,11 +116,12 @@ func New(opt Options) (*Engine, error) {
 	}
 
 	pol := &policy.Policy{
-		Workspace:    cfg.Workspace,
-		AllowWrite:   cfg.ToolEnabled("write") || cfg.ToolEnabled("edit"),
-		AllowShell:   cfg.ToolEnabled("bash"),
-		MaxReadBytes: cfg.Policy.MaxReadBytes,
-		Hashline:     cfg.Tools.Hashline,
+		Workspace:      cfg.Workspace,
+		AllowWrite:     cfg.ToolEnabled("write") || cfg.ToolEnabled("edit"),
+		AllowShell:     cfg.ToolEnabled("bash"),
+		MaxReadBytes:   cfg.Policy.MaxReadBytes,
+		BashTimeoutSec: cfg.Policy.BashTimeoutSec,
+		Hashline:       cfg.Tools.Hashline,
 	}
 
 	enabled := cfg.Tools.Enable

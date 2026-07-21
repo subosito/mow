@@ -27,6 +27,9 @@ var ErrAgentDone = agent.ErrDone
 // ErrAgentStuck is returned when the model repeats the same tool calls too many times.
 var ErrAgentStuck = agent.ErrStuck
 
+// ErrAgentMaxTurns is returned when a Prompt hits MaxTurns or the unlimited safety cap.
+var ErrAgentMaxTurns = agent.ErrMaxTurns
+
 // Options configures New / Run.
 type Options struct {
 	ConfigPaths []string

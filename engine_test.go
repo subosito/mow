@@ -230,9 +230,9 @@ func TestPromptOptsExtraTools(t *testing.T) {
 
 type extraPromptTool struct{}
 
-func (extraPromptTool) Name() string                         { return "only_this_prompt" }
-func (extraPromptTool) Description() string                  { return "test" }
-func (extraPromptTool) Parameters() json.RawMessage          { return json.RawMessage(`{}`) }
+func (extraPromptTool) Name() string                { return "only_this_prompt" }
+func (extraPromptTool) Description() string         { return "test" }
+func (extraPromptTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
 func (extraPromptTool) Exec(context.Context, json.RawMessage) (string, error) {
 	return "ok", nil
 }

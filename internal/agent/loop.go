@@ -13,7 +13,8 @@ import (
 	"github.com/subosito/mow/internal/llm"
 )
 
-// ErrMaxTurns is returned when the agent loop hits Options.MaxTurns.
+// ErrMaxTurns is returned when the agent loop hits Options.MaxTurns (> 0).
+// When MaxTurns <= 0 there is no turn limit (runs until finish, cancel, or ErrDone).
 var ErrMaxTurns = errors.New("agent: max turns exceeded")
 
 // ErrDone is returned by a tool Exec to end the agent loop successfully after
@@ -21,20 +22,12 @@ var ErrMaxTurns = errors.New("agent: max turns exceeded")
 // recorded for the model/history; Run returns nil error.
 var ErrDone = errors.New("agent: done")
 
-// ErrStuck is returned when the model repeats the same tool-call pattern too
-// many times in a row (runaway exploration under unlimited max turns).
+// ErrStuck is retained for API compatibility; the loop no longer returns it
+// (soft thrash hints only). Prefer ctx cancel for long-running stop.
 var ErrStuck = errors.New("agent: stuck repeating tool calls")
 
 // DefaultMaxParallelTools is used when Options.MaxParallelTools is unset (0).
 const DefaultMaxParallelTools = 8
-
-// stallRepeatLimit ends the loop after this many consecutive identical tool-call fingerprints.
-const stallRepeatLimit = 3
-
-// unlimitedSafetyCap is a hard ceiling when MaxTurns <= 0. Unlimited must not
-// mean unbounded API spend if thrash guards are somehow bypassed (e.g. model
-// mixes a write every few turns to reset explore streak).
-const unlimitedSafetyCap = 48
 
 // Tool is a host-executed function.
 type Tool interface {
@@ -51,8 +44,8 @@ type ChatFn func(ctx context.Context, messages []llm.Message, tools []llm.ToolSp
 // Options configures a Loop run.
 type Options struct {
 	System string
-	// MaxTurns caps LLM round-trips. <= 0 means unlimited (stop only on a
-	// final assistant message, error, or ctx cancel).
+	// MaxTurns caps LLM round-trips when > 0. <= 0 means no turn limit
+	// (hours/days OK — stop only on final text, ErrDone, error, or ctx cancel).
 	MaxTurns int
 	Tools    []Tool
 	// PriorMessages, if non-empty, seed history before the new user prompt
@@ -95,7 +88,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	if strings.TrimSpace(userPrompt) == "" {
 		return Result{}, fmt.Errorf("agent: empty prompt")
 	}
-	// <= 0: unlimited — goals and long tool loops must not hit a silent 120 cap.
+	// <= 0: no turn limit (intentional long runs — cancel via ctx).
 	maxTurns := opt.MaxTurns
 
 	var messages []llm.Message
@@ -144,17 +137,9 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		sameToolFP int
 		thrash     = newThrashState()
 	)
-	// Pass thrash into tool exec via options copy so parallel batches share it.
 	opt.thrash = thrash
 
-	for turn := 0; ; turn++ {
-		if maxTurns > 0 && turn >= maxTurns {
-			break
-		}
-		if maxTurns <= 0 && turn >= unlimitedSafetyCap {
-			return Result{Messages: messages, Usage: usage}, fmt.Errorf(
-				"%w: safety cap %d (even with unlimited max-turns)", ErrMaxTurns, unlimitedSafetyCap)
-		}
+	for turn := 0; maxTurns <= 0 || turn < maxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}
@@ -192,24 +177,15 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			return Result{Text: strings.TrimSpace(msg.Content), Messages: messages, Usage: usage}, nil
 		}
 
-		// Stall guard: identical tool-call batches in a row.
+		// Soft: track identical batches for a hint only (never hard-stop).
 		fp := toolCallFingerprint(msg.ToolCalls)
 		if fp != "" && fp == lastToolFP {
 			sameToolFP++
-			if sameToolFP >= stallRepeatLimit {
-				return Result{Messages: messages, Usage: usage}, fmt.Errorf(
-					"%w: same tool calls %d times in a row — change approach or finish",
-					ErrStuck, sameToolFP)
-			}
 		} else {
 			lastToolFP = fp
 			sameToolFP = 1
 		}
-
-		// Explore-only thrash: re-read/re-find forever with slightly different args.
-		// Count before tools; stop after tools only when already over limit so
-		// we never insert user text between assistant tool_calls and tool results.
-		_, exploreStop := thrash.noteTurn(msg.ToolCalls)
+		exploreWarn := thrash.noteTurn(msg.ToolCalls)
 
 		toolMsgs, err := runToolBatch(ctx, msg.ToolCalls, byName, opt)
 		messages = append(messages, toolMsgs...)
@@ -224,30 +200,22 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		if err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}
-		if exploreStop {
-			// Prefer unproductive count in the message when that tripped the stop.
-			n := thrash.unproductive
-			if n < thrash.exploreStreak && thrash.exploreStreak >= exploreHardCap {
-				n = thrash.exploreStreak
-			}
-			return Result{Messages: messages, Usage: usage}, fmt.Errorf(
-				"%w: %s", ErrStuck, exploreStopMessage(n))
-		}
-		// noteTurn already decided warn; re-check streak for the nudge after tools.
-		if thrash.exploreStreak > 0 && thrash.exploreStreak%exploreWarnEvery == 0 {
+		// Soft hints only — after tool results so message order stays valid.
+		if sameToolFP >= sameToolWarnAfter {
+			messages = append(messages, llm.Message{
+				Role:    "user",
+				Content: sameToolWarnMessage(sameToolFP),
+			})
+		} else if exploreWarn {
 			messages = append(messages, llm.Message{
 				Role:    "user",
 				Content: exploreWarnMessage(thrash.exploreStreak),
 			})
 		}
 	}
-	cap := maxTurns
-	if cap <= 0 {
-		cap = unlimitedSafetyCap
-	}
 	return Result{Messages: messages, Usage: usage}, fmt.Errorf(
 		"%w: %d (raise --max-turns / policy.max_turns, or set 0 for unlimited; prompt again keeps history)",
-		ErrMaxTurns, cap)
+		ErrMaxTurns, maxTurns)
 }
 
 // toolCallFingerprint is a stable key for stall detection (name + args per call).

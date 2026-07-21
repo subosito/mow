@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/subosito/mow/internal/agent"
@@ -374,7 +376,10 @@ type bashTool struct{ p *policy.Policy }
 
 func (t *bashTool) Name() string { return "bash" }
 func (t *bashTool) Description() string {
-	return "Run a shell command with cwd=workspace. Args: command."
+	return "Run a shell command with cwd=workspace (default timeout 60s). Args: command. " +
+		"Keep scripts short. Do NOT start long-lived servers in the foreground, and do NOT " +
+		"nest another full `mow run/goal` inside bash (it will block the tool until timeout). " +
+		"For a smoke server: start with `&`, redirect logs, sleep briefly, curl once, exit."
 }
 func (t *bashTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}`)
@@ -393,19 +398,56 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		return "", fmt.Errorf("command required")
 	}
 	timeout := 60 * time.Second
+	if t.p != nil && t.p.BashTimeoutSec > 0 {
+		timeout = time.Duration(t.p.BashTimeoutSec) * time.Second
+	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "bash", "-lc", a.Command)
+
+	// Own process group so timeout can kill the whole tree (bash + children).
+	// Do not use CommandContext's auto-kill alone — Wait after kill must not block forever.
+	cmd := exec.Command("bash", "-lc", a.Command)
 	cmd.Dir = t.p.Workspace
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	err := cmd.Run()
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	pid := cmd.Process.Pid
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	var err error
+	select {
+	case err = <-done:
+		// finished within budget
+	case <-cctx.Done():
+		// Kill entire process group (negative pgid). Best-effort; then reap with a bound.
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		select {
+		case err = <-done:
+		case <-time.After(2 * time.Second):
+			// Wait stuck (grandchild holding pipes, zombie race) — abandon Wait.
+			err = context.DeadlineExceeded
+		}
+	}
+
 	out := buf.String()
 	if len(out) > 100_000 {
 		out = out[:100_000] + "\n…(truncated)"
 	}
 	if err != nil {
+		if cctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
+			msg := fmt.Sprintf(
+				"\nerror: bash timed out after %s (raise policy.bash_timeout_sec; "+
+					"do not nest `mow run` or leave servers in the foreground — use `cmd &` + curl + exit)",
+				timeout)
+			return out + msg, nil
+		}
 		return out + "\nerror: " + err.Error(), nil
 	}
 	if out == "" {

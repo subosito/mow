@@ -18,7 +18,7 @@ func TestToOpenAIMessagesAlwaysEmitsContentString(t *testing.T) {
 		}}},
 		{Role: "tool", ToolCallID: "c1", Name: "read", Content: ""},
 		{Role: "assistant", ToolCalls: []ToolCall{{
-			ID: "c2", // type and args empty — stream partial
+			ID:       "c2", // type and args empty — stream partial
 			Function: FunctionCall{Name: "glob", Arguments: ""},
 		}}},
 	}

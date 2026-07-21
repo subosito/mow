@@ -6,22 +6,33 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/subosito/mow"
 )
 
-// maxExploreOnlySteps fails the goal after this many consecutive outer steps
-// that only used explore tools (read/glob/grep/bash) without finishing.
-// Research-heavy goals often need 2–3 pure-read steps before the first write.
-const maxExploreOnlySteps = 4
+// maxTransientSteps fails after this many consecutive steps that hit a
+// transient LLM/gateway error (502/503/429/…) after the HTTP client already
+// retried. One blip must not kill a multi-hour feature-test goal.
+const maxTransientSteps = 5
 
-// Runner drives Spec / saved State through repeated Engine.Prompt calls.
+// maxTurnBudgetSteps soft-continues when a step hits a user-set MaxTurns budget.
+// After this many consecutive budget hits, fail.
+const maxTurnBudgetSteps = 5
+
+// transientBackoff waits before the next step after an upstream blip.
+// Overridable in tests (set to 0 for speed).
+var transientBackoff = 2 * time.Second
+
+// Runner drives Spec / saved State through repeated Executor steps.
 type Runner struct {
 	Engine *mow.Engine
 	Store  *Store
 	// OnEvent is optional (in addition to package Subscribe listeners).
 	OnEvent func(Event)
+	// Exec optional; default builds Executor from Engine + Store.
+	Exec *Executor
 }
 
 // Create normalizes Spec and persists a pending goal.
@@ -90,8 +101,7 @@ func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 	return r.runState(ctx, st)
 }
 
-// RunParallel runs multiple goals concurrently. Each needs its own Engine
-// (Prompt is serialized per Engine). newEng is called once per spec.
+// RunParallel runs multiple goals concurrently. Each needs its own Engine.
 func RunParallel(ctx context.Context, specs []Spec, newEng func() (*mow.Engine, error), store *Store) ([]State, error) {
 	if newEng == nil {
 		return nil, fmt.Errorf("goal: nil engine factory")
@@ -136,107 +146,169 @@ func (r *Runner) store() *Store {
 	return &Store{}
 }
 
+func (r *Runner) executor() *Executor {
+	if r.Exec != nil {
+		return r.Exec
+	}
+	return &Executor{Engine: r.Engine, StoreDir: r.store().dir()}
+}
+
 func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 	if st.Status == StatusDone {
-		// Already complete — do not spend another LLM call.
 		r.fire(Event{Kind: EventDone, State: st, Text: "already done"})
 		return st, nil
 	}
 	st.Status = StatusRunning
 	st.Error = ""
-	if st.SessionID == "" {
+	if st.SessionID == "" && r.Engine != nil {
 		st.SessionID = r.Engine.SessionID()
 	}
 	if err := r.store().Save(st); err != nil {
 		return st, err
 	}
 	r.fire(Event{Kind: EventStart, State: st, Text: fmt.Sprintf("goal %s start", st.ID)})
+	r.store().AppendEvent(st.ID, LogEvent{Kind: "start", Status: st.Status, Step: st.Step, Plan: planPtr(st.Plan)})
 
-	exploreOnlyStreak := 0
+	transientSteps := 0
+	turnBudgetSteps := 0
+	exec := r.executor()
+
 	for st.Step < st.MaxSteps {
 		if err := ctx.Err(); err != nil {
 			st.Status = StatusFailed
 			st.Error = err.Error()
 			_ = r.store().Save(st)
 			r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
+			r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error})
 			return st, err
 		}
 
-		sig := &finishSignal{}
-		stepCtx := withFinish(ctx, sig)
-		prompt := stepPrompt(st)
-		res, err := r.Engine.PromptWith(stepCtx, prompt, mow.PromptOpts{
-			SystemAppend: SystemAppend(st),
-			// goal_report only exists during a goal step — not in repl/run.
-			ExtraTools: []mow.Tool{ReportTool()},
-		})
-		st.Step++
-		st.InputTokens += res.Usage.InputTokens
-		st.OutputTokens += res.Usage.OutputTokens
-		if st.SessionID == "" {
-			st.SessionID = res.SessionID
+		// Hint focus item for prompts.
+		if item, ok := st.Plan.NextPending(); ok {
+			st.CurrentItem = item.ID
+		} else {
+			st.CurrentItem = ""
 		}
+
+		sr, err := exec.RunStep(ctx, st)
+		st.Step++
+		st.InputTokens += sr.Usage.InputTokens
+		st.OutputTokens += sr.Usage.OutputTokens
+		if st.SessionID == "" {
+			st.SessionID = sr.SessionID
+		}
+		if sr.Plan.HasItems() {
+			st.Plan = sr.Plan
+		}
+
 		if err != nil {
+			if errors.Is(err, mow.ErrAgentMaxTurns) {
+				turnBudgetSteps++
+				transientSteps = 0
+				st.LastReply = sr.Text
+				st.Summary = maxTurnsStepSummary(r.Engine, sr.Text)
+				st.Error = ""
+				if turnBudgetSteps >= maxTurnBudgetSteps {
+					st.Status = StatusFailed
+					st.Error = classifyStepError(err) + fmt.Sprintf(" (%d steps)", turnBudgetSteps)
+					_ = r.store().Save(st)
+					r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
+					r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error, Outcome: string(OutcomeBudget)})
+					return st, fmt.Errorf("goal: %s", st.Error)
+				}
+				_ = r.store().Save(st)
+				r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d (max turns — continuing)", st.Step, st.MaxSteps)})
+				r.store().AppendEvent(st.ID, LogEvent{Kind: "budget", Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan)})
+				continue
+			}
+			if isTransientLLM(err) {
+				transientSteps++
+				turnBudgetSteps = 0
+				st.LastReply = sr.Text
+				st.Summary = transientStepSummary(err, r.Engine, sr.Text)
+				st.Error = ""
+				if transientSteps >= maxTransientSteps {
+					st.Status = StatusFailed
+					st.Error = classifyStepError(err) + fmt.Sprintf(" (%d consecutive upstream failures)", transientSteps)
+					_ = r.store().Save(st)
+					r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
+					r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error, Outcome: string(OutcomeRetry)})
+					return st, fmt.Errorf("goal: %s", st.Error)
+				}
+				_ = r.store().Save(st)
+				r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d (LLM upstream blip — retrying)", st.Step, st.MaxSteps)})
+				r.store().AppendEvent(st.ID, LogEvent{Kind: "retry", Step: st.Step, Text: st.Summary, Error: err.Error()})
+				select {
+				case <-ctx.Done():
+					st.Status = StatusFailed
+					st.Error = ctx.Err().Error()
+					_ = r.store().Save(st)
+					r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
+					return st, ctx.Err()
+				case <-time.After(transientBackoff):
+				}
+				continue
+			}
 			st.Status = StatusFailed
 			st.Error = classifyStepError(err)
-			st.LastReply = res.Text
+			st.LastReply = sr.Text
 			_ = r.store().Save(st)
 			r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
+			r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error})
 			return st, fmt.Errorf("goal: %s", st.Error)
 		}
-		st.LastReply = res.Text
-		done, failed, reason, reportSummary := resolveOutcome(res.Text, sig)
-		st.Summary = pickSummary(reportSummary, r.Engine, res.Text)
 
-		if done {
+		turnBudgetSteps = 0
+		transientSteps = 0
+		st.LastReply = sr.Text
+		if sr.Summary != "" {
+			st.Summary = sr.Summary
+		} else {
+			st.Summary = pickSummary("", r.Engine, sr.Text)
+		}
+
+		switch sr.Outcome {
+		case OutcomeDone:
 			st.Status = StatusDone
 			st.Error = ""
 			_ = r.store().Save(st)
 			r.fire(Event{Kind: EventDone, State: st, Text: "goal complete"})
+			r.store().AppendEvent(st.ID, LogEvent{Kind: "done", Status: st.Status, Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan), Outcome: string(OutcomeDone)})
 			return st, nil
-		}
-		if failed {
+		case OutcomeFailed:
 			st.Status = StatusFailed
-			if reason == "" {
-				reason = "model reported failure"
+			if sr.Reason == "" {
+				st.Error = "model reported failure"
+			} else {
+				st.Error = sr.Reason
 			}
-			st.Error = reason
-			_ = r.store().Save(st)
-			r.fire(Event{Kind: EventFail, State: st, Text: reason})
-			return st, fmt.Errorf("goal failed: %s", reason)
-		}
-
-		// Incomplete step: detect explore thrash across outer steps.
-		// Each Prompt resets the inner thrash counter, so without this a model
-		// can explore→emit prose→repeat for MaxSteps and burn a huge budget.
-		if lastStepExploreOnly(r.Engine) {
-			exploreOnlyStreak++
-		} else {
-			exploreOnlyStreak = 0
-		}
-		if exploreOnlyStreak >= maxExploreOnlySteps {
-			st.Status = StatusFailed
-			st.Error = fmt.Sprintf(
-				"no progress: %d consecutive steps used only explore tools (read/glob/grep/bash) without finishing — call goal_report or write/edit",
-				exploreOnlyStreak)
 			_ = r.store().Save(st)
 			r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
-			return st, fmt.Errorf("goal: %s", st.Error)
+			r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error, Outcome: string(OutcomeFailed)})
+			return st, fmt.Errorf("goal failed: %s", st.Error)
+		default:
+			// continue
+			_ = r.store().Save(st)
+			r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d", st.Step, st.MaxSteps)})
+			r.store().AppendEvent(st.ID, LogEvent{Kind: "step", Status: st.Status, Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan), Outcome: string(OutcomeContinue)})
 		}
-
-		_ = r.store().Save(st)
-		r.fire(Event{
-			Kind:  EventStep,
-			State: st,
-			Text:  fmt.Sprintf("step %d/%d", st.Step, st.MaxSteps),
-		})
 	}
 
 	st.Status = StatusFailed
 	st.Error = fmt.Sprintf("max steps %d exceeded", st.MaxSteps)
 	_ = r.store().Save(st)
 	r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
+	r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error})
 	return st, fmt.Errorf("goal: %s", st.Error)
+}
+
+func planPtr(p Plan) *Plan {
+	if !p.HasItems() {
+		return nil
+	}
+	cp := p
+	cp.Items = append([]PlanItem(nil), p.Items...)
+	return &cp
 }
 
 // classifyStepError maps agent loop errors into clearer goal failure text.
@@ -246,8 +318,11 @@ func classifyStepError(err error) string {
 	}
 	switch {
 	case errors.Is(err, mow.ErrAgentStuck):
-		return "stuck: unproductive exploration (re-reading / repeating the same tools) — " +
-			"read new files, write/edit, or finish with goal_report"
+		return "stuck: unproductive exploration — change approach or finish with goal_report"
+	case errors.Is(err, mow.ErrAgentMaxTurns):
+		return "step hit max agent turns (tool-loop budget)"
+	case isTransientLLM(err):
+		return "LLM upstream error after retries: " + err.Error()
 	case errors.Is(err, context.Canceled):
 		return err.Error()
 	default:
@@ -255,61 +330,41 @@ func classifyStepError(err error) string {
 	}
 }
 
-// lastStepExploreOnly reports whether the last Prompt requested at least one
-// tool and every requested tool was explore-only (read/glob/grep/bash).
-// Uses assistant tool_calls (always named), not tool-result Name (may be empty).
-// Text-only incomplete steps do not count — multi-step goals often think aloud.
-func lastStepExploreOnly(eng *mow.Engine) bool {
-	if eng == nil {
+func isTransientLLM(err error) bool {
+	if err == nil {
 		return false
 	}
-	msgs := eng.Messages()
-	lastUser := -1
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" {
-			lastUser = i
-			break
+	s := strings.ToLower(err.Error())
+	for _, p := range []string{
+		"http 429", "http 502", "http 503", "http 504", "http 500",
+		"upstream error", "bad gateway", "service unavailable", "gateway timeout",
+		"too many requests", "connection reset", "connection refused",
+		"tls handshake timeout", "i/o timeout", "eof",
+	} {
+		if strings.Contains(s, p) {
+			return true
 		}
 	}
-	if lastUser < 0 {
-		return false
-	}
-	sawTool := false
-	for _, m := range msgs[lastUser+1:] {
-		if m.Role != "assistant" || len(m.ToolCalls) == 0 {
-			continue
-		}
-		for _, tc := range m.ToolCalls {
-			sawTool = true
-			name := strings.ToLower(strings.TrimSpace(tc.Function.Name))
-			switch name {
-			case "read", "glob", "grep", "bash":
-				// explore
-			default:
-				// write/edit/goal_report/mcp/… counts as progress
-				return false
-			}
-		}
-	}
-	return sawTool
+	return false
 }
 
-func resolveOutcome(text string, sig *finishSignal) (done, failed bool, reason, summary string) {
-	if sig != nil {
-		if d, f, r, s := sig.outcome(); d || f {
-			return d, f, r, s
-		}
+func maxTurnsStepSummary(eng *mow.Engine, finalText string) string {
+	const note = "Previous step hit the agent turn budget. Continue from progress; finish one checklist item, then goal_report."
+	if s := pickSummary("", eng, finalText); s != "" {
+		return truncateRunes(note+"\n\n"+s, 2000)
 	}
-	if d, f, r, s := ParseStatusJSON(text); d || f {
-		return d, f, r, s
-	}
-	d, f, r := ParseOutcome(text)
-	return d, f, r, ""
+	return note
 }
 
-// pickSummary prefers goal_report.summary, then the best assistant prose from the
-// last Prompt's message history (models often put the real answer before a bare
-// GOAL_DONE line). Transcript alone is insufficient — it only stores the final text.
+func transientStepSummary(err error, eng *mow.Engine, finalText string) string {
+	note := "Previous step hit a transient LLM/gateway error (" + err.Error() + "). Retry the same work."
+	if s := pickSummary("", eng, finalText); s != "" {
+		return truncateRunes(note+"\n\n"+s, 2000)
+	}
+	return note
+}
+
+// pickSummary prefers report summary, then best assistant prose from history.
 func pickSummary(reportSummary string, eng *mow.Engine, finalText string) string {
 	if s := strings.TrimSpace(reportSummary); s != "" {
 		return truncateRunes(s, 2000)
@@ -337,20 +392,31 @@ func (r *Runner) fire(e Event) {
 
 func stepPrompt(st State) string {
 	if st.Step == 0 {
-		return "Begin work on the goal. When it is fully achieved, call goal_report " +
-			"status=done with summary immediately — do not keep exploring.\n\nGoal:\n" + st.Goal
+		var b strings.Builder
+		b.WriteString("Begin work on the goal.\n\nGoal:\n")
+		b.WriteString(st.Goal)
+		b.WriteString("\n\nIf the goal has multiple parts, first call goal_report status=continue with plan=[...] (id+title+status=pending). ")
+		b.WriteString("Otherwise call goal_report status=done summary=… when finished.")
+		return b.String()
 	}
 	var b strings.Builder
 	b.WriteString("Continue work on the goal.\n\nGoal:\n")
 	b.WriteString(st.Goal)
+	if st.Plan.HasItems() {
+		b.WriteString("\n\nChecklist:\n")
+		b.WriteString(st.Plan.Format())
+		if item, ok := st.Plan.NextPending(); ok {
+			fmt.Fprintf(&b, "\n\nFocus: [%s] %s\nMark done with goal_report status=continue item_id=%s item_status=done.",
+				item.ID, item.Title, item.ID)
+		} else if st.Plan.AllDone() {
+			b.WriteString("\n\nAll items done — call goal_report status=done summary=…")
+		}
+	}
 	if s := strings.TrimSpace(st.Summary); s != "" {
 		b.WriteString("\n\nPrevious step result (truncated):\n")
 		b.WriteString(s)
-		b.WriteString("\n\nDo not re-read files already covered above. ")
-		b.WriteString("If the goal is already satisfied, call goal_report status=done with summary now.")
-	} else {
-		b.WriteString("\n\nMake one concrete next step, then finish if the goal is met.")
 	}
+	b.WriteString("\n\nDo not re-read files already covered. If the whole goal is met, goal_report status=done summary=…")
 	return b.String()
 }
 

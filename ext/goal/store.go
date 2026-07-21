@@ -93,7 +93,8 @@ func (s *Store) Delete(id string) error {
 }
 
 // Reset clears progress so the goal can be re-run (pending, step 0).
-// Keeps Goal, MaxSteps, and last Summary. Clears session, error, last_reply.
+// Keeps Goal, MaxSteps, and last Summary. Clears session, error, last_reply,
+// plan item statuses (back to pending), and current_item.
 func (s *Store) Reset(id string) (State, error) {
 	st, err := s.Load(id)
 	if err != nil {
@@ -104,6 +105,12 @@ func (s *Store) Reset(id string) (State, error) {
 	st.Error = ""
 	st.SessionID = ""
 	st.LastReply = ""
+	st.CurrentItem = ""
+	// Reset checklist statuses but keep item titles/ids.
+	for i := range st.Plan.Items {
+		st.Plan.Items[i].Status = ItemPending
+		st.Plan.Items[i].Note = ""
+	}
 	// keep Summary as last successful result until overwritten
 	if err := s.Save(st); err != nil {
 		return State{}, err

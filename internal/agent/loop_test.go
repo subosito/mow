@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -148,9 +149,9 @@ func TestMaxTurnsZeroIsUnlimited(t *testing.T) {
 
 type doneTool struct{}
 
-func (doneTool) Name() string                 { return "finish" }
-func (doneTool) Description() string          { return "finish" }
-func (doneTool) Parameters() json.RawMessage  { return json.RawMessage(`{}`) }
+func (doneTool) Name() string                { return "finish" }
+func (doneTool) Description() string         { return "finish" }
+func (doneTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
 func (doneTool) Exec(context.Context, json.RawMessage) (string, error) {
 	return "finished-ok", agent.ErrDone
 }
@@ -192,54 +193,40 @@ func TestErrDoneEndsLoopSuccessfully(t *testing.T) {
 	}
 }
 
-func TestStuckRepeatedToolCalls(t *testing.T) {
+// Identical tools inject a soft warn but do not hard-stop when MaxTurns allows.
+func TestSameToolWarnDoesNotHardStop(t *testing.T) {
+	n := 0
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		n++
+		if n > 5 {
+			return llm.Message{Role: "assistant", Content: "done"}, nil
+		}
 		return llm.Message{
 			Role: "assistant",
 			ToolCalls: []llm.ToolCall{{
 				ID: "1", Type: "function",
-				Function: llm.FunctionCall{Name: "echo", Arguments: `{"message":"same"}`},
+				Function: llm.FunctionCall{Name: "echo", Arguments: `{"text":"same"}`},
 			}},
 		}, nil
 	}
-	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
 		MaxTurns: 20,
 		Tools:    []agent.Tool{echoTool{}},
 	})
-	if err == nil || !errors.Is(err, agent.ErrStuck) {
-		t.Fatalf("err=%v want ErrStuck", err)
+	if err != nil {
+		t.Fatalf("err=%v want nil (soft warn only)", err)
 	}
-}
-
-// Mix write (non-explore) every turn so explore streak never fires; unlimited
-// MaxTurns must still hit the safety cap.
-func TestUnlimitedSafetyCap(t *testing.T) {
-	n := 0
-	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
-		n++
-		// Alternate tool names so exact fingerprint stall does not trip.
-		name := "echo"
-		args := fmt.Sprintf(`{"text":"%d"}`, n)
-		return llm.Message{
-			Role: "assistant",
-			ToolCalls: []llm.ToolCall{{
-				ID:   fmt.Sprintf("c%d", n),
-				Type: "function",
-				Function: llm.FunctionCall{Name: name, Arguments: args},
-			}},
-		}, nil
+	if res.Text != "done" {
+		t.Fatalf("text=%q", res.Text)
 	}
-	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
-		MaxTurns:         0, // unlimited
-		MaxParallelTools: 1,
-		Tools:            []agent.Tool{echoTool{}},
-	})
-	if err == nil || !errors.Is(err, agent.ErrMaxTurns) {
-		t.Fatalf("err=%v want ErrMaxTurns safety cap", err)
+	var sawWarn bool
+	for _, m := range res.Messages {
+		if m.Role == "user" && strings.Contains(m.Content, "repeated the same tool") {
+			sawWarn = true
+		}
 	}
-	// unlimitedSafetyCap is 48
-	if n < 40 || n > 55 {
-		t.Fatalf("chat calls=%d want around 48", n)
+	if !sawWarn {
+		t.Fatal("expected soft same-tool warn in history")
 	}
 }
 
