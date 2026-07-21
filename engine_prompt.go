@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/subosito/mow/internal/agent"
@@ -114,11 +113,11 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 
 	if sess != nil {
 		if aerr := sess.Append(session.Event{Type: "user", Role: "user", Content: text}); aerr != nil {
-			slog.Warn("mow: session append failed (resume history incomplete)", "err", aerr)
+			e.log().Warn("mow: session append failed (resume history incomplete)", "err", aerr)
 		}
 	}
 
-	slog.Debug("mow run start", "run_id", runID, "session_id", sid, "workspace", ws)
+	e.log().Debug("mow run start", "run_id", runID, "session_id", sid, "workspace", ws)
 	e.Emit(Event{Type: EventRunStart, RunID: runID, SessionID: sid, Text: text})
 
 	// Stream callbacks: fan-out to OnToken/OnReasoning and Event stream.
@@ -200,7 +199,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 			}
 		}
 		if aerr != nil {
-			slog.Warn("mow: session append failed (resume history incomplete)", "err", aerr)
+			e.log().Warn("mow: session append failed (resume history incomplete)", "err", aerr)
 		}
 	}
 
@@ -212,7 +211,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		Text: res.Text, StopReason: stop, Error: errString(err),
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 	})
-	slog.Debug("mow run end", "run_id", runID, "session_id", sid, "stop_reason", stop, "err", err)
+	e.log().Debug("mow run end", "run_id", runID, "session_id", sid, "stop_reason", stop, "err", err)
 
 	for _, fn := range stopHooks {
 		if fn != nil {
@@ -235,7 +234,7 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 			Type: EventToolStart, RunID: runID, SessionID: sid,
 			Tool: ev.Name, ToolCallID: ev.ToolCallID, Args: ev.Args,
 		})
-		slog.Debug("mow tool start", "run_id", runID, "tool", ev.Name, "tool_call_id", ev.ToolCallID)
+		e.log().Debug("mow tool start", "run_id", runID, "tool", ev.Name, "tool_call_id", ev.ToolCallID)
 		return agent.PreToolDecision{}, nil
 	}}, pre...)
 	post = append([]agent.PostToolFunc{func(ctx context.Context, ev agent.PostToolEvent) (agent.PostToolDecision, error) {
@@ -254,7 +253,7 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 			Tool: ev.Name, ToolCallID: ev.ToolCallID, Args: ev.Args,
 			Result: res, Denied: ev.Denied, Error: errStr, DurationMs: durMs,
 		})
-		slog.Debug("mow tool end", "run_id", runID, "tool", ev.Name, "denied", ev.Denied, "error", errStr, "duration_ms", durMs)
+		e.log().Debug("mow tool end", "run_id", runID, "tool", ev.Name, "denied", ev.Denied, "error", errStr, "duration_ms", durMs)
 		return agent.PostToolDecision{}, nil
 	}}, post...)
 	after = append([]agent.AfterTurnFunc{func(ctx context.Context, ev agent.AfterTurnEvent) {

@@ -3,6 +3,7 @@
 // Public surface:
 //   - mow.New / Engine / Run — programmatic harness
 //   - mow.Provider — swap the LLM backend (streaming + usage preserved)
+//   - Options.HTTPClient / Options.Logger — inject transport + structured logs
 //   - mow.Tool / Options.Tools / Hooks — integration types (per-engine tools)
 //   - RunResult.Usage / Event tokens — provider-reported token accounting
 //   - ext / ext/* — optional packs (acp, rpc, mcp, lsp, …)
@@ -11,11 +12,22 @@
 // Implementation lives under internal/ (agent loop, llm, tools, config, …).
 package mow
 
-import "context"
+import (
+	"context"
+	"log/slog"
+	"net/http"
+)
 
 // Options configures New / Run.
 type Options struct {
 	ConfigPaths []string
+	// HTTPClient is used for all LLM/media HTTP (proxies, custom timeouts,
+	// transport middleware). Nil uses a default client (120s chat, 180s media).
+	HTTPClient *http.Client
+	// Logger receives engine logs (run/tool/warn). Nil uses slog.Default().
+	// Set a discarding handler to silence, or your own to capture structured
+	// logs without touching the process-global default.
+	Logger *slog.Logger
 	// Workspace overrides config/env workspace when non-empty.
 	Workspace string
 	// Model overrides config/env model when non-empty.

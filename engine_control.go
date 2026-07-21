@@ -74,6 +74,15 @@ func (e *Engine) AddOnEvent(fn EventFunc) (unsubscribe func()) {
 	}
 }
 
+// log returns the Options.Logger or the process default. Engine logging goes
+// through here so an embedder can capture it without touching slog global.
+func (e *Engine) log() *slog.Logger {
+	if e != nil && e.logger != nil {
+		return e.logger
+	}
+	return slog.Default()
+}
+
 // Cancel aborts the in-flight Prompt (if any). Safe from another goroutine (rpc cancel).
 func (e *Engine) Cancel() {
 	if e == nil {
@@ -133,7 +142,7 @@ func (e *Engine) Emit(ev Event) {
 			s.fn(ev)
 		}
 	}
-	slog.Debug("mow event",
+	e.log().Debug("mow event",
 		"type", string(ev.Type),
 		"run_id", ev.RunID,
 		"session_id", ev.SessionID,

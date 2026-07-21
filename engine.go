@@ -38,8 +38,9 @@ type Engine struct {
 	pol        *policy.Policy
 	tools      []agent.Tool
 	chat       agent.ChatFn
-	client     *llm.Client // nil when Options.Provider/Chat is injected
-	provider   Provider    // set when Options.Provider is used
+	client     *llm.Client  // nil when Options.Provider/Chat is injected
+	provider   Provider     // set when Options.Provider is used
+	logger     *slog.Logger // nil → slog.Default()
 	sys        string
 	opt        Options
 	sess       *session.Store
@@ -166,7 +167,11 @@ func New(opt Options) (*Engine, error) {
 	if contextload.ProjectTrusted(cfg.Workspace) {
 		skillDirs = append(skillDirs, filepath.Join(cfg.Workspace, ".mow", "skills"))
 	} else if _, serr := os.Stat(filepath.Join(cfg.Workspace, ".mow")); serr == nil {
-		slog.Info("mow: project .mow present but untrusted; run `mow trust` to load project config/skills")
+		logger := opt.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Info("mow: project .mow present but untrusted; run `mow trust` to load project config/skills")
 	}
 	skillDirs = append([]string{config.SkillsDir()}, skillDirs...)
 	if sk := contextload.LoadSkills(skillDirs); sk != "" {
@@ -200,6 +205,7 @@ func New(opt Options) (*Engine, error) {
 		onToken:     opt.OnToken,
 		onReasoning: opt.OnReasoning,
 		readOnlyExt: readOnlyExt,
+		logger:      opt.Logger,
 	}
 	if opt.OnEvent != nil {
 		e.AddOnEvent(opt.OnEvent)
@@ -225,6 +231,7 @@ func New(opt Options) (*Engine, error) {
 			mediaClient = &llm.MediaClient{
 				BaseURL:      cfg.LLM.BaseURL,
 				APIKey:       key,
+				HTTP:         opt.HTTPClient,
 				ExtraHeaders: withActorHeaders(cfg.LLM.Headers, "mow"),
 			}
 		}
@@ -234,6 +241,7 @@ func New(opt Options) (*Engine, error) {
 			mediaClient = &llm.MediaClient{
 				BaseURL:      cfg.LLM.BaseURL,
 				APIKey:       key,
+				HTTP:         opt.HTTPClient,
 				ExtraHeaders: withActorHeaders(cfg.LLM.Headers, "mow"),
 			}
 		}
@@ -251,6 +259,7 @@ func New(opt Options) (*Engine, error) {
 			BaseURL:      cfg.LLM.BaseURL,
 			APIKey:       key,
 			Model:        cfg.LLM.Model,
+			HTTP:         opt.HTTPClient,
 			ExtraHeaders: headers,
 			Stream:       cfg.LLM.Stream || opt.Stream,
 		}
