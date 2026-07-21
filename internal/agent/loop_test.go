@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -108,6 +109,137 @@ func TestMaxTurnsReturnsErrMaxTurns(t *testing.T) {
 	})
 	if err == nil || !errors.Is(err, agent.ErrMaxTurns) {
 		t.Fatalf("err=%v want ErrMaxTurns", err)
+	}
+}
+
+func TestMaxTurnsZeroIsUnlimited(t *testing.T) {
+	// With MaxTurns <= 0 the loop must not inject the old 120 default.
+	// Finish after a few tool rounds so the test stays bounded.
+	// Vary args each turn so the stall detector does not fire.
+	n := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		n++
+		if n > 5 {
+			return llm.Message{Role: "assistant", Content: "done"}, nil
+		}
+		args := fmt.Sprintf(`{"message":"x%d"}`, n)
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "echo", Arguments: args},
+			}},
+		}, nil
+	}
+	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+		MaxTurns: 0,
+		Tools:    []agent.Tool{echoTool{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != "done" {
+		t.Fatalf("text=%q", res.Text)
+	}
+	if n != 6 {
+		t.Fatalf("chat calls=%d want 6", n)
+	}
+}
+
+type doneTool struct{}
+
+func (doneTool) Name() string                 { return "finish" }
+func (doneTool) Description() string          { return "finish" }
+func (doneTool) Parameters() json.RawMessage  { return json.RawMessage(`{}`) }
+func (doneTool) Exec(context.Context, json.RawMessage) (string, error) {
+	return "finished-ok", agent.ErrDone
+}
+
+func TestErrDoneEndsLoopSuccessfully(t *testing.T) {
+	n := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		n++
+		if n > 1 {
+			t.Fatal("loop continued after ErrDone")
+		}
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "finish", Arguments: `{}`},
+			}},
+		}, nil
+	}
+	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+		MaxTurns: 10,
+		Tools:    []agent.Tool{doneTool{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("chat calls=%d", n)
+	}
+	// Tool result must be present; Text may be empty (tool-only assistant turn).
+	var saw string
+	for _, m := range res.Messages {
+		if m.Role == "tool" {
+			saw = m.Content
+		}
+	}
+	if saw != "finished-ok" {
+		t.Fatalf("tool content=%q", saw)
+	}
+}
+
+func TestStuckRepeatedToolCalls(t *testing.T) {
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "echo", Arguments: `{"message":"same"}`},
+			}},
+		}, nil
+	}
+	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+		MaxTurns: 20,
+		Tools:    []agent.Tool{echoTool{}},
+	})
+	if err == nil || !errors.Is(err, agent.ErrStuck) {
+		t.Fatalf("err=%v want ErrStuck", err)
+	}
+}
+
+// Mix write (non-explore) every turn so explore streak never fires; unlimited
+// MaxTurns must still hit the safety cap.
+func TestUnlimitedSafetyCap(t *testing.T) {
+	n := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		n++
+		// Alternate tool names so exact fingerprint stall does not trip.
+		name := "echo"
+		args := fmt.Sprintf(`{"text":"%d"}`, n)
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID:   fmt.Sprintf("c%d", n),
+				Type: "function",
+				Function: llm.FunctionCall{Name: name, Arguments: args},
+			}},
+		}, nil
+	}
+	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+		MaxTurns:         0, // unlimited
+		MaxParallelTools: 1,
+		Tools:            []agent.Tool{echoTool{}},
+	})
+	if err == nil || !errors.Is(err, agent.ErrMaxTurns) {
+		t.Fatalf("err=%v want ErrMaxTurns safety cap", err)
+	}
+	// unlimitedSafetyCap is 48
+	if n < 40 || n > 55 {
+		t.Fatalf("chat calls=%d want around 48", n)
 	}
 }
 

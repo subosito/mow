@@ -60,6 +60,24 @@ func TestLoadYAMLAndEnv(t *testing.T) {
 	}
 }
 
+func TestMaxTurnsUnlimitedYAML(t *testing.T) {
+	t.Setenv(config.EnvHome, t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	if err := os.WriteFile(path, []byte("policy:\n  max_turns: -1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENAI_API_KEY", "k")
+	t.Setenv("OPENAI_MODEL", "m")
+	f, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Policy.MaxTurns != 0 {
+		t.Fatalf("MaxTurns=%d want 0 (unlimited)", f.Policy.MaxTurns)
+	}
+}
+
 func TestExtensionsSection(t *testing.T) {
 	t.Setenv(config.EnvHome, t.TempDir())
 	dir := t.TempDir()

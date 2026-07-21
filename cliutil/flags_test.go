@@ -45,3 +45,35 @@ func TestNewFlagSetParsesDoubleDash(t *testing.T) {
 		t.Fatalf("config=%q", *cfg)
 	}
 }
+
+func TestMaxTurnsZeroMeansUnlimited(t *testing.T) {
+	var ef cliutil.EngineFlags
+	fs := cliutil.NewFlagSet("run")
+	ef.Bind(fs)
+	if err := fs.Parse([]string{"--max-turns", "0"}); err != nil {
+		t.Fatal(err)
+	}
+	if !ef.MaxTurnsSet || ef.MaxTurns != 0 {
+		t.Fatalf("MaxTurnsSet=%v MaxTurns=%d", ef.MaxTurnsSet, ef.MaxTurns)
+	}
+	opt := ef.Options()
+	if opt.MaxTurns != -1 {
+		t.Fatalf("Options.MaxTurns=%d want -1 (unlimited sentinel)", opt.MaxTurns)
+	}
+}
+
+func TestMaxTurnsOmittedLeavesConfig(t *testing.T) {
+	var ef cliutil.EngineFlags
+	fs := cliutil.NewFlagSet("run")
+	ef.Bind(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	if ef.MaxTurnsSet {
+		t.Fatal("MaxTurnsSet should be false when flag omitted")
+	}
+	opt := ef.Options()
+	if opt.MaxTurns != 0 {
+		t.Fatalf("Options.MaxTurns=%d want 0 (leave config)", opt.MaxTurns)
+	}
+}

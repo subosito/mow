@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 )
 
@@ -68,9 +69,10 @@ type reportTool struct{}
 
 func (reportTool) Name() string { return "goal_report" }
 func (reportTool) Description() string {
-	return "Report outer-loop goal completion. Call when the goal is fully done or blocked. " +
-		"Args: status (done|failed), summary (required when done: the user-facing result, e.g. bullets), " +
-		"reason (optional, for failed)."
+	return "End the outer-loop goal NOW. Call as soon as the goal is fully done or blocked — " +
+		"do not keep exploring after you have the answer. " +
+		"Args: status (done|failed), summary (required when done: the user-facing result), " +
+		"reason (optional, for failed). Calling this stops the tool loop."
 }
 func (reportTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"status":{"type":"string","enum":["done","failed"]},"summary":{"type":"string","description":"User-facing result when status=done"},"reason":{"type":"string"}},"required":["status"]}`)
@@ -89,13 +91,22 @@ func (reportTool) Exec(ctx context.Context, args json.RawMessage) (string, error
 		return "goal_report ignored (no active outer-loop goal)", nil
 	}
 	sig.report(a.Status, a.Reason, a.Summary)
-	if strings.EqualFold(a.Status, "done") {
-		if strings.TrimSpace(a.Summary) == "" {
-			return "recorded: goal done (warning: pass summary= with the result text for the user)", nil
-		}
-		return "recorded: goal done", nil
+	done, failed, _, _ := sig.outcome()
+	if !done && !failed {
+		return fmt.Sprintf("goal_report: unknown status %q (use done|failed)", a.Status), nil
 	}
-	return fmt.Sprintf("recorded: goal failed (%s)", strings.TrimSpace(a.Reason)), nil
+	var msg string
+	if done {
+		if strings.TrimSpace(a.Summary) == "" {
+			msg = "recorded: goal done (warning: pass summary= with the result text for the user)"
+		} else {
+			msg = "recorded: goal done"
+		}
+	} else {
+		msg = fmt.Sprintf("recorded: goal failed (%s)", strings.TrimSpace(a.Reason))
+	}
+	// End this Prompt immediately so the model cannot thrash with more tools.
+	return msg, mow.ErrAgentDone
 }
 
 // ParseStatusJSON extracts ```goal-status {json} ``` blocks from assistant text.

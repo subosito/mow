@@ -16,7 +16,16 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+
+	"github.com/subosito/mow/internal/agent"
 )
+
+// ErrAgentDone is returned by a tool to end the current Prompt successfully
+// after the tool batch (e.g. goal_report). Same as internal agent.ErrDone.
+var ErrAgentDone = agent.ErrDone
+
+// ErrAgentStuck is returned when the model repeats the same tool calls too many times.
+var ErrAgentStuck = agent.ErrStuck
 
 // Options configures New / Run.
 type Options struct {
@@ -43,7 +52,9 @@ type Options struct {
 	SessionID string
 	// Continue loads the latest session under the project dir when SessionID empty.
 	Continue bool
-	// MaxTurns overrides config when > 0.
+	// MaxTurns overrides config when non-zero: positive = that many turns,
+	// negative (e.g. -1) = unlimited. Zero leaves config (default 120).
+	// CLI --max-turns 0 maps to -1 (unlimited).
 	MaxTurns int
 	// Extra system text appended after AGENTS.md.
 	SystemAppend string

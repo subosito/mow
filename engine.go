@@ -108,8 +108,11 @@ func New(opt Options) (*Engine, error) {
 	if opt.AllowShell {
 		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "bash")
 	}
+	// MaxTurns: >0 overrides; <0 means unlimited (stored as 0). 0 leaves config.
 	if opt.MaxTurns > 0 {
 		cfg.Policy.MaxTurns = opt.MaxTurns
+	} else if opt.MaxTurns < 0 {
+		cfg.Policy.MaxTurns = 0
 	}
 
 	pol := &policy.Policy{

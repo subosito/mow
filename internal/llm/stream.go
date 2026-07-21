@@ -24,10 +24,10 @@ type StreamHooks struct {
 
 // streamReq is ChatRequest plus stream flag.
 type streamReq struct {
-	Model    string     `json:"model"`
-	Messages []Message  `json:"messages"`
-	Tools    []ToolSpec `json:"tools,omitempty"`
-	Stream   bool       `json:"stream"`
+	Model    string          `json:"model"`
+	Messages []openAIMessage `json:"messages"`
+	Tools    []ToolSpec      `json:"tools,omitempty"`
+	Stream   bool            `json:"stream"`
 	// StreamOptions asks for a final usage chunk (OpenAI spec since 2024;
 	// compatible gateways ignore unknown request fields).
 	StreamOptions *streamOptions `json:"stream_options,omitempty"`
@@ -57,7 +57,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	}
 
 	body := streamReq{
-		Model: c.Model, Messages: messages, Tools: tools, Stream: true,
+		Model: c.Model, Messages: toOpenAIMessages(messages), Tools: tools, Stream: true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
 	raw, err := json.Marshal(body)
@@ -200,12 +200,16 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		if a == nil {
 			continue
 		}
+		args := a.args
+		if strings.TrimSpace(args) == "" {
+			args = "{}"
+		}
 		msg.ToolCalls = append(msg.ToolCalls, ToolCall{
 			ID:   a.id,
 			Type: "function",
 			Function: FunctionCall{
 				Name:      a.name,
-				Arguments: a.args,
+				Arguments: args,
 			},
 		})
 	}

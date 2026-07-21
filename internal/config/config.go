@@ -70,6 +70,9 @@ type ToolsConfig struct {
 }
 
 type PolicyConfig struct {
+	// MaxTurns caps LLM round-trips per Prompt (default 120). 0 = unlimited
+	// after load. In YAML use max_turns: -1 for unlimited (0 is indistinguishable
+	// from "omit" in overlays). CLI: --max-turns 0.
 	MaxTurns       int `yaml:"max_turns"`
 	BashTimeoutSec int `yaml:"bash_timeout_sec"`
 	MaxReadBytes   int `yaml:"max_read_bytes"`
@@ -221,8 +224,14 @@ func mergeOverlay(dst *File, overlay *File) {
 	if len(overlay.Tools.Enable) > 0 {
 		dst.Tools.Enable = append([]string(nil), overlay.Tools.Enable...)
 	}
+	// MaxTurns: positive sets the cap; -1 (or any negative) means unlimited (→ 0).
+	// Plain 0 in a YAML overlay is indistinguishable from "absent", so use -1
+	// or set max_turns: 0 only via a full defaults replace is not supported —
+	// prefer max_turns: -1 for unlimited in YAML.
 	if overlay.Policy.MaxTurns > 0 {
 		dst.Policy.MaxTurns = overlay.Policy.MaxTurns
+	} else if overlay.Policy.MaxTurns < 0 {
+		dst.Policy.MaxTurns = 0 // unlimited
 	}
 	if overlay.Policy.BashTimeoutSec > 0 {
 		dst.Policy.BashTimeoutSec = overlay.Policy.BashTimeoutSec
@@ -394,8 +403,10 @@ func (f *File) normalize() error {
 	if f.LLM.APIKey == "" && f.LLM.APIKeyEnv != "" {
 		f.LLM.APIKey = strings.TrimSpace(os.Getenv(f.LLM.APIKeyEnv))
 	}
-	if f.Policy.MaxTurns <= 0 {
-		f.Policy.MaxTurns = 120
+	// MaxTurns: defaults() sets 120. Negative values (yaml -1) mean unlimited → 0.
+	// Do not rewrite 0 to 120 — 0 is the unlimited sentinel for the agent loop.
+	if f.Policy.MaxTurns < 0 {
+		f.Policy.MaxTurns = 0
 	}
 	if f.Policy.MaxReadBytes <= 0 {
 		f.Policy.MaxReadBytes = 512 << 10

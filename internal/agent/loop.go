@@ -16,8 +16,25 @@ import (
 // ErrMaxTurns is returned when the agent loop hits Options.MaxTurns.
 var ErrMaxTurns = errors.New("agent: max turns exceeded")
 
+// ErrDone is returned by a tool Exec to end the agent loop successfully after
+// the current tool batch (e.g. goal_report). The tool result string is still
+// recorded for the model/history; Run returns nil error.
+var ErrDone = errors.New("agent: done")
+
+// ErrStuck is returned when the model repeats the same tool-call pattern too
+// many times in a row (runaway exploration under unlimited max turns).
+var ErrStuck = errors.New("agent: stuck repeating tool calls")
+
 // DefaultMaxParallelTools is used when Options.MaxParallelTools is unset (0).
 const DefaultMaxParallelTools = 8
+
+// stallRepeatLimit ends the loop after this many consecutive identical tool-call fingerprints.
+const stallRepeatLimit = 3
+
+// unlimitedSafetyCap is a hard ceiling when MaxTurns <= 0. Unlimited must not
+// mean unbounded API spend if thrash guards are somehow bypassed (e.g. model
+// mixes a write every few turns to reset explore streak).
+const unlimitedSafetyCap = 48
 
 // Tool is a host-executed function.
 type Tool interface {
@@ -33,7 +50,9 @@ type ChatFn func(ctx context.Context, messages []llm.Message, tools []llm.ToolSp
 
 // Options configures a Loop run.
 type Options struct {
-	System   string
+	System string
+	// MaxTurns caps LLM round-trips. <= 0 means unlimited (stop only on a
+	// final assistant message, error, or ctx cancel).
 	MaxTurns int
 	Tools    []Tool
 	// PriorMessages, if non-empty, seed history before the new user prompt
@@ -54,6 +73,9 @@ type Options struct {
 	// MaxParallelTools caps concurrent Exec in one assistant tool batch.
 	// 0 → DefaultMaxParallelTools; 1 → sequential (legacy).
 	MaxParallelTools int
+
+	// thrash is set by Run for explore-loop / re-read guards (internal).
+	thrash *thrashState
 }
 
 // Result is the final assistant text and message history.
@@ -73,10 +95,8 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	if strings.TrimSpace(userPrompt) == "" {
 		return Result{}, fmt.Errorf("agent: empty prompt")
 	}
+	// <= 0: unlimited — goals and long tool loops must not hit a silent 120 cap.
 	maxTurns := opt.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = 120
-	}
 
 	var messages []llm.Message
 	sys := strings.TrimSpace(opt.System)
@@ -119,7 +139,22 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		})
 	}
 
-	for turn := 0; turn < maxTurns; turn++ {
+	var (
+		lastToolFP string
+		sameToolFP int
+		thrash     = newThrashState()
+	)
+	// Pass thrash into tool exec via options copy so parallel batches share it.
+	opt.thrash = thrash
+
+	for turn := 0; ; turn++ {
+		if maxTurns > 0 && turn >= maxTurns {
+			break
+		}
+		if maxTurns <= 0 && turn >= unlimitedSafetyCap {
+			return Result{Messages: messages, Usage: usage}, fmt.Errorf(
+				"%w: safety cap %d (even with unlimited max-turns)", ErrMaxTurns, unlimitedSafetyCap)
+		}
 		if err := ctx.Err(); err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}
@@ -157,22 +192,87 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			return Result{Text: strings.TrimSpace(msg.Content), Messages: messages, Usage: usage}, nil
 		}
 
+		// Stall guard: identical tool-call batches in a row.
+		fp := toolCallFingerprint(msg.ToolCalls)
+		if fp != "" && fp == lastToolFP {
+			sameToolFP++
+			if sameToolFP >= stallRepeatLimit {
+				return Result{Messages: messages, Usage: usage}, fmt.Errorf(
+					"%w: same tool calls %d times in a row — change approach or finish",
+					ErrStuck, sameToolFP)
+			}
+		} else {
+			lastToolFP = fp
+			sameToolFP = 1
+		}
+
+		// Explore-only thrash: re-read/re-find forever with slightly different args.
+		// Count before tools; stop after tools only when already over limit so
+		// we never insert user text between assistant tool_calls and tool results.
+		_, exploreStop := thrash.noteTurn(msg.ToolCalls)
+
 		toolMsgs, err := runToolBatch(ctx, msg.ToolCalls, byName, opt)
 		messages = append(messages, toolMsgs...)
+		// Tool requested clean end (e.g. goal_report) — keep results, stop successfully.
+		if errors.Is(err, ErrDone) {
+			return Result{
+				Text:     strings.TrimSpace(msg.Content),
+				Messages: messages,
+				Usage:    usage,
+			}, nil
+		}
 		if err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}
+		if exploreStop {
+			// Prefer unproductive count in the message when that tripped the stop.
+			n := thrash.unproductive
+			if n < thrash.exploreStreak && thrash.exploreStreak >= exploreHardCap {
+				n = thrash.exploreStreak
+			}
+			return Result{Messages: messages, Usage: usage}, fmt.Errorf(
+				"%w: %s", ErrStuck, exploreStopMessage(n))
+		}
+		// noteTurn already decided warn; re-check streak for the nudge after tools.
+		if thrash.exploreStreak > 0 && thrash.exploreStreak%exploreWarnEvery == 0 {
+			messages = append(messages, llm.Message{
+				Role:    "user",
+				Content: exploreWarnMessage(thrash.exploreStreak),
+			})
+		}
+	}
+	cap := maxTurns
+	if cap <= 0 {
+		cap = unlimitedSafetyCap
 	}
 	return Result{Messages: messages, Usage: usage}, fmt.Errorf(
-		"%w: %d (raise --max-turns / policy.max_turns, or prompt again to continue — history is kept)",
-		ErrMaxTurns, maxTurns)
+		"%w: %d (raise --max-turns / policy.max_turns, or set 0 for unlimited; prompt again keeps history)",
+		ErrMaxTurns, cap)
 }
 
-// toolSlot is one resolved call in a batch (soft result or hard error).
+// toolCallFingerprint is a stable key for stall detection (name + args per call).
+func toolCallFingerprint(calls []llm.ToolCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, tc := range calls {
+		if i > 0 {
+			b.WriteByte('|')
+		}
+		b.WriteString(tc.Function.Name)
+		b.WriteByte('=')
+		b.WriteString(strings.TrimSpace(tc.Function.Arguments))
+	}
+	return b.String()
+}
+
+// toolSlot is one resolved call in a batch (soft result, hard error, or ErrDone).
 type toolSlot struct {
 	msg  llm.Message
 	ok   bool // soft result ready to append
 	hard error
+	done bool // tool returned ErrDone — end loop after batch
 }
 
 func parallelLimit(opt Options) int {
@@ -202,6 +302,7 @@ func runToolBatch(ctx context.Context, calls []llm.ToolCall, byName map[string]T
 
 func runToolBatchSequential(ctx context.Context, calls []llm.ToolCall, byName map[string]Tool, opt Options) ([]llm.Message, error) {
 	var out []llm.Message
+	var done bool
 	for _, tc := range calls {
 		if err := ctx.Err(); err != nil {
 			return out, err
@@ -210,9 +311,15 @@ func runToolBatchSequential(ctx context.Context, calls []llm.ToolCall, byName ma
 		if slot.ok {
 			out = append(out, slot.msg)
 		}
+		if slot.done {
+			done = true
+		}
 		if slot.hard != nil {
 			return out, slot.hard
 		}
+	}
+	if done {
+		return out, ErrDone
 	}
 	return out, nil
 }
@@ -258,9 +365,13 @@ func runToolBatchParallel(ctx context.Context, calls []llm.ToolCall, byName map[
 	wg.Wait()
 
 	var out []llm.Message
+	var done bool
 	for i := range slots {
 		if slots[i].ok {
 			out = append(out, slots[i].msg)
+		}
+		if slots[i].done {
+			done = true
 		}
 	}
 	if hardErr != nil {
@@ -268,6 +379,9 @@ func runToolBatchParallel(ctx context.Context, calls []llm.ToolCall, byName map[
 	}
 	if err := ctx.Err(); err != nil {
 		return out, err
+	}
+	if done {
+		return out, ErrDone
 	}
 	return out, nil
 }
@@ -304,13 +418,29 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
+	// Re-read short-circuit: do not re-dump the same file into context.
+	if name == "read" {
+		if stub, ok := opt.thrash.maybeDedupeRead(args); ok {
+			return toolSlot{
+				ok: true,
+				msg: llm.Message{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Name:       name,
+					Content:    stub,
+				},
+			}
+		}
+	}
 	out, err := runTool(ctx, tool, name, tc.ID, args, opt.Hooks)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrDone) {
 		return toolSlot{hard: err}
 	}
 	out = TruncateToolResult(out, toolResultLimit(opt))
+	out = opt.thrash.annotateRepeat(name, args, out)
 	return toolSlot{
-		ok: true,
+		ok:   true,
+		done: errors.Is(err, ErrDone),
 		msg: llm.Message{
 			Role:       "tool",
 			ToolCallID: tc.ID,
@@ -411,8 +541,10 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		if execErr != nil {
+		// ErrDone is a clean stop request — keep the result text, do not soft-wrap.
+		if execErr != nil && !errors.Is(execErr, ErrDone) {
 			out = "error: " + execErr.Error()
+			execErr = nil
 		}
 	}
 
@@ -440,6 +572,9 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 		if d.Rewrite {
 			out = d.Result
 		}
+	}
+	if errors.Is(execErr, ErrDone) {
+		return out, ErrDone
 	}
 	return out, nil
 }

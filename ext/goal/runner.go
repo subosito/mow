@@ -2,6 +2,7 @@ package goal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -9,6 +10,11 @@ import (
 
 	"github.com/subosito/mow"
 )
+
+// maxExploreOnlySteps fails the goal after this many consecutive outer steps
+// that only used explore tools (read/glob/grep/bash) without finishing.
+// Research-heavy goals often need 2–3 pure-read steps before the first write.
+const maxExploreOnlySteps = 4
 
 // Runner drives Spec / saved State through repeated Engine.Prompt calls.
 type Runner struct {
@@ -146,6 +152,7 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 	}
 	r.fire(Event{Kind: EventStart, State: st, Text: fmt.Sprintf("goal %s start", st.ID)})
 
+	exploreOnlyStreak := 0
 	for st.Step < st.MaxSteps {
 		if err := ctx.Err(); err != nil {
 			st.Status = StatusFailed
@@ -169,11 +176,11 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		}
 		if err != nil {
 			st.Status = StatusFailed
-			st.Error = err.Error()
+			st.Error = classifyStepError(err)
 			st.LastReply = res.Text
 			_ = r.store().Save(st)
-			r.fire(Event{Kind: EventFail, State: st, Text: err.Error()})
-			return st, err
+			r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
+			return st, fmt.Errorf("goal: %s", st.Error)
 		}
 		st.LastReply = res.Text
 		done, failed, reason, reportSummary := resolveOutcome(res.Text, sig)
@@ -197,6 +204,24 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			return st, fmt.Errorf("goal failed: %s", reason)
 		}
 
+		// Incomplete step: detect explore thrash across outer steps.
+		// Each Prompt resets the inner thrash counter, so without this a model
+		// can explore→emit prose→repeat for MaxSteps and burn a huge budget.
+		if lastStepExploreOnly(r.Engine) {
+			exploreOnlyStreak++
+		} else {
+			exploreOnlyStreak = 0
+		}
+		if exploreOnlyStreak >= maxExploreOnlySteps {
+			st.Status = StatusFailed
+			st.Error = fmt.Sprintf(
+				"no progress: %d consecutive steps used only explore tools (read/glob/grep/bash) without finishing — call goal_report or write/edit",
+				exploreOnlyStreak)
+			_ = r.store().Save(st)
+			r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
+			return st, fmt.Errorf("goal: %s", st.Error)
+		}
+
 		_ = r.store().Save(st)
 		r.fire(Event{
 			Kind:  EventStep,
@@ -210,6 +235,61 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 	_ = r.store().Save(st)
 	r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
 	return st, fmt.Errorf("goal: %s", st.Error)
+}
+
+// classifyStepError maps agent loop errors into clearer goal failure text.
+func classifyStepError(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, mow.ErrAgentStuck):
+		return "stuck: unproductive exploration (re-reading / repeating the same tools) — " +
+			"read new files, write/edit, or finish with goal_report"
+	case errors.Is(err, context.Canceled):
+		return err.Error()
+	default:
+		return err.Error()
+	}
+}
+
+// lastStepExploreOnly reports whether the last Prompt requested at least one
+// tool and every requested tool was explore-only (read/glob/grep/bash).
+// Uses assistant tool_calls (always named), not tool-result Name (may be empty).
+// Text-only incomplete steps do not count — multi-step goals often think aloud.
+func lastStepExploreOnly(eng *mow.Engine) bool {
+	if eng == nil {
+		return false
+	}
+	msgs := eng.Messages()
+	lastUser := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			lastUser = i
+			break
+		}
+	}
+	if lastUser < 0 {
+		return false
+	}
+	sawTool := false
+	for _, m := range msgs[lastUser+1:] {
+		if m.Role != "assistant" || len(m.ToolCalls) == 0 {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			sawTool = true
+			name := strings.ToLower(strings.TrimSpace(tc.Function.Name))
+			switch name {
+			case "read", "glob", "grep", "bash":
+				// explore
+			default:
+				// write/edit/goal_report/mcp/… counts as progress
+				return false
+			}
+		}
+	}
+	return sawTool
 }
 
 func resolveOutcome(text string, sig *finishSignal) (done, failed bool, reason, summary string) {
@@ -255,7 +335,8 @@ func (r *Runner) fire(e Event) {
 
 func stepPrompt(st State) string {
 	if st.Step == 0 {
-		return "Begin work on the goal.\n\nGoal:\n" + st.Goal
+		return "Begin work on the goal. When it is fully achieved, call goal_report " +
+			"status=done with summary immediately — do not keep exploring.\n\nGoal:\n" + st.Goal
 	}
 	var b strings.Builder
 	b.WriteString("Continue work on the goal.\n\nGoal:\n")
@@ -263,8 +344,11 @@ func stepPrompt(st State) string {
 	if s := strings.TrimSpace(st.Summary); s != "" {
 		b.WriteString("\n\nPrevious step result (truncated):\n")
 		b.WriteString(s)
+		b.WriteString("\n\nDo not re-read files already covered above. ")
+		b.WriteString("If the goal is already satisfied, call goal_report status=done with summary now.")
+	} else {
+		b.WriteString("\n\nMake one concrete next step, then finish if the goal is met.")
 	}
-	b.WriteString("\n\nMake the next concrete progress.")
 	return b.String()
 }
 

@@ -244,7 +244,9 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 			res = res[:max] + "…(truncated)"
 		}
 		errStr := ""
-		if ev.ExecErr != nil {
+		// ErrDone is a clean stop from tools like goal_report — not a failure.
+		// Emitting it as Error made the CLI print "✗ goal_report: agent: done".
+		if ev.ExecErr != nil && !errors.Is(ev.ExecErr, agent.ErrDone) {
 			errStr = ev.ExecErr.Error()
 		}
 		durMs := ev.Duration.Milliseconds()
@@ -277,6 +279,9 @@ func stopReasonFrom(err error) string {
 	}
 	if errors.Is(err, agent.ErrMaxTurns) {
 		return StopMaxTurns
+	}
+	if errors.Is(err, agent.ErrStuck) {
+		return StopStuck
 	}
 	return StopError
 }

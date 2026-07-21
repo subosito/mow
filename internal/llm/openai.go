@@ -11,6 +11,11 @@ import (
 )
 
 // Message is a chat message in OpenAI-ish shape.
+//
+// Content uses omitempty for session/history JSON. OpenAI chat/completions
+// requests go through toOpenAIMessages, which always emits content as a string
+// (including "") so gateways with a strict MessageContent enum accept
+// tool-call turns and empty tool results.
 type Message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content,omitempty"`
@@ -24,6 +29,50 @@ type Message struct {
 	// Usage is provider-reported token counts for the call that produced this
 	// message (zero when the provider sent none). Response-only.
 	Usage Usage `json:"-"`
+}
+
+// openAIMessage is the chat/completions wire shape. Content is always a JSON
+// string (never omitted, never null). Many OpenAI-compatible gateways type
+// content as an untagged enum Text(String)|Parts([...]) with no null variant;
+// assistant tool-call turns and empty tool results then 400 with
+// "data did not match any variant of untagged enum MessageContent" if content
+// is missing or null. Emitting "" is accepted by OpenAI and those gateways.
+type openAIMessage struct {
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+}
+
+// toOpenAIMessages maps internal history to the OpenAI wire shape.
+func toOpenAIMessages(in []Message) []openAIMessage {
+	out := make([]openAIMessage, len(in))
+	for i, m := range in {
+		out[i] = openAIMessage{
+			Role:       m.Role,
+			Content:    m.Content,
+			ToolCallID: m.ToolCallID,
+			Name:       m.Name,
+		}
+		if len(m.ToolCalls) == 0 {
+			continue
+		}
+		tcs := make([]ToolCall, len(m.ToolCalls))
+		for j, tc := range m.ToolCalls {
+			tcs[j] = tc
+			if tcs[j].Type == "" {
+				tcs[j].Type = "function"
+			}
+			// Empty arguments are invalid JSON for most tool schemas; models
+			// sometimes stream a name with no arg chunks.
+			if strings.TrimSpace(tcs[j].Function.Arguments) == "" {
+				tcs[j].Function.Arguments = "{}"
+			}
+		}
+		out[i].ToolCalls = tcs
+	}
+	return out
 }
 
 // Usage counts provider-reported tokens for one chat call.
@@ -92,9 +141,9 @@ type Client struct {
 
 // ChatRequest is the outbound chat body (subset).
 type ChatRequest struct {
-	Model    string     `json:"model"`
-	Messages []Message  `json:"messages"`
-	Tools    []ToolSpec `json:"tools,omitempty"`
+	Model    string          `json:"model"`
+	Messages []openAIMessage `json:"messages"`
+	Tools    []ToolSpec      `json:"tools,omitempty"`
 }
 
 // ChatResponse is the inbound chat body (subset).
@@ -155,7 +204,7 @@ func (c *Client) chatOpenAI(ctx context.Context, messages []Message, tools []Too
 		url = base
 	}
 
-	body := ChatRequest{Model: c.Model, Messages: messages, Tools: tools}
+	body := ChatRequest{Model: c.Model, Messages: toOpenAIMessages(messages), Tools: tools}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return Message{}, err

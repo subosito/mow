@@ -45,6 +45,7 @@ const (
 	StopCompleted = "completed"
 	StopCancelled = "cancelled"
 	StopMaxTurns  = "max_turns"
+	StopStuck     = "stuck"
 	StopError     = "error"
 )
 
