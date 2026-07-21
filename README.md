@@ -79,7 +79,7 @@ Project `.mow` config/skills load only after `mow trust` (stored out-of-band und
 ## Extensions
 
 Blank-import packs into a custom binary, or `ext.RegisterTool` in `init`.  
-Stock `cmd/mow` already links acp/rpc/goal/mcp/lsp/job.
+Stock `cmd/mow` already links acp/rpc/goal/mcp/lsp/job/cmdhook.
 
 Config: `extensions.<pack>` (see `internal/config/mow.yaml.example`).  
 Docs: [docs/extensions.md](docs/extensions.md).

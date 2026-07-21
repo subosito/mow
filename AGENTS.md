@@ -40,7 +40,7 @@ Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool batches: `policy.max_
 | `mow` (root `*.go`) | Public Engine API (`engine_*.go`, `run.go`, `hooks.go`, `event.go`) |
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
 | `packcfg/` | Decode `extensions.<name>` (**not** a pack) |
-| `ext/` | Registration (`ext.go`) + packs: acp, rpc, goal, mcp, lsp, job |
+| `ext/` | Registration (`ext.go`) + packs: acp, rpc, goal, mcp, lsp, job, cmdhook |
 | `internal/` | Implementation — **not** an integrator import surface |
 | `cmd/mow/` | Thin CLI; blank-imports packs |
 | `docs/` | architecture, harness, extensions |

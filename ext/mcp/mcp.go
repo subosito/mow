@@ -2,8 +2,9 @@
 //
 // Config (first match wins):
 //  1. extensions.mcp in -config / $MOW_HOME/config.yaml
-//  2. $MOW_HOME/mcp.yaml
+//  2. $MOW_HOME/mcp.json, then $MOW_HOME/mcp.yaml
 //
+// Both the standard mcpServers map and a servers list are accepted.
 // On tools/call failure, the client restarts the server once and retries.
 package mcp
 
@@ -16,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,9 +46,34 @@ type ServerConfig struct {
 	Auth AuthConfig `yaml:"auth"`
 }
 
-// Config is extensions.mcp.
+// Config is extensions.mcp. It accepts the ecosystem-standard mcpServers map
+// (Claude Desktop / Claude Code / Cursor / VS Code — a keyed object, so an
+// existing config pastes in) as well as the original servers list.
 type Config struct {
+	// MCPServers is the standard form: name → server. Keys become tool
+	// prefixes; a per-entry name overrides the key.
+	MCPServers map[string]ServerConfig `yaml:"mcpServers"`
+	// Servers is the list form (each entry carries its own name).
 	Servers []ServerConfig `yaml:"servers"`
+}
+
+// resolved merges both config forms into a name-ordered server list.
+func (c Config) resolved() []ServerConfig {
+	var out []ServerConfig
+	names := make([]string, 0, len(c.MCPServers))
+	for name := range c.MCPServers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		s := c.MCPServers[name]
+		if strings.TrimSpace(s.Name) == "" {
+			s.Name = name
+		}
+		out = append(out, s)
+	}
+	out = append(out, c.Servers...)
+	return out
 }
 
 func init() {
@@ -61,18 +88,21 @@ func registerAll(configPaths ...string) error {
 	if err != nil {
 		return fmt.Errorf("mcp extensions: %w", err)
 	}
-	if !ok || len(c.Servers) == 0 {
-		// fallback file
-		path := filepath.Join(mow.Home(), "mcp.yaml")
-		raw, rerr := os.ReadFile(path)
-		if rerr != nil {
-			return nil
-		}
-		if err := yaml.Unmarshal(raw, &c); err != nil {
-			return fmt.Errorf("mcp: %s: %w", path, err)
+	if !ok || (len(c.Servers) == 0 && len(c.MCPServers) == 0) {
+		// Fallback files: $MOW_HOME/mcp.json (standard filename) then mcp.yaml.
+		// yaml.v3 parses JSON, so one decoder handles both.
+		for _, name := range []string{"mcp.json", "mcp.yaml"} {
+			raw, rerr := os.ReadFile(filepath.Join(mow.Home(), name))
+			if rerr != nil {
+				continue
+			}
+			if err := yaml.Unmarshal(raw, &c); err != nil {
+				return fmt.Errorf("mcp: %s: %w", name, err)
+			}
+			break
 		}
 	}
-	return RegisterServers(c.Servers)
+	return RegisterServers(c.resolved())
 }
 
 // RegisterServers starts each server and registers tools.

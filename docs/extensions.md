@@ -206,20 +206,35 @@ Same id never overlaps a previous tick (skip if still running). Not HA — use h
 
 Both are **linked in stock `cmd/mow`**. They register tools only when configured (no config → no tools, no process spawn).
 
-Prefer **extensions.*** in config (also `$MOW_HOME/config.yaml`); file fallbacks still work (`$MOW_HOME/mcp.yaml`, `$MOW_HOME/lsp.yaml`).
+Prefer **extensions.*** in config (also `$MOW_HOME/config.yaml`); file fallbacks still work (`$MOW_HOME/mcp.json` or `mcp.yaml`, `$MOW_HOME/lsp.yaml`).
+
+MCP servers use the ecosystem-standard `mcpServers` map (the same shape as
+Claude Desktop / Claude Code / Cursor / VS Code — paste an existing config
+straight in):
 
 ```yaml
 extensions:
   mcp:
-    servers:
-      - name: fs
+    mcpServers:
+      fs:
         command: npx
         args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+      remote:
+        url: https://mcp.example/mcp
   lsp:
     command: gopls
     args: [serve]
     root: .
 ```
+
+The `$MOW_HOME/mcp.json` fallback takes the standard JSON directly:
+
+```json
+{ "mcpServers": { "fs": { "command": "npx", "args": ["-y", "srv"] } } }
+```
+
+The older `servers:` list form (each entry with its own `name:`) is still
+accepted.
 
 - MCP tools: `mcp_<server>_<tool>`
   - stdio: `command` + `args` (reconnect once on failure)
@@ -230,15 +245,15 @@ extensions:
 ```yaml
 extensions:
   mcp:
-    servers:
-      - name: remote
+    mcpServers:
+      remote:
         url: http://127.0.0.1:3000/mcp
         headers:
           X-Custom: value
         auth:
           type: bearer
           token: "…"
-      - name: oauth-remote
+      oauth-remote:
         url: https://mcp.example/mcp
         auth:
           type: oauth2_client_credentials
@@ -437,8 +452,50 @@ mow stays minimal by default. Heavier features (hashline edit, DAP, memory, brow
 
 ## Skills (config-only)
 
-Markdown under `skills.dirs`, `$MOW_HOME/skills` (default `~/.mow/skills`), and trusted `workspace/.mow/skills`.  
+Each skill is a folder with a `SKILL.md` entry point, one level under
+`skills.dirs`, `$MOW_HOME/skills` (default `~/.mow/skills`), or trusted
+`workspace/.mow/skills` — e.g. `~/.mow/skills/humanizer/SKILL.md`. Clone a skill
+repo straight in; other files in the folder are ignored.  
 Project config/skills require `mow trust` (out-of-band, `$MOW_HOME/trusted`) or `MOW_TRUST_PROJECT=1`.
+
+---
+
+## Command hooks (`cmdhook`) — Claude Code plugin bridge
+
+`cmdhook` runs Claude Code-style command hooks (a plugin `hooks.json`) against
+mow's hook system, so existing plugins — e.g. [context-mode](https://github.com/mksglu/context-mode) —
+work unchanged. Each hook command receives the event as JSON on stdin and may
+return a decision as JSON on stdout (or block via exit code 2 with stderr as
+the reason), exactly as under Claude Code.
+
+Config (`extensions.cmdhook`, or `$MOW_HOME/cmdhook.yaml`):
+
+```yaml
+extensions:
+  cmdhook:
+    root: /path/to/plugin        # ${CLAUDE_PLUGIN_ROOT}
+    hooks_file: hooks/hooks.json # default, relative to root
+    timeout_sec: 10              # per command
+```
+
+Event mapping (Claude → mow hook):
+
+| Claude event | mow hook | Decision honored |
+|--------------|----------|------------------|
+| `PreToolUse` | PreTool | `permissionDecision` deny/ask → deny; `additionalContext`; `updatedInput` → rewrite args |
+| `PostToolUse` | PostTool | `additionalContext` appended to the tool result |
+| `UserPromptSubmit` | UserPrompt | stdout/`additionalContext` → system append; block → abort |
+| `SessionStart` | SessionStart | `additionalContext` → system append |
+| `Stop` | Stop | fire-and-forget capture |
+| `PreCompact` | PreCompact | fire-and-forget |
+
+Tool names are translated to Claude conventions for matchers and payloads
+(`read`→`Read`, `mcp_srv_x`→`mcp__srv_x`). mow's engine has no interactive
+prompt, so a PreToolUse `ask` is treated as deny — hosts with an approval UI
+gate power tools themselves.
+
+Same trust bar as any executable extension: the commands run with full machine
+access. Link the pack only for plugins you trust.
 
 ---
 
