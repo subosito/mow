@@ -246,6 +246,9 @@ func cmdReset(args []string) int {
 func printState(st State, store *Store) {
 	fmt.Printf("id=%s status=%s step=%d/%d session=%s\n",
 		st.ID, st.Status, st.Step, st.MaxSteps, st.SessionID)
+	if st.InputTokens > 0 || st.OutputTokens > 0 {
+		fmt.Printf("tokens: %d in / %d out\n", st.InputTokens, st.OutputTokens)
+	}
 	fmt.Printf("goal: %s\n", st.Goal)
 	if st.Error != "" {
 		fmt.Printf("error: %s\n", st.Error)

@@ -171,3 +171,51 @@ func TestSubscribe(t *testing.T) {
 		t.Fatalf("subscribe saw %d", saw)
 	}
 }
+
+func TestRunnerAccumulatesUsage(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MOW_HOME", dir)
+	var n atomic.Int32
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			i := n.Add(1)
+			// Each step reports usage; the runner must sum across steps.
+			usage := mow.Usage{InputTokens: 100, OutputTokens: 20}
+			if i < 3 {
+				return mow.Message{Role: "assistant", Content: "working", Usage: usage}, nil
+			}
+			return mow.Message{Role: "assistant", Content: "done\nGOAL_DONE", Usage: usage}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lastEventTokens int
+	r := &goal.Runner{
+		Engine: eng,
+		Store:  &goal.Store{Dir: dir + "/goals"},
+		OnEvent: func(e goal.Event) {
+			lastEventTokens = e.State.InputTokens + e.State.OutputTokens
+		},
+	}
+	st, err := r.RunSpec(context.Background(), goal.Spec{ID: "u1", Goal: "x", MaxSteps: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Step != 3 {
+		t.Fatalf("step=%d want 3", st.Step)
+	}
+	if st.InputTokens != 300 || st.OutputTokens != 60 {
+		t.Fatalf("usage=%d/%d want 300/60", st.InputTokens, st.OutputTokens)
+	}
+	// Events carry the running total so hosts can display live tokens.
+	if lastEventTokens == 0 {
+		t.Fatal("events did not carry cumulative usage")
+	}
+	// Persisted for `mow goal status`.
+	loaded, _ := r.Store.Load("u1")
+	if loaded.InputTokens != 300 {
+		t.Fatalf("persisted usage lost: %d", loaded.InputTokens)
+	}
+}

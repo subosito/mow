@@ -46,6 +46,10 @@ type State struct {
 	Summary   string    `json:"summary,omitempty"`
 	Error     string    `json:"error,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// InputTokens / OutputTokens are cumulative across all steps (zero when
+	// the provider reports no usage).
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
 }
 
 // EventKind classifies progress signals for subscribers (logs, hosts, …).

@@ -162,6 +162,8 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			SystemAppend: SystemAppend(st),
 		})
 		st.Step++
+		st.InputTokens += res.Usage.InputTokens
+		st.OutputTokens += res.Usage.OutputTokens
 		if st.SessionID == "" {
 			st.SessionID = res.SessionID
 		}
