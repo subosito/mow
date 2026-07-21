@@ -80,3 +80,11 @@ session:
 #         every: 1h
 #         goal: fix-ci
 
+
+# Claude Code plugin hooks bridge (ext/cmdhook). Runs a plugin hooks.json
+# against mow's hook system — e.g. context-mode. Same trust bar as shell.
+# extensions:
+#   cmdhook:
+#     root: /path/to/plugin
+#     hooks_file: hooks/hooks.json
+#     timeout_sec: 10

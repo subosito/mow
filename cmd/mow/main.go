@@ -21,6 +21,7 @@ import (
 	// Linked packs — each registers tools/commands in init.
 	// Remove an import to drop that pack (and its subcommand) from this binary.
 	_ "github.com/subosito/mow/ext/acp"
+	_ "github.com/subosito/mow/ext/cmdhook"
 	_ "github.com/subosito/mow/ext/goal"
 	_ "github.com/subosito/mow/ext/job"
 	_ "github.com/subosito/mow/ext/lsp"
