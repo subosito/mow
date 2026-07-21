@@ -7,7 +7,15 @@ import (
 	"strings"
 )
 
-// LoadSkills reads *.md from dirs (non-recursive) and concatenates them for the system prompt.
+// LoadSkills collects skill markdown from each dir and concatenates it for the
+// system prompt. Skills use the standard folder layout, one level deep:
+//
+//	<dir>/<name>/SKILL.md
+//
+// The folder is the skill and SKILL.md (case-insensitive) is its entry point;
+// other files in the folder (README, references) are not instructions. A
+// folder without SKILL.md is skipped. Each skill is labeled by folder name so
+// the model can cite it.
 func LoadSkills(dirs []string) string {
 	var parts []string
 	seen := map[string]bool{}
@@ -20,21 +28,16 @@ func LoadSkills(dirs []string) string {
 		if err != nil {
 			continue
 		}
-		var names []string
+		var folders []string
 		for _, e := range entries {
-			if e.IsDir() {
-				continue
+			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+				folders = append(folders, e.Name())
 			}
-			n := e.Name()
-			if !strings.HasSuffix(strings.ToLower(n), ".md") {
-				continue
-			}
-			names = append(names, n)
 		}
-		sort.Strings(names)
-		for _, n := range names {
-			p := filepath.Join(dir, n)
-			if seen[p] {
+		sort.Strings(folders)
+		for _, name := range folders {
+			p, ok := findSkillFile(filepath.Join(dir, name))
+			if !ok || seen[p] {
 				continue
 			}
 			seen[p] = true
@@ -43,9 +46,24 @@ func LoadSkills(dirs []string) string {
 				continue
 			}
 			if s := strings.TrimSpace(string(b)); s != "" {
-				parts = append(parts, "## skill: "+n+"\n\n"+s)
+				parts = append(parts, "## skill: "+name+"\n\n"+s)
 			}
 		}
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// findSkillFile returns the SKILL.md inside a skill folder (case-insensitive),
+// if present.
+func findSkillFile(folder string) (string, bool) {
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.EqualFold(e.Name(), "SKILL.md") {
+			return filepath.Join(folder, e.Name()), true
+		}
+	}
+	return "", false
 }
