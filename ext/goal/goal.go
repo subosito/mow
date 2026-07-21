@@ -226,17 +226,18 @@ func contentWithoutMarkers(text string) string {
 // SystemAppend is injected each step (via PromptOpts) for the outer-loop protocol.
 func SystemAppend(st State) string {
 	return fmt.Sprintf(
-		"You are working toward this goal (outer loop step %d of %d):\n%s\n\n"+
+		"You are working toward THIS goal only (outer loop step %d of %d):\n%s\n\n"+
+			"The summary you report must answer THIS goal — ignore unrelated prior chat or git leftovers.\n\n"+
 			"Finish protocol (required):\n"+
-			"- When the goal is met, call tool goal_report with status=done AND summary= the "+
-			"user-facing result immediately. That ends the step — do not keep calling tools after.\n"+
+			"- When THIS goal is met, call tool goal_report with status=done AND summary= the "+
+			"user-facing result for this goal. That ends the step — do not keep calling tools after.\n"+
 			"- Prefer goal_report over bare %s. "+
 			"Alternatively end with ```goal-status {\"status\":\"done\",\"summary\":\"…\"} ```.\n"+
 			"- If blocked, goal_report status=failed with reason (or %s <reason>).\n\n"+
 			"Working rules:\n"+
 			"- Make focused progress; do not re-read or re-list files you already inspected.\n"+
 			"- Avoid endless bash explore loops (find/ls/cat cycles). Read what you need, then act or finish.\n"+
-			"- Do not claim done until the goal is actually met.",
+			"- Do not claim done until THIS goal is actually met.",
 		st.Step+1, st.MaxSteps, st.Goal, MarkerDone, MarkerFailed,
 	)
 }

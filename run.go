@@ -117,6 +117,10 @@ type PromptOpts struct {
 	// ReadOnly() true (e.g. MCP tools with readOnlyHint). Everything else —
 	// including pack and MCP tools without the marker — is denied.
 	ReadOnly bool
+	// ExtraTools are available only for this Prompt (appended after engine tools).
+	// Used by packs like goal for goal_report so the tool is not always visible
+	// in repl/run (where it used to encourage false "task complete" reports).
+	ExtraTools []Tool
 }
 
 // Run is a one-shot helper: New + single Prompt.

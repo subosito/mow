@@ -2,6 +2,7 @@ package mow_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -187,6 +188,55 @@ func TestEngineMultiTurn(t *testing.T) {
 		t.Fatalf("turns=%d", n)
 	}
 }
+
+func TestPromptOptsExtraTools(t *testing.T) {
+	var saw []string
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			for _, ts := range tools {
+				saw = append(saw, ts.Function.Name)
+			}
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range saw {
+		if n == "only_this_prompt" {
+			t.Fatal("extra tool leaked into default Prompt")
+		}
+	}
+	saw = nil
+	if _, err := eng.PromptWith(context.Background(), "hi", mow.PromptOpts{
+		ExtraTools: []mow.Tool{extraPromptTool{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, n := range saw {
+		if n == "only_this_prompt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("ExtraTools missing from specs: %v", saw)
+	}
+}
+
+type extraPromptTool struct{}
+
+func (extraPromptTool) Name() string                         { return "only_this_prompt" }
+func (extraPromptTool) Description() string                  { return "test" }
+func (extraPromptTool) Parameters() json.RawMessage          { return json.RawMessage(`{}`) }
+func (extraPromptTool) Exec(context.Context, json.RawMessage) (string, error) {
+	return "ok", nil
+}
+func (extraPromptTool) ReadOnly() bool { return true }
 
 func TestPromptWithSystemAppend(t *testing.T) {
 	t.Setenv("MOW_HOME", t.TempDir())

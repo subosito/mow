@@ -167,6 +167,8 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		prompt := stepPrompt(st)
 		res, err := r.Engine.PromptWith(stepCtx, prompt, mow.PromptOpts{
 			SystemAppend: SystemAppend(st),
+			// goal_report only exists during a goal step — not in repl/run.
+			ExtraTools: []mow.Tool{ReportTool()},
 		})
 		st.Step++
 		st.InputTokens += res.Usage.InputTokens

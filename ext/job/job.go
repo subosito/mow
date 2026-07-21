@@ -2,7 +2,10 @@
 //
 //	import _ "github.com/subosito/mow/ext/job"
 //
-// Config: extensions.job.schedules or $MOW_HOME/job/schedules.yaml.
+// Ways to schedule:
+//   - Inline CLI (no file): mow job --every 10m --prompt "…" [engine flags]
+//   - File: $MOW_HOME/job/schedules.yaml
+//   - Config: extensions.job.schedules
 package job
 
 import (

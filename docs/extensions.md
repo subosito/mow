@@ -165,7 +165,7 @@ Embed: `goal.Runner{Engine, Store}.RunSpec(ctx, spec)`; hosts may `goal.Subscrib
 
 Completion (any of):
 
-- tool **`goal_report`** with `status=done` and **`summary`** (user-facing result — preferred)
+- tool **`goal_report`** (injected only during `goal run` steps) with `status=done` and **`summary`** (user-facing result — preferred). Not available in plain `repl`/`run`, so the model cannot “finish a goal” on the wrong chat turn.
 - fenced **`goal-status`** JSON `{"status":"done","summary":"…"}`
 - line markers `GOAL_DONE` / `GOAL_FAILED:` (summary then taken from the best assistant prose in the transcript, not the bare marker)
 
@@ -182,19 +182,29 @@ Also: `mow goal delete --id NAME`.
 
 ### `ext/job`
 
+**Inline** (no schedule file — same idea as `mow goal run --goal …`):
+
+```bash
+mow job --every 10m --prompt "Summarize git status" --allow-shell
+mow job --every 1h --goal fix-ci --allow-write --allow-shell
+mow job --cron "0 9 * * 1-5" --prompt "Morning brief"
+# ctrl+c to stop; first --every tick fires immediately
+```
+
+**File / config** (`$MOW_HOME/job/schedules.yaml` or `extensions.job`):
+
 ```yaml
-# $MOW_HOME/job/schedules.yaml  OR  extensions.job in config
 schedules:
   - id: hourly
-    every: 1h
+    every: 1h                 # Go duration
     goal: fix-ci
   - id: weekday-morning
-    cron: "0 9 * * 1-5"    # min hour dom month dow (local)
+    cron: "0 9 * * 1-5"       # min hour dom month dow (local)
     prompt: "Summarize open PRs"
 ```
 
 ```bash
-mow job                       # daemon until Ctrl+C
+mow job                       # daemon from schedules file / extensions.job
 mow job list                  # table of schedules + next fire
 mow job check                 # validate; exit 1 if any bad
 mow job --schedules path.yaml

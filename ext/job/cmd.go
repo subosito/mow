@@ -52,24 +52,37 @@ func runCmd(args []string) int {
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `mow job — in-process interval jobs
 
-  mow job [--schedules path] [engine flags]           run daemon until Ctrl+C
-  mow job run|serve [--schedules path] [engine flags] same as default
-  mow job list  [--schedules path]                    list schedules
-  mow job check [--schedules path]                    validate schedules (exit 1 if any bad)
+Inline (no schedule file — like mow goal run):
 
-Schedules YAML (default $MOW_HOME/job/schedules.yaml) or extensions.job:
+  mow job --every 10m --prompt "Summarize git status" [engine flags]
+  mow job --every 1h --goal fix-ci --allow-write --allow-shell
+  mow job --cron "0 9 * * 1-5" --prompt "Morning brief" [engine flags]
+
+From a file / config:
+
+  mow job [--schedules path] [engine flags]           run daemon until Ctrl+C
+  mow job run|serve …                                 same as default
+  mow job list  [--schedules path]                    list schedules
+  mow job check [--schedules path]                    validate schedules
+
+Inline flags (when any of --every/--cron/--goal/--prompt is set, schedules file is ignored):
+  --every 10m     Go duration; first tick runs immediately
+  --cron "…"      5-field min hour dom month dow (local)
+  --goal ID       re-run a saved mow goal each tick
+  --prompt TEXT   one-shot Prompt each tick
+  --id NAME       job id (default: inline)
+
+File form ($MOW_HOME/job/schedules.yaml or extensions.job):
 
   schedules:
     - id: hourly-ci
-      every: 1h                 # Go duration; first tick runs immediately
+      every: 1h
       goal: fix-ci
     - id: morning
-      cron: "0 9 * * 1-5"       # 5-field min hour dom month dow (local)
+      cron: "0 9 * * 1-5"
       prompt: "Summarize git status"
 
-Cron fields: min hour dom month dow (local). Prefer host cron for HA.
-Overlapping ticks for the same id are skipped (one fire at a time).
-Each tick logs "result:" with the prompt reply or goal summary (stderr).
+Overlapping ticks for the same id are skipped. Not HA — use host cron for production.
 
 `)
 }
@@ -175,18 +188,39 @@ func cmdRun(args []string) int {
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
 	schedPath := fs.String("schedules", "", "schedules yaml path (default $MOW_HOME/job/schedules.yaml)")
+	// Inline schedule (goal-style): no file required.
+	every := fs.String("every", "", "inline interval, e.g. 10m (no schedules file)")
+	cronExpr := fs.String("cron", "", "inline 5-field cron (local)")
+	id := fs.String("id", "", "inline job id (default: inline)")
+	goalID := fs.String("goal", "", "inline: saved goal id to run each tick")
+	prompt := fs.String("prompt", "", "inline: prompt text each tick")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	jobs, src, err := loadSchedulesForCLI(*schedPath, &ef)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mow job: %v\n", err)
-		return 1
-	}
-	if len(jobs) == 0 {
-		fmt.Fprintln(os.Stderr, "mow job: no schedules configured")
-		return 1
+	var jobs []Job
+	var src string
+	if inlineJobRequested(*every, *cronExpr, *goalID, *prompt) {
+		j, err := InlineJob(*id, *every, *cronExpr, *goalID, *prompt)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mow job: %v\n", err)
+			return 2
+		}
+		jobs = []Job{j}
+		src = "flags"
+	} else {
+		var err error
+		jobs, src, err = loadSchedulesForCLI(*schedPath, &ef)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mow job: %v\n", err)
+			fmt.Fprintln(os.Stderr, "hint: mow job --every 10m --prompt \"…\"  (no file needed)")
+			return 1
+		}
+		if len(jobs) == 0 {
+			fmt.Fprintln(os.Stderr, "mow job: no schedules configured")
+			fmt.Fprintln(os.Stderr, "hint: mow job --every 10m --prompt \"…\"  or create $MOW_HOME/job/schedules.yaml")
+			return 1
+		}
 	}
 	// Refuse to start with invalid schedules.
 	for _, j := range jobs {
@@ -210,4 +244,36 @@ func cmdRun(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// inlineJobRequested is true when the user passed any inline schedule flag.
+func inlineJobRequested(every, cron, goalID, prompt string) bool {
+	return strings.TrimSpace(every) != "" ||
+		strings.TrimSpace(cron) != "" ||
+		strings.TrimSpace(goalID) != "" ||
+		strings.TrimSpace(prompt) != ""
+}
+
+// InlineJob builds a single Job from CLI-style fields (no schedules file).
+func InlineJob(id, every, cron, goalID, prompt string) (Job, error) {
+	j := Job{
+		ID:     strings.TrimSpace(id),
+		Every:  strings.TrimSpace(every),
+		Cron:   strings.TrimSpace(cron),
+		Goal:   strings.TrimSpace(goalID),
+		Prompt: strings.TrimSpace(prompt),
+	}
+	if j.ID == "" {
+		j.ID = "inline"
+	}
+	if j.Every == "" && j.Cron == "" {
+		return Job{}, fmt.Errorf("need --every (e.g. 10m) or --cron")
+	}
+	if j.Goal == "" && j.Prompt == "" {
+		return Job{}, fmt.Errorf("need --goal or --prompt")
+	}
+	if err := ValidateJob(j); err != nil {
+		return Job{}, err
+	}
+	return j, nil
 }

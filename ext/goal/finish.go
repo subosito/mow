@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/subosito/mow"
-	"github.com/subosito/mow/ext"
 )
 
 // Active finish signal for the in-flight goal step (set via tool goal_report).
@@ -59,21 +58,23 @@ func finishFrom(ctx context.Context) *finishSignal {
 	return v
 }
 
-func init() {
-	ext.RegisterTool(&reportTool{})
-}
-
 // reportTool lets the model declare goal completion without fragile text markers.
-// Only active while a goal.Runner step is in progress (context carries the signal).
+// Injected only for goal.Runner steps via PromptOpts.ExtraTools — not registered
+// globally, so mow repl/run do not see "finish the goal" as a generic tool.
 type reportTool struct{}
+
+// ReportTool is the goal_report tool instance for PromptOpts.ExtraTools.
+func ReportTool() mow.Tool { return reportTool{} }
 
 func (reportTool) Name() string { return "goal_report" }
 func (reportTool) Description() string {
-	return "End the outer-loop goal NOW. Call as soon as the goal is fully done or blocked — " +
-		"do not keep exploring after you have the answer. " +
-		"Args: status (done|failed), summary (required when done: the user-facing result), " +
-		"reason (optional, for failed). Calling this stops the tool loop."
+	return "Report completion of the CURRENT outer-loop goal only. " +
+		"Call when this goal's objective is fully achieved or blocked — " +
+		"summary must describe this goal's result (not unrelated prior chat). " +
+		"Args: status (done|failed), summary (required when done), reason (optional for failed). " +
+		"Stops the tool loop for this step."
 }
+func (reportTool) ReadOnly() bool { return true }
 func (reportTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"status":{"type":"string","enum":["done","failed"]},"summary":{"type":"string","description":"User-facing result when status=done"},"reason":{"type":"string"}},"required":["status"]}`)
 }

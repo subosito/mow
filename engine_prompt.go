@@ -55,13 +55,21 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		maxToolRes = e.opt.MaxToolResultChars
 	}
 	chat := e.chat
-	tools := e.tools
+	tools := append([]agent.Tool(nil), e.tools...)
 	prior := e.prior
 	hooks := e.hooks
 	pol := e.pol
 	cfg := e.cfg
 	readOnlyExt := e.readOnlyExt
 	e.mu.Unlock()
+
+	// Per-call tools (e.g. goal_report only during goal.Runner steps).
+	for _, t := range opt.ExtraTools {
+		if t == nil {
+			continue
+		}
+		tools = append(tools, adaptTool(t))
+	}
 
 	// Cancellable run context + stable id for hosts/orchestrators.
 	ctx, runID := e.beginRun(ctx)
