@@ -1,22 +1,25 @@
-// Package rpc provides a line-delimited JSON control plane for embedders.
+// Package rpc provides a JSON-RPC 2.0 control plane for embedders over
+// line-delimited JSON (one object per line).
 //
-// Request (one JSON object per line):
+// Requests may include "jsonrpc":"2.0" but need not — minimal clients that
+// send only id/method/params still work:
 //
-//	{"id":1,"method":"prompt","params":{"text":"hello"}}
+//	{"jsonrpc":"2.0","id":1,"method":"prompt","params":{"text":"hello"}}
 //	{"id":2,"method":"cancel"}
 //	{"id":3,"method":"status"}
 //	{"id":4,"method":"session"}
 //	{"id":5,"method":"version"}
 //	{"id":6,"method":"ping"}
 //
-// Response:
+// Responses and notifications are conformant (jsonrpc tag; errors carry a
+// standard code):
 //
-//	{"id":1,"result":{"text":"…","session_id":"…","run_id":"…","stop_reason":"completed"}}
-//	{"id":1,"error":{"message":"…"}}
+//	{"jsonrpc":"2.0","id":1,"result":{"text":"…","session_id":"…","run_id":"…","stop_reason":"completed"}}
+//	{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"unknown method …"}}
 //
 // While a prompt runs, unsolicited event notifications may be written (no id):
 //
-//	{"method":"event","params":{"type":"token","run_id":"…","delta":"…"}}
+//	{"jsonrpc":"2.0","method":"event","params":{"type":"token","run_id":"…","delta":"…"}}
 //
 // Cancel/status are handled concurrently so a host can abort an in-flight prompt.
 //
@@ -48,26 +51,57 @@ type Server struct {
 	encMu sync.Mutex
 }
 
+// jsonRPCVersion tags every response and notification; requests may omit it
+// (we stay tolerant of minimal clients) but a conformant JSON-RPC 2.0 client
+// works unchanged.
+const jsonRPCVersion = "2.0"
+
+// Standard JSON-RPC 2.0 error codes.
+const (
+	codeParseError     = -32700
+	codeInvalidRequest = -32600
+	codeMethodNotFound = -32601
+	codeInternalError  = -32603
+)
+
 type request struct {
-	ID     json.RawMessage `json:"id"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params"`
 }
 
 type response struct {
-	ID     json.RawMessage `json:"id,omitempty"`
-	Result any             `json:"result,omitempty"`
-	Error  *rpcError       `json:"error,omitempty"`
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Result  any             `json:"result,omitempty"`
+	Error   *rpcError       `json:"error,omitempty"`
 }
 
 // notification is a server-push line (events during prompt).
 type notification struct {
-	Method string `json:"method"`
-	Params any    `json:"params,omitempty"`
+	JSONRPC string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitempty"`
 }
 
 type rpcError struct {
+	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+// reply/replyErr/notify stamp the JSON-RPC version so every emitted line is
+// conformant (the many call sites never forget it).
+func (s *Server) reply(id json.RawMessage, result any) {
+	s.write(response{JSONRPC: jsonRPCVersion, ID: id, Result: result})
+}
+
+func (s *Server) replyErr(id json.RawMessage, code int, msg string) {
+	s.write(response{JSONRPC: jsonRPCVersion, ID: id, Error: &rpcError{Code: code, Message: msg}})
+}
+
+func (s *Server) notify(method string, params any) {
+	s.write(notification{JSONRPC: jsonRPCVersion, Method: method, Params: params})
 }
 
 // Serve reads lines until EOF. prompt runs in a worker; cancel/status stay responsive.
@@ -88,7 +122,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	if stream {
 		unsub := s.Engine.AddOnEvent(func(ev mow.Event) {
-			s.write(notification{Method: "event", Params: ev})
+			s.notify("event", ev)
 		})
 		defer unsub()
 	}
@@ -105,7 +139,7 @@ func (s *Server) Serve(ctx context.Context) error {
 			}
 			var req request
 			if err := json.Unmarshal([]byte(line), &req); err != nil {
-				s.write(response{Error: &rpcError{Message: "invalid json: " + err.Error()}})
+				s.replyErr(nil, codeParseError, "invalid json: "+err.Error())
 				continue
 			}
 			select {
@@ -138,6 +172,10 @@ func (s *Server) Serve(ctx context.Context) error {
 				promptWG.Wait()
 				return nil
 			}
+			if strings.TrimSpace(req.Method) == "" {
+				s.replyErr(req.ID, codeInvalidRequest, "missing method")
+				continue
+			}
 			switch strings.ToLower(req.Method) {
 			case "prompt":
 				promptWG.Add(1)
@@ -147,27 +185,27 @@ func (s *Server) Serve(ctx context.Context) error {
 				}(req)
 			case "cancel":
 				s.Engine.Cancel()
-				s.write(response{ID: req.ID, Result: map[string]any{"ok": true}})
+				s.reply(req.ID, map[string]any{"ok": true})
 			case "status":
-				s.write(response{ID: req.ID, Result: s.Engine.Status()})
+				s.reply(req.ID, s.Engine.Status())
 			case "session", "session_id":
-				s.write(response{ID: req.ID, Result: map[string]any{
+				s.reply(req.ID, map[string]any{
 					"session_id": s.Engine.SessionID(),
 					"workspace":  s.Engine.Workspace(),
 					"model":      s.Engine.Model(),
 					"wire":       s.Engine.Wire(),
-				}})
+				})
 			case "ping":
-				s.write(response{ID: req.ID, Result: "pong"})
+				s.reply(req.ID, "pong")
 			case "version":
-				s.write(response{ID: req.ID, Result: map[string]any{
+				s.reply(req.ID, map[string]any{
 					"name":    "mow",
 					"version": mow.VersionString(),
 					"rpc":     "2",
 					"package": "github.com/subosito/mow",
-				}})
+				})
 			default:
-				s.write(response{ID: req.ID, Error: &rpcError{Message: "unknown method " + req.Method}})
+				s.replyErr(req.ID, codeMethodNotFound, "unknown method "+req.Method)
 			}
 		}
 	}
@@ -181,14 +219,15 @@ func (s *Server) handlePrompt(ctx context.Context, req request) {
 
 	res, err := s.Engine.Prompt(ctx, p.Text)
 	if err != nil {
-		s.write(response{ID: req.ID, Error: &rpcError{Message: err.Error()}, Result: map[string]any{
-			"text": res.Text, "session_id": res.SessionID, "run_id": res.RunID, "stop_reason": res.StopReason,
-		}})
+		s.write(response{JSONRPC: jsonRPCVersion, ID: req.ID,
+			Error:  &rpcError{Code: codeInternalError, Message: err.Error()},
+			Result: map[string]any{"text": res.Text, "session_id": res.SessionID, "run_id": res.RunID, "stop_reason": res.StopReason},
+		})
 		return
 	}
-	s.write(response{ID: req.ID, Result: map[string]any{
+	s.reply(req.ID, map[string]any{
 		"text": res.Text, "session_id": res.SessionID, "run_id": res.RunID, "stop_reason": res.StopReason,
-	}})
+	})
 }
 
 func (s *Server) write(v any) {

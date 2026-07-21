@@ -354,8 +354,8 @@ mow loop ──acp_delegate──▶ peer ACP agent (other harness)
 
 ### RPC control plane (`ext/rpc`)
 
-JSONL on stdio. Methods: `prompt`, `cancel`, `status`, `session`, `version`, `ping`.  
-During `prompt`, server may write notifications `{"method":"event","params":{…Event}}` (`run.start`, `token`, `reasoning`, `tool.start`, `tool.end`, `turn`, `delegate.chunk`, `run.end`). Final response includes `run_id` and `stop_reason`.
+**JSON-RPC 2.0** over line-delimited JSON on stdio. Methods: `prompt`, `cancel`, `status`, `session`, `version`, `ping`. Responses and notifications carry `"jsonrpc":"2.0"` and errors carry a standard `code` (-32601 method not found, -32600 invalid request, -32700 parse error, -32603 internal). Requests may include `"jsonrpc":"2.0"` but need not — minimal clients sending only `id`/`method`/`params` still work.  
+During `prompt`, server may write notifications `{"jsonrpc":"2.0","method":"event","params":{…Event}}` (`run.start`, `token`, `reasoning`, `tool.start`, `tool.end`, `turn`, `delegate.chunk`, `run.end`). Final response includes `run_id` and `stop_reason`.
 
 `tool.end` includes `duration_ms` (wall time for that tool). Tool batches may run up to `policy.max_parallel_tools` concurrent Exec calls (default 8); soft results append in call order. See [harness.md](harness.md) § Abort / cancel.
 ---
