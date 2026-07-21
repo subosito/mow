@@ -50,7 +50,7 @@ tools:
   #   - understand_video
 
 policy:
-  max_turns: 40
+  max_turns: 120
   bash_timeout_sec: 60
   max_read_bytes: 524288          # 512 KiB per read (default)
   max_context_chars: 100000       # soft history compaction (default); -1 disables

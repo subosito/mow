@@ -57,8 +57,23 @@ func extractThinking(s string) (visible, thinking string, unclosed bool) {
 		// Drop a single leading newline after the close tag.
 		rest = strings.TrimPrefix(rest, "\n")
 		rest = strings.TrimPrefix(rest, "\r\n")
+		// Seam guard: stripping the block must not weld the surrounding prose
+		// together ("key files.Let me"). When both sides touch with
+		// non-whitespace, keep them apart with a space.
+		if v := vis.String(); v != "" && rest != "" &&
+			!isSpaceByte(v[len(v)-1]) && !isSpaceByte(rest[0]) {
+			vis.WriteByte(' ')
+		}
 	}
 	return vis.String(), think.String(), unclosed
+}
+
+func isSpaceByte(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r':
+		return true
+	}
+	return false
 }
 
 func earliestThinkOpen(s string) (idx int, open, close string) {

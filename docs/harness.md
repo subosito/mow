@@ -148,6 +148,7 @@ Lifecycle slog (`mow run/tool start|end`) is **Debug** by default. Stock CLI pri
 
 | Knob | Default | Effect |
 |------|---------|--------|
+| `policy.max_turns` | `120` | Runaway guard: LLM round-trips per Prompt (a turn may batch up to 8 tools). Exhausted runs stop with `max_turns`; the session resumes with a follow-up prompt |
 | `policy.max_context_chars` | `100000` | Soft-compact history before each LLM call; set `-1` to disable |
 | `policy.max_tool_result_chars` | `24000` | Cap each tool result stored for the model (~6k tokens) |
 | `policy.max_read_bytes` | `512KiB` | Cap `read` tool raw file size |

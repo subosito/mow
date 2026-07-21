@@ -143,7 +143,7 @@ func defaults() *File {
 			Enable: []string{"read", "glob", "grep"},
 		},
 		Policy: PolicyConfig{
-			MaxTurns:           40,
+			MaxTurns:           120,
 			BashTimeoutSec:     60,
 			MaxReadBytes:       512 << 10, // 512 KiB — enough for code files; loop also caps tool results
 			MaxContextChars:    100_000,   // soft compaction on by default (~25–30k tokens rough)
@@ -395,7 +395,7 @@ func (f *File) normalize() error {
 		f.LLM.APIKey = strings.TrimSpace(os.Getenv(f.LLM.APIKeyEnv))
 	}
 	if f.Policy.MaxTurns <= 0 {
-		f.Policy.MaxTurns = 40
+		f.Policy.MaxTurns = 120
 	}
 	if f.Policy.MaxReadBytes <= 0 {
 		f.Policy.MaxReadBytes = 512 << 10

@@ -75,7 +75,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	}
 	maxTurns := opt.MaxTurns
 	if maxTurns <= 0 {
-		maxTurns = 40
+		maxTurns = 120
 	}
 
 	var messages []llm.Message
@@ -163,7 +163,9 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			return Result{Messages: messages, Usage: usage}, err
 		}
 	}
-	return Result{Messages: messages, Usage: usage}, fmt.Errorf("%w: %d", ErrMaxTurns, maxTurns)
+	return Result{Messages: messages, Usage: usage}, fmt.Errorf(
+		"%w: %d (raise --max-turns / policy.max_turns, or prompt again to continue — history is kept)",
+		ErrMaxTurns, maxTurns)
 }
 
 // toolSlot is one resolved call in a batch (soft result or hard error).

@@ -71,3 +71,22 @@ func TestLoopStripsInlineThinking(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractThinkingSeamNotGlued(t *testing.T) {
+	cases := []struct{ in, wantVis string }{
+		// Inline tags with no surrounding whitespace must not weld prose.
+		{"key files.<think>plan</think>Let me go", "key files. Let me go"},
+		// Existing whitespace on either side: no extra separator injected.
+		{"key files.\n<think>plan</think>\nLet me go", "key files.\nLet me go"},
+		{"a <think>x</think>b", "a b"},
+		{"a<think>x</think> b", "a b"},
+		// Multiple blocks.
+		{"one<think>x</think>two<think>y</think>three", "one two three"},
+	}
+	for _, c := range cases {
+		vis, _, unclosed := extractThinking(c.in)
+		if unclosed || vis != c.wantVis {
+			t.Errorf("extractThinking(%q) vis=%q want %q (unclosed=%v)", c.in, vis, c.wantVis, unclosed)
+		}
+	}
+}

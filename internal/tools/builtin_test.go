@@ -118,3 +118,41 @@ func TestEditReturnsDiffWithPath(t *testing.T) {
 		t.Fatalf("file not updated: %q", data)
 	}
 }
+
+func TestReadMissingFileSuggestsNearby(t *testing.T) {
+	ws := t.TempDir()
+	for _, f := range []string{"tui.go", "layout_test.go", "render.go"} {
+		if err := os.WriteFile(filepath.Join(ws, f), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := &policy.Policy{Workspace: ws}
+	var rd interface {
+		Exec(ctx context.Context, args json.RawMessage) (string, error)
+	}
+	for _, tool := range tools.Registry(p, []string{"read"}) {
+		if tool.Name() == "read" {
+			rd = tool
+		}
+	}
+	if rd == nil {
+		t.Fatal("read tool missing from registry")
+	}
+	_, err := rd.Exec(context.Background(), json.RawMessage(`{"path":"layout.go"}`))
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no such file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The stem match must surface the real neighbor.
+	if !strings.Contains(msg, "layout_test.go") {
+		t.Fatalf("expected nearby suggestion in error: %v", err)
+	}
+	// No stem match → directory listing fallback.
+	_, err = rd.Exec(context.Background(), json.RawMessage(`{"path":"zzz.go"}`))
+	if err == nil || !strings.Contains(err.Error(), "directory contains:") {
+		t.Fatalf("expected directory fallback: %v", err)
+	}
+}

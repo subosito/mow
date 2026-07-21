@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -72,6 +73,11 @@ func (t *readTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	}
 	f, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// Models guess conventional filenames; naming the real neighbors
+			// turns a wasted turn into an immediate correction.
+			return "", fmt.Errorf("read %s: no such file%s", a.Path, nearbyHint(path))
+		}
 		return "", err
 	}
 	defer f.Close()
@@ -436,4 +442,46 @@ func applyHashlineEdit(content, hash, newLine string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("hashline: no line with hash %s", hash)
+}
+
+// nearbyHint suggests real files when a read path does not exist: name-stem
+// matches from the same directory, else a short directory listing. Keeps a
+// guessing model self-correcting in one turn instead of re-globbing.
+func nearbyHint(path string) string {
+	dir := filepath.Dir(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+	base := filepath.Base(path)
+	stem := strings.ToLower(strings.TrimSuffix(base, filepath.Ext(base)))
+	var near, all []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		if e.IsDir() {
+			name += "/"
+		}
+		all = append(all, name)
+		lower := strings.ToLower(strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())))
+		if stem != "" && (strings.Contains(lower, stem) || strings.Contains(stem, lower)) {
+			near = append(near, name)
+		}
+	}
+	const maxShow = 8
+	pick := near
+	label := " — nearby: "
+	if len(pick) == 0 {
+		pick = all
+		label = " — directory contains: "
+	}
+	sort.Strings(pick)
+	extra := ""
+	if len(pick) > maxShow {
+		extra = fmt.Sprintf(" (+%d more)", len(pick)-maxShow)
+		pick = pick[:maxShow]
+	}
+	return label + strings.Join(pick, ", ") + extra
 }
