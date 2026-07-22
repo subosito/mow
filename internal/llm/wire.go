@@ -7,6 +7,8 @@ import "strings"
 const (
 	// WireOpenAIChat is POST /v1/chat/completions (default agent path).
 	WireOpenAIChat = "openai-chat-completions"
+	// WireOpenAIResponses is POST /v1/responses (Grok-class, GPT-5-class agent tools).
+	WireOpenAIResponses = "openai-responses"
 	// WireAnthropicMsg is POST /v1/messages.
 	WireAnthropicMsg = "anthropic-messages"
 )
@@ -18,13 +20,17 @@ func NormalizeWire(w string) string {
 	if w == "" {
 		return WireOpenAIChat
 	}
+	// Singular alias (common typo / gateway label).
+	if w == "openai-response" {
+		return WireOpenAIResponses
+	}
 	return w
 }
 
 // IsKnownChatWire reports whether mow can speak this wire for chat/tools.
 func IsKnownChatWire(w string) bool {
 	switch NormalizeWire(w) {
-	case WireOpenAIChat, WireAnthropicMsg:
+	case WireOpenAIChat, WireOpenAIResponses, WireAnthropicMsg:
 		return true
 	default:
 		return false

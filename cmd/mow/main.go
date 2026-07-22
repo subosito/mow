@@ -359,7 +359,7 @@ Env (supported):
   MOW_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
   MOW_MODEL / OPENAI_MODEL / ANTHROPIC_MODEL
   MOW_BASE_URL / OPENAI_BASE_URL / ANTHROPIC_BASE_URL
-  MOW_WIRE                         openai-chat-completions | anthropic-messages
+  MOW_WIRE                         openai-chat-completions | openai-responses | anthropic-messages
   MOW_TRUST_PROJECT=1              trust project .mow/config this run (or: mow trust)
 
 Secure default tools: read, glob, grep. Power tools: --allow-write / --allow-shell.

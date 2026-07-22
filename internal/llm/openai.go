@@ -123,9 +123,9 @@ type ToolSpecFunction struct {
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
-// Client is a multi-wire chat client (openai-chat-completions or anthropic-messages).
+// Client is a multi-wire chat client (chat-completions, responses, or anthropic-messages).
 type Client struct {
-	// Wire is the client protocol id (see WireOpenAIChat, WireAnthropicMsg).
+	// Wire is the client protocol id (see WireOpenAIChat, WireOpenAIResponses, WireAnthropicMsg).
 	Wire         string
 	BaseURL      string
 	APIKey       string
@@ -135,7 +135,8 @@ type Client struct {
 	// Stream enables SSE token deltas when supported by the wire.
 	Stream bool
 	// MaxTokens caps the response length on wires that require it
-	// (anthropic-messages). Zero means the default (8192).
+	// (anthropic-messages, openai-responses max_output_tokens). Zero means
+	// provider default (8192 for Anthropic; omit for Responses).
 	MaxTokens int
 }
 
@@ -180,6 +181,11 @@ func (c *Client) ChatWithStream(ctx context.Context, messages []Message, tools [
 			return c.chatAnthropicStream(ctx, messages, tools, hooks)
 		}
 		return c.chatAnthropic(ctx, messages, tools)
+	case WireOpenAIResponses:
+		if stream {
+			return c.chatOpenAIResponsesStream(ctx, messages, tools, hooks)
+		}
+		return c.chatOpenAIResponses(ctx, messages, tools)
 	default: // WireOpenAIChat
 		if stream {
 			return c.ChatStreamHooks(ctx, messages, tools, hooks)

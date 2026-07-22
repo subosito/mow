@@ -112,7 +112,7 @@ mow only needs:
 | `llm.base_url` | Provider or gateway `/v1` (or Anthropic root for messages wire) |
 | `llm.api_key` / env | Auth for that endpoint |
 | `llm.model` | Chat model id |
-| `llm.wire` | `openai-chat-completions` (default) or `anthropic-messages` |
+| `llm.wire` | `openai-chat-completions` (default), `openai-responses`, or `anthropic-messages` |
 
 | Without a gateway | With any compatible gateway |
 |-------------------|-----------------------------|

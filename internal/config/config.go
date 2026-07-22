@@ -26,7 +26,7 @@ type File struct {
 
 type LLMConfig struct {
 	// Wire is the client protocol:
-	//   openai-chat-completions (default) | anthropic-messages
+	//   openai-chat-completions (default) | openai-responses | anthropic-messages
 	Wire      string            `yaml:"wire"`
 	BaseURL   string            `yaml:"base_url"`
 	APIKey    string            `yaml:"api_key"`
@@ -389,11 +389,15 @@ func (f *File) normalize() error {
 	if f.LLM.Wire == "" {
 		f.LLM.Wire = "openai-chat-completions"
 	}
+	// Singular alias (common typo / gateway label).
+	if f.LLM.Wire == "openai-response" {
+		f.LLM.Wire = "openai-responses"
+	}
 	switch f.LLM.Wire {
-	case "openai-chat-completions", "anthropic-messages":
+	case "openai-chat-completions", "openai-responses", "anthropic-messages":
 		// ok
 	default:
-		return fmt.Errorf("llm.wire must be openai-chat-completions or anthropic-messages, got %q", f.LLM.Wire)
+		return fmt.Errorf("llm.wire must be openai-chat-completions, openai-responses, or anthropic-messages, got %q", f.LLM.Wire)
 	}
 	if f.LLM.Wire == "anthropic-messages" && (f.LLM.APIKeyEnv == "" || f.LLM.APIKeyEnv == "OPENAI_API_KEY") {
 		if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) != "" || f.LLM.APIKey == "" {

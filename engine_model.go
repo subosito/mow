@@ -56,14 +56,14 @@ func (e *Engine) SetModel(id string) error {
 	return nil
 }
 
-// SetWire switches the client wire (openai-chat-completions | anthropic-messages).
+// SetWire switches the client wire (openai-chat-completions | openai-responses | anthropic-messages).
 func (e *Engine) SetWire(wire string) error {
 	if e == nil {
 		return fmt.Errorf("mow: nil engine")
 	}
 	wire = llm.NormalizeWire(wire)
 	if !llm.IsKnownChatWire(wire) {
-		return fmt.Errorf("mow: unsupported wire %q (want openai-chat-completions or anthropic-messages)", wire)
+		return fmt.Errorf("mow: unsupported wire %q (want openai-chat-completions, openai-responses, or anthropic-messages)", wire)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
