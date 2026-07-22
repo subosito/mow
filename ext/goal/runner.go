@@ -56,7 +56,14 @@ func (r *Runner) Create(spec Spec) (State, error) {
 }
 
 // Run executes steps until done, failed, max steps, or ctx cancel.
+// maxStepsRaise, when > stored MaxSteps, raises the outer budget so a failed
+// "max steps exceeded" goal can continue (e.g. CLI --max-steps 24).
 func (r *Runner) Run(ctx context.Context, id string) (State, error) {
+	return r.RunRaise(ctx, id, 0)
+}
+
+// RunRaise is Run with an optional MaxSteps raise (0 = keep stored).
+func (r *Runner) RunRaise(ctx context.Context, id string, maxStepsRaise int) (State, error) {
 	if r == nil || r.Engine == nil {
 		return State{}, fmt.Errorf("goal: nil engine")
 	}
@@ -68,10 +75,12 @@ func (r *Runner) Run(ctx context.Context, id string) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
+	st = applyMaxStepsRaise(st, maxStepsRaise)
 	return r.runState(ctx, st)
 }
 
 // RunSpec creates (or resumes incomplete) then runs.
+// On resume, MaxSteps is the max of stored and spec.MaxSteps so CLI can raise the budget.
 func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 	if r == nil || r.Engine == nil {
 		return State{}, fmt.Errorf("goal: nil engine")
@@ -92,13 +101,26 @@ func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 			if strings.TrimSpace(prev.Goal) == "" {
 				prev.Goal = spec.Goal
 			}
-			if prev.MaxSteps <= 0 {
-				prev.MaxSteps = spec.MaxSteps
-			}
+			prev = applyMaxStepsRaise(prev, spec.MaxSteps)
 			st = prev
 		}
 	}
 	return r.runState(ctx, st)
+}
+
+// applyMaxStepsRaise raises st.MaxSteps when raise > current (never lowers).
+// Clears a pure "max steps exceeded" failure so the outer loop can continue.
+func applyMaxStepsRaise(st State, raise int) State {
+	if raise <= st.MaxSteps {
+		return st
+	}
+	st.MaxSteps = raise
+	if st.Status == StatusFailed && strings.Contains(st.Error, "max steps") {
+		st.Error = ""
+		// runState sets StatusRunning; leave Failed→clear so we don't look terminal mid-load.
+		st.Status = StatusPending
+	}
+	return st
 }
 
 // RunParallel runs multiple goals concurrently. Each needs its own Engine.

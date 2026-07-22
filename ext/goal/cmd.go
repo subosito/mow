@@ -61,6 +61,9 @@ Subcommands:
   reset  --id NAME                               clear progress (pending); re-run with run --id
   delete --id NAME                               remove goal file
 
+  --max-steps N   outer Prompt budget (default 8). On resume, raises stored
+                  max_steps when N is higher so you can continue past "8/8 exceeded".
+
 Engine flags (run): same as other packs (--config --model --workspace … --continue)
 
 Completion: goal_report status=done summary="…" (preferred). Multi-part goals: first
@@ -102,7 +105,7 @@ func cmdRun(args []string) int {
 	ef.Bind(fs)
 	id := fs.String("id", "", "existing goal id")
 	goalText := fs.String("goal", "", "one-shot goal text (creates/resumes id)")
-	maxSteps := fs.Int("max-steps", 8, "max steps when using --goal")
+	maxSteps := fs.Int("max-steps", 8, "outer step budget (resume: raises stored max_steps if higher)")
 	dir := fs.String("dir", "", "store dir (default $MOW_HOME/goals)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -132,7 +135,8 @@ func cmdRun(args []string) int {
 	case strings.TrimSpace(*goalText) != "":
 		st, err = r.RunSpec(ctx, Spec{ID: *id, Goal: *goalText, MaxSteps: *maxSteps})
 	case strings.TrimSpace(*id) != "":
-		st, err = r.Run(ctx, *id)
+		// --max-steps N raises the stored budget when N is larger (continue past 8/8).
+		st, err = r.RunRaise(ctx, *id, *maxSteps)
 	default:
 		fmt.Fprintln(os.Stderr, "mow goal run: need --id or --goal")
 		return 2
