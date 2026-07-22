@@ -28,9 +28,23 @@ res, err := eng.Prompt(ctx, "list go files")
 // res.Text, res.SessionID
 ```
 
-One-shot: `mow.Run(ctx, prompt, opt)`.
-Custom backends: `Options.Provider` (streaming + usage preserved); per-engine
-tools: `Options.Tools`; token counts: `RunResult.Usage` / run.end events.
+One-shot: `mow.Run(ctx, prompt, opt)`. The engine is multi-turn — call
+`eng.Prompt` again and history carries.
+
+What the embed gives you beyond a one-liner:
+
+- **Custom transport / logging** — `Options.HTTPClient` (proxy, timeouts) and
+  `Options.Logger` (capture `*slog` without touching the global default).
+- **Custom LLM backend** — `Options.Provider` (streaming, tool calls, and
+  token usage all preserved), or `Options.Chat` for quick fakes.
+- **Per-engine tools** — `Options.Tools`; two engines in one process can run
+  different toolsets.
+- **Events & tokens** — `Options.OnEvent` for the lifecycle stream;
+  `RunResult.Usage` / `run.end` for provider-reported token totals.
+- **Sessions** — `eng.Sessions()` lists resumable sessions;
+  `Options.SessionID` / `Continue` resume one.
+
+Full walkthrough with code: **[docs/embedding.md](docs/embedding.md)**.
 
 ## Try it
 
@@ -90,6 +104,7 @@ Docs: [docs/extensions.md](docs/extensions.md).
 |-----|----------|
 | [AGENTS.md](AGENTS.md) | AI agents: build, spine, conventions |
 | [docs/architecture.md](docs/architecture.md) | Public/internal, LLM endpoint model |
+| [docs/embedding.md](docs/embedding.md) | Embed in Go: options, events, custom tools/providers, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config |
 | [docs/extensions.md](docs/extensions.md) | Packs, CLI ownership, ACP, media, decisions |
 

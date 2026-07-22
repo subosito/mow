@@ -3,7 +3,7 @@
 **Binary:** `mow`  
 **Module:** `github.com/subosito/mow`  
 
-Stack context: [architecture.md](architecture.md). Packs: [extensions.md](extensions.md).
+Stack context: [architecture.md](architecture.md). Embedding in Go: [embedding.md](embedding.md). Packs: [extensions.md](extensions.md).
 
 ---
 
@@ -176,6 +176,11 @@ Compaction is **character-estimate**, not a real tokenizer. It keeps the system 
 
 No provider OAuth in mow. Streaming: `OnToken` / `OnEvent` / ACP `session/update` chunks.
 
+**Embedder overrides** (code, not config): `Options.HTTPClient` routes all
+LLM/media HTTP through your transport (proxy, timeouts, middleware);
+`Options.Logger` captures engine logs on your own `*slog.Logger`;
+`Options.Provider` swaps the backend entirely. See [embedding.md](embedding.md).
+
 Optional HTTP attribution labels: `X-Mow-Actor`, `X-Mow-Session`, `X-Mow-Component` (see [extensions.md](extensions.md)).
 
 ---
@@ -232,6 +237,8 @@ JSONL under `session.dir` (default `$MOW_HOME/sessions/<project-hash>/`).
 Default: new session. Resume: `--continue` (latest) or `--session ID` (loads agent prior). `--no-session` for tests/CI. Agent prior uses the last full message snapshot.
 
 Works on **`mow run`** and **`mow repl`** (same `Options.Continue` / `SessionID`). REPL prints `session=…` at start (and a short transcript when resuming) and again on exit with a resume hint (`mow repl --session <id>` or `--continue`).
+
+Embedders build a session picker with **`Engine.Sessions()`** → `[]SessionInfo{ID, Updated, Preview}` (newest first, `Preview` = first user line), then resume via `Options.SessionID`. This is what mowi's `/sessions` uses.
 
 **Cancel mid tool batch:** hard-abort fails fast (siblings cancelled). Soft results already finished still append to history in call order; incomplete tools are omitted. Session prior keeps whatever was appended before cancel (`StopReason=cancelled`).
 

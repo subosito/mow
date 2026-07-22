@@ -121,5 +121,6 @@ Gate: `devenv shell -- just verify` before commit when the change is non-trivial
 | Doc | Read when |
 |-----|-----------|
 | [docs/architecture.md](docs/architecture.md) | Public/internal, LLM endpoint model |
+| [docs/embedding.md](docs/embedding.md) | Embedding in Go: options, events, custom tools/providers, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config, sessions |
 | [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP/LSP |
