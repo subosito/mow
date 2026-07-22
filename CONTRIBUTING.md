@@ -12,7 +12,8 @@ devenv shell -- just verify   # go test ./... + go vet — gate before commit
 go test ./... && go vet ./...
 ```
 
-- Conventional Commits (`feat(scope):`, `fix:`, `docs:`, `chore:`).
+- **Commits must use Conventional Commits** — see [AGENTS.md § Commits](AGENTS.md#commits)
+  (`feat(scope): …`, `fix: …`, `docs: …`, `chore: …`). No informal subjects.
 - Match surrounding style; scoped diffs; no drive-by refactors.
 - Test non-trivial logic, table-driven like the nearest `*_test.go`.
 - Do not regress the security invariants listed in AGENTS.md.

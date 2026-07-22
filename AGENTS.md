@@ -57,10 +57,42 @@ do not tell them to import `internal/`.
 
 ## Conventions
 
-- **Conventional Commits** (`feat(scope):`, `fix:`, `docs:`, `chore:`).
 - Match surrounding style; scoped diffs; no drive-by refactors.
 - Test non-trivial logic; table-driven like nearest `*_test.go`.
 - Prefer stdlib; no new deps without a clear need.
+
+## Commits
+
+**Always use [Conventional Commits](https://www.conventionalcommits.org/)** when
+creating a git commit in this repo (agents and humans). Informal subjects
+(`run`, `updates`, `wip`, `fix stuff`) are not acceptable.
+
+Format:
+
+```
+type(optional-scope): short imperative subject
+
+Optional body: why this change, not a file list.
+```
+
+| Rule | Detail |
+|------|--------|
+| Types | `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf` (pick one) |
+| Scope | Prefer when clear: `llm`, `agent`, `goal`, `job`, `engine`, `cli`, `mcp`, `rpc`, `tools`, `config`, pack name, … |
+| Subject | Imperative, lowercase after the colon, no trailing period, ~72 chars max |
+| Body | Blank line after subject; explain *why* when non-obvious |
+| Splits | One logical change per commit when practical; do not dump unrelated work into one subject |
+
+Examples:
+
+```
+feat(llm): add openai-responses wire
+fix(goal): raise max_steps on resume via --max-steps
+docs: document openai-responses in harness
+chore: remove obsolete review notes
+```
+
+Gate: `devenv shell -- just verify` before commit when the change is non-trivial.
 
 ## Security invariants (do not regress)
 
