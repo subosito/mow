@@ -171,6 +171,7 @@ Compaction is **character-estimate**, not a real tokenizer. It keeps the system 
 | `llm.wire` | `openai-chat-completions` (default) \| `openai-responses` \| `anthropic-messages` |
 | `llm.headers` | Optional extra headers |
 | `llm.stream` | SSE content deltas (both wires) |
+| `llm.prompt_cache` | Provider prompt caching (default on). Anthropic: `cache_control` on system/tools/history → repeated prefixes bill ~90% cheaper. Set `false` for gateways that reject the field |
 | `llm.generate.*` | Side-lane model ids for generate tools |
 | `llm.understand.*` | Side-lane model ids for understand tools |
 

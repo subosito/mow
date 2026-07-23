@@ -138,6 +138,10 @@ type Client struct {
 	// (anthropic-messages, openai-responses max_output_tokens). Zero means
 	// provider default (8192 for Anthropic; omit for Responses).
 	MaxTokens int
+	// PromptCache enables provider prompt caching where the wire supports an
+	// explicit breakpoint (anthropic-messages: cache_control on system, tools,
+	// and the last message). OpenAI caches automatically and ignores this.
+	PromptCache bool
 }
 
 // ChatRequest is the outbound chat body (subset).

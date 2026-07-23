@@ -29,16 +29,22 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 	url := anthropicMessagesURL(c.BaseURL)
 
 	system, anthMsgs := toAnthropicMessages(messages)
+	if c.PromptCache {
+		cacheLastMessage(anthMsgs)
+	}
 	body := map[string]any{
 		"model":      c.Model,
 		"max_tokens": c.anthropicMaxTokens(),
 		"messages":   anthMsgs,
 	}
-	if system != "" {
-		body["system"] = system
+	if sys := anthropicSystemField(system, c.PromptCache); sys != nil {
+		body["system"] = sys
 	}
-	if len(tools) > 0 {
-		body["tools"] = toAnthropicTools(tools)
+	if atools := toAnthropicTools(tools); len(atools) > 0 {
+		if c.PromptCache {
+			cacheLastTool(atools)
+		}
+		body["tools"] = atools
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -76,8 +82,10 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 		} `json:"content"`
 		StopReason string `json:"stop_reason"`
 		Usage      struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 		} `json:"usage"`
 		Error *struct {
 			Message string `json:"message"`
@@ -90,8 +98,10 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 		return Message{}, fmt.Errorf("llm: %s", parsed.Error.Message)
 	}
 	msg := Message{Role: "assistant", StopReason: parsed.StopReason}
+	// When caching is active Anthropic reports non-cached input in input_tokens
+	// and the cached prefix separately; sum them so the total input is honest.
 	msg.Usage = Usage{
-		InputTokens:  parsed.Usage.InputTokens,
+		InputTokens:  parsed.Usage.InputTokens + parsed.Usage.CacheCreationInputTokens + parsed.Usage.CacheReadInputTokens,
 		OutputTokens: parsed.Usage.OutputTokens,
 	}
 	var textParts []string
@@ -113,6 +123,65 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 	}
 	msg.Content = strings.Join(textParts, "")
 	return msg, nil
+}
+
+// Prompt caching (anthropic-messages): cache_control breakpoints tell Anthropic
+// to cache the request prefix up to and including the marked block. We mark the
+// three stable/large prefixes — system prompt, tool definitions, and the last
+// message — so repeated turns (and the many LLM calls inside one agent loop)
+// re-read the cached prefix (~90% cheaper input) instead of re-sending it. Max
+// four breakpoints are allowed; we use at most three.
+func ephemeralCacheControl() map[string]any {
+	return map[string]any{"type": "ephemeral"}
+}
+
+// anthropicSystemField returns the request "system" value: a plain string, or a
+// single cacheable text block when caching is on (the system prompt — AGENTS.md
+// + skills — is usually the largest stable input).
+func anthropicSystemField(system string, cache bool) any {
+	if system == "" {
+		return nil
+	}
+	if !cache {
+		return system
+	}
+	return []map[string]any{{
+		"type":          "text",
+		"text":          system,
+		"cache_control": ephemeralCacheControl(),
+	}}
+}
+
+// cacheLastTool marks the final tool so the (stable) tool definitions cache
+// alongside the system prompt.
+func cacheLastTool(tools []map[string]any) {
+	if len(tools) == 0 {
+		return
+	}
+	tools[len(tools)-1]["cache_control"] = ephemeralCacheControl()
+}
+
+// cacheLastMessage marks the last content block of the last message, so a
+// growing multi-turn history caches incrementally (each turn's tail is a cache
+// hit on the next call). Promotes a plain string body to a block to carry the
+// marker.
+func cacheLastMessage(msgs []map[string]any) {
+	if len(msgs) == 0 {
+		return
+	}
+	last := msgs[len(msgs)-1]
+	switch c := last["content"].(type) {
+	case string:
+		last["content"] = []map[string]any{{
+			"type":          "text",
+			"text":          c,
+			"cache_control": ephemeralCacheControl(),
+		}}
+	case []map[string]any:
+		if len(c) > 0 {
+			c[len(c)-1]["cache_control"] = ephemeralCacheControl()
+		}
+	}
 }
 
 func toAnthropicMessages(messages []Message) (system string, out []map[string]any) {

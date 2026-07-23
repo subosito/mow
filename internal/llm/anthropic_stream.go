@@ -26,17 +26,23 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 	url := anthropicMessagesURL(c.BaseURL)
 
 	system, anthMsgs := toAnthropicMessages(messages)
+	if c.PromptCache {
+		cacheLastMessage(anthMsgs)
+	}
 	body := map[string]any{
 		"model":      c.Model,
 		"max_tokens": c.anthropicMaxTokens(),
 		"messages":   anthMsgs,
 		"stream":     true,
 	}
-	if system != "" {
-		body["system"] = system
+	if sys := anthropicSystemField(system, c.PromptCache); sys != nil {
+		body["system"] = sys
 	}
-	if len(tools) > 0 {
-		body["tools"] = toAnthropicTools(tools)
+	if atools := toAnthropicTools(tools); len(atools) > 0 {
+		if c.PromptCache {
+			cacheLastTool(atools)
+		}
+		body["tools"] = atools
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -200,16 +206,19 @@ func applyAnthropicSSE(data, event string, msg *Message, toolsByIdx map[int]*ant
 		var ev struct {
 			Message struct {
 				Usage struct {
-					InputTokens  int `json:"input_tokens"`
-					OutputTokens int `json:"output_tokens"`
+					InputTokens              int `json:"input_tokens"`
+					OutputTokens             int `json:"output_tokens"`
+					CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+					CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 				} `json:"usage"`
 			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
 			return nil
 		}
-		if ev.Message.Usage.InputTokens > 0 {
-			msg.Usage.InputTokens = ev.Message.Usage.InputTokens
+		// Sum cached + non-cached input so the reported total is honest.
+		if in := ev.Message.Usage.InputTokens + ev.Message.Usage.CacheCreationInputTokens + ev.Message.Usage.CacheReadInputTokens; in > 0 {
+			msg.Usage.InputTokens = in
 		}
 		if ev.Message.Usage.OutputTokens > 0 {
 			msg.Usage.OutputTokens = ev.Message.Usage.OutputTokens

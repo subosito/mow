@@ -34,6 +34,10 @@ type LLMConfig struct {
 	Model     string            `yaml:"model"` // provider (or gateway) model id
 	Headers   map[string]string `yaml:"headers"`
 	Stream    bool              `yaml:"stream"`
+	// PromptCache toggles provider prompt caching (anthropic-messages: cache
+	// system/tools/history). Nil = enabled (pure win for repeated prefixes);
+	// set false for gateways that reject cache_control fields.
+	PromptCache *bool `yaml:"prompt_cache"`
 
 	// Generate maps modality → model id for generate_* tools
 	// (image → POST /v1/images/generations, speech → /v1/audio/speech, …).

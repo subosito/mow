@@ -267,6 +267,8 @@ func New(opt Options) (*Engine, error) {
 			HTTP:         opt.HTTPClient,
 			ExtraHeaders: headers,
 			Stream:       cfg.LLM.Stream || opt.Stream,
+			// Prompt caching on by default (nil); explicit false disables it.
+			PromptCache: cfg.LLM.PromptCache == nil || *cfg.LLM.PromptCache,
 		}
 		e.client = client
 		mediaClient = llm.FromClient(client)
