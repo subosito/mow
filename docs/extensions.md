@@ -232,7 +232,7 @@ Same id never overlaps a previous tick (skip if still running). Not HA — use h
 
 ### `ext/mcpserve` — mow **as** an MCP server
 
-The mirror of `ext/mcp` (client): `mow mcp-serve` runs mow as an MCP server over
+The mirror of `ext/mcp` (client): `mow mcp` runs mow as an MCP server over
 stdio, exposing one tool, `mow_prompt`, so another agent or editor (Claude
 Desktop, etc.) can call mow as a delegated sub-agent. `initialize` /
 `tools/list` / `tools/call` over newline-delimited JSON-RPC 2.0. `mow_prompt`

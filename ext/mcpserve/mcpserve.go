@@ -2,7 +2,7 @@
 // editors (Claude Desktop, etc.) can call mow as a sub-agent via a single
 // `mow_prompt` tool. It is the mirror of ext/mcp (which makes mow an MCP
 // client). Link it into a binary with a blank import; it registers the
-// `mow mcp-serve` subcommand.
+// `mow mcp` subcommand (parallel to `mow acp` — serve this protocol).
 package mcpserve
 
 import (
@@ -25,14 +25,14 @@ const mcpProtocolVersion = "2024-11-05"
 
 func init() {
 	ext.RegisterCommand(ext.Command{
-		Name:    "mcp-serve",
+		Name:    "mcp",
 		Summary: "Serve mow as an MCP server over stdio (exposes a mow_prompt tool)",
 		Run:     runCmd,
 	})
 }
 
 func runCmd(args []string) int {
-	fs := cliutil.NewFlagSet("mcp-serve")
+	fs := cliutil.NewFlagSet("mcp")
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
 	if err := fs.Parse(args); err != nil {
