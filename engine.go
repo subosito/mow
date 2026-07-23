@@ -249,7 +249,16 @@ func New(opt Options) (*Engine, error) {
 			}
 		}
 	case opt.Chat != nil:
-		e.chat = adaptChat(opt.Chat)
+		inner := adaptChat(opt.Chat)
+		e.chat = func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+			msg, err := inner(ctx, messages, tools)
+			if err == nil && msg.Usage.InputTokens > 0 {
+				e.mu.Lock()
+				e.lastCtxTokens = msg.Usage.InputTokens
+				e.mu.Unlock()
+			}
+			return msg, err
+		}
 		if key := cfg.ResolveAPIKey(); key != "" {
 			mediaClient = &llm.MediaClient{
 				BaseURL:      cfg.LLM.BaseURL,
