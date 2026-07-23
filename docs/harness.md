@@ -205,6 +205,62 @@ tools:
     - understand_image # needs llm.understand.image
 ```
 
+### Media tools (`generate_*` / `understand_*`) — end to end
+
+A media tool appears only when **both** hold: its model id is set under
+`llm.generate.*` / `llm.understand.*`, **and** its name is in `tools.enable`.
+Media calls reuse the chat `base_url` + key, so `base_url` typically points at a
+gateway that routes each model by id (or use one provider's own ids).
+
+| Tool | Args | Endpoint | Output |
+|------|------|----------|--------|
+| `generate_image` | `prompt`, `path?`, `size?` | `POST /images/generations` | PNG under `media/image-<ts>.png` |
+| `generate_speech` | `text`, `path?`, `voice?` | `POST /audio/speech` | `media/speech-<ts>.mp3` |
+| `generate_video` | `prompt`, … | `POST /videos/generations` | `media/video-<ts>.*` |
+| `understand_image` | image `path`/`url` + question | vision chat | text (read-only) |
+| `understand_voice` | audio `path` | transcription | text (read-only) |
+| `understand_video` | video `path` | multimodal | text (read-only) |
+
+`understand_*` are read-only (usable in read-only prompts). `generate_*` write
+under `media/` **without** `--allow-write` — being in the enable list is the
+write consent for that folder.
+
+Runnable config (`$MOW_HOME/config.yaml`):
+
+```yaml
+llm:
+  base_url: https://api.openai.com/v1   # or a gateway that routes these models
+  api_key_env: OPENAI_API_KEY           # media reuses the chat endpoint + key
+  model: gpt-4.1-mini
+  generate:
+    image:  gpt-image-1                 # OpenAI ids shown; swap for your gateway's
+    speech: tts-1
+    speech_voice: alloy                 # ElevenLabs: a voice_id, not a name
+    video:  grok-imagine-video
+  understand:
+    image:  gpt-4o                      # a vision model
+    voice:  whisper-1
+    video:  qwen-vl-plus
+tools:
+  enable: [read, glob, grep,
+           generate_image, generate_speech, generate_video,
+           understand_image, understand_voice, understand_video]
+```
+
+Then just ask — the agent calls the tool; you don't invoke it directly:
+
+```bash
+mow run -p "Generate an image of a red bicycle on a beach and save it"
+#   → generate_image → media/image-….png
+mow run -p "Describe the image at diagram.png"
+#   → understand_image → text answer
+mow run -p "Transcribe recording.mp3 and summarize it"
+#   → understand_voice → transcript → summary
+```
+
+Confirm what's active with `mow run -p "list your available tools"`. A missing
+tool means its model id isn't set or its name isn't in `tools.enable`.
+
 ---
 
 ## 7. Config and trust
