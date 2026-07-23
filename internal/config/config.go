@@ -38,6 +38,12 @@ type LLMConfig struct {
 	// system/tools/history). Nil = enabled (pure win for repeated prefixes);
 	// set false for gateways that reject cache_control fields.
 	PromptCache *bool `yaml:"prompt_cache"`
+	// ContextWindow / InputPrice / OutputPrice override the built-in model
+	// catalog (context tokens; USD per 1M input/output tokens) when it is
+	// missing or stale for the configured model.
+	ContextWindow int     `yaml:"context_window"`
+	InputPrice    float64 `yaml:"input_price"`
+	OutputPrice   float64 `yaml:"output_price"`
 
 	// Generate maps modality → model id for generate_* tools
 	// (image → POST /v1/images/generations, speech → /v1/audio/speech, …).

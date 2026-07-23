@@ -48,9 +48,12 @@ type Engine struct {
 	sid        string
 	prior      []llm.Message
 	transcript []Message // user/assistant only (session resume)
-	noSess     bool
-	hooks      agent.Hooks
-	life       lifeHooks
+	// lastCtxTokens is the most recent LLM call's input tokens ≈ current context
+	// size (for a context-window fullness indicator). 0 until the first call.
+	lastCtxTokens int
+	noSess        bool
+	hooks         agent.Hooks
+	life          lifeHooks
 	// readOnlyExt marks ext tools that declared ReadOnly() true; only these
 	// (plus builtin read tools) run under PromptOpts.ReadOnly.
 	readOnlyExt map[string]bool
@@ -230,6 +233,11 @@ func New(opt Options) (*Engine, error) {
 			if err != nil {
 				return llm.Message{}, err
 			}
+			if out.Usage.InputTokens > 0 {
+				e.mu.Lock()
+				e.lastCtxTokens = out.Usage.InputTokens
+				e.mu.Unlock()
+			}
 			return toInternalMessage(out), nil
 		}
 		if key := cfg.ResolveAPIKey(); key != "" {
@@ -284,7 +292,13 @@ func New(opt Options) (*Engine, error) {
 			e.mu.Lock()
 			c := *e.client
 			e.mu.Unlock()
-			return c.ChatWithStream(ctx, messages, tools, hooks)
+			msg, err := c.ChatWithStream(ctx, messages, tools, hooks)
+			if err == nil && msg.Usage.InputTokens > 0 {
+				e.mu.Lock()
+				e.lastCtxTokens = msg.Usage.InputTokens // ≈ current context size
+				e.mu.Unlock()
+			}
+			return msg, err
 		}
 	}
 
