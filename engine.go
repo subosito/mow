@@ -486,6 +486,45 @@ func (e *Engine) Transcript() []Message {
 	return out
 }
 
+// Rewind drops the most recent user↔assistant exchange from the live context
+// (in-memory history + transcript) and returns that user prompt. Use it to
+// implement retry/edit: after Rewind, re-Prompt the returned text (or an edited
+// version) and it replaces the removed turn. The next Prompt writes a corrected
+// full-history snapshot, so a later resume is consistent; the append-only
+// session file keeps the superseded turn but LoadMessages uses only the last
+// snapshot. Returns ("", false) when there is nothing to rewind.
+func (e *Engine) Rewind() (lastUser string, ok bool) {
+	if e == nil {
+		return "", false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	// prior: trailing messages back through the last user prompt (tool results
+	// have role "tool", so scanning for "user" lands on the real prompt).
+	i := len(e.prior) - 1
+	for i >= 0 && e.prior[i].Role != "user" {
+		i--
+	}
+	if i < 0 {
+		return "", false
+	}
+	lastUser = e.prior[i].Content
+	e.prior = e.prior[:i]
+	// transcript mirrors user/assistant turns only.
+	j := len(e.transcript) - 1
+	for j >= 0 && e.transcript[j].Role != "user" {
+		j--
+	}
+	if j >= 0 {
+		if lastUser == "" {
+			lastUser = e.transcript[j].Content
+		}
+		e.transcript = e.transcript[:j]
+	}
+	e.lastCtxTokens = 0
+	return lastUser, true
+}
+
 // Messages returns the full last agent-loop history (roles include tool), after
 // the most recent Prompt. Used by hosts that need intermediate assistant prose
 // (e.g. goal summary when the final line is only GOAL_DONE).
