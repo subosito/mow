@@ -230,6 +230,17 @@ mow job --schedules path.yaml
 
 Same id never overlaps a previous tick (skip if still running). Not HA — use host cron for production redundancy.
 
+### `ext/mcpserve` — mow **as** an MCP server
+
+The mirror of `ext/mcp` (client): `mow mcp-serve` runs mow as an MCP server over
+stdio, exposing one tool, `mow_prompt`, so another agent or editor (Claude
+Desktop, etc.) can call mow as a delegated sub-agent. `initialize` /
+`tools/list` / `tools/call` over newline-delimited JSON-RPC 2.0. `mow_prompt`
+takes `{prompt, read_only?}` and returns the agent's final answer as text
+content; the serving process's own tool permissions (`--allow-write` /
+`--allow-shell`) bound what the delegated run may do. Blank-imported in the
+stock binary.
+
 ### `ext/mcp` / `ext/lsp` (supported; opt-in via config)
 
 Both are **linked in stock `cmd/mow`**. They register tools only when configured (no config → no tools, no process spawn).
