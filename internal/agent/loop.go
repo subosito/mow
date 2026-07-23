@@ -66,6 +66,10 @@ type Options struct {
 	// MaxParallelTools caps concurrent Exec in one assistant tool batch.
 	// 0 → DefaultMaxParallelTools; 1 → sequential (legacy).
 	MaxParallelTools int
+	// Steer, when set, is called at each turn boundary (after a tool batch,
+	// before the next LLM call). Any returned strings are appended as user
+	// messages, so a host can steer a running turn without cancelling it.
+	Steer func() []string
 
 	// thrash is set by Run for explore-loop / re-read guards (internal).
 	thrash *thrashState
@@ -211,6 +215,15 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 				Role:    "user",
 				Content: exploreWarnMessage(thrash.exploreStreak),
 			})
+		}
+		// Mid-turn steering: host-supplied guidance injected before the next
+		// LLM call, so the model course-corrects without a cancel/restart.
+		if opt.Steer != nil {
+			for _, s := range opt.Steer() {
+				if s = strings.TrimSpace(s); s != "" {
+					messages = append(messages, llm.Message{Role: "user", Content: s})
+				}
+			}
 		}
 	}
 	return Result{Messages: messages, Usage: usage}, fmt.Errorf(

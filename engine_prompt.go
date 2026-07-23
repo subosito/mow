@@ -156,6 +156,11 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	// Inject tool lifecycle events as outer hooks (do not mutate e.hooks permanently).
 	hooks = hooksWithEvents(hooks, e, runID, sid)
 
+	// Fresh steer buffer per run — stale guidance must not leak into this turn.
+	e.mu.Lock()
+	e.steer = nil
+	e.mu.Unlock()
+
 	res, err := agent.Run(ctx, chat, text, agent.Options{
 		System:             sys,
 		MaxTurns:           maxTurns,
@@ -166,6 +171,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		MaxContextChars:    maxCtx,
 		MaxToolResultChars: maxToolRes,
 		MaxParallelTools:   maxPar,
+		Steer:              e.drainSteer,
 		AllowTool: func(name string) error {
 			// Read-only prompts allow only known side-effect-free tools.
 			// Ext/MCP tools are denied unless they declared ReadOnly() —

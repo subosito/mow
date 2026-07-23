@@ -51,9 +51,12 @@ type Engine struct {
 	// lastCtxTokens is the most recent LLM call's input tokens ≈ current context
 	// size (for a context-window fullness indicator). 0 until the first call.
 	lastCtxTokens int
-	noSess        bool
-	hooks         agent.Hooks
-	life          lifeHooks
+	// steer holds host guidance injected into the running turn at the next turn
+	// boundary (Engine.Steer); drained by the loop, cleared at each run start.
+	steer  []string
+	noSess bool
+	hooks  agent.Hooks
+	life   lifeHooks
 	// readOnlyExt marks ext tools that declared ReadOnly() true; only these
 	// (plus builtin read tools) run under PromptOpts.ReadOnly.
 	readOnlyExt map[string]bool
@@ -483,6 +486,37 @@ func (e *Engine) Transcript() []Message {
 	}
 	out := make([]Message, len(e.transcript))
 	copy(out, e.transcript)
+	return out
+}
+
+// Steer injects guidance into a running turn: the text is appended as a user
+// message at the next turn boundary (after the current tool batch), so the model
+// course-corrects without a cancel/restart. No-op-safe when idle — the message
+// is delivered if a run consumes it before finishing, else dropped at the next
+// run start. Safe to call from any goroutine.
+func (e *Engine) Steer(text string) {
+	if e == nil {
+		return
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	e.mu.Lock()
+	e.steer = append(e.steer, text)
+	e.mu.Unlock()
+}
+
+// drainSteer pops all pending steer messages (called by the loop at each turn
+// boundary).
+func (e *Engine) drainSteer() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.steer) == 0 {
+		return nil
+	}
+	out := e.steer
+	e.steer = nil
 	return out
 }
 
