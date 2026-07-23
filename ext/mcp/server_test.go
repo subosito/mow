@@ -1,4 +1,4 @@
-package mcpserve
+package mcp
 
 import (
 	"bytes"
@@ -31,18 +31,15 @@ func TestMCPServeFlow(t *testing.T) {
 		t.Fatalf("serve code=%d", code)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 3 { // one response per request with an id; notification silent
+	if len(lines) != 3 { // one response per request with an id; the notification is silent
 		t.Fatalf("want 3 responses, got %d: %q", len(lines), out.String())
 	}
-	// initialize → protocolVersion
 	if !strings.Contains(lines[0], mcpProtocolVersion) {
 		t.Fatalf("initialize: %s", lines[0])
 	}
-	// tools/list → mow_prompt
 	if !strings.Contains(lines[1], "mow_prompt") {
 		t.Fatalf("tools/list: %s", lines[1])
 	}
-	// tools/call → the agent's answer as text content
 	var call struct {
 		Result struct {
 			Content []struct{ Text string } `json:"content"`

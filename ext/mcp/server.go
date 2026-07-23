@@ -1,9 +1,11 @@
-// Package mcpserve exposes mow as an MCP server over stdio: other agents and
-// editors (Claude Desktop, etc.) can call mow as a sub-agent via a single
-// `mow_prompt` tool. It is the mirror of ext/mcp (which makes mow an MCP
-// client). Link it into a binary with a blank import; it registers the
-// `mow mcp` subcommand (parallel to `mow acp` — serve this protocol).
-package mcpserve
+package mcp
+
+// This file is the MCP *server* side of the pack: `mow mcp` exposes mow itself
+// as an MCP server over stdio with a single `mow_prompt` tool, so other agents
+// and editors (Claude Desktop, etc.) can call mow as a delegated sub-agent. It
+// mirrors the client side (rest of this package), which connects out to other
+// MCP servers and registers their tools. One package, both directions — like
+// ext/acp (serve `mow acp` + `acp_delegate` client tool).
 
 import (
 	"bufio"
@@ -20,18 +22,18 @@ import (
 	"github.com/subosito/mow/ext"
 )
 
-// mcpProtocolVersion matches the stdio version ext/mcp negotiates as a client.
+// mcpProtocolVersion matches the stdio version the client side negotiates.
 const mcpProtocolVersion = "2024-11-05"
 
 func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "mcp",
 		Summary: "Serve mow as an MCP server over stdio (exposes a mow_prompt tool)",
-		Run:     runCmd,
+		Run:     serveCmd,
 	})
 }
 
-func runCmd(args []string) int {
+func serveCmd(args []string) int {
 	fs := cliutil.NewFlagSet("mcp")
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
@@ -40,7 +42,7 @@ func runCmd(args []string) int {
 	}
 	eng, err := ef.NewEngine()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mow mcp-serve: %v\n", err)
+		fmt.Fprintf(os.Stderr, "mow mcp: %v\n", err)
 		return 1
 	}
 	return serve(eng, os.Stdin, os.Stdout)
@@ -62,7 +64,7 @@ func serve(eng *mow.Engine, in io.Reader, out io.Writer) int {
 			if json.Unmarshal(trimmed, &req) == nil {
 				// Notifications (no id) get no response.
 				if len(req.ID) > 0 {
-					if resp := handle(eng, req.ID, req.Method, req.Params); resp != nil {
+					if resp := serveHandle(eng, req.ID, req.Method, req.Params); resp != nil {
 						_ = enc.Encode(resp)
 					}
 				}
@@ -74,7 +76,7 @@ func serve(eng *mow.Engine, in io.Reader, out io.Writer) int {
 	}
 }
 
-func handle(eng *mow.Engine, id json.RawMessage, method string, params json.RawMessage) any {
+func serveHandle(eng *mow.Engine, id json.RawMessage, method string, params json.RawMessage) any {
 	switch method {
 	case "initialize":
 		return reply(id, map[string]any{
@@ -87,7 +89,7 @@ func handle(eng *mow.Engine, id json.RawMessage, method string, params json.RawM
 	case "tools/list":
 		return reply(id, map[string]any{"tools": []any{promptTool()}})
 	case "tools/call":
-		return callTool(eng, id, params)
+		return serveCallTool(eng, id, params)
 	default:
 		return replyErr(id, -32601, "method not found: "+method)
 	}
@@ -108,7 +110,7 @@ func promptTool() map[string]any {
 	}
 }
 
-func callTool(eng *mow.Engine, id json.RawMessage, params json.RawMessage) any {
+func serveCallTool(eng *mow.Engine, id json.RawMessage, params json.RawMessage) any {
 	var p struct {
 		Name      string `json:"name"`
 		Arguments struct {

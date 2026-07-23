@@ -26,7 +26,6 @@ import (
 	_ "github.com/subosito/mow/ext/job"
 	_ "github.com/subosito/mow/ext/lsp"
 	_ "github.com/subosito/mow/ext/mcp"
-	_ "github.com/subosito/mow/ext/mcpserve"
 	_ "github.com/subosito/mow/ext/rpc"
 )
 

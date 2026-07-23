@@ -230,18 +230,27 @@ mow job --schedules path.yaml
 
 Same id never overlaps a previous tick (skip if still running). Not HA — use host cron for production redundancy.
 
-### `ext/mcpserve` — mow **as** an MCP server
+### `ext/mcp` — both MCP directions (client tools + `mow mcp` server)
 
-The mirror of `ext/mcp` (client): `mow mcp` runs mow as an MCP server over
-stdio, exposing one tool, `mow_prompt`, so another agent or editor (Claude
-Desktop, etc.) can call mow as a delegated sub-agent. `initialize` /
-`tools/list` / `tools/call` over newline-delimited JSON-RPC 2.0. `mow_prompt`
-takes `{prompt, read_only?}` and returns the agent's final answer as text
-content; the serving process's own tool permissions (`--allow-write` /
-`--allow-shell`) bound what the delegated run may do. Blank-imported in the
-stock binary.
+Like `ext/acp` (which serves `mow acp` **and** provides the `acp_delegate`
+client tool), `ext/mcp` is one protocol pack covering both directions:
 
-### `ext/mcp` / `ext/lsp` (supported; opt-in via config)
+- **Client (config-driven):** connect out to trusted MCP servers (stdio or
+  streamable HTTP) and register *their* tools onto the agent, name-prefixed
+  `mcp_<server>_<tool>`. Activated by `extensions.mcp` / `mcp.json` — no
+  subcommand. See below.
+- **Server (`mow mcp`):** run mow *as* an MCP server over stdio, exposing one
+  tool, `mow_prompt`, so another agent or editor (Claude Desktop, etc.) can call
+  mow as a delegated sub-agent. `initialize` / `tools/list` / `tools/call` over
+  newline-delimited JSON-RPC 2.0. `mow_prompt` takes `{prompt, read_only?}` and
+  returns the agent's final answer as text; the serving process's own
+  permissions (`--allow-write` / `--allow-shell`, plus per-call `read_only`)
+  bound what a delegated run may do.
+
+Remove the one blank import → both the `mow mcp` command and the client tools
+disappear.
+
+### `ext/mcp` / `ext/lsp` (config, opt-in)
 
 Both are **linked in stock `cmd/mow`**. They register tools only when configured (no config → no tools, no process spawn).
 
