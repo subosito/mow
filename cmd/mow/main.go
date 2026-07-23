@@ -231,6 +231,7 @@ func replCmd(args []string) int {
 		return 1
 	}
 	fmt.Fprintln(os.Stderr, "mow repl — empty line or /quit to exit; Ctrl+C aborts the current turn")
+	fmt.Fprintln(os.Stderr, "  /btw <question>  ask an aside without adding it to context")
 	if ef.Stream {
 		fmt.Fprintln(os.Stderr, "(token stream on stderr via --stream)")
 	}
@@ -246,12 +247,24 @@ func replCmd(args []string) int {
 		if line == "" || line == "/quit" || line == "/exit" {
 			break
 		}
+		// /btw <text>: an aside answered against context but not persisted, so it
+		// never re-enters a later prompt. Handy for a quick side question.
+		btw := false
+		if rest, ok := strings.CutPrefix(line, "/btw"); ok {
+			line = strings.TrimSpace(rest)
+			if line == "" {
+				fmt.Fprintln(os.Stderr, "usage: /btw <question>  (aside — not added to context)")
+				continue
+			}
+			btw = true
+			fmt.Fprintln(os.Stderr, "(btw — this exchange won't be kept in context)")
+		}
 		if ef.Stream {
 			fmt.Fprint(os.Stderr, "\n")
 		}
 		// Per-prompt cancel: first Ctrl+C aborts this turn only; REPL stays up.
 		pctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		res, err := eng.Prompt(pctx, line)
+		res, err := eng.PromptWith(pctx, line, mow.PromptOpts{Ephemeral: btw})
 		stop()
 		if err != nil {
 			if errors.Is(err, context.Canceled) {

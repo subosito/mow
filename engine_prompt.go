@@ -119,7 +119,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		}
 	}
 
-	if sess != nil {
+	if sess != nil && !opt.Ephemeral {
 		if aerr := sess.Append(session.Event{Type: "user", Role: "user", Content: text}); aerr != nil {
 			e.log().Warn("mow: session append failed (resume history incomplete)", "err", aerr)
 		}
@@ -183,31 +183,36 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		},
 	})
 
-	e.mu.Lock()
-	if len(res.Messages) > 0 {
-		e.prior = res.Messages
-	}
-	// Keep in-memory transcript aligned with what we append to the session file.
-	e.transcript = append(e.transcript, Message{Role: "user", Content: text})
-	if strings.TrimSpace(res.Text) != "" {
-		e.transcript = append(e.transcript, Message{Role: "assistant", Content: res.Text})
-	}
-	e.mu.Unlock()
+	// Ephemeral asides run against current context but leave no trace: skip the
+	// history/transcript update and the session append, so the exchange never
+	// re-enters a later prompt.
+	if !opt.Ephemeral {
+		e.mu.Lock()
+		if len(res.Messages) > 0 {
+			e.prior = res.Messages
+		}
+		// Keep in-memory transcript aligned with what we append to the session file.
+		e.transcript = append(e.transcript, Message{Role: "user", Content: text})
+		if strings.TrimSpace(res.Text) != "" {
+			e.transcript = append(e.transcript, Message{Role: "assistant", Content: res.Text})
+		}
+		e.mu.Unlock()
 
-	if sess != nil {
-		var aerr error
-		if res.Text != "" {
-			aerr = sess.Append(session.Event{Type: "assistant", Role: "assistant", Content: res.Text})
-		}
-		// Full message dump for agent resume (LoadMessages keeps only the last snapshot).
-		for _, m := range res.Messages {
-			mm := m
-			if perr := sess.Append(session.Event{Type: "message", Message: &mm}); perr != nil && aerr == nil {
-				aerr = perr
+		if sess != nil {
+			var aerr error
+			if res.Text != "" {
+				aerr = sess.Append(session.Event{Type: "assistant", Role: "assistant", Content: res.Text})
 			}
-		}
-		if aerr != nil {
-			e.log().Warn("mow: session append failed (resume history incomplete)", "err", aerr)
+			// Full message dump for agent resume (LoadMessages keeps only the last snapshot).
+			for _, m := range res.Messages {
+				mm := m
+				if perr := sess.Append(session.Event{Type: "message", Message: &mm}); perr != nil && aerr == nil {
+					aerr = perr
+				}
+			}
+			if aerr != nil {
+				e.log().Warn("mow: session append failed (resume history incomplete)", "err", aerr)
+			}
 		}
 	}
 

@@ -124,6 +124,14 @@ type PromptOpts struct {
 	// Used by packs like goal for goal_report so the tool is not always visible
 	// in repl/run (where it used to encourage false "task complete" reports).
 	ExtraTools []Tool
+	// Ephemeral runs the turn against the current context but does NOT persist
+	// it: the question and answer are not appended to the in-memory history
+	// (e.prior/transcript) or the session file, so they never re-enter a later
+	// prompt. Streaming, events, and hooks still fire so a UI can render the
+	// reply. Use for mid-conversation asides ("/btw …") that must not pollute
+	// context. Orthogonal to side effects — combine with ReadOnly to also
+	// forbid writes/shell during the aside.
+	Ephemeral bool
 }
 
 // Run is a one-shot helper: New + single Prompt.

@@ -39,6 +39,13 @@ client built from `llm.base_url` + key + model (config or env). The engine is
 eng.Prompt(ctx, "Now write a test for the largest one")
 ```
 
+For a mid-conversation aside that must not pollute context, run it ephemeral —
+answered against current history but never appended to it (this backs `/btw`):
+
+```go
+eng.PromptWith(ctx, "btw, what does this flag do?", mow.PromptOpts{Ephemeral: true})
+```
+
 One-shot without holding an engine:
 
 ```go

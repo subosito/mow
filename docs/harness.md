@@ -240,6 +240,8 @@ Works on **`mow run`** and **`mow repl`** (same `Options.Continue` / `SessionID`
 
 Embedders build a session picker with **`Engine.Sessions()`** → `[]SessionInfo{ID, Updated, Preview}` (newest first, `Preview` = first user line), then resume via `Options.SessionID`. This is what mowi's `/sessions` uses.
 
+**Ephemeral asides:** `PromptWith(ctx, text, PromptOpts{Ephemeral: true})` runs a turn against the current context but does **not** append it to history or the session file, so it never re-enters a later prompt (events/streaming still fire). `mow repl` and mowi expose this as **`/btw <question>`** — a mid-conversation side question that doesn't pollute context.
+
 **Cancel mid tool batch:** hard-abort fails fast (siblings cancelled). Soft results already finished still append to history in call order; incomplete tools are omitted. Session prior keeps whatever was appended before cancel (`StopReason=cancelled`).
 
 **LLM HTTP:** chat/stream requests retry up to 3 times on 429 / 5xx / transient network errors (honours `Retry-After` when present).
