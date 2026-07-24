@@ -230,6 +230,29 @@ mow job --schedules path.yaml
 
 Same id never overlaps a previous tick (skip if still running). Not HA — use host cron for production redundancy.
 
+### `ext/proc` — background processes (general)
+
+`proc_start` / `proc_status` / `proc_stop` tools + a `mow proc` CLI let an agent
+launch a long-lived process (dev server, watcher, mock) and **keep working while
+it runs** — start returns a pid immediately and the process is detached (new
+session, released), logging to a file. Available anywhere (run/repl/host), gated
+by `--allow-shell` (it runs shell commands). Storage: `$MOW_HOME/proc/<project>/`.
+
+```bash
+# the agent (with --allow-shell) calls proc_start, then proc_status/proc_stop:
+mow run --allow-shell -p "Start the dev server (npm run dev) and confirm it responds on :3000"
+# manage out-of-band:
+mow proc list
+mow proc logs <id> [lines]
+mow proc stop <id>        #  or: mow proc stop-all
+```
+
+Do **not** use bare `bash &` for servers — the `bash` tool runs in its own
+process group and kills it on return, so backgrounded children die. `proc_*` is
+the supported way. Shares the mechanism with `ext/goal`'s goal-scoped
+`goal_process_*` (both use `internal/proc`). Processes persist until stopped
+(nohup-like); use `mow proc stop-all` to clean up.
+
 ### `ext/mcp` — both MCP directions (client tools + `mow mcp` server)
 
 Like `ext/acp` (which serves `mow acp` **and** provides the `acp_delegate`

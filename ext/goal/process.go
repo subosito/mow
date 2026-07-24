@@ -3,17 +3,18 @@ package goal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/subosito/mow"
+	iproc "github.com/subosito/mow/internal/proc"
 )
+
+// Goal-scoped background process tools. The mechanism lives in internal/proc
+// (shared with ext/proc); these tools just scope storage to the goal dir and
+// gate on an active goal.
 
 // processScope is carried on the step context for process tools.
 type processScope struct {
@@ -34,6 +35,13 @@ func processScopeFrom(ctx context.Context) (processScope, bool) {
 
 func procDir(root, goalID string) string {
 	return filepath.Join(root, goalID, "procs")
+}
+
+func procState(alive bool) string {
+	if alive {
+		return "running"
+	}
+	return "dead"
 }
 
 // ProcessTools returns goal-scoped process lifecycle tools for ExtraTools.
@@ -58,64 +66,22 @@ func (procStartTool) Exec(ctx context.Context, args json.RawMessage) (string, er
 		return "goal_process_start ignored (no active goal)", nil
 	}
 	var a struct {
-		ID      string `json:"id"`
-		Command string `json:"command"`
-		Log     string `json:"log"`
+		ID, Command, Log string
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	id := sanitizeProcID(a.ID)
-	cmd := strings.TrimSpace(a.Command)
-	if id == "" || cmd == "" {
-		return "", fmt.Errorf("id and command required")
+	info, err := iproc.Start(procDir(scope.Root, scope.GoalID), a.ID, a.Command, a.Log, "")
+	if errors.Is(err, iproc.ErrAlreadyRunning) {
+		return fmt.Sprintf("already running id=%s pid=%d", info.ID, info.PID), nil
 	}
-	dir := procDir(scope.Root, scope.GoalID)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	// Already running?
-	if pid, err := readPID(dir, id); err == nil && pidAlive(pid) {
-		return fmt.Sprintf("already running id=%s pid=%d", id, pid), nil
-	}
-	logName := strings.TrimSpace(a.Log)
-	if logName == "" {
-		logName = id + ".log"
-	}
-	logName = filepath.Base(logName)
-	logPath := filepath.Join(dir, logName)
-	logF, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return "", err
 	}
-	// Detach: new session, no controlling tty; shell -c command.
-	c := exec.Command("bash", "-lc", cmd)
-	c.Dir = os.Getenv("PWD")
-	if wd, err := os.Getwd(); err == nil {
-		c.Dir = wd
+	if !info.Alive {
+		return fmt.Sprintf("started id=%s pid=%d but process already exited — check log %s", info.ID, info.PID, info.Log), nil
 	}
-	c.Stdout = logF
-	c.Stderr = logF
-	c.Stdin = nil
-	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := c.Start(); err != nil {
-		logF.Close()
-		return "", err
-	}
-	pid := c.Process.Pid
-	// Release so parent does not wait; process keeps log fd via dup.
-	_ = c.Process.Release()
-	_ = logF.Close()
-	if err := writePID(dir, id, pid); err != nil {
-		_ = syscall.Kill(pid, syscall.SIGTERM)
-		return "", err
-	}
-	// Brief settle so callers can connect immediately after.
-	time.Sleep(200 * time.Millisecond)
-	if !pidAlive(pid) {
-		return fmt.Sprintf("started id=%s pid=%d but process already exited — check log %s", id, pid, logPath), nil
-	}
-	return fmt.Sprintf("started id=%s pid=%d log=%s", id, pid, logPath), nil
+	return fmt.Sprintf("started id=%s pid=%d log=%s", info.ID, info.PID, info.Log), nil
 }
 
 type procStatusTool struct{}
@@ -133,48 +99,26 @@ func (procStatusTool) Exec(ctx context.Context, args json.RawMessage) (string, e
 	if !ok {
 		return "goal_process_status ignored (no active goal)", nil
 	}
-	var a struct {
-		ID string `json:"id"`
-	}
+	var a struct{ ID string }
 	_ = json.Unmarshal(args, &a)
 	dir := procDir(scope.Root, scope.GoalID)
-	id := sanitizeProcID(a.ID)
-	if id != "" {
-		pid, err := readPID(dir, id)
+	if id := iproc.SanitizeID(a.ID); id != "" {
+		info, err := iproc.Status(dir, id)
 		if err != nil {
 			return fmt.Sprintf("id=%s not found", id), nil
 		}
-		if pidAlive(pid) {
-			return fmt.Sprintf("id=%s pid=%d status=running", id, pid), nil
-		}
-		return fmt.Sprintf("id=%s pid=%d status=dead", id, pid), nil
+		return fmt.Sprintf("id=%s pid=%d status=%s", info.ID, info.PID, procState(info.Alive)), nil
 	}
-	entries, err := os.ReadDir(dir)
+	list, err := iproc.List(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "(no processes)", nil
-		}
 		return "", err
 	}
-	var b strings.Builder
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasSuffix(name, ".pid") {
-			continue
-		}
-		id := strings.TrimSuffix(name, ".pid")
-		pid, err := readPID(dir, id)
-		if err != nil {
-			continue
-		}
-		st := "dead"
-		if pidAlive(pid) {
-			st = "running"
-		}
-		fmt.Fprintf(&b, "%s pid=%d %s\n", id, pid, st)
-	}
-	if b.Len() == 0 {
+	if len(list) == 0 {
 		return "(no processes)", nil
+	}
+	var b strings.Builder
+	for _, p := range list {
+		fmt.Fprintf(&b, "%s pid=%d %s\n", p.ID, p.PID, procState(p.Alive))
 	}
 	return strings.TrimSpace(b.String()), nil
 }
@@ -193,63 +137,17 @@ func (procStopTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 	if !ok {
 		return "goal_process_stop ignored (no active goal)", nil
 	}
-	var a struct {
-		ID string `json:"id"`
-	}
+	var a struct{ ID string }
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	id := sanitizeProcID(a.ID)
+	id := iproc.SanitizeID(a.ID)
 	if id == "" {
 		return "", fmt.Errorf("id required")
 	}
-	dir := procDir(scope.Root, scope.GoalID)
-	pid, err := readPID(dir, id)
+	info, err := iproc.Stop(procDir(scope.Root, scope.GoalID), id)
 	if err != nil {
 		return fmt.Sprintf("id=%s not found", id), nil
 	}
-	if pidAlive(pid) {
-		_ = syscall.Kill(pid, syscall.SIGTERM)
-		time.Sleep(200 * time.Millisecond)
-		if pidAlive(pid) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-		}
-	}
-	_ = os.Remove(filepath.Join(dir, id+".pid"))
-	return fmt.Sprintf("stopped id=%s pid=%d", id, pid), nil
-}
-
-func sanitizeProcID(id string) string {
-	id = strings.TrimSpace(id)
-	var b strings.Builder
-	for _, r := range id {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			b.WriteRune(r)
-		}
-	}
-	s := b.String()
-	if len(s) > 40 {
-		s = s[:40]
-	}
-	return s
-}
-
-func writePID(dir, id string, pid int) error {
-	return os.WriteFile(filepath.Join(dir, id+".pid"), []byte(strconv.Itoa(pid)+"\n"), 0o600)
-}
-
-func readPID(dir, id string) (int, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, id+".pid"))
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(strings.TrimSpace(string(raw)))
-}
-
-func pidAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil
+	return fmt.Sprintf("stopped id=%s pid=%d", info.ID, info.PID), nil
 }
