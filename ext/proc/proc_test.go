@@ -56,3 +56,31 @@ func TestProcLifecycle(t *testing.T) {
 		t.Fatalf("after stop (want not found): %q", st2)
 	}
 }
+
+func TestAutoKillOnClose(t *testing.T) {
+	ctx, eng := engCtx(t, true)
+	if out, _ := (startTool{}).Exec(ctx, json.RawMessage(`{"id":"auto","command":"sleep 60"}`)); !strings.Contains(out, "started id=auto") {
+		t.Fatalf("start: %q", out)
+	}
+	if st, _ := (statusTool{}).Exec(ctx, json.RawMessage(`{"id":"auto"}`)); !strings.Contains(st, "status=running") {
+		t.Fatalf("should be running: %q", st)
+	}
+	// Closing the engine must kill the auto process.
+	eng.Close()
+	time.Sleep(200 * time.Millisecond)
+	if st, _ := (statusTool{}).Exec(ctx, json.RawMessage(`{"id":"auto"}`)); !strings.Contains(st, "not found") {
+		t.Fatalf("auto proc should be gone after Close: %q", st)
+	}
+
+	// keep=true survives Close.
+	ctx2, eng2 := engCtx(t, true)
+	if out, _ := (startTool{}).Exec(ctx2, json.RawMessage(`{"id":"kept","command":"sleep 60","keep":true}`)); !strings.Contains(out, "kept") {
+		t.Fatalf("keep start: %q", out)
+	}
+	eng2.Close()
+	time.Sleep(100 * time.Millisecond)
+	if st, _ := (statusTool{}).Exec(ctx2, json.RawMessage(`{"id":"kept"}`)); !strings.Contains(st, "status=running") {
+		t.Fatalf("kept proc should survive Close: %q", st)
+	}
+	_, _ = (stopTool{}).Exec(ctx2, json.RawMessage(`{"id":"kept"}`)) // cleanup
+}

@@ -96,6 +96,51 @@ func (e *Engine) Cancel() {
 	}
 }
 
+// RegisterCleanup adds a function to run when the Engine is Closed — e.g. a
+// background-process tool registers a stop so the process is auto-killed when
+// the session ends. Cleanups run in reverse registration order (LIFO).
+func (e *Engine) RegisterCleanup(fn func()) {
+	if e == nil || fn == nil {
+		return
+	}
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		fn() // already closed — run now so nothing leaks
+		return
+	}
+	e.cleanups = append(e.cleanups, fn)
+	e.mu.Unlock()
+}
+
+// Close cancels any in-flight run and runs registered cleanups once (LIFO).
+// Idempotent. Hosts (mow run/repl, embedders) should defer Close so
+// session-scoped resources — notably ext/proc background processes — are torn
+// down on exit. A crashed process skips cleanups; `mow proc stop-all` recovers.
+func (e *Engine) Close() error {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return nil
+	}
+	e.closed = true
+	fns := e.cleanups
+	e.cleanups = nil
+	e.mu.Unlock()
+
+	e.Cancel()
+	for i := len(fns) - 1; i >= 0; i-- {
+		func() {
+			defer func() { _ = recover() }() // one bad cleanup must not skip the rest
+			fns[i]()
+		}()
+	}
+	return nil
+}
+
 // Status returns a control-plane snapshot (busy, session, model, policy flags).
 func (e *Engine) Status() Status {
 	if e == nil {

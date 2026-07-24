@@ -250,8 +250,13 @@ mow proc stop <id>        #  or: mow proc stop-all
 Do **not** use bare `bash &` for servers — the `bash` tool runs in its own
 process group and kills it on return, so backgrounded children die. `proc_*` is
 the supported way. Shares the mechanism with `ext/goal`'s goal-scoped
-`goal_process_*` (both use `internal/proc`). Processes persist until stopped
-(nohup-like); use `mow proc stop-all` to clean up.
+`goal_process_*` (both use `internal/proc`).
+
+**Lifecycle:** processes are **auto-killed when the session exits** —
+`Engine.Close()` (deferred by `mow run`/`repl` and called by hosts like mowi)
+stops everything `proc_start` launched, so nothing leaks. Pass `keep: true` to a
+`proc_start` call to let that process survive session exit (nohup-like). A
+crashed process skips cleanup; `mow proc stop-all` recovers.
 
 ### `ext/mcp` — both MCP directions (client tools + `mow mcp` server)
 

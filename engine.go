@@ -53,10 +53,13 @@ type Engine struct {
 	lastCtxTokens int
 	// steer holds host guidance injected into the running turn at the next turn
 	// boundary (Engine.Steer); drained by the loop, cleared at each run start.
-	steer  []string
-	noSess bool
-	hooks  agent.Hooks
-	life   lifeHooks
+	steer []string
+	// cleanups run on Close (LIFO); closed guards against double-close.
+	cleanups []func()
+	closed   bool
+	noSess   bool
+	hooks    agent.Hooks
+	life     lifeHooks
 	// readOnlyExt marks ext tools that declared ReadOnly() true; only these
 	// (plus builtin read tools) run under PromptOpts.ReadOnly.
 	readOnlyExt map[string]bool

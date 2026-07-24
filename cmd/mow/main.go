@@ -231,6 +231,7 @@ func replCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "mow repl: %v\n", err)
 		return 1
 	}
+	defer eng.Close() // tear down session-scoped resources (ext/proc procs) on exit
 	fmt.Fprintln(os.Stderr, "mow repl — empty line or /quit to exit; Ctrl+C aborts the current turn")
 	fmt.Fprintln(os.Stderr, "  /btw <question>  ask an aside without adding it to context")
 	if ef.Stream {

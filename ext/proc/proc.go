@@ -66,10 +66,10 @@ type startTool struct{}
 
 func (startTool) Name() string { return "proc_start" }
 func (startTool) Description() string {
-	return "Start a long-lived process in the background (dev server, watcher, mock) and keep working while it runs — this returns a pid immediately; the process is detached. Args: id (short name), command (shell), log (optional filename). Manage with proc_status / proc_stop. Requires --allow-shell. Do NOT use bare `bash &` for servers: the bash tool kills its process group when it returns."
+	return "Start a long-lived process in the background (dev server, watcher, mock) and keep working while it runs — this returns a pid immediately; the process is detached. Args: id (short name), command (shell), log (optional filename), keep (bool: survive session exit; default false = auto-killed on exit). Manage with proc_status / proc_stop. Requires --allow-shell. Do NOT use bare `bash &` for servers: the bash tool kills its process group when it returns."
 }
 func (startTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"command":{"type":"string"},"log":{"type":"string"}},"required":["id","command"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"command":{"type":"string"},"log":{"type":"string"},"keep":{"type":"boolean"}},"required":["id","command"]}`)
 }
 func (startTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
 	eng, err := requireShell(ctx)
@@ -78,11 +78,13 @@ func (startTool) Exec(ctx context.Context, args json.RawMessage) (string, error)
 	}
 	var a struct {
 		ID, Command, Log string
+		Keep             bool
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	info, err := iproc.Start(storeDir(eng.Workspace()), a.ID, a.Command, a.Log, eng.Workspace())
+	dir := storeDir(eng.Workspace())
+	info, err := iproc.Start(dir, a.ID, a.Command, a.Log, eng.Workspace())
 	if errors.Is(err, iproc.ErrAlreadyRunning) {
 		return fmt.Sprintf("already running id=%s pid=%d", info.ID, info.PID), nil
 	}
@@ -92,7 +94,13 @@ func (startTool) Exec(ctx context.Context, args json.RawMessage) (string, error)
 	if !info.Alive {
 		return fmt.Sprintf("started id=%s pid=%d but it exited immediately — check log %s", info.ID, info.PID, info.Log), nil
 	}
-	return fmt.Sprintf("started id=%s pid=%d log=%s", info.ID, info.PID, info.Log), nil
+	// Auto-kill on session exit unless keep=true. Cleanup runs on Engine.Close().
+	if !a.Keep {
+		id := info.ID
+		eng.RegisterCleanup(func() { _, _ = iproc.Stop(dir, id) })
+		return fmt.Sprintf("started id=%s pid=%d log=%s", info.ID, info.PID, info.Log), nil
+	}
+	return fmt.Sprintf("started id=%s pid=%d log=%s (kept — survives session exit)", info.ID, info.PID, info.Log), nil
 }
 
 type statusTool struct{}
