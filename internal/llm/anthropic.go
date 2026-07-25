@@ -37,7 +37,7 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 		"max_tokens": c.anthropicMaxTokens(),
 		"messages":   anthMsgs,
 	}
-	if sys := anthropicSystemField(system, c.PromptCache); sys != nil {
+	if sys := anthropicSystemField(c.activeSystemPrefix(), system, c.PromptCache); sys != nil {
 		body["system"] = sys
 	}
 	if atools := toAnthropicTools(tools); len(atools) > 0 {
@@ -135,21 +135,40 @@ func ephemeralCacheControl() map[string]any {
 	return map[string]any{"type": "ephemeral"}
 }
 
-// anthropicSystemField returns the request "system" value: a plain string, or a
-// single cacheable text block when caching is on (the system prompt — AGENTS.md
-// + skills — is usually the largest stable input).
-func anthropicSystemField(system string, cache bool) any {
-	if system == "" {
+// anthropicSystemField returns the request "system" value.
+//
+// prefix entries become separate text blocks before the main system string so
+// each llm.system_prefix item stays its own segment (not joined with \n\n).
+//
+// Shapes:
+//   - no prefix, no cache → plain string
+//   - no prefix, cache → one text block with cache_control
+//   - prefix set → block array
+func anthropicSystemField(prefix []string, system string, cache bool) any {
+	var blocks []map[string]any
+	for _, p := range prefix {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		blocks = append(blocks, map[string]any{"type": "text", "text": p})
+	}
+	if s := strings.TrimSpace(system); s != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": s})
+	}
+	if len(blocks) == 0 {
 		return nil
 	}
-	if !cache {
-		return system
+	if len(blocks) == 1 && !cache {
+		return blocks[0]["text"]
 	}
-	return []map[string]any{{
-		"type":          "text",
-		"text":          system,
-		"cache_control": ephemeralCacheControl(),
-	}}
+	if cache {
+		// Stable system prefix — cache every block (Anthropic allows ≤4 breakpoints).
+		for i := range blocks {
+			blocks[i]["cache_control"] = ephemeralCacheControl()
+		}
+	}
+	return blocks
 }
 
 // cacheLastTool marks the final tool so the (stable) tool definitions cache

@@ -291,7 +291,9 @@ func New(opt Options) (*Engine, error) {
 			ExtraHeaders: headers,
 			Stream:       cfg.LLM.Stream || opt.Stream,
 			// Prompt caching on by default (nil); explicit false disables it.
-			PromptCache: cfg.LLM.PromptCache == nil || *cfg.LLM.PromptCache,
+			PromptCache:        cfg.LLM.PromptCache == nil || *cfg.LLM.PromptCache,
+			SystemPrefix:       append([]string(nil), cfg.LLM.SystemPrefix...),
+			SystemPrefixModels: append([]string(nil), cfg.LLM.SystemPrefixModels...),
 		}
 		e.client = client
 		mediaClient = llm.FromClient(client)

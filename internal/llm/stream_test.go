@@ -82,6 +82,37 @@ func TestChatStreamHooksReasoningContentField(t *testing.T) {
 	}
 }
 
+func TestChatStreamHooksThoughtSignature(t *testing.T) {
+	// Gemini/Antigravity attach thought_signature on the tool_call start chunk;
+	// it must be kept for the next request's history.
+	const body = "" +
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_g\",\"type\":\"function\",\"thought_signature\":\"sig-xyz\",\"function\":{\"name\":\"glob\",\"arguments\":\"\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"pattern\\\":\\\"**/*\\\"}\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
+	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("tool_calls=%+v", msg.ToolCalls)
+	}
+	tc := msg.ToolCalls[0]
+	if tc.ThoughtSignature != "sig-xyz" {
+		t.Fatalf("thought_signature=%q", tc.ThoughtSignature)
+	}
+	if tc.Function.Name != "glob" || tc.Function.Arguments != `{"pattern":"**/*"}` {
+		t.Fatalf("function=%+v", tc.Function)
+	}
+}
+
 func TestChatStreamHooksNonContiguousToolIndices(t *testing.T) {
 	// Some gateways send tool_calls indices that skip values or start above 0.
 	// Both calls must survive, in index order.

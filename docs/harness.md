@@ -172,6 +172,8 @@ Compaction is **character-estimate**, not a real tokenizer. It keeps the system 
 | `llm.headers` | Optional extra headers |
 | `llm.stream` | SSE content deltas (both wires) |
 | `llm.prompt_cache` | Provider prompt caching (default on). Anthropic: `cache_control` on system/tools/history → repeated prefixes bill ~90% cheaper. Set `false` for gateways that reject the field |
+| `llm.system_prefix` | Optional text segments prepended before AGENTS.md/skills/default system (each list item separate). All wires. User config only — not project `.mow/config` |
+| `llm.system_prefix_models` | Case-insensitive globs limiting when `system_prefix` applies. **Empty = every model** when prefix is set. Re-evaluated each call (follows `SetModel`) |
 | `llm.generate.*` | Side-lane model ids for generate tools |
 | `llm.understand.*` | Side-lane model ids for understand tools |
 

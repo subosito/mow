@@ -1,9 +1,60 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+// Gemini 3 / Antigravity require thought_signature on functionCall parts when
+// replaying tool_calls. Capture must survive history → toOpenAIMessages.
+func TestToOpenAIMessagesPreservesThoughtSignature(t *testing.T) {
+	in := []Message{
+		{Role: "user", Content: "list files"},
+		{Role: "assistant", ToolCalls: []ToolCall{{
+			ID: "call_1", Type: "function",
+			ThoughtSignature: "sig-opaque-abc",
+			Function:         FunctionCall{Name: "glob", Arguments: `{"pattern":"**/*"}`},
+		}}},
+		{Role: "tool", ToolCallID: "call_1", Name: "glob", Content: "a.go"},
+	}
+	wire := toOpenAIMessages(in)
+	raw, err := json.Marshal(ChatRequest{Model: "m", Messages: wire})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Messages []struct {
+			ToolCalls []struct {
+				ThoughtSignature string `json:"thought_signature"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Messages) < 2 || len(parsed.Messages[1].ToolCalls) != 1 {
+		t.Fatalf("body=%s", raw)
+	}
+	if got := parsed.Messages[1].ToolCalls[0].ThoughtSignature; got != "sig-opaque-abc" {
+		t.Fatalf("thought_signature=%q body=%s", got, raw)
+	}
+	// Empty signature must not appear (omitempty) for plain OpenAI payloads.
+	plain := toOpenAIMessages([]Message{{
+		Role: "assistant",
+		ToolCalls: []ToolCall{{
+			ID: "c", Type: "function",
+			Function: FunctionCall{Name: "read", Arguments: `{}`},
+		}},
+	}})
+	raw2, _ := json.Marshal(plain[0])
+	if strings.Contains(string(raw2), "thought_signature") {
+		t.Fatalf("empty signature should omit: %s", raw2)
+	}
+}
 
 // Regression: OpenAI-compat gateways with untagged MessageContent (Text|Parts)
 // reject assistant tool-call turns and empty tool results when content is
@@ -67,5 +118,37 @@ func TestToOpenAIMessagesAlwaysEmitsContentString(t *testing.T) {
 	}
 	if asst.ToolCalls[0].Function.Arguments != "{}" {
 		t.Fatalf("arguments=%q", asst.ToolCalls[0].Function.Arguments)
+	}
+}
+
+func TestChatOpenAIParsesThoughtSignature(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices":[{
+				"message":{
+					"role":"assistant",
+					"content":"",
+					"tool_calls":[{
+						"id":"call_1",
+						"type":"function",
+						"thought_signature":"sig-ns",
+						"function":{"name":"glob","arguments":"{\"pattern\":\"*\"}"}
+					}]
+				},
+				"finish_reason":"tool_calls"
+			}],
+			"usage":{"prompt_tokens":1,"completion_tokens":2}
+		}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
+	msg, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "x"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.ToolCalls) != 1 || msg.ToolCalls[0].ThoughtSignature != "sig-ns" {
+		t.Fatalf("msg=%+v", msg)
 	}
 }

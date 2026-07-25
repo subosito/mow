@@ -35,7 +35,7 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 		"messages":   anthMsgs,
 		"stream":     true,
 	}
-	if sys := anthropicSystemField(system, c.PromptCache); sys != nil {
+	if sys := anthropicSystemField(c.activeSystemPrefix(), system, c.PromptCache); sys != nil {
 		body["system"] = sys
 	}
 	if atools := toAnthropicTools(tools); len(atools) > 0 {

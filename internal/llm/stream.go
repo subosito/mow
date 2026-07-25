@@ -133,9 +133,9 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	}
 
 	msg := Message{Role: "assistant"}
-	// tool call id -> accumulating function
+	// tool call index -> accumulating function (+ optional thought_signature)
 	type acc struct {
-		id, name, args string
+		id, name, args, thoughtSig string
 	}
 	toolsAcc := map[int]*acc{}
 
@@ -164,10 +164,11 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 					ReasoningContent string `json:"reasoning_content"` // some OpenAI-compat
 					Thinking         string `json:"thinking"`          // some gateways
 					ToolCalls        []struct {
-						Index    int    `json:"index"`
-						ID       string `json:"id"`
-						Type     string `json:"type"`
-						Function struct {
+						Index            int    `json:"index"`
+						ID               string `json:"id"`
+						Type             string `json:"type"`
+						ThoughtSignature string `json:"thought_signature"`
+						Function         struct {
 							Name      string `json:"name"`
 							Arguments string `json:"arguments"`
 						} `json:"function"`
@@ -233,6 +234,12 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 				a.name = tc.Function.Name
 			}
 			a.args += tc.Function.Arguments
+			// Some providers send thought_signature once on the start chunk; keep first non-empty.
+			if a.thoughtSig == "" {
+				if s := strings.TrimSpace(tc.ThoughtSignature); s != "" {
+					a.thoughtSig = s
+				}
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -255,8 +262,9 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 			args = "{}"
 		}
 		msg.ToolCalls = append(msg.ToolCalls, ToolCall{
-			ID:   a.id,
-			Type: "function",
+			ID:               a.id,
+			Type:             "function",
+			ThoughtSignature: a.thoughtSig,
 			Function: FunctionCall{
 				Name:      a.name,
 				Arguments: args,

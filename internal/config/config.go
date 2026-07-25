@@ -38,6 +38,16 @@ type LLMConfig struct {
 	// system/tools/history). Nil = enabled (pure win for repeated prefixes);
 	// set false for gateways that reject cache_control fields.
 	PromptCache *bool `yaml:"prompt_cache"`
+	// SystemPrefix is optional text segments prepended before the compiled
+	// system prompt (AGENTS.md / skills / default). Each list item is a
+	// separate segment (not one joined string). Applies on all wires when
+	// the model matches SystemPrefixModels. Not loadable from project
+	// .mow/config.
+	SystemPrefix []string `yaml:"system_prefix"`
+	// SystemPrefixModels limits SystemPrefix to matching model ids (case-
+	// insensitive globs: *, ?). Empty = apply for every model when
+	// SystemPrefix is set. Example: ["family-*"].
+	SystemPrefixModels []string `yaml:"system_prefix_models"`
 	// ContextWindow / InputPrice / OutputPrice override the built-in model
 	// catalog (context tokens; USD per 1M input/output tokens) when it is
 	// missing or stale for the configured model.
@@ -207,6 +217,9 @@ func mergeProjectFile(dst *File, path string) error {
 	overlay.LLM.APIKey = ""
 	overlay.LLM.APIKeyEnv = ""
 	overlay.LLM.Headers = nil
+	// System prefix is user/host config only (not project-controlled).
+	overlay.LLM.SystemPrefix = nil
+	overlay.LLM.SystemPrefixModels = nil
 	overlay.Session.Dir = ""
 	overlay.Tools.Enable = dropPowerTools(overlay.Tools.Enable)
 	mergeOverlay(dst, &overlay)
@@ -327,6 +340,12 @@ func mergeLLM(dst *LLMConfig, o LLMConfig) {
 	}
 	if s := strings.TrimSpace(o.Model); s != "" {
 		dst.Model = s
+	}
+	if len(o.SystemPrefix) > 0 {
+		dst.SystemPrefix = append([]string(nil), o.SystemPrefix...)
+	}
+	if len(o.SystemPrefixModels) > 0 {
+		dst.SystemPrefixModels = append([]string(nil), o.SystemPrefixModels...)
 	}
 	if len(o.Headers) > 0 {
 		if dst.Headers == nil {

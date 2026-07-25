@@ -102,6 +102,10 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+	// ThoughtSignature is optional provider metadata on a tool_call that must
+	// be echoed when replaying that call in later turns. Empty on most
+	// providers; omitempty keeps ordinary payloads clean.
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 // FunctionCall holds name + JSON arguments string.
@@ -142,6 +146,15 @@ type Client struct {
 	// explicit breakpoint (anthropic-messages: cache_control on system, tools,
 	// and the last message). OpenAI caches automatically and ignores this.
 	PromptCache bool
+	// SystemPrefix is optional text segments prepended before the compiled
+	// system prompt (AGENTS.md / skills / default). Each entry is a separate
+	// segment. On anthropic-messages they become separate system text blocks;
+	// on other wires they are leading role=system messages. Configure via
+	// llm.system_prefix — mow does not hardcode vendor text.
+	SystemPrefix []string
+	// SystemPrefixModels are case-insensitive globs against Client.Model.
+	// Empty = always apply SystemPrefix when set. Non-empty = apply only on match.
+	SystemPrefixModels []string
 }
 
 // ChatRequest is the outbound chat body (subset).
@@ -179,6 +192,8 @@ func (c *Client) ChatWithDelta(ctx context.Context, messages []Message, tools []
 // ChatWithStream is Chat with content and reasoning SSE callbacks.
 func (c *Client) ChatWithStream(ctx context.Context, messages []Message, tools []ToolSpec, hooks StreamHooks) (Message, error) {
 	stream := c.Stream || hooks.OnContent != nil || hooks.OnReasoning != nil
+	// Leading system segments for non-Anthropic wires (Anthropic uses system blocks).
+	messages = c.messagesWithSystemPrefix(messages)
 	switch NormalizeWire(c.Wire) {
 	case WireAnthropicMsg:
 		if stream {

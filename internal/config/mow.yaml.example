@@ -19,6 +19,15 @@ llm:
   # api_key_env: OPENAI_API_KEY
   # model: deepseek-v4-flash          # chat agent loop (tools + reasoning)
   # stream: true
+  #
+  # Optional system segments before AGENTS.md / skills / default system.
+  # Each list item is a separate segment. Limit by model id with globs
+  # (case-insensitive); omit system_prefix_models to apply for every model.
+  # system_prefix:
+  #   - "…"
+  # system_prefix_models:
+  #   - "family-*"
+  # (Only $MOW_HOME/config.yaml / --config; not project .mow/config.)
 
   # Side-lane model ids (same base_url/key as chat). Chat stays on `model` above.
   # generate.* / understand.* → tools generate_* / understand_*
