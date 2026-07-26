@@ -30,16 +30,17 @@ llm:
   # (Only $MOW_HOME/config.yaml / --config; not project .mow/config.)
 
   # Side-lane model ids (same base_url/key as chat). Chat stays on `model` above.
+  # Use whatever ids your provider/gateway exposes. Chat stays on `model` above.
   # generate.* / understand.* → tools generate_* / understand_*
   # generate:
-  #   image: grok-imagine-image-quality
-  #   speech: eleven_v3
-  #   speech_voice: LcvlyuBGMjj1h4uAtQjo   # ElevenLabs voice_id (optional; built-in default if omitted)
-  #   video: grok-imagine-video
+  #   image: gpt-image-1                  # or your gateway's image model id
+  #   speech: tts-1
+  #   speech_voice: alloy                 # provider voice id (optional; default alloy)
+  #   video: …                            # if your endpoint supports video
   # understand:
-  #   image: qwen3-vl-plus
-  #   voice: whisper-large-v3-turbo
-  #   video: qwen-vl-plus
+  #   image: gpt-4o-mini                  # vision-capable chat model id
+  #   voice: whisper-1
+  #   video: …
 
 tools:
   # Secure default when omitted: read, glob, grep
@@ -93,10 +94,26 @@ session:
 #     # root:                            # default $MOW_HOME/ops
 #     # log_max_lines: 200
 #     # log_max_bytes: 262144
-#     # Named profiles (explicit MOW_OPS or -p/--ops NAME):
-#     #   $MOW_HOME/ops/<name>/config.yaml   # services, actions, acp, model
-#     #   $MOW_HOME/ops/<name>/prompt.md
-#     #   $MOW_HOME/ops/<name>/incidents/
+#     # Named profiles live under $MOW_HOME/ops/<name>/ (not in this file):
+#     #   config.yaml   services, actions, acp peers, model, every, prompt
+#     #   prompt.md     system instructions
+#     #   incidents/    durable tickets
+#     # Example profile config.yaml:
+#     #   every: 15m
+#     #   model: deepseek-chat            # optional; or rely on $MOW_HOME/config.yaml
+#     #   services:
+#     #     - name: api
+#     #       logs: [/var/log/api/app.log]
+#     #       actions:
+#     #         status:  [systemctl, is-active, api.service]
+#     #         restart: [systemctl, restart, api.service]
+#     #       acp: api-peer
+#     #   acp:
+#     #     agents:
+#     #       - name: api-peer
+#     #         command: [mow, acp]
+#     #         dir: /path/to/api/repo
+#     # Then: mow ops run api-stack --once
 
 
 # Claude Code plugin hooks bridge (ext/cmdhook). Runs a plugin hooks.json

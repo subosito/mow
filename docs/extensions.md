@@ -413,11 +413,13 @@ Media models: yaml `llm.generate.*` / `llm.understand.*` (and `tools.enable`). O
 | **Agent** | `mow acp` | Editor/client → mow `Engine` |
 | **Client / delegate** | tool `acp_delegate` | mow → peer harness subprocess |
 
-Agent methods (Zed-oriented): `initialize`, `authenticate`, `logout`, `session/new|load|resume|list|delete|close`, `session/prompt`, `session/cancel`, `session/set_mode` (`ask` \| `code`), `session/set_config_option` (**model** select from catalog + wire), streaming `session/update` (`agent_message_chunk`, `current_mode_update`, `config_option_update`, `terminal_output` / `terminal_exit`), `session/request_permission` (auto-allow), **fs/** read/write (workspace jail), **terminal/** create|output|write|resize|wait_for_exit|kill|release when shell allowed.
+Agent methods (Zed-oriented): `initialize`, `authenticate`, `logout`, `session/new|load|resume|list|delete|close`, `session/prompt`, `session/cancel`, `session/set_mode` (`ask` \| `code`), `session/set_config_option` (mode + model), streaming `session/update` (`agent_message_chunk`, `current_mode_update`, `config_option_update`, `terminal_output` / `terminal_exit`), `session/request_permission` (auto-allow), **fs/** read/write (workspace jail), **terminal/** create|output|write|resize|wait_for_exit|kill|release when shell allowed.
 
 **Prompt content:** text, image, audio, resource, resource_link. Media is written under `media/acp/` and referenced in the text prompt (`promptCapabilities.image|audio|embeddedContext`).
 
-**Modes:** `ask` = read-only tools (no write/edit/bash, no terminal); `code` = full access per process policy (`--allow-write` / `--allow-shell`).
+**Modes:** `ask` = read-only tools (no write/edit/bash, no terminal); `code` = full access per process policy (`--allow-write` / `--allow-shell`). Advertised both as ACP `modes` and as a `configOptions` select (`category: mode`) for editor UIs.
+
+**Model picker:** `configOptions` entry `id=model` (`category: model`) lists `GET /models` for the configured endpoint. Plain OpenAI-compatible catalogs (OpenAI, DeepSeek, local gateways, …) show every id; optional gateway `wire` metadata filters to chat wires only and is applied on switch via `SetModelWithWire` (not shown in labels). Multimodal clone ids ending in `:image` / `:video` / `:audio` are omitted when present.
 
 **Why ACP for delegate (not a private RPC):** same wire for editors and peer agents; avoid inventing mow↔claude, mow↔codex one-offs. Core stays **one loop**; delegation is a tool with workspace jail + timeout.
 

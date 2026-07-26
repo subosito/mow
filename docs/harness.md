@@ -237,7 +237,7 @@ llm:
   generate:
     image:  gpt-image-1                 # OpenAI ids shown; swap for your gateway's
     speech: tts-1
-    speech_voice: alloy                 # ElevenLabs: a voice_id, not a name
+    speech_voice: alloy                 # provider voice id (OpenAI-style name or vendor voice_id)
     video:  grok-imagine-video
   understand:
     image:  gpt-4o                      # a vision model

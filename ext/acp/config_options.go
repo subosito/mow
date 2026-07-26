@@ -153,10 +153,10 @@ func (a *agentServer) listModels(ctx context.Context) ([]mow.ModelInfo, error) {
 
 // filterChatModels keeps catalog rows suitable for the agent chat picker.
 //
-// Portable rules (any OpenAI-compatible host, including DeepSeek):
-//   - no wire metadata → keep (plain /v1/models lists are chat models)
+// Portable rules (any OpenAI-compatible /models list):
+//   - no wire metadata → keep (plain catalogs are chat models)
 //   - preferred wire set → keep only known chat wires; drop images/speech/…
-//   - id suffix :image / :video / :audio → drop (gateway multimodal clones)
+//   - id suffix :image / :video / :audio → drop (optional multimodal clones)
 //
 // Wire is never shown in the UI; it is only used for SetModelWithWire.
 func filterChatModels(list []mow.ModelInfo) []mow.ModelInfo {
@@ -183,7 +183,7 @@ func isChatModel(m mow.ModelInfo) bool {
 	}
 	w := strings.TrimSpace(m.Wire)
 	if w == "" {
-		// DeepSeek, OpenAI, most gateways: id only.
+		// Plain catalogs (OpenAI, DeepSeek, local servers, …): id only.
 		return true
 	}
 	return isChatWire(w)

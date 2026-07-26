@@ -35,7 +35,7 @@ type MediaOptions struct {
 
 	GenerateImage  string
 	GenerateSpeech string
-	// DefaultSpeechVoice used when generate_speech omits voice (ElevenLabs voice_id).
+	// DefaultSpeechVoice used when generate_speech omits voice (provider voice id).
 	DefaultSpeechVoice string
 	GenerateVideo      string
 
@@ -45,8 +45,9 @@ type MediaOptions struct {
 }
 
 // DefaultSpeechVoiceID is the fallback TTS voice when none is configured.
-// Matches common ElevenLabs / dududu female default (not an OpenAI name).
-const DefaultSpeechVoiceID = "LcvlyuBGMjj1h4uAtQjo"
+// OpenAI-compatible "alloy"; override via llm.generate.speech_voice for
+// provider-specific ids (e.g. ElevenLabs voice_id).
+const DefaultSpeechVoiceID = "alloy"
 
 // MediaTools returns generate/understand tools for configured models.
 // Caller still filters by tools.enable.

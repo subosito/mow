@@ -28,24 +28,22 @@ func (p *modelProv) SetModel(id string) error {
 
 func TestFilterChatModels(t *testing.T) {
 	in := []mow.ModelInfo{
-		// Plain OpenAI-compatible catalog (DeepSeek, etc.): id only → keep all.
+		// Plain OpenAI-compatible catalog (id only) → keep all.
 		{ID: "deepseek-chat"},
-		{ID: "deepseek-reasoner"},
-		// Gateway with wire metadata.
-		{ID: "ag/gemini-3.6-flash-medium", Wire: "openai-chat-completions"},
-		{ID: "ag/gemini-3.6-flash-medium:image", Wire: "openai-chat-completions"},
-		{ID: "eleven_v3", Wire: "openai-audio-speech"},
-		{ID: "grok-imagine-image-quality", Wire: "openai-images-generations"},
-		{ID: "claude-sonnet-5", Wire: "anthropic-messages"},
-		{ID: "codex/gpt-5.5", Wire: "openai-chat-completions"},
+		{ID: "gpt-4.1-mini"},
+		// Optional gateway wire metadata.
+		{ID: "chat-model", Wire: "openai-chat-completions"},
+		{ID: "chat-model:image", Wire: "openai-chat-completions"},
+		{ID: "tts-model", Wire: "openai-audio-speech"},
+		{ID: "image-model", Wire: "openai-images-generations"},
+		{ID: "claude-model", Wire: "anthropic-messages"},
 	}
 	got := filterChatModels(in)
 	want := map[string]bool{
-		"deepseek-chat":              true,
-		"deepseek-reasoner":          true,
-		"ag/gemini-3.6-flash-medium": true,
-		"claude-sonnet-5":            true,
-		"codex/gpt-5.5":              true,
+		"deepseek-chat": true,
+		"gpt-4.1-mini":  true,
+		"chat-model":    true,
+		"claude-model":  true,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d: %+v", len(got), got)
