@@ -17,7 +17,8 @@ llm:
   # wire: anthropic-messages
   # base_url: https://api.openai.com/v1   # or any OpenAI-compatible /v1
   # api_key_env: OPENAI_API_KEY
-  # model: deepseek-v4-flash          # chat agent loop (tools + reasoning)
+  # model: gpt-5-mini                 # chat agent loop (tools + reasoning)
+  # model: deepseek-chat              # or any OpenAI-compatible id
   # stream: true
   #
   # Optional system segments before AGENTS.md / skills / default system.
@@ -38,7 +39,7 @@ llm:
   #   speech_voice: alloy                 # provider voice id (optional; default alloy)
   #   video: …                            # if your endpoint supports video
   # understand:
-  #   image: gpt-4o-mini                  # vision-capable chat model id
+  #   image: gpt-5                        # vision-capable chat model id
   #   voice: whisper-1
   #   video: …
 
@@ -100,7 +101,7 @@ session:
 #     #   incidents/    durable tickets
 #     # Example profile config.yaml:
 #     #   every: 15m
-#     #   model: deepseek-chat            # optional; or rely on $MOW_HOME/config.yaml
+#     #   model: gpt-5-mini               # optional; or rely on $MOW_HOME/config.yaml
 #     #   services:
 #     #     - name: api
 #     #       logs: [/var/log/api/app.log]

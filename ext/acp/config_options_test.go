@@ -30,7 +30,7 @@ func TestFilterChatModels(t *testing.T) {
 	in := []mow.ModelInfo{
 		// Plain OpenAI-compatible catalog (id only) → keep all.
 		{ID: "deepseek-chat"},
-		{ID: "gpt-4.1-mini"},
+		{ID: "gpt-5-mini"},
 		// Optional gateway wire metadata.
 		{ID: "chat-model", Wire: "openai-chat-completions"},
 		{ID: "chat-model:image", Wire: "openai-chat-completions"},
@@ -41,7 +41,7 @@ func TestFilterChatModels(t *testing.T) {
 	got := filterChatModels(in)
 	want := map[string]bool{
 		"deepseek-chat": true,
-		"gpt-4.1-mini":  true,
+		"gpt-5-mini":    true,
 		"chat-model":    true,
 		"claude-model":  true,
 	}

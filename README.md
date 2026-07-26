@@ -56,7 +56,7 @@ go build -o bin/mow ./cmd/mow
 
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_API_KEY=sk-…
-export OPENAI_MODEL=gpt-4.1-mini
+export OPENAI_MODEL=gpt-5-mini
 # Or any OpenAI-compatible gateway:
 # export OPENAI_BASE_URL=http://127.0.0.1:PORT/v1
 # export OPENAI_API_KEY=…

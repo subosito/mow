@@ -233,16 +233,16 @@ Runnable config (`$MOW_HOME/config.yaml`):
 llm:
   base_url: https://api.openai.com/v1   # or a gateway that routes these models
   api_key_env: OPENAI_API_KEY           # media reuses the chat endpoint + key
-  model: gpt-4.1-mini
+  model: gpt-5-mini
   generate:
     image:  gpt-image-1                 # OpenAI ids shown; swap for your gateway's
     speech: tts-1
     speech_voice: alloy                 # provider voice id (OpenAI-style name or vendor voice_id)
-    video:  grok-imagine-video
+    # video: …                          # if your endpoint supports video
   understand:
-    image:  gpt-4o                      # a vision model
+    image:  gpt-5                       # vision-capable chat model
     voice:  whisper-1
-    video:  qwen-vl-plus
+    # video: …
 tools:
   enable: [read, glob, grep,
            generate_image, generate_speech, generate_video,

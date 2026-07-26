@@ -277,7 +277,7 @@ run without persistence (tests/CI).
 
 ```go
 eng.Model()                       // active chat model id
-eng.SetModel("gpt-4.1")           // switch for subsequent Prompts
+eng.SetModel("gpt-5-mini")        // switch for subsequent Prompts
 eng.ListModels(ctx)               // GET /models (built-in client)
 eng.Wire()                        // openai-chat-completions | openai-responses | anthropic-messages
 eng.SetWire("anthropic-messages")
