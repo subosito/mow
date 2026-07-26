@@ -413,7 +413,7 @@ Media models: yaml `llm.generate.*` / `llm.understand.*` (and `tools.enable`). O
 | **Agent** | `mow acp` | Editor/client → mow `Engine` |
 | **Client / delegate** | tool `acp_delegate` | mow → peer harness subprocess |
 
-Agent methods (Zed-oriented): `initialize`, `authenticate`, `logout`, `session/new|load|resume|list|delete|close`, `session/prompt`, `session/cancel`, `session/set_mode` (`ask` \| `code`), streaming `session/update` (`agent_message_chunk`, `current_mode_update`, `terminal_output` / `terminal_exit`), `session/request_permission` (auto-allow), **fs/** read/write (workspace jail), **terminal/** create|output|write|resize|wait_for_exit|kill|release when shell allowed.
+Agent methods (Zed-oriented): `initialize`, `authenticate`, `logout`, `session/new|load|resume|list|delete|close`, `session/prompt`, `session/cancel`, `session/set_mode` (`ask` \| `code`), `session/set_config_option` (**model** select from catalog + wire), streaming `session/update` (`agent_message_chunk`, `current_mode_update`, `config_option_update`, `terminal_output` / `terminal_exit`), `session/request_permission` (auto-allow), **fs/** read/write (workspace jail), **terminal/** create|output|write|resize|wait_for_exit|kill|release when shell allowed.
 
 **Prompt content:** text, image, audio, resource, resource_link. Media is written under `media/acp/` and referenced in the text prompt (`promptCapabilities.image|audio|embeddedContext`).
 

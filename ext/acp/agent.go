@@ -187,13 +187,17 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		a.sessions[sid] = &acpSession{mode: ModeCode}
 		mode := ModeCode
 		a.mu.Unlock()
+		result := map[string]any{
+			"sessionId": sid,
+			"modes":     modeState(mode),
+		}
+		if opts := a.sessionConfigOptions(parent); len(opts) > 0 {
+			result["configOptions"] = opts
+		}
 		a.write(response{
 			JSONRPC: "2.0",
 			ID:      req.ID,
-			Result: map[string]any{
-				"sessionId": sid,
-				"modes":     modeState(mode),
-			},
+			Result:  result,
 		})
 	case "session/load":
 		// Resume an existing mow session id (same Engine already holds transcript/prior when constructed with SessionID).
@@ -226,13 +230,17 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				}),
 			})
 		}
+		loadResult := map[string]any{
+			"sessionId": sid,
+			"modes":     modeState(mode),
+		}
+		if opts := a.sessionConfigOptions(parent); len(opts) > 0 {
+			loadResult["configOptions"] = opts
+		}
 		a.write(response{
 			JSONRPC: "2.0",
 			ID:      req.ID,
-			Result: map[string]any{
-				"sessionId": sid,
-				"modes":     modeState(mode),
-			},
+			Result:  loadResult,
 		})
 	case "fs/read_text_file":
 		var p struct {
@@ -527,9 +535,13 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		}
 		mode := a.sessions[sid].mode
 		a.mu.Unlock()
+		resumeResult := map[string]any{"sessionId": sid, "modes": modeState(mode)}
+		if opts := a.sessionConfigOptions(parent); len(opts) > 0 {
+			resumeResult["configOptions"] = opts
+		}
 		a.write(response{
 			JSONRPC: "2.0", ID: req.ID,
-			Result: map[string]any{"sessionId": sid, "modes": modeState(mode)},
+			Result: resumeResult,
 		})
 	case "session/list":
 		a.mu.Lock()
@@ -594,8 +606,45 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		})
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
 	case "session/set_config_option", "session/setConfigOption":
-		// No config options advertised; accept for forward compatibility.
-		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"configOptions": []any{}}})
+		var p struct {
+			SessionID string `json:"sessionId"`
+			ConfigID  string `json:"configId"`
+			// value is string for select options; boolean for type boolean (unused today).
+			Value any `json:"value"`
+			Type  string `json:"type"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil || strings.TrimSpace(p.SessionID) == "" {
+			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "sessionId and configId required"}})
+			return
+		}
+		configID := strings.TrimSpace(p.ConfigID)
+		if configID == "" {
+			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "configId required"}})
+			return
+		}
+		sid := strings.TrimSpace(p.SessionID)
+		switch configID {
+		case configIDModel:
+			val, _ := p.Value.(string)
+			if val == "" {
+				// Some clients nest value under typed payload.
+				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "model value required"}})
+				return
+			}
+			if err := a.applyModelConfig(parent, val); err != nil {
+				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
+				return
+			}
+		default:
+			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "unknown configId: " + configID}})
+			return
+		}
+		opts := a.sessionConfigOptions(parent)
+		if opts == nil {
+			opts = []map[string]any{}
+		}
+		a.notifyConfigOptions(sid, opts)
+		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"configOptions": opts}})
 	case "terminal/kill":
 		var p struct {
 			TerminalID string `json:"terminalId"`

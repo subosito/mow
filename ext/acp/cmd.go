@@ -63,6 +63,9 @@ func printUsage() {
   JSON-RPC on stdin → stdout. Ctrl+C / SIGTERM stops the agent.
   Streaming is always on for session/update chunks.
 
+  Model picker: session config option id "model" (from GET /models when available;
+  switching uses catalog wire via SetModelWithWire). Modes: ask | code.
+
 Engine flags: same as mow run (--config --model --workspace --allow-write …).
 
 Optional: extensions.acp.agents → acp_delegate tool for peer harnesses.

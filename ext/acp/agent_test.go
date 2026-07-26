@@ -219,6 +219,86 @@ func (c *pipeClient) sessionNew(ctx context.Context, cwd string) (string, error)
 	return res.SessionID, nil
 }
 
+type modelListProv struct {
+	model string
+	list  []mow.ModelInfo
+}
+
+func (p *modelListProv) Chat(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec, hooks mow.ChatHooks) (mow.Message, error) {
+	return mow.Message{Role: "assistant", Content: "ok"}, nil
+}
+func (p *modelListProv) ListModels(ctx context.Context) ([]mow.ModelInfo, error) {
+	return append([]mow.ModelInfo(nil), p.list...), nil
+}
+func (p *modelListProv) SetModel(id string) error {
+	p.model = id
+	return nil
+}
+
+func TestSessionNewAdvertisesModelConfig(t *testing.T) {
+	prov := &modelListProv{
+		model: "m1",
+		list: []mow.ModelInfo{
+			{ID: "m1", Wire: "openai-chat-completions"},
+			{ID: "m2", Wire: "anthropic-messages"},
+		},
+	}
+	eng, err := mow.New(mow.Options{NoSession: true, Model: "m1", Provider: prov})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	go func() {
+		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
+		_ = cw.Close()
+	}()
+	cl := newPipeClient(cr, aw)
+	go cl.readLoop()
+	if err := cl.callOK(ctx, "initialize", map[string]any{"protocolVersion": 1}); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := cl.call(ctx, "session/new", map[string]any{"cwd": t.TempDir(), "mcpServers": []any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		SessionID     string           `json:"sessionId"`
+		ConfigOptions []map[string]any `json:"configOptions"`
+	}
+	if err := json.Unmarshal(msg["result"], &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.SessionID == "" || len(res.ConfigOptions) == 0 {
+		t.Fatalf("%+v", res)
+	}
+	if res.ConfigOptions[0]["id"] != "model" || res.ConfigOptions[0]["currentValue"] != "m1" {
+		t.Fatalf("option=%v", res.ConfigOptions[0])
+	}
+	msg, err = cl.call(ctx, "session/set_config_option", map[string]any{
+		"sessionId": res.SessionID,
+		"configId":  "model",
+		"value":     "m2",
+	})
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	var setRes struct {
+		ConfigOptions []map[string]any `json:"configOptions"`
+	}
+	_ = json.Unmarshal(msg["result"], &setRes)
+	if len(setRes.ConfigOptions) == 0 || setRes.ConfigOptions[0]["currentValue"] != "m2" {
+		t.Fatalf("after set: %v", setRes.ConfigOptions)
+	}
+	if eng.Model() != "m2" {
+		t.Fatalf("eng model=%q", eng.Model())
+	}
+	cancel()
+	_ = aw.Close()
+}
+
 func (c *pipeClient) prompt(ctx context.Context, sid, text string) (string, error) {
 	msg, err := c.call(ctx, "session/prompt", map[string]any{
 		"sessionId": sid,
