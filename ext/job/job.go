@@ -276,7 +276,7 @@ func (d *Daemon) fire(ctx context.Context, j Job) {
 		}
 		d.log(fmt.Sprintf("job %s goal %s status=%s", j.ID, g, st.Status))
 		if sum != "" {
-			d.log(fmt.Sprintf("job %s result:\n%s", j.ID, truncateLog(sum, 800)))
+			d.log(fmt.Sprintf("job %s result:\n%s", j.ID, truncateLog(sum, jobResultLogMax)))
 		}
 		return
 	}
@@ -287,16 +287,25 @@ func (d *Daemon) fire(ctx context.Context, j Job) {
 	}
 	d.log(fmt.Sprintf("job %s prompt ok session=%s", j.ID, res.SessionID))
 	if t := strings.TrimSpace(res.Text); t != "" {
-		d.log(fmt.Sprintf("job %s result:\n%s", j.ID, truncateLog(t, 800)))
+		d.log(fmt.Sprintf("job %s result:\n%s", j.ID, truncateLog(t, jobResultLogMax)))
 	}
 }
 
+// jobResultLogMax is the max runes of a tick result written to the job log
+// (stderr / OnLog). 800 was far too small for ops summaries; 32k still
+// bounds runaway model output for journald.
+const jobResultLogMax = 32_000
+
 func truncateLog(s string, n int) string {
 	s = strings.TrimSpace(s)
-	if n <= 0 || len(s) <= n {
+	if n <= 0 {
 		return s
 	}
-	return s[:n] + "…"
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + fmt.Sprintf("…\n(truncated, %d chars total)", len(r))
 }
 
 func (d *Daemon) goalStore() *goal.Store {
