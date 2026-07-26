@@ -151,9 +151,14 @@ func (a *agentServer) listModels(ctx context.Context) ([]mow.ModelInfo, error) {
 	return a.eng.ListModels(lctx)
 }
 
-// filterChatModels drops media/embedding/speech catalog rows so the ACP picker
-// only offers agent chat models. Preferred wire must be a known chat wire when set;
-// ids like foo:image / eleven_* / whisper are excluded even if mis-tagged as chat.
+// filterChatModels keeps catalog rows suitable for the agent chat picker.
+//
+// Portable rules (any OpenAI-compatible host, including DeepSeek):
+//   - no wire metadata → keep (plain /v1/models lists are chat models)
+//   - preferred wire set → keep only known chat wires; drop images/speech/…
+//   - id suffix :image / :video / :audio → drop (gateway multimodal clones)
+//
+// Wire is never shown in the UI; it is only used for SetModelWithWire.
 func filterChatModels(list []mow.ModelInfo) []mow.ModelInfo {
 	out := make([]mow.ModelInfo, 0, len(list))
 	for _, m := range list {
@@ -165,36 +170,23 @@ func filterChatModels(list []mow.ModelInfo) []mow.ModelInfo {
 }
 
 func isChatModel(m mow.ModelInfo) bool {
-	id := strings.ToLower(strings.TrimSpace(m.ID))
+	id := strings.TrimSpace(m.ID)
 	if id == "" {
 		return false
 	}
-	// Gateway multi-modal clones and pure media/embedding models.
-	if strings.Contains(id, ":image") || strings.Contains(id, ":video") || strings.Contains(id, ":audio") {
-		return false
-	}
-	for _, k := range []string{
-		"eleven", "whisper", "embedding", "imagine-image", "imagine-video",
-		"tts", "speech", "audio-speech", "transcription",
-	} {
-		if strings.Contains(id, k) {
+	lower := strings.ToLower(id)
+	if i := strings.LastIndex(lower, ":"); i >= 0 {
+		switch lower[i+1:] {
+		case "image", "video", "audio":
 			return false
 		}
 	}
-	w := strings.ToLower(strings.TrimSpace(m.Wire))
-	if w != "" {
-		return isChatWire(w)
-	}
-	// No preferred wire: keep if any registered wire is chat, or if wires empty (unknown = allow).
-	if len(m.Wires) == 0 {
+	w := strings.TrimSpace(m.Wire)
+	if w == "" {
+		// DeepSeek, OpenAI, most gateways: id only.
 		return true
 	}
-	for _, x := range m.Wires {
-		if isChatWire(x) {
-			return true
-		}
-	}
-	return false
+	return isChatWire(w)
 }
 
 func isChatWire(w string) bool {

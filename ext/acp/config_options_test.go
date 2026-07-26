@@ -28,17 +28,21 @@ func (p *modelProv) SetModel(id string) error {
 
 func TestFilterChatModels(t *testing.T) {
 	in := []mow.ModelInfo{
+		// Plain OpenAI-compatible catalog (DeepSeek, etc.): id only → keep all.
+		{ID: "deepseek-chat"},
+		{ID: "deepseek-reasoner"},
+		// Gateway with wire metadata.
 		{ID: "ag/gemini-3.6-flash-medium", Wire: "openai-chat-completions"},
 		{ID: "ag/gemini-3.6-flash-medium:image", Wire: "openai-chat-completions"},
 		{ID: "eleven_v3", Wire: "openai-audio-speech"},
 		{ID: "grok-imagine-image-quality", Wire: "openai-images-generations"},
-		{ID: "whisper-large-v3-turbo", Wire: "openai-audio-transcriptions"},
-		{ID: "text-embedding-v4", Wire: "openai-embeddings"},
 		{ID: "claude-sonnet-5", Wire: "anthropic-messages"},
-		{ID: "codex/gpt-5.5", Wire: "openai-chat-completions", Wires: []string{"openai-chat-completions", "openai-images-generations"}},
+		{ID: "codex/gpt-5.5", Wire: "openai-chat-completions"},
 	}
 	got := filterChatModels(in)
 	want := map[string]bool{
+		"deepseek-chat":              true,
+		"deepseek-reasoner":          true,
 		"ag/gemini-3.6-flash-medium": true,
 		"claude-sonnet-5":            true,
 		"codex/gpt-5.5":              true,
