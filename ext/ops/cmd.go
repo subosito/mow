@@ -58,12 +58,15 @@ func opsCmd(args []string) int {
 }
 
 func printOpsUsage() {
-	fmt.Fprintf(os.Stderr, `mow ops — named fleet observer
+	fmt.Fprintf(os.Stderr, `mow ops — continuous fleet monitor + remediate
 
 Profiles: $MOW_HOME/ops/<name>/
-  config.yaml   services, actions, acp, model, every, prompt
-  prompt.md     system instructions for the observer
-  incidents/    incident store
+  config.yaml   services, actions, acp peers, model, every, prompt
+  prompt.md     system instructions (how to fix this stack)
+  incidents/    durable work items (open → fix → close)
+
+Each mow ops run tick: scan logs/status → ticket real issues → restart and/or
+acp_delegate peers to fix code → update/close incidents. Not log-classify only.
 
 Profile name is always explicit (first arg after the verb, or -p/--ops, or MOW_OPS).
 
@@ -75,7 +78,7 @@ Commands:
   mow ops services NAME                list services
   mow ops status NAME [service]        run actions.status
   mow ops incidents NAME               list incidents
-  mow ops run NAME [flags]             observer loop (or --once)
+  mow ops run NAME [flags]             remediation loop (or --once)
 
 Run flags:
 
@@ -96,7 +99,8 @@ Examples:
   mow ops run fleet --once
   MOW_OPS=fleet mow ops run fleet   # same; name still required on run
 
-Tools (agent): ops_services, ops_logs, ops_action, ops_incident
+Tools (agent): ops_services, ops_logs, ops_action, ops_incident;
+  plus acp_delegate when the profile declares acp.agents / service.acp.
 `)
 }
 
@@ -496,12 +500,17 @@ func runOnce(ef cliutil.EngineFlags, name, prompt string) int {
 }
 
 func defaultOpsRunPrompt(name string) string {
+	// Each ops run tick is an autonomous SRE turn: detect → ticket → remediate
+	// (restart and/or acp_delegate peers) → close. Not a log classifier.
 	return fmt.Sprintf(
-		"You are the fleet ops observer for profile %q. "+
-			"Use ops_services, ops_logs, ops_action, and ops_incident (ops=%s or MOW_OPS is set). "+
-			"Scan for new errors since the last check, open or update incidents with stable signatures, "+
-			"and only restart via ops_action when a service is clearly stuck or after a deploy. "+
-			"Prefer file logs. End with a short summary of findings and actions taken.",
+		"You are the continuous fleet ops agent for profile %q (ops=%s / MOW_OPS). "+
+			"Mission: keep services healthy — monitor logs and status, open incidents only for issues that need attention, "+
+			"then fix them (ops_action restart when stuck; acp_delegate to the service's peer for code/config fixes). "+
+			"Workflow each tick: (1) ops_incident list (2) ops_action status per service (3) ops_logs with greps for ERROR/WARN/panic/5xx/timeout "+
+			"(4) for each real problem: open/update incident with a stable signature, take a remediation step, note it on the incident "+
+			"(5) close or mark mitigated when fixed or clearly stale. "+
+			"Do not open tickets for one-off historical lines with no recurrence and healthy status. "+
+			"Do not thrash restarts. Prefer file logs. End with findings, actions taken (including peer work), and open incidents.",
 		name, name,
 	)
 }

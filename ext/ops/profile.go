@@ -282,8 +282,11 @@ func (p Profile) systemAppend() string {
 		}
 		b.WriteString(". ")
 	}
-	b.WriteString("Prefer ops_logs for file/OTEL lines; ops_action only for allowlisted restart/status; ")
-	b.WriteString("open incidents for recurring issues; acp_delegate for code in peer repos.")
+	b.WriteString("Role: continuous monitor + remediate (not log-classify only). ")
+	b.WriteString("Prefer ops_logs for evidence; ops_action only for allowlisted restart/status; ")
+	b.WriteString("ops_incident for durable work items (open/update/close with stable signatures); ")
+	b.WriteString("acp_delegate to a service's acp peer when code or config in that repo can fix the issue. ")
+	b.WriteString("Open incidents only for problems that need attention; close when fixed or stale.")
 	if p.Prompt != "" {
 		b.WriteString("\n\n")
 		b.WriteString(p.Prompt)

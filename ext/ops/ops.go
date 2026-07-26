@@ -1,6 +1,7 @@
-// Package ops is the fleet-observer pack: named ops profiles under
+// Package ops is continuous fleet ops: named profiles under
 // $MOW_HOME/ops/<name>/ (config.yaml, prompt.md, incidents/), bounded log
-// reads, allowlisted actions, ACP peers, and mow ops run.
+// reads, allowlisted restart/status, ACP peers for code fixes, and mow ops run.
+// Each run tick is meant to detect issues and remediate (not only classify logs).
 //
 //	import _ "github.com/subosito/mow/ext/ops"
 //
@@ -31,7 +32,7 @@ func init() {
 	ext.RegisterTool(incidentTool{})
 	ext.RegisterCommand(ext.Command{
 		Name:    "ops",
-		Summary: "Fleet observer — list | show | run | status | …",
+		Summary: "Fleet ops — monitor, fix via peers | list | run | …",
 		Run:     opsCmd,
 	})
 	// BeforeNew: when MOW_OPS is set, apply profile LLM env + merge ACP peers
@@ -301,7 +302,7 @@ type incidentTool struct{}
 
 func (incidentTool) Name() string { return "ops_incident" }
 func (incidentTool) Description() string {
-	return "Incidents for a named ops profile ($MOW_HOME/ops/<name>/incidents). Args: ops, action list|open|update|close; open needs signature+summary; update/close need id."
+	return "Durable work queue for a named ops profile ($MOW_HOME/ops/<name>/incidents). Use list first each tick; open only for issues that need attention (stable signature); update with notes after restarts/peer work; close when fixed or stale. Args: ops, action list|open|update|close; open needs signature+summary; update/close need id."
 }
 func (incidentTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"ops":{"type":"string"},"action":{"type":"string","enum":["list","open","update","close"]},"id":{"type":"string"},"signature":{"type":"string"},"summary":{"type":"string"},"service":{"type":"string"},"note":{"type":"string"},"status":{"type":"string"}},"required":["action"]}`)

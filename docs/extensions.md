@@ -45,7 +45,7 @@ Customization modes (see [harness.md](harness.md)):
 |-------|------|
 | **Public core** | `Engine.Prompt`, secure defaults, sessions, stream, skills, media tools (when configured) |
 | **ext registration** | Tools, hooks, CLI commands, BeforeNew hooks |
-| **Packs** | ACP, RPC, goal, MCP, LSP, job, ops, proc, … |
+| **Packs** | ACP, RPC, goal, MCP, LSP, job, ops (monitor+remediate), proc, … |
 | **Host UI** | Goals board, collab, multi-agent roster (unless promoted to a pack) |
 
 ---
@@ -62,7 +62,7 @@ ext/
   acp/                 # pack: ACP + "acp" + acp_delegate
   goal/                # pack: outer-loop goals + "goal"
   job/                 # pack: interval jobs (`mow job`)
-  ops/                 # pack: fleet observer (logs, systemctl, incidents)
+  ops/                 # pack: continuous fleet ops (logs, restart, incidents, peer fixes)
   mcp/                 # pack: MCP → tools
   lsp/                 # pack: LSP hover/definition (gopls, …)
 cmd/mow/               # thin binary: run/repl + blank-import packs
