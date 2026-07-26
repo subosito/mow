@@ -274,8 +274,14 @@ func TestSessionNewAdvertisesModelConfig(t *testing.T) {
 	if res.SessionID == "" || len(res.ConfigOptions) == 0 {
 		t.Fatalf("%+v", res)
 	}
-	if res.ConfigOptions[0]["id"] != "model" || res.ConfigOptions[0]["currentValue"] != "m1" {
-		t.Fatalf("option=%v", res.ConfigOptions[0])
+	if len(res.ConfigOptions) < 2 {
+		t.Fatalf("want mode+model, got %v", res.ConfigOptions)
+	}
+	if res.ConfigOptions[0]["id"] != "mode" || res.ConfigOptions[0]["currentValue"] != "code" {
+		t.Fatalf("mode option=%v", res.ConfigOptions[0])
+	}
+	if res.ConfigOptions[1]["id"] != "model" || res.ConfigOptions[1]["currentValue"] != "m1" {
+		t.Fatalf("model option=%v", res.ConfigOptions[1])
 	}
 	msg, err = cl.call(ctx, "session/set_config_option", map[string]any{
 		"sessionId": res.SessionID,
@@ -289,11 +295,36 @@ func TestSessionNewAdvertisesModelConfig(t *testing.T) {
 		ConfigOptions []map[string]any `json:"configOptions"`
 	}
 	_ = json.Unmarshal(msg["result"], &setRes)
-	if len(setRes.ConfigOptions) == 0 || setRes.ConfigOptions[0]["currentValue"] != "m2" {
+	var modelCur any
+	for _, o := range setRes.ConfigOptions {
+		if o["id"] == "model" {
+			modelCur = o["currentValue"]
+		}
+	}
+	if modelCur != "m2" {
 		t.Fatalf("after set: %v", setRes.ConfigOptions)
 	}
 	if eng.Model() != "m2" {
 		t.Fatalf("eng model=%q", eng.Model())
+	}
+	// Mode via config option
+	msg, err = cl.call(ctx, "session/set_config_option", map[string]any{
+		"sessionId": res.SessionID,
+		"configId":  "mode",
+		"value":     "ask",
+	})
+	if err != nil {
+		t.Fatalf("set mode: %v", err)
+	}
+	_ = json.Unmarshal(msg["result"], &setRes)
+	var modeCur any
+	for _, o := range setRes.ConfigOptions {
+		if o["id"] == "mode" {
+			modeCur = o["currentValue"]
+		}
+	}
+	if modeCur != "ask" {
+		t.Fatalf("mode after set: %v", setRes.ConfigOptions)
 	}
 	cancel()
 	_ = aw.Close()

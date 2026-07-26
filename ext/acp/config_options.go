@@ -12,23 +12,51 @@ import (
 // ACP session config option ids (session/set_config_option configId).
 const (
 	configIDModel = "model"
+	configIDMode  = "mode"
 )
 
 // modelConfigMax is the max catalog entries advertised in the picker.
-// Large catalogs (hundreds of ids) are truncated for UX; current model is always kept.
+// Large catalogs are truncated for UX; current model is always kept.
 const modelConfigMax = 80
 
 // sessionConfigOptions builds ACP configOptions for session/new|load|resume.
-// Currently: model selector (category "model") from Engine.ListModels + current model.
-func (a *agentServer) sessionConfigOptions(ctx context.Context) []map[string]any {
+// Mode (ask/code) + chat model selector. Mode is category "mode" so clients
+// that map config options still show ask/code next to the model picker.
+func (a *agentServer) sessionConfigOptions(ctx context.Context, mode string) []map[string]any {
 	if a == nil || a.eng == nil {
 		return nil
 	}
-	opt := a.modelConfigOption(ctx)
-	if opt == nil {
-		return nil
+	out := []map[string]any{modeConfigOption(mode)}
+	if opt := a.modelConfigOption(ctx); opt != nil {
+		out = append(out, opt)
 	}
-	return []map[string]any{opt}
+	return out
+}
+
+func modeConfigOption(current string) map[string]any {
+	if current != ModeAsk && current != ModeCode {
+		current = ModeCode
+	}
+	return map[string]any{
+		"id":           configIDMode,
+		"name":         "Mode",
+		"description":  "Ask = read-only tools; Code = full tools allowed by process policy",
+		"category":     "mode",
+		"type":         "select",
+		"currentValue": current,
+		"options": []map[string]any{
+			{
+				"value":       ModeAsk,
+				"name":        "Ask",
+				"description": "Read-only: no write/edit/bash for this session",
+			},
+			{
+				"value":       ModeCode,
+				"name":        "Code",
+				"description": "Full tool access allowed by the mow process policy",
+			},
+		},
+	}
 }
 
 func (a *agentServer) modelConfigOption(ctx context.Context) map[string]any {
@@ -41,6 +69,8 @@ func (a *agentServer) modelConfigOption(ctx context.Context) map[string]any {
 			return nil
 		}
 		list = []mow.ModelInfo{{ID: cur, Wire: eng.Wire()}}
+	} else {
+		list = filterChatModels(list)
 	}
 	if cur == "" && len(list) == 0 {
 		return nil
@@ -89,16 +119,10 @@ func (a *agentServer) modelConfigOption(ctx context.Context) map[string]any {
 		if id == "" {
 			continue
 		}
-		name := id
-		desc := ""
-		if w := strings.TrimSpace(m.Wire); w != "" {
-			name = id + "  [" + w + "]"
-			desc = "wire " + w
-		}
+		// Name is id only — wire stays internal (SetModelWithWire still uses catalog metadata).
 		options = append(options, map[string]any{
-			"value":       id,
-			"name":        name,
-			"description": desc,
+			"value": id,
+			"name":  id,
 		})
 	}
 	if len(options) == 0 {
@@ -107,7 +131,7 @@ func (a *agentServer) modelConfigOption(ctx context.Context) map[string]any {
 	return map[string]any{
 		"id":           configIDModel,
 		"name":         "Model",
-		"description":  "Chat model for this session (catalog wire applied when known)",
+		"description":  "Chat model for this session",
 		"category":     "model",
 		"type":         "select",
 		"currentValue": cur,
@@ -127,13 +151,68 @@ func (a *agentServer) listModels(ctx context.Context) ([]mow.ModelInfo, error) {
 	return a.eng.ListModels(lctx)
 }
 
+// filterChatModels drops media/embedding/speech catalog rows so the ACP picker
+// only offers agent chat models. Preferred wire must be a known chat wire when set;
+// ids like foo:image / eleven_* / whisper are excluded even if mis-tagged as chat.
+func filterChatModels(list []mow.ModelInfo) []mow.ModelInfo {
+	out := make([]mow.ModelInfo, 0, len(list))
+	for _, m := range list {
+		if isChatModel(m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func isChatModel(m mow.ModelInfo) bool {
+	id := strings.ToLower(strings.TrimSpace(m.ID))
+	if id == "" {
+		return false
+	}
+	// Gateway multi-modal clones and pure media/embedding models.
+	if strings.Contains(id, ":image") || strings.Contains(id, ":video") || strings.Contains(id, ":audio") {
+		return false
+	}
+	for _, k := range []string{
+		"eleven", "whisper", "embedding", "imagine-image", "imagine-video",
+		"tts", "speech", "audio-speech", "transcription",
+	} {
+		if strings.Contains(id, k) {
+			return false
+		}
+	}
+	w := strings.ToLower(strings.TrimSpace(m.Wire))
+	if w != "" {
+		return isChatWire(w)
+	}
+	// No preferred wire: keep if any registered wire is chat, or if wires empty (unknown = allow).
+	if len(m.Wires) == 0 {
+		return true
+	}
+	for _, x := range m.Wires {
+		if isChatWire(x) {
+			return true
+		}
+	}
+	return false
+}
+
+func isChatWire(w string) bool {
+	switch strings.ToLower(strings.TrimSpace(w)) {
+	case "openai-chat-completions", "openai-responses", "openai-response", "anthropic-messages":
+		return true
+	default:
+		return false
+	}
+}
+
 // applyModelConfig sets the engine model (+ catalog wire when known).
 func (a *agentServer) applyModelConfig(ctx context.Context, value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return fmt.Errorf("model value required")
 	}
-	// Strip accidental "id  [wire]" paste from display labels.
+	// Strip accidental "id  [wire]" paste from older labels.
 	if i := strings.LastIndex(value, "["); i > 0 && strings.HasSuffix(value, "]") {
 		value = strings.TrimSpace(value[:i])
 	}
@@ -157,6 +236,33 @@ func (a *agentServer) applyModelConfig(ctx context.Context, value string) error 
 		}
 		return err
 	}
+	return nil
+}
+
+func (a *agentServer) applyModeConfig(sessionID, mode string) error {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != ModeAsk && mode != ModeCode {
+		return fmt.Errorf("modeId must be ask or code")
+	}
+	sid := strings.TrimSpace(sessionID)
+	a.mu.Lock()
+	if a.sessions[sid] == nil {
+		a.sessions[sid] = &acpSession{mode: mode}
+	} else {
+		a.sessions[sid].mode = mode
+	}
+	a.mu.Unlock()
+	a.write(notification{
+		JSONRPC: "2.0",
+		Method:  "session/update",
+		Params: mustJSON(map[string]any{
+			"sessionId": sid,
+			"update": map[string]any{
+				"sessionUpdate": "current_mode_update",
+				"currentModeId": mode,
+			},
+		}),
+	})
 	return nil
 }
 

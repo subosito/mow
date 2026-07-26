@@ -191,7 +191,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			"sessionId": sid,
 			"modes":     modeState(mode),
 		}
-		if opts := a.sessionConfigOptions(parent); len(opts) > 0 {
+		if opts := a.sessionConfigOptions(parent, mode); len(opts) > 0 {
 			result["configOptions"] = opts
 		}
 		a.write(response{
@@ -234,7 +234,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			"sessionId": sid,
 			"modes":     modeState(mode),
 		}
-		if opts := a.sessionConfigOptions(parent); len(opts) > 0 {
+		if opts := a.sessionConfigOptions(parent, mode); len(opts) > 0 {
 			loadResult["configOptions"] = opts
 		}
 		a.write(response{
@@ -536,7 +536,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		mode := a.sessions[sid].mode
 		a.mu.Unlock()
 		resumeResult := map[string]any{"sessionId": sid, "modes": modeState(mode)}
-		if opts := a.sessionConfigOptions(parent); len(opts) > 0 {
+		if opts := a.sessionConfigOptions(parent, mode); len(opts) > 0 {
 			resumeResult["configOptions"] = opts
 		}
 		a.write(response{
@@ -579,38 +579,27 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "sessionId required"}})
 			return
 		}
-		mode := strings.ToLower(strings.TrimSpace(p.ModeID))
-		if mode != ModeAsk && mode != ModeCode {
-			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "modeId must be ask or code"}})
+		sid := strings.TrimSpace(p.SessionID)
+		if err := a.applyModeConfig(sid, p.ModeID); err != nil {
+			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
 			return
 		}
-		sid := strings.TrimSpace(p.SessionID)
+		// Keep configOptions mode selector in sync for clients that use it.
 		a.mu.Lock()
-		if a.sessions[sid] == nil {
-			a.sessions[sid] = &acpSession{mode: mode}
-		} else {
-			a.sessions[sid].mode = mode
+		mode := ModeCode
+		if s := a.sessions[sid]; s != nil {
+			mode = s.mode
 		}
 		a.mu.Unlock()
-		// Notify client of mode change (optional but useful for UI sync).
-		a.write(notification{
-			JSONRPC: "2.0",
-			Method:  "session/update",
-			Params: mustJSON(map[string]any{
-				"sessionId": sid,
-				"update": map[string]any{
-					"sessionUpdate": "current_mode_update",
-					"currentModeId": mode,
-				},
-			}),
-		})
+		opts := a.sessionConfigOptions(parent, mode)
+		a.notifyConfigOptions(sid, opts)
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
 	case "session/set_config_option", "session/setConfigOption":
 		var p struct {
 			SessionID string `json:"sessionId"`
 			ConfigID  string `json:"configId"`
 			// value is string for select options; boolean for type boolean (unused today).
-			Value any `json:"value"`
+			Value any    `json:"value"`
 			Type  string `json:"type"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil || strings.TrimSpace(p.SessionID) == "" {
@@ -627,7 +616,6 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		case configIDModel:
 			val, _ := p.Value.(string)
 			if val == "" {
-				// Some clients nest value under typed payload.
 				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "model value required"}})
 				return
 			}
@@ -635,11 +623,27 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
 				return
 			}
+		case configIDMode:
+			val, _ := p.Value.(string)
+			if val == "" {
+				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "mode value required"}})
+				return
+			}
+			if err := a.applyModeConfig(sid, val); err != nil {
+				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
+				return
+			}
 		default:
 			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "unknown configId: " + configID}})
 			return
 		}
-		opts := a.sessionConfigOptions(parent)
+		a.mu.Lock()
+		mode := ModeCode
+		if s := a.sessions[sid]; s != nil && s.mode != "" {
+			mode = s.mode
+		}
+		a.mu.Unlock()
+		opts := a.sessionConfigOptions(parent, mode)
 		if opts == nil {
 			opts = []map[string]any{}
 		}

@@ -63,8 +63,8 @@ func printUsage() {
   JSON-RPC on stdin → stdout. Ctrl+C / SIGTERM stops the agent.
   Streaming is always on for session/update chunks.
 
-  Model picker: session config option id "model" (from GET /models when available;
-  switching uses catalog wire via SetModelWithWire). Modes: ask | code.
+  Config options: mode (ask|code) and model (chat-only catalog; wire hidden,
+  applied via SetModelWithWire). Also session/set_mode for ask|code.
 
 Engine flags: same as mow run (--config --model --workspace --allow-write …).
 

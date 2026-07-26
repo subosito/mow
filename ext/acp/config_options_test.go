@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/subosito/mow"
@@ -25,12 +26,41 @@ func (p *modelProv) SetModel(id string) error {
 	return nil
 }
 
+func TestFilterChatModels(t *testing.T) {
+	in := []mow.ModelInfo{
+		{ID: "ag/gemini-3.6-flash-medium", Wire: "openai-chat-completions"},
+		{ID: "ag/gemini-3.6-flash-medium:image", Wire: "openai-chat-completions"},
+		{ID: "eleven_v3", Wire: "openai-audio-speech"},
+		{ID: "grok-imagine-image-quality", Wire: "openai-images-generations"},
+		{ID: "whisper-large-v3-turbo", Wire: "openai-audio-transcriptions"},
+		{ID: "text-embedding-v4", Wire: "openai-embeddings"},
+		{ID: "claude-sonnet-5", Wire: "anthropic-messages"},
+		{ID: "codex/gpt-5.5", Wire: "openai-chat-completions", Wires: []string{"openai-chat-completions", "openai-images-generations"}},
+	}
+	got := filterChatModels(in)
+	want := map[string]bool{
+		"ag/gemini-3.6-flash-medium": true,
+		"claude-sonnet-5":            true,
+		"codex/gpt-5.5":              true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d: %+v", len(got), got)
+	}
+	for _, m := range got {
+		if !want[m.ID] {
+			t.Fatalf("unexpected %q", m.ID)
+		}
+	}
+}
+
 func TestModelConfigOptionShape(t *testing.T) {
 	prov := &modelProv{
 		model: "alpha",
 		list: []mow.ModelInfo{
 			{ID: "alpha", Wire: "openai-chat-completions"},
 			{ID: "beta", Wire: "anthropic-messages"},
+			{ID: "eleven_v3", Wire: "openai-audio-speech"},
+			{ID: "alpha:image", Wire: "openai-chat-completions"},
 		},
 	}
 	eng, err := mow.New(mow.Options{NoSession: true, Model: "alpha", Provider: prov})
@@ -50,7 +80,14 @@ func TestModelConfigOptionShape(t *testing.T) {
 	}
 	opts, _ := opt["options"].([]map[string]any)
 	if len(opts) != 2 {
-		t.Fatalf("options=%v", opts)
+		t.Fatalf("options=%v (want chat only)", opts)
+	}
+	// No wire in display name.
+	for _, o := range opts {
+		name, _ := o["name"].(string)
+		if strings.Contains(name, "[") {
+			t.Fatalf("wire leaked into name: %q", name)
+		}
 	}
 	if err := a.applyModelConfig(context.Background(), "beta"); err != nil {
 		t.Fatal(err)
@@ -58,16 +95,34 @@ func TestModelConfigOptionShape(t *testing.T) {
 	if eng.Model() != "beta" || prov.model != "beta" {
 		t.Fatalf("model eng=%q prov=%q", eng.Model(), prov.model)
 	}
-	opt2 := a.modelConfigOption(context.Background())
-	if opt2["currentValue"] != "beta" {
-		t.Fatalf("current after set=%v", opt2["currentValue"])
+}
+
+func TestSessionConfigOptionsIncludesModeAndModel(t *testing.T) {
+	prov := &modelProv{
+		model: "alpha",
+		list:  []mow.ModelInfo{{ID: "alpha", Wire: "openai-chat-completions"}},
+	}
+	eng, err := mow.New(mow.Options{NoSession: true, Model: "alpha", Provider: prov})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &agentServer{eng: eng}
+	opts := a.sessionConfigOptions(context.Background(), ModeAsk)
+	if len(opts) != 2 {
+		t.Fatalf("opts=%v", opts)
+	}
+	if opts[0]["id"] != configIDMode || opts[0]["category"] != "mode" || opts[0]["currentValue"] != ModeAsk {
+		t.Fatalf("mode opt=%v", opts[0])
+	}
+	if opts[1]["id"] != configIDModel || opts[1]["category"] != "model" {
+		t.Fatalf("model opt=%v", opts[1])
 	}
 }
 
 func TestModelConfigIncludesCurrentWhenMissingFromCatalog(t *testing.T) {
 	prov := &modelProv{
 		model: "custom-local",
-		list:  []mow.ModelInfo{{ID: "catalog-a"}},
+		list:  []mow.ModelInfo{{ID: "catalog-a", Wire: "openai-chat-completions"}},
 	}
 	eng, err := mow.New(mow.Options{NoSession: true, Model: "custom-local", Provider: prov})
 	if err != nil {
