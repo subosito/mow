@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 	"unicode/utf8"
 
 	"github.com/subosito/mow"
@@ -26,6 +27,7 @@ import (
 	_ "github.com/subosito/mow/ext/job"
 	_ "github.com/subosito/mow/ext/lsp"
 	_ "github.com/subosito/mow/ext/mcp"
+	_ "github.com/subosito/mow/ext/ops"
 	_ "github.com/subosito/mow/ext/proc"
 	_ "github.com/subosito/mow/ext/rpc"
 )
@@ -148,6 +150,12 @@ func isTTY() bool {
 }
 
 func runCmd(args []string) int {
+	for _, a := range args {
+		if a == "-h" || a == "--help" || a == "help" {
+			printRunUsage()
+			return 0
+		}
+	}
 	fs := cliutil.NewFlagSet("run")
 	promptFlag := fs.String("p", "", "one-shot prompt")
 	var ef cliutil.EngineFlags
@@ -161,6 +169,7 @@ func runCmd(args []string) int {
 	}
 	if prompt == "" {
 		fmt.Fprintln(os.Stderr, "mow run: prompt required (-p or args)")
+		fmt.Fprintln(os.Stderr, "  mow run -p \"…\" [flags]   or   mow run help")
 		return 2
 	}
 	opt := ef.OptionsCLI()
@@ -189,12 +198,32 @@ func runCmd(args []string) int {
 // Trust gates project-local .mow/config.yaml and skills; it is stored under
 // the user home so a cloned repo can never grant itself trust.
 func trustCmd(args []string) int {
+	for _, a := range args {
+		if a == "-h" || a == "--help" || a == "help" {
+			fmt.Fprintf(os.Stderr, `mow trust — allow project .mow/config and skills
+
+Trust is stored under $MOW_HOME/trusted (not inside the repo).
+
+  mow trust [path]           trust this workspace (default: .)
+  mow trust --list           list trusted workspaces
+  mow trust --revoke [path]  revoke trust
+
+  --workspace path           same as [path] (flag form)
+
+`)
+			return 0
+		}
+	}
 	fs := cliutil.NewFlagSet("trust")
 	list := fs.Bool("list", false, "show trusted workspaces")
 	revoke := fs.Bool("revoke", false, "revoke trust instead of granting it")
 	dir := fs.String("workspace", ".", "workspace to trust/revoke")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	// Positional path: mow trust /path/to/repo
+	if fs.NArg() > 0 && (*dir == "." || *dir == "") {
+		*dir = fs.Arg(0)
 	}
 	if *list {
 		for _, ws := range mow.TrustedWorkspaces() {
@@ -207,18 +236,24 @@ func trustCmd(args []string) int {
 			fmt.Fprintf(os.Stderr, "mow trust: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(os.Stderr, "mow: workspace untrusted: %s\n", *dir)
+		fmt.Fprintf(os.Stderr, "mow: untrusted %s\n", *dir)
 		return 0
 	}
 	if err := mow.TrustWorkspace(*dir); err != nil {
 		fmt.Fprintf(os.Stderr, "mow trust: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "mow: workspace trusted (project .mow/config.yaml and skills will load): %s\n", *dir)
+	fmt.Fprintf(os.Stderr, "mow: trusted %s  (project .mow/config.yaml + skills load)\n", *dir)
 	return 0
 }
 
 func replCmd(args []string) int {
+	for _, a := range args {
+		if a == "-h" || a == "--help" || a == "help" {
+			printReplUsage()
+			return 0
+		}
+	}
 	fs := cliutil.NewFlagSet("repl")
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
@@ -234,6 +269,7 @@ func replCmd(args []string) int {
 	defer eng.Close() // tear down session-scoped resources (ext/proc procs) on exit
 	fmt.Fprintln(os.Stderr, "mow repl — empty line or /quit to exit; Ctrl+C aborts the current turn")
 	fmt.Fprintln(os.Stderr, "  /btw <question>  ask an aside without adding it to context")
+	fmt.Fprintln(os.Stderr, "  /model [id]      list models or switch (catalog wire when present)")
 	if ef.Stream {
 		fmt.Fprintln(os.Stderr, "(token stream on stderr via --stream)")
 	}
@@ -248,6 +284,15 @@ func replCmd(args []string) int {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || line == "/quit" || line == "/exit" {
 			break
+		}
+		// Slash meta-commands (not sent to the model).
+		if strings.HasPrefix(line, "/") {
+			if handled, err := handleReplSlash(context.Background(), eng, line); handled {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "mow: %v\n", err)
+				}
+				continue
+			}
 		}
 		// /btw <text>: an aside answered against context but not persisted, so it
 		// never re-enters a later prompt. Handy for a quick side question.
@@ -284,6 +329,130 @@ func replCmd(args []string) int {
 	}
 	printReplSessionExit(eng, ef)
 	return 0
+}
+
+// handleReplSlash runs meta slash commands. Returns handled=true when the line
+// was a known command (and must not be sent as a user prompt).
+func handleReplSlash(ctx context.Context, eng *mow.Engine, line string) (handled bool, err error) {
+	parts := strings.Fields(line)
+	if len(parts) == 0 {
+		return false, nil
+	}
+	switch parts[0] {
+	case "/model":
+		filter := ""
+		if len(parts) > 1 {
+			filter = strings.Join(parts[1:], " ")
+		}
+		return true, replModel(ctx, eng, filter)
+	case "/help", "/?":
+		fmt.Fprintln(os.Stderr, "commands: /model [id]  /btw <q>  /quit")
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+// replModel lists GET /models or switches. Catalog wire is applied when present;
+// empty wire keeps the current/default wire (SetModelWithWire).
+func replModel(ctx context.Context, eng *mow.Engine, filter string) error {
+	if eng == nil {
+		return fmt.Errorf("nil engine")
+	}
+	filter = strings.TrimSpace(filter)
+	// Allow paste of "id  [wire]" display lines.
+	if i := strings.LastIndex(filter, "["); i > 0 && strings.HasSuffix(filter, "]") {
+		filter = strings.TrimSpace(filter[:i])
+	}
+	listCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	list, err := eng.ListModels(listCtx)
+	cur := eng.Model()
+	wire := eng.Wire()
+	if err != nil {
+		if filter == "" {
+			return err
+		}
+		// Catalog down — still allow force-set by id.
+		if setErr := eng.SetModel(filter); setErr != nil {
+			return fmt.Errorf("list models: %w; set: %v", err, setErr)
+		}
+		fmt.Fprintf(os.Stderr, "model → %s · %s (catalog unavailable: %v)\n", eng.Model(), eng.Wire(), err)
+		return nil
+	}
+	if filter == "" {
+		fmt.Fprintf(os.Stderr, "models · current %s · wire %s\n", cur, wire)
+		const maxShow = 80
+		n := len(list)
+		show := n
+		if show > maxShow {
+			show = maxShow
+		}
+		for i := 0; i < show; i++ {
+			info := list[i]
+			mark := "  "
+			if cur != "" && strings.EqualFold(info.ID, cur) {
+				mark = "• "
+			}
+			line := mark + info.ID
+			if info.Wire != "" {
+				line += "  [" + info.Wire + "]"
+			}
+			fmt.Fprintln(os.Stderr, line)
+		}
+		if n > show {
+			fmt.Fprintf(os.Stderr, "… %d more — refine with /model <filter>\n", n-show)
+		}
+		if n == 0 {
+			fmt.Fprintln(os.Stderr, "(empty catalog)")
+		}
+		fmt.Fprintln(os.Stderr, "switch: /model <id>")
+		return nil
+	}
+	// Exact match → set + catalog wire when known.
+	for _, info := range list {
+		if strings.EqualFold(info.ID, filter) {
+			if err := eng.SetModelWithWire(info.ID, info.Wire); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "model → %s · %s\n", eng.Model(), eng.Wire())
+			return nil
+		}
+	}
+	// Unique substring match.
+	var matched []mow.ModelInfo
+	fl := strings.ToLower(filter)
+	for _, info := range list {
+		if strings.Contains(strings.ToLower(info.ID), fl) {
+			matched = append(matched, info)
+		}
+	}
+	if len(matched) == 1 {
+		if err := eng.SetModelWithWire(matched[0].ID, matched[0].Wire); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "model → %s · %s\n", eng.Model(), eng.Wire())
+		return nil
+	}
+	if len(matched) == 0 {
+		if len(list) > 0 {
+			return fmt.Errorf("no catalog model matching %q — /model to list", filter)
+		}
+		if err := eng.SetModel(filter); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "model → %s · %s\n", eng.Model(), eng.Wire())
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "models matching %q (%d) — pick an exact id:\n", filter, len(matched))
+	for _, info := range matched {
+		line := "  " + info.ID
+		if info.Wire != "" {
+			line += "  [" + info.Wire + "]"
+		}
+		fmt.Fprintln(os.Stderr, line)
+	}
+	return nil
 }
 
 // printReplSession announces session id and any resumed transcript (stderr).
@@ -338,46 +507,92 @@ func printReplSessionExit(eng *mow.Engine, ef cliutil.EngineFlags) {
 	fmt.Fprintf(os.Stderr, "        mow repl --continue\n")
 }
 
-func printUsage() {
-	fmt.Fprintf(os.Stderr, `mow — agentic harness (library + CLI)
+func printRunUsage() {
+	fmt.Fprintf(os.Stderr, `mow run — one-shot prompt
 
-API:
-  import "github.com/subosito/mow"
-  eng, _ := mow.New(mow.Options{...})
-  res, _ := eng.Prompt(ctx, "…")
+  mow run -p "…" [flags]
+  mow run "free-form prompt text" [flags]
+
+Flags:
+
+  -p TEXT              prompt (or pass as args)
+  --config --workspace --model --base-url
+  --allow-shell --allow-write --max-turns
+  --stream --verbose --session --continue --no-session
+
+Examples:
+
+  mow run -p "summarize this repo"
+  mow run -p "fix the tests" --allow-write --allow-shell
+  mow run --continue -p "try again"
+
+`)
+}
+
+func printReplUsage() {
+	fmt.Fprintf(os.Stderr, `mow repl — interactive line REPL
+
+  mow repl [flags]
+
+In-session:
+
+  /model [id]     list models or switch (catalog wire when present)
+  /btw <q>        aside — answered but not kept in context
+  /quit           exit (empty line also exits)
+  Ctrl+C          cancel current turn only
+
+Flags: same as mow run (--config --model --workspace --allow-write …).
+  --stream        token deltas on stderr
+  --continue      resume latest session
+  --session ID    resume a specific session
+
+TTY with no args often lands here (default interactive pack if linked).
+
+`)
+}
+
+func printUsage() {
+	fmt.Fprintf(os.Stderr, `mow — agent harness (library + CLI)
 
 Core:
-  mow run -p "prompt" [flags]   one-shot
-  mow repl [flags]              line REPL
-  mow trust [--revoke|--list]   trust workspace for project .mow config/skills
+
+  mow run  -p "…" [flags]     one-shot prompt
+  mow repl [flags]            interactive REPL  (/model /btw /quit)
+  mow trust [path]            trust workspace for project .mow config
+  mow trust --list | --revoke
   mow version | help
 
 `)
 	if cmds := ext.Commands(); len(cmds) > 0 {
-		fmt.Fprintln(os.Stderr, "Extensions (linked packs):")
+		fmt.Fprintln(os.Stderr, "Packs (this binary):")
 		for _, c := range cmds {
 			extra := ""
 			if c.DefaultInteractive {
 				extra = "  [default on TTY]"
 			}
-			fmt.Fprintf(os.Stderr, "  mow %-12s %s%s\n", c.Name, c.Summary, extra)
+			fmt.Fprintf(os.Stderr, "  mow %-10s %s%s\n", c.Name, c.Summary, extra)
 		}
+		fmt.Fprintln(os.Stderr, "  (each pack: mow <pack> help)")
 		fmt.Fprintln(os.Stderr)
 	}
-	fmt.Fprintf(os.Stderr, `Shared flags (help shows --long; -long also works):
+	fmt.Fprintf(os.Stderr, `Common flags (also -long):
+
   --config --workspace --model --base-url
   --allow-shell --allow-write --max-turns --stream --verbose
   --session --continue --no-session
 
-Env (supported):
-  MOW_HOME                         user data root (default ~/.mow)
+Env:
+
+  MOW_HOME                         data root (default ~/.mow)
   MOW_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
   MOW_MODEL / OPENAI_MODEL / ANTHROPIC_MODEL
   MOW_BASE_URL / OPENAI_BASE_URL / ANTHROPIC_BASE_URL
   MOW_WIRE                         openai-chat-completions | openai-responses | anthropic-messages
-  MOW_TRUST_PROJECT=1              trust project .mow/config this run (or: mow trust)
+  MOW_OPS                          ops profile name (with ext/ops)
+  MOW_TRUST_PROJECT=1              trust project config this run
 
-Secure default tools: read, glob, grep. Power tools: --allow-write / --allow-shell.
+Defaults: tools read, glob, grep. Power: --allow-write / --allow-shell.
+Library: import "github.com/subosito/mow" → Engine.Prompt
 
 `)
 }

@@ -89,6 +89,14 @@ session:
 #       - id: hourly
 #         every: 1h
 #         goal: fix-ci
+#   ops:                              # pack settings only (ext/ops)
+#     # root:                            # default $MOW_HOME/ops
+#     # log_max_lines: 200
+#     # log_max_bytes: 262144
+#     # Named profiles (explicit MOW_OPS or -p/--ops NAME):
+#     #   $MOW_HOME/ops/<name>/config.yaml   # services, actions, acp, model
+#     #   $MOW_HOME/ops/<name>/prompt.md
+#     #   $MOW_HOME/ops/<name>/incidents/
 
 
 # Claude Code plugin hooks bridge (ext/cmdhook). Runs a plugin hooks.json

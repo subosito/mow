@@ -29,7 +29,7 @@ func init() {
 	ext.RegisterTool(stopTool{})
 	ext.RegisterCommand(ext.Command{
 		Name:    "proc",
-		Summary: "Manage background processes: list | stop <id> | stop-all | logs <id> [n]",
+		Summary: "Background processes — list | stop | logs",
 		Run:     procCmd,
 	})
 }
@@ -181,6 +181,10 @@ func procState(alive bool) string {
 
 // procCmd is `mow proc …` — manage the current project's background processes.
 func procCmd(args []string) int {
+	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+		printProcUsage()
+		return 0
+	}
 	dir := storeDir("") // current directory's project
 	sub := "list"
 	if len(args) > 0 {
@@ -199,7 +203,8 @@ func procCmd(args []string) int {
 		return 0
 	case "stop":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: mow proc stop <id>")
+			fmt.Fprintln(os.Stderr, "mow proc stop: id required")
+			fmt.Fprintln(os.Stderr, "  mow proc stop <id>")
 			return 2
 		}
 		info, err := iproc.Stop(dir, args[1])
@@ -221,7 +226,8 @@ func procCmd(args []string) int {
 		return 0
 	case "logs", "log":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: mow proc logs <id> [lines]")
+			fmt.Fprintln(os.Stderr, "mow proc logs: id required")
+			fmt.Fprintln(os.Stderr, "  mow proc logs <id> [lines]")
 			return 2
 		}
 		n := 40
@@ -242,7 +248,31 @@ func procCmd(args []string) int {
 		}
 		return 0
 	default:
-		fmt.Fprintln(os.Stderr, "usage: mow proc [list | stop <id> | stop-all | logs <id> [n]]")
+		fmt.Fprintf(os.Stderr, "mow proc: unknown %q\n\n", sub)
+		printProcUsage()
 		return 2
 	}
+}
+
+func printProcUsage() {
+	fmt.Fprintf(os.Stderr, `mow proc — background processes for this workspace
+
+State: $MOW_HOME/proc/<workspace-hash>/
+Started by the agent via proc_start (requires --allow-shell).
+
+Commands:
+
+  mow proc list                 list processes (default)
+  mow proc stop <id>            stop one (SIGTERM then SIGKILL)
+  mow proc stop-all             stop every process in this workspace
+  mow proc logs <id> [n]        tail log (default 40 lines)
+
+Examples:
+
+  mow proc
+  mow proc stop dev-server
+  mow proc logs dev-server 80
+
+Tools (agent): proc_start, proc_status, proc_stop
+`)
 }

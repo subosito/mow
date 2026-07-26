@@ -50,9 +50,12 @@ func runCmd(args []string) int {
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `mow rpc — JSON-lines control plane on stdio
 
-  One JSON object per line on stdin; responses and event notifications on stdout.
+  One JSON object per line on stdin; responses and events on stdout.
+
+  mow rpc [engine flags]
 
 Methods:
+
   prompt   {"id":1,"method":"prompt","params":{"text":"…"}}
   cancel   {"id":2,"method":"cancel"}
   status   {"id":3,"method":"status"}
@@ -65,9 +68,7 @@ During prompt, unsolicited events may appear (no id):
 
 tool.end includes duration_ms. Cancel/status stay responsive while a prompt runs.
 
-  mow rpc [engine flags]
-
-Engine flags: same as mow run. See docs/extensions.md.
+Engine flags: same as mow run. Docs: docs/extensions.md
 
 `)
 }

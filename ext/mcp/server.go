@@ -28,12 +28,18 @@ const mcpProtocolVersion = "2024-11-05"
 func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "mcp",
-		Summary: "Serve mow as an MCP server over stdio (exposes a mow_prompt tool)",
+		Summary: "MCP server on stdin/stdout (mow_prompt tool)",
 		Run:     serveCmd,
 	})
 }
 
 func serveCmd(args []string) int {
+	for _, a := range args {
+		if a == "-h" || a == "--help" || a == "help" {
+			printMCPUsage()
+			return 0
+		}
+	}
 	fs := cliutil.NewFlagSet("mcp")
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
@@ -46,6 +52,25 @@ func serveCmd(args []string) int {
 		return 1
 	}
 	return serve(eng, os.Stdin, os.Stdout)
+}
+
+func printMCPUsage() {
+	fmt.Fprintf(os.Stderr, `mow mcp — serve mow as an MCP server over stdio
+
+  Point Claude Desktop / other MCP hosts at this process. Exposes one tool:
+
+    mow_prompt   run the agent on a prompt; returns the final answer
+                 args: prompt (required), read_only (optional bool)
+
+  mow mcp [engine flags]
+
+Engine flags: same as mow run (--config --model --workspace --allow-write …).
+Power tools for the delegated agent follow --allow-write / --allow-shell.
+
+Client side (outbound MCP servers): extensions.mcp in config — not this command.
+See docs/extensions.md.
+
+`)
 }
 
 // serve runs the newline-delimited JSON-RPC 2.0 loop until stdin closes.

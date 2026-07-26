@@ -17,7 +17,7 @@ import (
 func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "goal",
-		Summary: "Outer-loop goals (multi-step Prompt; headless)",
+		Summary: "Multi-step goals — list | new | run | status | …",
 		Run:     runCmd,
 	})
 }
@@ -51,31 +51,31 @@ func runCmd(args []string) int {
 }
 
 func printGoalUsage() {
-	fmt.Fprintf(os.Stderr, `mow goal — multi-step goals over Engine.Prompt
+	fmt.Fprintf(os.Stderr, `mow goal — multi-step goals (outer loop over Prompt)
 
-Subcommands:
-  new    --id NAME --goal "..." [--max-steps N]   create pending goal
-  run    --id NAME | --goal "..." [engine flags]  run until done/fail/max
-  status --id NAME                               show saved state
-  list                                           list goals under $MOW_HOME/goals
-  reset  --id NAME                               clear progress (pending); re-run with run --id
-  delete --id NAME                               remove goal file
+Commands:
 
-  --max-steps N   outer Prompt budget (default 8). On resume, raises stored
-                  max_steps when N is higher so you can continue past "8/8 exceeded".
+  mow goal list
+  mow goal new    --id NAME --goal "…" [--max-steps N]
+  mow goal run    --id NAME | --goal "…" [engine flags]
+  mow goal status --id NAME
+  mow goal reset  --id NAME          clear progress → pending
+  mow goal delete --id NAME
 
-Engine flags (run): same as other packs (--config --model --workspace … --continue)
+  --max-steps N   outer Prompt budget (default 8; raise on resume to continue)
 
-Completion: goal_report status=done summary="…" (preferred). Multi-part goals: first
-  goal_report status=continue plan=[{id,title,status:pending}…], then item_id/item_status,
-  then status=done when the checklist is complete. Also: GOAL_DONE / GOAL_FAILED markers.
-Result: mow goal status --id …  or  $MOW_HOME/goals/<id>.json (summary + plan)
-Events: $MOW_HOME/goals/<id>/events.jsonl
-Processes: goal_process_start|status|stop (long-lived servers for the goal)
-Resume incomplete/failed: mow goal run --id … (reuses state; done goals need reset first)
+Examples:
 
-Failed → re-run: mow goal run --id NAME resumes failed/pending/running; for done use reset then run.
+  mow goal new --id fix-ci --goal "Make CI green"
+  mow goal run --id fix-ci --allow-write --allow-shell
+  mow goal run --id fix-ci --max-steps 24
 
+State:  $MOW_HOME/goals/<id>.json
+Done:   model calls goal_report status=done summary="…"
+        (or plan checklist → item updates → status=done)
+Resume: mow goal run --id NAME  (done goals: reset then run)
+
+Engine flags: --config --model --workspace --continue …
 `)
 }
 

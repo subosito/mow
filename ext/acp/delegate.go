@@ -41,6 +41,13 @@ type Config struct {
 	Agents      []AgentSpec `yaml:"agents"`
 }
 
+// sharedDelegate is the singleton acp_delegate tool so packs (e.g. ops) can
+// merge agents without replacing each other.
+var (
+	sharedMu       sync.Mutex
+	sharedDelegate *delegateTool
+)
+
 // RegisterFromConfig loads config (same paths as mow.New) and registers
 // acp_delegate when extensions.acp.agents is non-empty.
 // Must run *before* mow.New so the tool is in the registry.
@@ -53,16 +60,7 @@ func RegisterFromConfig(configPaths ...string) error {
 	if err := cfg.Extension("acp", &c); err != nil {
 		return err
 	}
-	agents := indexAgents(c.Agents)
-	if len(agents) == 0 {
-		return nil
-	}
-	ext.RegisterTool(&delegateTool{
-		agents:    agents,
-		workspace: cfg.Workspace,
-		peerIdle:  peerIdleDuration(c.PeerIdleSec),
-		peers:     map[string]*peerSlot{},
-	})
+	AppendAgents(c.Agents, cfg.Workspace, c.PeerIdleSec)
 	return nil
 }
 
@@ -76,17 +74,35 @@ func RegisterFromEngine(eng *mow.Engine) error {
 	if err := eng.Extension("acp", &c); err != nil {
 		return err
 	}
-	agents := indexAgents(c.Agents)
-	if len(agents) == 0 {
-		return nil
-	}
-	ext.RegisterTool(&delegateTool{
-		agents:    agents,
-		workspace: eng.Workspace(),
-		peerIdle:  peerIdleDuration(c.PeerIdleSec),
-		peers:     map[string]*peerSlot{},
-	})
+	AppendAgents(c.Agents, eng.Workspace(), c.PeerIdleSec)
 	return nil
+}
+
+// AppendAgents merges peer specs into acp_delegate (creating the tool if needed).
+// Used by extensions.acp and by other packs (e.g. ops profiles) for self-contained
+// agent lists. Empty list is a no-op. peerIdleSec: 0 = default, -1 = no idle drop;
+// only applied when the shared tool is first created.
+func AppendAgents(agents []AgentSpec, workspace string, peerIdleSec int) {
+	indexed := indexAgents(agents)
+	if len(indexed) == 0 {
+		return
+	}
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if sharedDelegate == nil {
+		sharedDelegate = &delegateTool{
+			agents:    map[string]AgentSpec{},
+			workspace: strings.TrimSpace(workspace),
+			peerIdle:  peerIdleDuration(peerIdleSec),
+			peers:     map[string]*peerSlot{},
+		}
+	} else if sharedDelegate.workspace == "" && strings.TrimSpace(workspace) != "" {
+		sharedDelegate.workspace = strings.TrimSpace(workspace)
+	}
+	for k, v := range indexed {
+		sharedDelegate.agents[k] = v
+	}
+	ext.RegisterTool(sharedDelegate)
 }
 
 func peerIdleDuration(sec int) time.Duration {

@@ -18,7 +18,7 @@ import (
 func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "job",
-		Summary: "Run interval jobs (goals or prompts) until stopped",
+		Summary: "Interval jobs — run | list | check",
 		Run:     runCmd,
 	})
 }
@@ -31,9 +31,9 @@ func runCmd(args []string) int {
 	switch args[0] {
 	case "serve", "run":
 		return cmdRun(args[1:])
-	case "list":
+	case "list", "ls":
 		return cmdList(args[1:])
-	case "check":
+	case "check", "validate":
 		return cmdCheck(args[1:])
 	case "help", "-h", "--help":
 		printUsage()
@@ -50,39 +50,38 @@ func runCmd(args []string) int {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `mow job — in-process interval jobs
+	fmt.Fprintf(os.Stderr, `mow job — interval / cron jobs (in-process)
 
-Inline (no schedule file — like mow goal run):
+Commands:
+
+  mow job run|serve [flags]     start daemon (default if no verb)
+  mow job list                  list schedules
+  mow job check                 validate schedules
+
+Quick (no schedule file):
 
   mow job --every 10m --prompt "Summarize git status" [engine flags]
   mow job --every 1h --goal fix-ci --allow-write --allow-shell
-  mow job --cron "0 9 * * 1-5" --prompt "Morning brief" [engine flags]
+  mow job --cron "0 9 * * 1-5" --prompt "Morning brief"
 
-From a file / config:
+Flags:
 
-  mow job [--schedules path] [engine flags]           run daemon until Ctrl+C
-  mow job run|serve …                                 same as default
-  mow job list  [--schedules path]                    list schedules
-  mow job check [--schedules path]                    validate schedules
-
-Inline flags (when any of --every/--cron/--goal/--prompt is set, schedules file is ignored):
-  --every 10m     Go duration; first tick runs immediately
+  --every 10m     interval (first tick immediate)
   --cron "…"      5-field min hour dom month dow (local)
-  --goal ID       re-run a saved mow goal each tick
-  --prompt TEXT   one-shot Prompt each tick
+  --prompt TEXT   prompt each tick
+  --goal ID       re-run saved goal each tick
   --id NAME       job id (default: inline)
+  --schedules path   yaml file (default $MOW_HOME/job/schedules.yaml)
 
-File form ($MOW_HOME/job/schedules.yaml or extensions.job):
+File / extensions.job:
 
   schedules:
-    - id: hourly-ci
+    - id: hourly
       every: 1h
       goal: fix-ci
-    - id: morning
-      cron: "0 9 * * 1-5"
-      prompt: "Summarize git status"
 
-Overlapping ticks for the same id are skipped. Not HA — use host cron for production.
+Overlapping ticks for the same id are skipped. Ctrl+C stops.
+For fleet ops prefer: mow ops run NAME
 
 `)
 }
