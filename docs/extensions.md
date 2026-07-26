@@ -382,12 +382,12 @@ Not core: RPC, ACP, MCP, LSP, job, goals — **packs or hosts**.
 
 ```yaml
 llm:
-  model: deepseek-v4-flash
+  model: gpt-5-mini
   generate:
-    image: grok-imagine-image-quality
+    image: gpt-image-1
   understand:
-    image: qwen3-vl-plus
-    voice: whisper-large-v3-turbo
+    image: gpt-5
+    voice: whisper-1
 tools:
   enable:
     - read

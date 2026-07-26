@@ -61,9 +61,9 @@ res, err := eng.Prompt(ctx, "Add a test for X")
 
 ```yaml
 llm:
-  base_url: http://127.0.0.1:9420/v1
-  api_key_env: OPENAI_API_KEY   # gateway key
-  model: deepseek-v4-flash      # model id
+  base_url: http://127.0.0.1:PORT/v1   # any OpenAI-compatible gateway
+  api_key_env: OPENAI_API_KEY         # gateway key
+  model: gpt-5-mini                   # model id the gateway routes
 ```
 
 Same binary; only config changes. Gateway is never required.
