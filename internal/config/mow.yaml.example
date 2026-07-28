@@ -19,6 +19,9 @@ llm:
   # api_key_env: OPENAI_API_KEY
   # model: gpt-5-mini                 # chat agent loop (tools + reasoning)
   # model: deepseek-chat              # or any OpenAI-compatible id
+  # effort: medium                    # none|low|medium|high (optional; provider default if omit)
+  #   # AG-style catalogs: rewrites model id tier (-low/-medium/-high)
+  #   # OpenAI-style: body reasoning_effort; Gemini-family: thinking_budget
   # stream: true
   #
   # Optional system segments before AGENTS.md / skills / default system.
@@ -86,6 +89,7 @@ session:
 #         command: [peer-agent, --acp]
 #         # dir: /abs/path              # default: workspace
 #         # timeout_sec: 600
+#         # effort: high                # appends --reasoning-effort for Grok-like peers
 #   job:
 #     schedules:
 #       - id: hourly

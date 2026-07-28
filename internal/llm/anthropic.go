@@ -33,7 +33,7 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 		cacheLastMessage(anthMsgs)
 	}
 	body := map[string]any{
-		"model":      c.Model,
+		"model":      c.requestModel(),
 		"max_tokens": c.anthropicMaxTokens(),
 		"messages":   anthMsgs,
 	}
@@ -47,6 +47,10 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 		body["tools"] = atools
 	}
 	raw, err := json.Marshal(body)
+	if err != nil {
+		return Message{}, err
+	}
+	raw, err = c.finalizeChatBody(raw)
 	if err != nil {
 		return Message{}, err
 	}

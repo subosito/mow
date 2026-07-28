@@ -108,6 +108,13 @@ func New(opt Options) (*Engine, error) {
 	if m := strings.TrimSpace(opt.Model); m != "" {
 		cfg.LLM.Model = m
 	}
+	if e := strings.TrimSpace(opt.Effort); e != "" {
+		norm, nerr := llm.NormalizeEffort(e)
+		if nerr != nil {
+			return nil, fmt.Errorf("effort: %w", nerr)
+		}
+		cfg.LLM.Effort = norm
+	}
 	if b := strings.TrimSpace(opt.BaseURL); b != "" {
 		cfg.LLM.BaseURL = b
 	}
@@ -287,6 +294,7 @@ func New(opt Options) (*Engine, error) {
 			BaseURL:      cfg.LLM.BaseURL,
 			APIKey:       key,
 			Model:        cfg.LLM.Model,
+			Effort:       cfg.LLM.Effort,
 			HTTP:         opt.HTTPClient,
 			ExtraHeaders: headers,
 			Stream:       cfg.LLM.Stream || opt.Stream,

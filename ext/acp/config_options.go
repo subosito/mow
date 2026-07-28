@@ -11,8 +11,9 @@ import (
 
 // ACP session config option ids (session/set_config_option configId).
 const (
-	configIDModel = "model"
-	configIDMode  = "mode"
+	configIDModel  = "model"
+	configIDMode   = "mode"
+	configIDEffort = "effort"
 )
 
 // modelConfigMax is the max catalog entries advertised in the picker.
@@ -20,8 +21,7 @@ const (
 const modelConfigMax = 80
 
 // sessionConfigOptions builds ACP configOptions for session/new|load|resume.
-// Mode (ask/code) + chat model selector. Mode is category "mode" so clients
-// that map config options still show ask/code next to the model picker.
+// Mode + model + effort (thought_level). Editors map category for UX.
 func (a *agentServer) sessionConfigOptions(ctx context.Context, mode string) []map[string]any {
 	if a == nil || a.eng == nil {
 		return nil
@@ -30,7 +30,35 @@ func (a *agentServer) sessionConfigOptions(ctx context.Context, mode string) []m
 	if opt := a.modelConfigOption(ctx); opt != nil {
 		out = append(out, opt)
 	}
+	out = append(out, effortConfigOption(a.eng.Effort()))
 	return out
+}
+
+func effortConfigOption(current string) map[string]any {
+	current = strings.ToLower(strings.TrimSpace(current))
+	switch current {
+	case "none", "low", "medium", "high":
+		// ok
+	default:
+		// Unset → show as medium for UI selection? Prefer empty as "default".
+		// ACP select needs a currentValue; use "default" pseudo that maps to clear.
+		current = "default"
+	}
+	return map[string]any{
+		"id":           configIDEffort,
+		"name":         "Effort",
+		"description":  "Reasoning intensity (provider default if unset)",
+		"category":     "thought_level",
+		"type":         "select",
+		"currentValue": current,
+		"options": []map[string]any{
+			{"value": "default", "name": "Default", "description": "Provider / model default"},
+			{"value": "none", "name": "None", "description": "Minimal or off when supported"},
+			{"value": "low", "name": "Low"},
+			{"value": "medium", "name": "Medium"},
+			{"value": "high", "name": "High"},
+		},
+	}
 }
 
 func modeConfigOption(current string) map[string]any {

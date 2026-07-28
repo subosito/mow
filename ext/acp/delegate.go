@@ -24,6 +24,10 @@ type AgentSpec struct {
 	Dir string `yaml:"dir" json:"dir"`
 	// TimeoutSec caps one delegated prompt (default 600).
 	TimeoutSec int `yaml:"timeout_sec" json:"timeout_sec"`
+	// Effort optional peer reasoning intensity. When set and command does not
+	// already pass --reasoning-effort/--effort, mow appends
+	// --reasoning-effort <value> (Grok CLI and similar).
+	Effort string `yaml:"effort" json:"effort"`
 }
 
 // Config is the extensions.acp section.
@@ -172,6 +176,21 @@ func peerKey(agent, dir string) string {
 	return strings.ToLower(agent) + "\x00" + dir
 }
 
+// peerCommand builds the peer argv, optionally injecting --reasoning-effort.
+func peerCommand(spec AgentSpec) []string {
+	cmd := append([]string(nil), spec.Command...)
+	effort := strings.TrimSpace(spec.Effort)
+	if effort == "" {
+		return cmd
+	}
+	for _, a := range cmd {
+		if a == "--reasoning-effort" || a == "--effort" {
+			return cmd
+		}
+	}
+	return append(cmd, "--reasoning-effort", effort)
+}
+
 func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
 		Agent  string `json:"agent"`
@@ -290,7 +309,7 @@ func (t *delegateTool) getOrStart(ctx context.Context, spec AgentSpec, dir strin
 		t.peers[key] = res
 		t.peersMu.Unlock()
 
-		cl := &Client{Command: append([]string(nil), spec.Command...), Dir: dir}
+		cl := &Client{Command: peerCommand(spec), Dir: dir}
 		sid, err := cl.Start(ctx)
 
 		t.peersMu.Lock()

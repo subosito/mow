@@ -104,10 +104,14 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	}
 
 	body := streamReq{
-		Model: c.Model, Messages: toOpenAIMessages(messages), Tools: tools, Stream: true,
+		Model: c.requestModel(), Messages: toOpenAIMessages(messages), Tools: tools, Stream: true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
 	raw, err := json.Marshal(body)
+	if err != nil {
+		return Message{}, err
+	}
+	raw, err = c.finalizeChatBody(raw)
 	if err != nil {
 		return Message{}, err
 	}

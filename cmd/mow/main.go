@@ -577,7 +577,7 @@ Core:
 	}
 	fmt.Fprintf(os.Stderr, `Common flags (also -long):
 
-  --config --workspace --model --base-url
+  --config --workspace --model --effort --base-url
   --allow-shell --allow-write --max-turns --stream --verbose
   --session --continue --no-session
 
@@ -586,6 +586,7 @@ Env:
   MOW_HOME                         data root (default ~/.mow)
   MOW_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
   MOW_MODEL / OPENAI_MODEL / ANTHROPIC_MODEL
+  MOW_EFFORT                       none | low | medium | high
   MOW_BASE_URL / OPENAI_BASE_URL / ANTHROPIC_BASE_URL
   MOW_WIRE                         openai-chat-completions | openai-responses | anthropic-messages
   MOW_OPS                          ops profile name (with ext/ops)

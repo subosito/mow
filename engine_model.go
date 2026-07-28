@@ -153,3 +153,43 @@ func (e *Engine) SetModelWithWire(id, wire string) error {
 	}
 	return e.SetWire(wire)
 }
+
+// Effort returns the canonical reasoning effort (none|low|medium|high), or "" if unset.
+func (e *Engine) Effort() string {
+	if e == nil {
+		return ""
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.client != nil {
+		return e.client.Effort
+	}
+	if e.cfg != nil {
+		return e.cfg.LLM.Effort
+	}
+	return ""
+}
+
+// SetEffort sets reasoning intensity for subsequent chat calls (none|low|medium|high).
+// Empty clears to provider default. Invalid values return an error.
+func (e *Engine) SetEffort(effort string) error {
+	if e == nil {
+		return fmt.Errorf("mow: nil engine")
+	}
+	norm, err := llm.NormalizeEffort(effort)
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.client != nil {
+		e.client.Effort = norm
+	}
+	if e.cfg != nil {
+		e.cfg.LLM.Effort = norm
+	}
+	if e.client == nil && e.cfg == nil {
+		return fmt.Errorf("mow: effort switch requires a live engine")
+	}
+	return nil
+}

@@ -155,6 +155,11 @@ type Client struct {
 	// SystemPrefixModels are case-insensitive globs against Client.Model.
 	// Empty = always apply SystemPrefix when set. Non-empty = apply only on match.
 	SystemPrefixModels []string
+	// Effort is the canonical reasoning intensity (none|low|medium|high).
+	// Empty = provider default. Applied via model-id tier rewrite and/or body fields.
+	Effort string
+	// CatalogIDs are known model ids (e.g. from ListModels) for tier pick/fallback.
+	CatalogIDs []string
 }
 
 // ChatRequest is the outbound chat body (subset).
@@ -229,8 +234,12 @@ func (c *Client) chatOpenAI(ctx context.Context, messages []Message, tools []Too
 		url = base
 	}
 
-	body := ChatRequest{Model: c.Model, Messages: toOpenAIMessages(messages), Tools: tools}
+	body := ChatRequest{Model: c.requestModel(), Messages: toOpenAIMessages(messages), Tools: tools}
 	raw, err := json.Marshal(body)
+	if err != nil {
+		return Message{}, err
+	}
+	raw, err = c.finalizeChatBody(raw)
 	if err != nil {
 		return Message{}, err
 	}

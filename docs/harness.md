@@ -168,6 +168,7 @@ Compaction is **character-estimate**, not a real tokenizer. It keeps the system 
 | `llm.base_url` | Provider or gateway `/v1` |
 | `llm.api_key` / `api_key_env` | Provider key **or** gateway key |
 | `llm.model` | Model id |
+| `llm.effort` | Reasoning intensity: `none` \| `low` \| `medium` \| `high` (optional; model-id tier and/or body fields) |
 | `llm.wire` | `openai-chat-completions` (default) \| `openai-responses` \| `anthropic-messages` |
 | `llm.headers` | Optional extra headers |
 | `llm.stream` | SSE content deltas (both wires) |

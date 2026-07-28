@@ -44,6 +44,9 @@ type Options struct {
 	Workspace string
 	// Model overrides config/env model when non-empty.
 	Model string
+	// Effort overrides config/env reasoning effort when non-empty
+	// (none|low|medium|high). Empty leaves config.
+	Effort string
 	// BaseURL overrides config/env LLM base URL when non-empty.
 	BaseURL string
 	// AllowWrite / AllowShell override config enable list when true.

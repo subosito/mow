@@ -99,18 +99,18 @@ func TestModelConfigOptionShape(t *testing.T) {
 	}
 }
 
-func TestSessionConfigOptionsIncludesModeAndModel(t *testing.T) {
+func TestSessionConfigOptionsIncludesModeModelEffort(t *testing.T) {
 	prov := &modelProv{
 		model: "alpha",
 		list:  []mow.ModelInfo{{ID: "alpha", Wire: "openai-chat-completions"}},
 	}
-	eng, err := mow.New(mow.Options{NoSession: true, Model: "alpha", Provider: prov})
+	eng, err := mow.New(mow.Options{NoSession: true, Model: "alpha", Effort: "high", Provider: prov})
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := &agentServer{eng: eng}
 	opts := a.sessionConfigOptions(context.Background(), ModeAsk)
-	if len(opts) != 2 {
+	if len(opts) != 3 {
 		t.Fatalf("opts=%v", opts)
 	}
 	if opts[0]["id"] != configIDMode || opts[0]["category"] != "mode" || opts[0]["currentValue"] != ModeAsk {
@@ -118,6 +118,9 @@ func TestSessionConfigOptionsIncludesModeAndModel(t *testing.T) {
 	}
 	if opts[1]["id"] != configIDModel || opts[1]["category"] != "model" {
 		t.Fatalf("model opt=%v", opts[1])
+	}
+	if opts[2]["id"] != configIDEffort || opts[2]["category"] != "thought_level" || opts[2]["currentValue"] != "high" {
+		t.Fatalf("effort opt=%v", opts[2])
 	}
 }
 

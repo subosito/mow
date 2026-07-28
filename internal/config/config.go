@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/subosito/mow/internal/llm"
 )
 
 // File is the on-disk / merged configuration.
@@ -32,6 +34,9 @@ type LLMConfig struct {
 	APIKey    string            `yaml:"api_key"`
 	APIKeyEnv string            `yaml:"api_key_env"`
 	Model     string            `yaml:"model"` // provider (or gateway) model id
+	// Effort is canonical reasoning intensity: none|low|medium|high.
+	// Empty = provider default. Applied by mow (model-id tier rewrite and/or body fields).
+	Effort    string            `yaml:"effort"`
 	Headers   map[string]string `yaml:"headers"`
 	Stream    bool              `yaml:"stream"`
 	// PromptCache toggles provider prompt caching (anthropic-messages: cache
@@ -341,6 +346,9 @@ func mergeLLM(dst *LLMConfig, o LLMConfig) {
 	if s := strings.TrimSpace(o.Model); s != "" {
 		dst.Model = s
 	}
+	if s := strings.TrimSpace(o.Effort); s != "" {
+		dst.Effort = s
+	}
 	if len(o.SystemPrefix) > 0 {
 		dst.SystemPrefix = append([]string(nil), o.SystemPrefix...)
 	}
@@ -402,6 +410,9 @@ func applyEnv(f *File) {
 	if v := firstEnv(modelEnvs...); v != "" {
 		f.LLM.Model = v
 	}
+	if v := firstEnv("MOW_EFFORT"); v != "" {
+		f.LLM.Effort = v
+	}
 }
 
 func firstEnv(keys ...string) string {
@@ -432,6 +443,14 @@ func (f *File) normalize() error {
 		if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) != "" || f.LLM.APIKey == "" {
 			f.LLM.APIKeyEnv = "ANTHROPIC_API_KEY"
 		}
+	}
+	if s := strings.TrimSpace(f.LLM.Effort); s != "" {
+		// Validate early; empty is ok (provider default).
+		norm, err := llm.NormalizeEffort(s)
+		if err != nil {
+			return fmt.Errorf("llm.effort: %w", err)
+		}
+		f.LLM.Effort = norm
 	}
 	if f.LLM.APIKey == "" && f.LLM.APIKeyEnv != "" {
 		f.LLM.APIKey = strings.TrimSpace(os.Getenv(f.LLM.APIKeyEnv))

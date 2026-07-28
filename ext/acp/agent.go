@@ -633,6 +633,15 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
 				return
 			}
+		case configIDEffort:
+			val, _ := p.Value.(string)
+			if strings.EqualFold(strings.TrimSpace(val), "default") {
+				val = ""
+			}
+			if err := a.eng.SetEffort(val); err != nil {
+				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
+				return
+			}
 		default:
 			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "unknown configId: " + configID}})
 			return

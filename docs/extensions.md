@@ -421,6 +421,12 @@ Agent methods (Zed-oriented): `initialize`, `authenticate`, `logout`, `session/n
 
 **Model picker:** `configOptions` entry `id=model` (`category: model`) lists `GET /models` for the configured endpoint. Plain OpenAI-compatible catalogs (OpenAI, DeepSeek, local gateways, …) show every id; optional gateway `wire` metadata filters to chat wires only and is applied on switch via `SetModelWithWire` (not shown in labels). Multimodal clone ids ending in `:image` / `:video` / `:audio` are omitted when present.
 
+**Effort / thought level:** `llm.effort` / `MOW_EFFORT` / `--effort` / ACP `id=effort` (`category: thought_level`): `none|low|medium|high` (empty = provider default). mow applies adapters on each chat call:
+- **Model-id tier** (e.g. `ag/*-low|medium|high`): rewrites the request model using catalog when available.
+- **Body** `reasoning_effort` on OpenAI chat/responses for non-Gemini models.
+- **Body** `thinking_budget` for Gemini-family models on OpenAI-compatible chat.
+Peer harnesses may set `extensions.acp.agents[].effort` to inject `--reasoning-effort` into the peer command.
+
 **Why ACP for delegate (not a private RPC):** same wire for editors and peer agents; avoid inventing mow↔claude, mow↔codex one-offs. Core stays **one loop**; delegation is a tool with workspace jail + timeout.
 
 **Delegate v2:** peer process + ACP session are **reused** across `acp_delegate` calls (same agent + cwd) until idle TTL or death. Partial peer text is emitted as `EventDelegateChunk` on the parent Engine (`AddOnEvent` / `OnEvent` / rpc `event` lines). Tool result still returns the full concatenated answer.

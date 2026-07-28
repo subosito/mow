@@ -160,7 +160,7 @@ func (c *Client) buildResponsesBody(messages []Message, tools []ToolSpec, stream
 	}
 	storeFalse := false
 	body := responsesReq{
-		Model:        c.Model,
+		Model:        c.requestModel(),
 		Input:        input,
 		Instructions: instructions,
 		Tools:        toResponsesTools(tools),
@@ -242,6 +242,10 @@ func (c *Client) chatOpenAIResponses(ctx context.Context, messages []Message, to
 	if err != nil {
 		return Message{}, err
 	}
+	raw, err = c.finalizeChatBody(raw)
+	if err != nil {
+		return Message{}, err
+	}
 	req, err := newJSONRequest(ctx, http.MethodPost, url, raw)
 	if err != nil {
 		return Message{}, err
@@ -289,6 +293,10 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 	url := responsesURL(c.BaseURL)
 	body := c.buildResponsesBody(messages, tools, true)
 	raw, err := json.Marshal(body)
+	if err != nil {
+		return Message{}, err
+	}
+	raw, err = c.finalizeChatBody(raw)
 	if err != nil {
 		return Message{}, err
 	}

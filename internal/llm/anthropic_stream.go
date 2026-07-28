@@ -30,7 +30,7 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 		cacheLastMessage(anthMsgs)
 	}
 	body := map[string]any{
-		"model":      c.Model,
+		"model":      c.requestModel(),
 		"max_tokens": c.anthropicMaxTokens(),
 		"messages":   anthMsgs,
 		"stream":     true,
@@ -45,6 +45,10 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 		body["tools"] = atools
 	}
 	raw, err := json.Marshal(body)
+	if err != nil {
+		return Message{}, err
+	}
+	raw, err = c.finalizeChatBody(raw)
 	if err != nil {
 		return Message{}, err
 	}

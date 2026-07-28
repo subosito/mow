@@ -89,6 +89,12 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	// Feed effort tier resolver.
+	ids := make([]string, len(out))
+	for i, m := range out {
+		ids[i] = m.ID
+	}
+	c.SetCatalogIDs(ids)
 	return out, nil
 }
 

@@ -15,6 +15,7 @@ type EngineFlags struct {
 	Config     string
 	Workspace  string
 	Model      string
+	Effort     string
 	BaseURL    string
 	AllowShell bool
 	AllowWrite bool
@@ -34,6 +35,7 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.Config, "config", "", "optional config yaml")
 	fs.StringVar(&f.Workspace, "workspace", "", "workspace root")
 	fs.StringVar(&f.Model, "model", "", "model id")
+	fs.StringVar(&f.Effort, "effort", "", "reasoning effort: none|low|medium|high")
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
 	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash")
 	fs.BoolVar(&f.AllowWrite, "allow-write", false, "enable write/edit")
@@ -84,6 +86,7 @@ func (f *EngineFlags) Options() mow.Options {
 		ConfigPaths: paths,
 		Workspace:   f.Workspace,
 		Model:       f.Model,
+		Effort:      f.Effort,
 		BaseURL:     f.BaseURL,
 		AllowWrite:  f.AllowWrite,
 		AllowShell:  f.AllowShell,

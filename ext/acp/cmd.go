@@ -63,8 +63,8 @@ func printUsage() {
   JSON-RPC on stdin → stdout. Ctrl+C / SIGTERM stops the agent.
   Streaming is always on for session/update chunks.
 
-  Config options: mode (ask|code) and model (chat-only catalog; wire hidden,
-  applied via SetModelWithWire). Also session/set_mode for ask|code.
+  Config options: mode (ask|code), model (chat catalog), effort (none|low|medium|high).
+  Also session/set_mode. Effort maps to model-id tiers and/or request body fields.
 
 Engine flags: same as mow run (--config --model --workspace --allow-write …).
 
