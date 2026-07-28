@@ -90,10 +90,52 @@ func TestResolveEffortGeminiThinkingBudget(t *testing.T) {
 	}
 }
 
-func TestResolveEffortUnset(t *testing.T) {
+func TestResolveEffortUnsetKeepsExplicitTier(t *testing.T) {
 	plan := ResolveEffort("ag/gemini-3.6-flash-medium", WireOpenAIChat, "", nil)
 	if plan.Model != "ag/gemini-3.6-flash-medium" {
 		t.Fatalf("%+v", plan)
+	}
+}
+
+func TestResolveEffortBareAGDefaultsMedium(t *testing.T) {
+	catalog := []string{"ag/gemini-3.6-flash-low", "ag/gemini-3.6-flash-medium"}
+	plan := ResolveEffort("ag/gemini-3.6-flash", WireOpenAIChat, "", catalog)
+	if plan.Model != "ag/gemini-3.6-flash-medium" {
+		t.Fatalf("%+v", plan)
+	}
+}
+
+func TestCollapseEffortTiersInCatalog(t *testing.T) {
+	in := []ModelInfo{
+		{ID: "ag/gemini-3.6-flash-low", Wire: "openai-chat-completions"},
+		{ID: "ag/gemini-3.6-flash-medium", Wire: "openai-chat-completions"},
+		{ID: "gpt-5-mini", Wire: "openai-chat-completions"},
+		{ID: "deepseek-chat"},
+	}
+	got := CollapseEffortTiersInCatalog(in)
+	want := map[string]bool{
+		"ag/gemini-3.6-flash": true,
+		"gpt-5-mini":          true,
+		"deepseek-chat":       true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d: %+v", len(got), got)
+	}
+	for _, m := range got {
+		if !want[m.ID] {
+			t.Fatalf("unexpected %q", m.ID)
+		}
+	}
+}
+
+func TestNormalizeConfiguredModel(t *testing.T) {
+	base, eff := NormalizeConfiguredModel("ag/gemini-3.6-flash-medium", "")
+	if base != "ag/gemini-3.6-flash" || eff != "medium" {
+		t.Fatalf("%q %q", base, eff)
+	}
+	base, eff = NormalizeConfiguredModel("ag/gemini-3.6-flash-medium", "high")
+	if base != "ag/gemini-3.6-flash" || eff != "high" {
+		t.Fatalf("effort wins: %q %q", base, eff)
 	}
 }
 

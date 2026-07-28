@@ -25,7 +25,9 @@ func (e *Engine) Model() string {
 }
 
 // SetModel switches the chat model for subsequent Prompt calls.
-// No-op-safe: returns an error when using a custom Options.Chat inject (no live client).
+// Tiered AG-style ids (…-low|medium|high) are stored as the lean base; when
+// effort is unset, the tier becomes the engine effort. No-op-safe: returns an
+// error when using a custom Options.Chat inject (no live client).
 func (e *Engine) SetModel(id string) error {
 	if e == nil {
 		return fmt.Errorf("mow: nil engine")
@@ -36,6 +38,14 @@ func (e *Engine) SetModel(id string) error {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	curEffort := ""
+	if e.client != nil {
+		curEffort = e.client.Effort
+	} else if e.cfg != nil {
+		curEffort = e.cfg.LLM.Effort
+	}
+	base, eff := llm.NormalizeConfiguredModel(id, curEffort)
+	id = base
 	if e.client == nil {
 		// Custom providers may opt in via the ModelSwitcher extension.
 		if sw, ok := e.provider.(ModelSwitcher); ok {
@@ -44,14 +54,23 @@ func (e *Engine) SetModel(id string) error {
 			}
 			if e.cfg != nil {
 				e.cfg.LLM.Model = id
+				if strings.TrimSpace(e.cfg.LLM.Effort) == "" && eff != "" {
+					e.cfg.LLM.Effort = eff
+				}
 			}
 			return nil
 		}
 		return fmt.Errorf("mow: model switch requires the built-in client or a Provider implementing ModelSwitcher")
 	}
 	e.client.Model = id
+	if strings.TrimSpace(e.client.Effort) == "" && eff != "" {
+		e.client.Effort = eff
+	}
 	if e.cfg != nil {
 		e.cfg.LLM.Model = id
+		if strings.TrimSpace(e.cfg.LLM.Effort) == "" && eff != "" {
+			e.cfg.LLM.Effort = eff
+		}
 	}
 	return nil
 }

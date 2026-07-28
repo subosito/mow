@@ -89,6 +89,7 @@ func modeConfigOption(current string) map[string]any {
 
 func (a *agentServer) modelConfigOption(ctx context.Context) map[string]any {
 	eng := a.eng
+	// Lean id for picker (AG tiers live in effort, not model name).
 	cur := strings.TrimSpace(eng.Model())
 	list, err := a.listModels(ctx)
 	if err != nil {
