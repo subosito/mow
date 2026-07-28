@@ -112,13 +112,17 @@ func (e *Engine) Wire() string {
 	return llm.WireOpenAIChat
 }
 
-// ModelInfo is a listed model (id + optional preferred wire / effort metadata).
+// ModelInfo is a listed model (id + optional preferred wire / effort / facet metadata).
 type ModelInfo struct {
 	ID            string
 	Wire          string
 	Wires         []string
 	Efforts       []string // catalog-advertised; empty = use static none|low|medium|high
 	DefaultEffort string
+	// Facet is a gateway capability token ("chat", "search", "image", …).
+	// Empty when the catalog omits it. ACP filters to chat (or empty) only —
+	// never by parsing ":" in the model id.
+	Facet string
 }
 
 // ListModels returns available models from GET /models.
@@ -153,7 +157,7 @@ func (e *Engine) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 	out := make([]ModelInfo, 0, len(infos))
 	for _, m := range infos {
-		item := ModelInfo{ID: m.ID, Wire: m.Wire, Wires: m.Wires, DefaultEffort: m.DefaultEffort}
+		item := ModelInfo{ID: m.ID, Wire: m.Wire, Wires: m.Wires, DefaultEffort: m.DefaultEffort, Facet: m.Facet}
 		if len(m.Efforts) > 0 {
 			item.Efforts = append([]string(nil), m.Efforts...)
 		}

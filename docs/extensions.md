@@ -255,7 +255,7 @@ the supported way. Shares the mechanism with `ext/goal`'s goal-scoped
 `goal_process_*` (both use `internal/proc`).
 
 **Lifecycle:** processes are **auto-killed when the session exits** —
-`Engine.Close()` (deferred by `mow run`/`repl` and called by hosts like mowi)
+`Engine.Close()` (deferred by `mow run`/`repl` and called by embedders on exit)
 stops everything `proc_start` launched, so nothing leaks. Pass `keep: true` to a
 `proc_start` call to let that process survive session exit (nohup-like). A
 crashed process skips cleanup; `mow proc stop-all` recovers.
@@ -419,9 +419,9 @@ Agent methods (Zed-oriented): `initialize`, `authenticate`, `logout`, `session/n
 
 **Modes:** `ask` = read-only tools (no write/edit/bash, no terminal); `code` = full access per process policy (`--allow-write` / `--allow-shell`). Advertised both as ACP `modes` and as a `configOptions` select (`category: mode`) for editor UIs.
 
-**Model picker:** `configOptions` entry `id=model` (`category: model`) lists `GET /models` for the configured endpoint. Plain OpenAI-compatible catalogs (OpenAI, DeepSeek, local gateways, …) show every id; optional gateway `wire` metadata filters to chat wires only and is applied on switch via `SetModelWithWire` (not shown in labels). Multimodal clone ids ending in `:image` / `:video` / `:audio` are omitted when present.
+**Model picker:** `configOptions` entry `id=model` (`category: model`) lists `GET /models` for the configured endpoint. Plain OpenAI-compatible catalogs (OpenAI, DeepSeek, local servers, …) show every id; optional gateway `wire` metadata filters to chat wires only and is applied on switch via `SetModelWithWire` (not shown in labels). When the gateway advertises `facet`, only empty/`chat` rows are offered (non-chat clones such as `search` / `image` stay out of the picker). Filtering uses the `facet` field only — never by parsing `:` in the model id (colons can be part of legitimate provider ids).
 
-**Effort / thought level:** `llm.effort` / `MOW_EFFORT` / `--effort` / ACP `id=effort` (`category: thought_level`). Effort is **never** part of the model id. Gateways (cincai/chacha) advertise per-model `efforts` and `default_effort` on `GET /v1/models`; mow’s ACP selector uses that list (hide when empty or a single fixed tier). On chat calls mow sends body `reasoning_effort` when the catalog lists efforts (gateway maps upstream tier). Without catalog efforts, fallback is static none|low|medium|high with optional `thinking_budget` for Gemini-family models. Legacy config ids like `gemini-3.6-flash-medium` normalize to lean `model` + `effort`. Peer `extensions.acp.agents[].effort` may inject `--reasoning-effort` for Grok-like peers.
+**Effort / thought level:** `llm.effort` / `MOW_EFFORT` / `--effort` / ACP `id=effort` (`category: thought_level`). Effort is **never** part of the model id. Gateways that extend `GET /v1/models` may advertise per-model `efforts` and `default_effort`; mow’s ACP selector uses that list (hide when empty or a single fixed tier). On chat calls mow sends body `reasoning_effort` when the catalog lists efforts (gateway maps upstream tier). Without catalog efforts, fallback is static none|low|medium|high with optional `thinking_budget` for Gemini-family models. Legacy config ids like `gemini-2.5-flash-medium` normalize to lean `model` + `effort`. Peer `extensions.acp.agents[].effort` may inject `--reasoning-effort` when the peer CLI accepts that flag.
 
 **Why ACP for delegate (not a private RPC):** same wire for editors and peer agents; avoid inventing mow↔claude, mow↔codex one-offs. Core stays **one loop**; delegation is a tool with workspace jail + timeout.
 

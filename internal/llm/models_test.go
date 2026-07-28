@@ -63,3 +63,30 @@ func TestListModelsWorksForAnthropicWire(t *testing.T) {
 		t.Fatalf("%+v", list)
 	}
 }
+
+func TestListModelsParsesFacet(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "model-x", "wire": "openai-responses", "facet": "chat"},
+				{"id": "model-x:search", "wire": "openai-responses", "facet": "search"},
+			},
+		})
+	}))
+	defer srv.Close()
+	c := &llm.Client{BaseURL: srv.URL + "/v1", APIKey: "k"}
+	list, err := c.ListModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]llm.ModelInfo{}
+	for _, m := range list {
+		byID[m.ID] = m
+	}
+	if byID["model-x"].Facet != "chat" {
+		t.Fatalf("chat facet: %+v", byID["model-x"])
+	}
+	if byID["model-x:search"].Facet != "search" {
+		t.Fatalf("search facet: %+v", byID["model-x:search"])
+	}
+}

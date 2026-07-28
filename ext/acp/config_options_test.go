@@ -31,19 +31,23 @@ func TestFilterChatModels(t *testing.T) {
 		// Plain OpenAI-compatible catalog (id only) → keep all.
 		{ID: "deepseek-chat"},
 		{ID: "gpt-5-mini"},
-		// Optional gateway wire metadata.
-		{ID: "chat-model", Wire: "openai-chat-completions"},
-		{ID: "chat-model:image", Wire: "openai-chat-completions"},
-		{ID: "tts-model", Wire: "openai-audio-speech"},
+		// Optional gateway wire + facet metadata.
+		{ID: "chat-model", Wire: "openai-chat-completions", Facet: "chat"},
+		{ID: "chat-model:image", Wire: "openai-chat-completions", Facet: "image"},
+		{ID: "chat-model:search", Wire: "openai-chat-completions", Facet: "search"},
+		// Colon in id is NOT a facet signal when facet is chat (or empty).
+		{ID: "vendor:org/model-v1", Wire: "openai-chat-completions", Facet: "chat"},
+		{ID: "tts-model", Wire: "openai-audio-speech", Facet: "chat"},
 		{ID: "image-model", Wire: "openai-images-generations"},
-		{ID: "claude-model", Wire: "anthropic-messages"},
+		{ID: "claude-model", Wire: "anthropic-messages", Facet: "chat"},
 	}
 	got := filterChatModels(in)
 	want := map[string]bool{
-		"deepseek-chat": true,
-		"gpt-5-mini":    true,
-		"chat-model":    true,
-		"claude-model":  true,
+		"deepseek-chat":       true,
+		"gpt-5-mini":          true,
+		"chat-model":          true,
+		"vendor:org/model-v1": true,
+		"claude-model":        true,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d: %+v", len(got), got)
@@ -59,10 +63,11 @@ func TestModelConfigOptionShape(t *testing.T) {
 	prov := &modelProv{
 		model: "alpha",
 		list: []mow.ModelInfo{
-			{ID: "alpha", Wire: "openai-chat-completions"},
-			{ID: "beta", Wire: "anthropic-messages"},
-			{ID: "eleven_v3", Wire: "openai-audio-speech"},
-			{ID: "alpha:image", Wire: "openai-chat-completions"},
+			{ID: "alpha", Wire: "openai-chat-completions", Facet: "chat"},
+			{ID: "beta", Wire: "anthropic-messages", Facet: "chat"},
+			{ID: "tts-model", Wire: "openai-audio-speech", Facet: "chat"},
+			{ID: "alpha:image", Wire: "openai-chat-completions", Facet: "image"},
+			{ID: "alpha:search", Wire: "openai-chat-completions", Facet: "search"},
 		},
 	}
 	eng, err := mow.New(mow.Options{NoSession: true, Model: "alpha", Provider: prov})

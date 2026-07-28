@@ -20,7 +20,8 @@ func (u Usage) Cost(l ModelLimits) float64 {
 }
 
 // modelCatalog maps a model-id substring to limits. Order matters: more
-// specific ids (…-mini) precede their prefixes so Contains picks the right row.
+// specific ids (…-mini, gpt-5.4-*) precede broader prefixes so Contains picks
+// the right row.
 var modelCatalog = []struct {
 	match string
 	lim   ModelLimits
@@ -31,14 +32,15 @@ var modelCatalog = []struct {
 	{"sonnet", ModelLimits{200_000, 3, 15}},
 	{"claude-haiku", ModelLimits{200_000, 0.8, 4}},
 	{"haiku", ModelLimits{200_000, 0.8, 4}},
-	{"gpt-4.1-mini", ModelLimits{1_000_000, 0.4, 1.6}},
-	{"gpt-4.1", ModelLimits{1_000_000, 2, 8}},
-	{"gpt-4o-mini", ModelLimits{128_000, 0.15, 0.6}},
-	{"gpt-4o", ModelLimits{128_000, 2.5, 10}},
-	{"o3-mini", ModelLimits{200_000, 1.1, 4.4}},
-	{"o3", ModelLimits{200_000, 2, 8}},
-	{"o1", ModelLimits{200_000, 15, 60}},
+	// OpenAI GPT-5 family (longer / more specific first).
+	{"gpt-5.4-mini", ModelLimits{400_000, 0.25, 2}},
+	{"gpt-5.4-nano", ModelLimits{400_000, 0.05, 0.4}},
+	{"gpt-5.4", ModelLimits{1_000_000, 1.25, 10}},
+	{"gpt-5-mini", ModelLimits{400_000, 0.25, 2}},
+	{"gpt-5-nano", ModelLimits{400_000, 0.05, 0.4}},
+	{"gpt-5", ModelLimits{400_000, 1.25, 10}},
 	{"deepseek", ModelLimits{128_000, 0.27, 1.1}},
+	{"gemini", ModelLimits{1_000_000, 0.3, 2.5}},
 }
 
 // lookupModelLimits returns best-effort limits for a model id (empty when no

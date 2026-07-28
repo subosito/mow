@@ -7,7 +7,7 @@ import "strings"
 const (
 	// WireOpenAIChat is POST /v1/chat/completions (default agent path).
 	WireOpenAIChat = "openai-chat-completions"
-	// WireOpenAIResponses is POST /v1/responses (Grok-class, GPT-5-class agent tools).
+	// WireOpenAIResponses is POST /v1/responses (OpenAI Responses API).
 	WireOpenAIResponses = "openai-responses"
 	// WireAnthropicMsg is POST /v1/messages.
 	WireAnthropicMsg = "anthropic-messages"

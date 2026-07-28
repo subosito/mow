@@ -132,11 +132,11 @@ func TestLoadGenerateUnderstandYAML(t *testing.T) {
 	path := filepath.Join(dir, "c.yaml")
 	yaml := `
 llm:
-  model: deepseek-v4-flash
+  model: deepseek-chat
   generate:
-    image: grok-imagine-image-quality
+    image: gpt-image-1
   understand:
-    image: qwen-vl
+    image: gpt-5
 tools:
   enable:
     - read
@@ -157,10 +157,10 @@ tools:
 		t.Fatal(err)
 	}
 	// env OPENAI_MODEL empty string might not clear - Load applies firstEnv only if non-empty
-	if f.LLM.Generate.Image != "grok-imagine-image-quality" {
+	if f.LLM.Generate.Image != "gpt-image-1" {
 		t.Fatalf("generate.image=%q", f.LLM.Generate.Image)
 	}
-	if f.LLM.Understand.Image != "qwen-vl" {
+	if f.LLM.Understand.Image != "gpt-5" {
 		t.Fatalf("understand.image=%q", f.LLM.Understand.Image)
 	}
 	if !f.ToolEnabled("generate_image") || !f.ToolEnabled("understand_image") {

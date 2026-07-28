@@ -298,9 +298,9 @@ Default: new session. Resume: `--continue` (latest) or `--session ID` (loads age
 
 Works on **`mow run`** and **`mow repl`** (same `Options.Continue` / `SessionID`). REPL prints `session=…` at start (and a short transcript when resuming) and again on exit with a resume hint (`mow repl --session <id>` or `--continue`).
 
-Embedders build a session picker with **`Engine.Sessions()`** → `[]SessionInfo{ID, Updated, Preview}` (newest first, `Preview` = first user line), then resume via `Options.SessionID`. This is what mowi's `/sessions` uses.
+Embedders build a session picker with **`Engine.Sessions()`** → `[]SessionInfo{ID, Updated, Preview}` (newest first, `Preview` = first user line), then resume via `Options.SessionID`.
 
-**Ephemeral asides:** `PromptWith(ctx, text, PromptOpts{Ephemeral: true})` runs a turn against the current context but does **not** append it to history or the session file, so it never re-enters a later prompt (events/streaming still fire). `mow repl` and mowi expose this as **`/btw <question>`** — a mid-conversation side question that doesn't pollute context.
+**Ephemeral asides:** `PromptWith(ctx, text, PromptOpts{Ephemeral: true})` runs a turn against the current context but does **not** append it to history or the session file, so it never re-enters a later prompt (events/streaming still fire). `mow repl` exposes this as **`/btw <question>`** — a mid-conversation side question that doesn't pollute context. Host UIs can offer the same via `PromptOpts{Ephemeral: true}`.
 
 **Cancel mid tool batch:** hard-abort fails fast (siblings cancelled). Soft results already finished still append to history in call order; incomplete tools are omitted. Session prior keeps whatever was appended before cancel (`StopReason=cancelled`).
 

@@ -10,7 +10,7 @@ import (
 
 // Effort levels (canonical). Empty = provider / gateway default.
 // Effort is never encoded in the model id on the wire — gateways that need
-// upstream tier suffixes (e.g. Antigravity) map that themselves.
+// upstream tier suffixes map that themselves.
 const (
 	EffortNone   = "none"
 	EffortLow    = "low"
@@ -128,6 +128,9 @@ func CollapseEffortTiersInCatalog(list []ModelInfo) []ModelInfo {
 			if existing.info.DefaultEffort == "" && strings.TrimSpace(m.DefaultEffort) != "" {
 				existing.info.DefaultEffort = strings.TrimSpace(m.DefaultEffort)
 			}
+			if existing.info.Facet == "" && strings.TrimSpace(m.Facet) != "" {
+				existing.info.Facet = strings.TrimSpace(m.Facet)
+			}
 			continue
 		}
 		order = append(order, dkey)
@@ -149,7 +152,7 @@ func CollapseEffortTiersInCatalog(list []ModelInfo) []ModelInfo {
 }
 
 // NormalizeConfiguredModel migrates legacy tiered model ids into lean base + effort.
-// Example: "gemini-3.6-flash-medium" + "" → ("gemini-3.6-flash", "medium").
+// Example: "gemini-2.5-flash-medium" + "" → ("gemini-2.5-flash", "medium").
 // Explicit effort wins over a suffix. Non-tiered models are unchanged.
 func NormalizeConfiguredModel(model, effort string) (base, eff string) {
 	base = strings.TrimSpace(model)
@@ -205,7 +208,7 @@ func ResolveEffortFor(model, wire, effort string, catalog []string, modelEfforts
 
 func looksGeminiFamily(model string) bool {
 	m := strings.ToLower(model)
-	// Bare product names (gemini-3.6-flash) and legacy ag/ prefix.
+	// Gemini product ids and common gateway-prefixed forms (e.g. vendor/gemini-…).
 	return strings.HasPrefix(m, "ag/") ||
 		strings.Contains(m, "gemini") ||
 		strings.HasPrefix(m, "models/gemini")

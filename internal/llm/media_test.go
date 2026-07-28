@@ -136,7 +136,7 @@ func TestGenerateVideoWait_xaiVideoURL(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status": "done",
 				"video":  map[string]any{"url": fileSrv.URL + "/clip.mp4", "duration": 8},
-				"model":  "grok-imagine-video",
+				"model":  "video-model",
 			})
 		default:
 			http.NotFound(w, r)

@@ -58,7 +58,7 @@ func (a *agentServer) effortConfigOption() map[string]any {
 		return effortConfigOptionStatic(current)
 	}
 	if len(efforts) == 1 {
-		// Single fixed tier (typical Antigravity) — no selector.
+		// Single fixed tier — nothing useful to switch; hide the selector.
 		return nil
 	}
 
@@ -265,10 +265,11 @@ func (a *agentServer) listModels(ctx context.Context) ([]mow.ModelInfo, error) {
 
 // filterChatModels keeps catalog rows suitable for the agent chat picker.
 //
-// Portable rules (any OpenAI-compatible /models list):
+// Rules (portable across gateways and plain OpenAI catalogs):
+//   - facet set → keep only empty or "chat" (gateway-advertised capability;
+//     never parse ":" from the model id — some providers use colon in the id)
 //   - no wire metadata → keep (plain catalogs are chat models)
 //   - preferred wire set → keep only known chat wires; drop images/speech/…
-//   - id suffix :image / :video / :audio → drop (optional multimodal clones)
 //
 // Wire is never shown in the UI; it is only used for SetModelWithWire.
 func filterChatModels(list []mow.ModelInfo) []mow.ModelInfo {
@@ -286,12 +287,10 @@ func isChatModel(m mow.ModelInfo) bool {
 	if id == "" {
 		return false
 	}
-	lower := strings.ToLower(id)
-	if i := strings.LastIndex(lower, ":"); i >= 0 {
-		switch lower[i+1:] {
-		case "image", "video", "audio":
-			return false
-		}
+	// Facet is authoritative when the gateway advertises it. Do not drop by
+	// ":" in the id — colon can be part of a legitimate model identifier.
+	if f := strings.ToLower(strings.TrimSpace(m.Facet)); f != "" && f != "chat" {
+		return false
 	}
 	w := strings.TrimSpace(m.Wire)
 	if w == "" {

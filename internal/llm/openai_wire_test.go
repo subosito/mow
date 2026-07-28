@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Gemini 3 / Antigravity require thought_signature on functionCall parts when
+// Some providers require thought_signature on functionCall parts when
 // replaying tool_calls. Capture must survive history → toOpenAIMessages.
 func TestToOpenAIMessagesPreservesThoughtSignature(t *testing.T) {
 	in := []Message{

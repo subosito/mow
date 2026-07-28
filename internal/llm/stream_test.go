@@ -12,7 +12,7 @@ import (
 )
 
 func TestChatStreamHooksSeparatesReasoningAndContent(t *testing.T) {
-	// Simulate DeepSeek/ZenMux: long reasoning then short content.
+	// Simulate OpenAI-compat stream: long reasoning then short content.
 	const body = "" +
 		"data: {\"choices\":[{\"delta\":{\"reasoning\":\"think \"}}]}\n\n" +
 		"data: {\"choices\":[{\"delta\":{\"reasoning\":\"step\"}}]}\n\n" +
@@ -32,7 +32,7 @@ func TestChatStreamHooksSeparatesReasoningAndContent(t *testing.T) {
 	c := &Client{
 		BaseURL: srv.URL + "/v1",
 		APIKey:  "test",
-		Model:   "deepseek-v4-flash",
+		Model:   "deepseek-chat",
 		HTTP:    srv.Client(),
 	}
 
@@ -83,7 +83,7 @@ func TestChatStreamHooksReasoningContentField(t *testing.T) {
 }
 
 func TestChatStreamHooksThoughtSignature(t *testing.T) {
-	// Gemini/Antigravity attach thought_signature on the tool_call start chunk;
+	// Some providers attach thought_signature on the tool_call start chunk;
 	// it must be kept for the next request's history.
 	const body = "" +
 		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_g\",\"type\":\"function\",\"thought_signature\":\"sig-xyz\",\"function\":{\"name\":\"glob\",\"arguments\":\"\"}}]}}]}\n\n" +

@@ -116,7 +116,7 @@ func TestChatOpenAIResponsesNonStream(t *testing.T) {
 		Wire:   WireOpenAIResponses,
 		BaseURL: srv.URL + "/v1",
 		APIKey: "k",
-		Model:  "grok-4.5",
+		Model:  "test-model",
 		HTTP:   srv.Client(),
 	}
 	msg, err := c.Chat(context.Background(), []Message{
@@ -131,7 +131,7 @@ func TestChatOpenAIResponsesNonStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotBody["model"] != "grok-4.5" {
+	if gotBody["model"] != "test-model" {
 		t.Fatalf("model=%v body=%v", gotBody["model"], gotBody)
 	}
 	if store, _ := gotBody["store"].(bool); store {

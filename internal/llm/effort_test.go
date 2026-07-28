@@ -34,7 +34,7 @@ func TestNormalizeEffort(t *testing.T) {
 }
 
 func TestStripEffortTiers(t *testing.T) {
-	if got := StripEffortTiers("gemini-3.6-flash-medium"); got != "gemini-3.6-flash" {
+	if got := StripEffortTiers("gemini-2.5-flash-medium"); got != "gemini-2.5-flash" {
 		t.Fatalf("got %q", got)
 	}
 	if got := StripEffortTiers("gpt-5-mini"); got != "gpt-5-mini" {
@@ -44,9 +44,9 @@ func TestStripEffortTiers(t *testing.T) {
 
 func TestResolveEffortNeverRewritesModelTier(t *testing.T) {
 	// Effort is body-only; model stays lean even if catalog has legacy tiers.
-	catalog := []string{"gemini-3.6-flash-low", "gemini-3.6-flash-medium"}
-	plan := ResolveEffort("gemini-3.6-flash", WireOpenAIChat, "high", catalog)
-	if plan.Model != "gemini-3.6-flash" {
+	catalog := []string{"gemini-2.5-flash-low", "gemini-2.5-flash-medium"}
+	plan := ResolveEffort("gemini-2.5-flash", WireOpenAIChat, "high", catalog)
+	if plan.Model != "gemini-2.5-flash" {
 		t.Fatalf("model rewritten: %q", plan.Model)
 	}
 	if plan.ThinkingBudget == nil || *plan.ThinkingBudget != 8192 {
@@ -58,8 +58,8 @@ func TestResolveEffortNeverRewritesModelTier(t *testing.T) {
 }
 
 func TestResolveEffortStripsLegacyTierOnWire(t *testing.T) {
-	plan := ResolveEffort("gemini-3.6-flash-medium", WireOpenAIChat, "low", nil)
-	if plan.Model != "gemini-3.6-flash" {
+	plan := ResolveEffort("gemini-2.5-flash-medium", WireOpenAIChat, "low", nil)
+	if plan.Model != "gemini-2.5-flash" {
 		t.Fatalf("want lean model, got %q", plan.Model)
 	}
 	if plan.ThinkingBudget == nil || *plan.ThinkingBudget != 256 {
@@ -75,22 +75,22 @@ func TestResolveEffortBodyReasoning(t *testing.T) {
 }
 
 func TestResolveEffortUnset(t *testing.T) {
-	plan := ResolveEffort("gemini-3.6-flash", WireOpenAIChat, "", nil)
-	if plan.Model != "gemini-3.6-flash" || plan.ThinkingBudget != nil || plan.ReasoningEffort != "" {
+	plan := ResolveEffort("gemini-2.5-flash", WireOpenAIChat, "", nil)
+	if plan.Model != "gemini-2.5-flash" || plan.ThinkingBudget != nil || plan.ReasoningEffort != "" {
 		t.Fatalf("%+v", plan)
 	}
 }
 
 func TestCollapseEffortTiersInCatalog(t *testing.T) {
 	in := []ModelInfo{
-		{ID: "gemini-3.6-flash-low", Wire: "openai-chat-completions"},
-		{ID: "gemini-3.6-flash-medium", Wire: "openai-chat-completions"},
+		{ID: "gemini-2.5-flash-low", Wire: "openai-chat-completions"},
+		{ID: "gemini-2.5-flash-medium", Wire: "openai-chat-completions"},
 		{ID: "gpt-5-mini", Wire: "openai-chat-completions"},
 		{ID: "deepseek-chat"},
 	}
 	got := CollapseEffortTiersInCatalog(in)
 	want := map[string]bool{
-		"gemini-3.6-flash": true,
+		"gemini-2.5-flash": true,
 		"gpt-5-mini":       true,
 		"deepseek-chat":    true,
 	}
@@ -105,12 +105,12 @@ func TestCollapseEffortTiersInCatalog(t *testing.T) {
 }
 
 func TestNormalizeConfiguredModel(t *testing.T) {
-	base, eff := NormalizeConfiguredModel("gemini-3.6-flash-medium", "")
-	if base != "gemini-3.6-flash" || eff != "medium" {
+	base, eff := NormalizeConfiguredModel("gemini-2.5-flash-medium", "")
+	if base != "gemini-2.5-flash" || eff != "medium" {
 		t.Fatalf("%q %q", base, eff)
 	}
-	base, eff = NormalizeConfiguredModel("gemini-3.6-flash-medium", "high")
-	if base != "gemini-3.6-flash" || eff != "high" {
+	base, eff = NormalizeConfiguredModel("gemini-2.5-flash-medium", "high")
+	if base != "gemini-2.5-flash" || eff != "high" {
 		t.Fatalf("effort wins: %q %q", base, eff)
 	}
 }
@@ -136,7 +136,7 @@ func TestFinalizeChatBody(t *testing.T) {
 
 func TestFinalizeChatBodyGeminiThinkingBudget(t *testing.T) {
 	// Legacy path: no catalog efforts → thinking_budget for Gemini family.
-	c := &Client{Model: "gemini-3.6-flash-medium", Wire: WireOpenAIChat, Effort: "high"}
+	c := &Client{Model: "gemini-2.5-flash-medium", Wire: WireOpenAIChat, Effort: "high"}
 	raw, _ := json.Marshal(map[string]any{"model": c.requestModel()})
 	out, err := c.finalizeChatBody(raw)
 	if err != nil {
@@ -144,7 +144,7 @@ func TestFinalizeChatBodyGeminiThinkingBudget(t *testing.T) {
 	}
 	var m map[string]any
 	_ = json.Unmarshal(out, &m)
-	if m["model"] != "gemini-3.6-flash" {
+	if m["model"] != "gemini-2.5-flash" {
 		t.Fatalf("model=%v", m["model"])
 	}
 	if m["thinking_budget"] != float64(8192) {
@@ -154,11 +154,11 @@ func TestFinalizeChatBodyGeminiThinkingBudget(t *testing.T) {
 
 func TestFinalizeChatBodyGeminiWithCatalogEfforts(t *testing.T) {
 	// When gateway advertises efforts, send reasoning_effort (gateway maps tiers).
-	c := &Client{Model: "gemini-3.6-flash", Wire: WireOpenAIChat, Effort: "high"}
+	c := &Client{Model: "gemini-2.5-flash", Wire: WireOpenAIChat, Effort: "high"}
 	c.SetCatalogModels([]ModelInfo{{
-		ID: "gemini-3.6-flash", Efforts: []string{"low", "medium", "high"}, DefaultEffort: "medium",
+		ID: "gemini-2.5-flash", Efforts: []string{"low", "medium", "high"}, DefaultEffort: "medium",
 	}})
-	raw, _ := json.Marshal(map[string]any{"model": "gemini-3.6-flash"})
+	raw, _ := json.Marshal(map[string]any{"model": "gemini-2.5-flash"})
 	out, err := c.finalizeChatBody(raw)
 	if err != nil {
 		t.Fatal(err)

@@ -164,7 +164,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 			Choices []struct {
 				Delta struct {
 					Content          string `json:"content"`
-					Reasoning        string `json:"reasoning"`         // DeepSeek / ZenMux
+					Reasoning        string `json:"reasoning"`         // some OpenAI-compat
 					ReasoningContent string `json:"reasoning_content"` // some OpenAI-compat
 					Thinking         string `json:"thinking"`          // some gateways
 					ToolCalls        []struct {

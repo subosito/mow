@@ -61,6 +61,33 @@ do not tell them to import `internal/`.
 - Test non-trivial logic; table-driven like nearest `*_test.go`.
 - Prefer stdlib; no new deps without a clear need.
 
+## Public samples (OSS)
+
+This module is **open source**. Anything a stranger reads on GitHub must not
+imply a private fleet, host product, or in-house gateway.
+
+| Do | Don't |
+|----|--------|
+| Current public provider ids (`gpt-5-mini`, `gpt-5.4-mini`, `deepseek-chat`, `claude-sonnet-4`, `gemini-2.5-flash`) | Stale ids (`gpt-4o`, `gpt-4.1`, …), host-only catalog nicknames, private revs, or peer names that only exist on the home fleet |
+| Generic roles (`peer-agent`, `api`, `gateway`, `embedders`, `host UIs`) | Private product binaries, TUI host names, ops profile names from the home fleet |
+| “OpenAI-compatible gateway”, “when the peer CLI accepts `--reasoning-effort`” | Naming a sibling monorepo product as if it were part of mow |
+| `http://127.0.0.1:PORT/v1`, `https://api.openai.com/v1` | Home-lab ports, real keys, `$HOME` paths to other repos |
+| `facet` / `efforts` described as optional **gateway** metadata | Documenting a specific private catalog product as required |
+
+**Where this applies:** `docs/`, `README.md`, `internal/config/mow.yaml.example`,
+CLI help strings, public Go doc comments, and **test fixtures that look like
+examples** (ids in `*_test.go` that readers treat as “how to configure”).
+
+**OK to keep:** real public wire names (`openai-responses`, `anthropic-messages`),
+stdlib/third-party protocol brands the code actually speaks, and implementation
+comments that describe wire fields without advertising a private stack.
+
+**Before commit:** if the diff touches docs, examples, or fixture model ids,
+re-read for host/fleet names **and** stale model generations. Prefer current
+public ids (GPT-5 family, current Claude/Gemini/DeepSeek lines) over last year’s
+defaults. Behavior that supports a gateway prefix (e.g. Gemini-family heuristics)
+may stay; **wording and samples** stay generic and up to date.
+
 ## Commits
 
 **Always use [Conventional Commits](https://www.conventionalcommits.org/)** when
@@ -93,6 +120,7 @@ chore: remove obsolete review notes
 ```
 
 Gate: `devenv shell -- just verify` before commit when the change is non-trivial.
+Also apply **Public samples (OSS)** above when the commit includes docs or fixtures.
 
 ## Security invariants (do not regress)
 

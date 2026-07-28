@@ -13,7 +13,7 @@ workspace: .
 llm:
   # Client wire. Default: openai-chat-completions.
   wire: openai-chat-completions
-  # wire: openai-responses   # POST /v1/responses (Grok-class, GPT-5-class)
+  # wire: openai-responses   # POST /v1/responses (OpenAI Responses API)
   # wire: anthropic-messages
   # base_url: https://api.openai.com/v1   # or any OpenAI-compatible /v1
   # api_key_env: OPENAI_API_KEY
@@ -89,7 +89,7 @@ session:
 #         command: [peer-agent, --acp]
 #         # dir: /abs/path              # default: workspace
 #         # timeout_sec: 600
-#         # effort: high                # appends --reasoning-effort for Grok-like peers
+#         # effort: high                # appends --reasoning-effort when the peer CLI accepts it
 #   job:
 #     schedules:
 #       - id: hourly

@@ -115,7 +115,7 @@ func New(opt Options) (*Engine, error) {
 		}
 		cfg.LLM.Effort = norm
 	}
-	// Lean model id + effort: ag/foo-medium → model=ag/foo, effort=medium
+	// Lean model id + effort: family-model-medium → model=family-model, effort=medium
 	// when effort was not already set explicitly.
 	if base, eff := llm.NormalizeConfiguredModel(cfg.LLM.Model, cfg.LLM.Effort); base != "" {
 		cfg.LLM.Model = base

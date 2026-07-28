@@ -12,7 +12,7 @@ import (
 )
 
 // ModelInfo is one entry from GET /v1/models.
-// Wire/Wires/Efforts are optional metadata some gateways attach; plain providers omit them.
+// Wire/Wires/Efforts/Facet are optional metadata some gateways attach; plain providers omit them.
 type ModelInfo struct {
 	ID      string   `json:"id"`
 	OwnedBy string   `json:"owned_by,omitempty"`
@@ -24,6 +24,9 @@ type ModelInfo struct {
 	Efforts []string `json:"efforts,omitempty"`
 	// DefaultEffort is the gateway default when effort is omitted.
 	DefaultEffort string `json:"default_effort,omitempty"`
+	// Facet is a gateway capability token ("chat", "search", "image", …).
+	// Empty on plain OpenAI catalogs. Do not infer from ":" in the model id.
+	Facet string `json:"facet,omitempty"`
 }
 
 type modelsResponse struct {
@@ -93,6 +96,7 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			Wire:          strings.TrimSpace(m.Wire),
 			Wires:         m.Wires,
 			DefaultEffort: strings.TrimSpace(m.DefaultEffort),
+			Facet:         strings.TrimSpace(m.Facet),
 		}
 		if len(m.Efforts) > 0 {
 			info.Efforts = append([]string(nil), m.Efforts...)
