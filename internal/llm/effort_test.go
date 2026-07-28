@@ -135,6 +135,7 @@ func TestFinalizeChatBody(t *testing.T) {
 }
 
 func TestFinalizeChatBodyGeminiThinkingBudget(t *testing.T) {
+	// Legacy path: no catalog efforts → thinking_budget for Gemini family.
 	c := &Client{Model: "gemini-3.6-flash-medium", Wire: WireOpenAIChat, Effort: "high"}
 	raw, _ := json.Marshal(map[string]any{"model": c.requestModel()})
 	out, err := c.finalizeChatBody(raw)
@@ -148,5 +149,40 @@ func TestFinalizeChatBodyGeminiThinkingBudget(t *testing.T) {
 	}
 	if m["thinking_budget"] != float64(8192) {
 		t.Fatalf("%v", m)
+	}
+}
+
+func TestFinalizeChatBodyGeminiWithCatalogEfforts(t *testing.T) {
+	// When gateway advertises efforts, send reasoning_effort (gateway maps tiers).
+	c := &Client{Model: "gemini-3.6-flash", Wire: WireOpenAIChat, Effort: "high"}
+	c.SetCatalogModels([]ModelInfo{{
+		ID: "gemini-3.6-flash", Efforts: []string{"low", "medium", "high"}, DefaultEffort: "medium",
+	}})
+	raw, _ := json.Marshal(map[string]any{"model": "gemini-3.6-flash"})
+	out, err := c.finalizeChatBody(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(out, &m)
+	if m["reasoning_effort"] != "high" {
+		t.Fatalf("%v", m)
+	}
+	if m["thinking_budget"] != nil {
+		t.Fatalf("should not set thinking_budget when catalog efforts present: %v", m)
+	}
+}
+
+func TestNormalizeEffortForCatalog(t *testing.T) {
+	allowed := []string{"low", "medium", "high"}
+	got, err := NormalizeEffortFor("high", allowed)
+	if err != nil || got != "high" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if _, err := NormalizeEffortFor("none", allowed); err == nil {
+		t.Fatal("none not in catalog efforts should error")
+	}
+	if _, err := NormalizeEffortFor("none", nil); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -623,6 +623,20 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
 				return
 			}
+			// Model change may change available efforts; realign to default_effort.
+			if efforts := a.eng.Efforts(); len(efforts) > 0 {
+				cur := a.eng.Effort()
+				ok := cur == ""
+				for _, e := range efforts {
+					if strings.EqualFold(e, cur) {
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					_ = a.eng.SetEffort(a.eng.DefaultEffort())
+				}
+			}
 		case configIDMode:
 			val, _ := p.Value.(string)
 			if val == "" {

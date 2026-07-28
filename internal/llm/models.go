@@ -12,12 +12,18 @@ import (
 )
 
 // ModelInfo is one entry from GET /v1/models.
-// Wire/Wires are optional metadata some gateways attach; plain providers omit them.
+// Wire/Wires/Efforts are optional metadata some gateways attach; plain providers omit them.
 type ModelInfo struct {
 	ID      string   `json:"id"`
 	OwnedBy string   `json:"owned_by,omitempty"`
 	Wire    string   `json:"wire,omitempty"`  // preferred chat wire
 	Wires   []string `json:"wires,omitempty"` // all registered wires
+	// Efforts lists allowed reasoning-effort values when the gateway advertises them.
+	// When non-empty, clients should validate SetEffort against this list instead of
+	// a static none|low|medium|high set.
+	Efforts []string `json:"efforts,omitempty"`
+	// DefaultEffort is the gateway default when effort is omitted.
+	DefaultEffort string `json:"default_effort,omitempty"`
 }
 
 type modelsResponse struct {
@@ -81,12 +87,17 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			continue
 		}
 		seen[id] = true
-		out = append(out, ModelInfo{
-			ID:      id,
-			OwnedBy: m.OwnedBy,
-			Wire:    strings.TrimSpace(m.Wire),
-			Wires:   m.Wires,
-		})
+		info := ModelInfo{
+			ID:            id,
+			OwnedBy:       m.OwnedBy,
+			Wire:          strings.TrimSpace(m.Wire),
+			Wires:         m.Wires,
+			DefaultEffort: strings.TrimSpace(m.DefaultEffort),
+		}
+		if len(m.Efforts) > 0 {
+			info.Efforts = append([]string(nil), m.Efforts...)
+		}
+		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	// Raw ids (with AG tiers) for ResolveEffort; picker sees lean bases.
@@ -95,7 +106,9 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		ids[i] = m.ID
 	}
 	c.SetCatalogIDs(ids)
-	return CollapseEffortTiersInCatalog(out), nil
+	collapsed := CollapseEffortTiersInCatalog(out)
+	c.SetCatalogModels(collapsed)
+	return collapsed, nil
 }
 
 func modelsURL(baseURL string) string {

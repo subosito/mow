@@ -66,11 +66,11 @@ func (e *Engine) SetModel(id string) error {
 	if strings.TrimSpace(e.client.Effort) == "" && eff != "" {
 		e.client.Effort = eff
 	}
+	// Align effort with catalog efforts for this model (default_effort when needed).
+	e.client.SyncEffortToModel(id)
 	if e.cfg != nil {
 		e.cfg.LLM.Model = id
-		if strings.TrimSpace(e.cfg.LLM.Effort) == "" && eff != "" {
-			e.cfg.LLM.Effort = eff
-		}
+		e.cfg.LLM.Effort = e.client.Effort
 	}
 	return nil
 }
@@ -112,11 +112,13 @@ func (e *Engine) Wire() string {
 	return llm.WireOpenAIChat
 }
 
-// ModelInfo is a listed model (id + optional preferred wire metadata).
+// ModelInfo is a listed model (id + optional preferred wire / effort metadata).
 type ModelInfo struct {
-	ID    string
-	Wire  string
-	Wires []string
+	ID            string
+	Wire          string
+	Wires         []string
+	Efforts       []string // catalog-advertised; empty = use static none|low|medium|high
+	DefaultEffort string
 }
 
 // ListModels returns available models from GET /models.
@@ -151,7 +153,11 @@ func (e *Engine) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 	out := make([]ModelInfo, 0, len(infos))
 	for _, m := range infos {
-		out = append(out, ModelInfo{ID: m.ID, Wire: m.Wire, Wires: m.Wires})
+		item := ModelInfo{ID: m.ID, Wire: m.Wire, Wires: m.Wires, DefaultEffort: m.DefaultEffort}
+		if len(m.Efforts) > 0 {
+			item.Efforts = append([]string(nil), m.Efforts...)
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -189,18 +195,23 @@ func (e *Engine) Effort() string {
 	return ""
 }
 
-// SetEffort sets reasoning intensity for subsequent chat calls (none|low|medium|high).
-// Empty clears to provider default. Invalid values return an error.
+// SetEffort sets reasoning intensity for subsequent chat calls.
+// When GET /models advertised efforts for the active model, only those values
+// are accepted (no static none|low|medium|high list). Empty clears to gateway default.
 func (e *Engine) SetEffort(effort string) error {
 	if e == nil {
 		return fmt.Errorf("mow: nil engine")
 	}
-	norm, err := llm.NormalizeEffort(effort)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var allowed []string
+	if e.client != nil {
+		allowed = e.client.EffortsForModel(e.client.Model)
+	}
+	norm, err := llm.NormalizeEffortFor(effort, allowed)
 	if err != nil {
 		return err
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.client != nil {
 		e.client.Effort = norm
 	}
@@ -211,4 +222,31 @@ func (e *Engine) SetEffort(effort string) error {
 		return fmt.Errorf("mow: effort switch requires a live engine")
 	}
 	return nil
+}
+
+// Efforts returns catalog-advertised effort levels for the active model, or nil
+// when the gateway did not advertise them (caller may fall back to static list).
+func (e *Engine) Efforts() []string {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.client == nil {
+		return nil
+	}
+	return e.client.EffortsForModel(e.client.Model)
+}
+
+// DefaultEffort returns catalog default_effort for the active model, or "".
+func (e *Engine) DefaultEffort() string {
+	if e == nil {
+		return ""
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.client == nil {
+		return ""
+	}
+	return e.client.DefaultEffortForModel(e.client.Model)
 }

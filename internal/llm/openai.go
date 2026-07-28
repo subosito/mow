@@ -155,11 +155,16 @@ type Client struct {
 	// SystemPrefixModels are case-insensitive globs against Client.Model.
 	// Empty = always apply SystemPrefix when set. Non-empty = apply only on match.
 	SystemPrefixModels []string
-	// Effort is the canonical reasoning intensity (none|low|medium|high).
-	// Empty = provider default. Applied via model-id tier rewrite and/or body fields.
+	// Effort is the canonical reasoning intensity (none|low|medium|high, or
+	// catalog-advertised values). Empty = provider/gateway default.
+	// Applied via body fields; gateways may map effort to upstream model tiers.
 	Effort string
 	// CatalogIDs are known model ids (e.g. from ListModels) for tier pick/fallback.
 	CatalogIDs []string
+	// CatalogModels is the lean model catalog from ListModels (id → efforts metadata).
+	// When the active model has Efforts set, SetEffort / ResolveEffort use that list
+	// instead of the static none|low|medium|high set.
+	CatalogModels map[string]ModelInfo
 }
 
 // ChatRequest is the outbound chat body (subset).

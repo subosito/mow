@@ -21,27 +21,101 @@ const (
 const modelConfigMax = 80
 
 // sessionConfigOptions builds ACP configOptions for session/new|load|resume.
-// Mode + model + effort (thought_level). Editors map category for UX.
+// Mode + model + effort (thought_level). Effort options come from the catalog
+// (GET /models efforts / default_effort) when available — not a static list.
 func (a *agentServer) sessionConfigOptions(ctx context.Context, mode string) []map[string]any {
 	if a == nil || a.eng == nil {
 		return nil
 	}
+	// Refresh catalog so efforts match the gateway (best-effort).
+	_, _ = a.eng.ListModels(ctx)
 	out := []map[string]any{modeConfigOption(mode)}
 	if opt := a.modelConfigOption(ctx); opt != nil {
 		out = append(out, opt)
 	}
-	out = append(out, effortConfigOption(a.eng.Effort()))
+	if opt := a.effortConfigOption(); opt != nil {
+		out = append(out, opt)
+	}
 	return out
 }
 
-func effortConfigOption(current string) map[string]any {
-	current = strings.ToLower(strings.TrimSpace(current))
+// effortConfigOption builds the effort selector from catalog efforts for the
+// active model. Returns nil when:
+//   - catalog has no efforts for this model (nothing to switch), or
+//   - only one effort is advertised (gateway fixed tier; no UI switch).
+// Falls back to a static none|low|medium|high list only when the catalog has
+// been loaded but the model has no efforts metadata (plain OpenAI/DeepSeek).
+func (a *agentServer) effortConfigOption() map[string]any {
+	if a == nil || a.eng == nil {
+		return nil
+	}
+	efforts := a.eng.Efforts()
+	def := strings.ToLower(strings.TrimSpace(a.eng.DefaultEffort()))
+	current := strings.ToLower(strings.TrimSpace(a.eng.Effort()))
+
+	if len(efforts) == 0 {
+		// No catalog metadata for this model: generic static list + default.
+		return effortConfigOptionStatic(current)
+	}
+	if len(efforts) == 1 {
+		// Single fixed tier (typical Antigravity) — no selector.
+		return nil
+	}
+
+	// Normalize current against catalog.
+	if current == "" {
+		current = def
+	}
+	if current == "" || !effortInList(current, efforts) {
+		if def != "" && effortInList(def, efforts) {
+			current = def
+		} else {
+			current = strings.ToLower(strings.TrimSpace(efforts[0]))
+		}
+	}
+
+	options := make([]map[string]any, 0, len(efforts)+1)
+	// Leading "default" clears client override so gateway applies default_effort.
+	if def != "" {
+		options = append(options, map[string]any{
+			"value":       "default",
+			"name":        "Default (" + def + ")",
+			"description": "Gateway default for this model",
+		})
+	}
+	for _, e := range efforts {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == "" {
+			continue
+		}
+		options = append(options, map[string]any{
+			"value": e,
+			"name":  strings.ToUpper(e[:1]) + e[1:],
+		})
+	}
+	if len(options) == 0 {
+		return nil
+	}
+	// UI currentValue: show default pseudo when effort matches default and engine effort is empty.
+	uiCurrent := current
+	if strings.TrimSpace(a.eng.Effort()) == "" && def != "" {
+		uiCurrent = "default"
+	}
+	return map[string]any{
+		"id":           configIDEffort,
+		"name":         "Effort",
+		"description":  "Reasoning intensity for this model (from gateway catalog)",
+		"category":     "thought_level",
+		"type":         "select",
+		"currentValue": uiCurrent,
+		"options":      options,
+	}
+}
+
+func effortConfigOptionStatic(current string) map[string]any {
 	switch current {
 	case "none", "low", "medium", "high":
-		// ok
 	default:
-		// Unset → show as medium for UI selection? Prefer empty as "default".
-		// ACP select needs a currentValue; use "default" pseudo that maps to clear.
 		current = "default"
 	}
 	return map[string]any{
@@ -53,12 +127,21 @@ func effortConfigOption(current string) map[string]any {
 		"currentValue": current,
 		"options": []map[string]any{
 			{"value": "default", "name": "Default", "description": "Provider / model default"},
-			{"value": "none", "name": "None", "description": "Minimal or off when supported"},
+			{"value": "none", "name": "None"},
 			{"value": "low", "name": "Low"},
 			{"value": "medium", "name": "Medium"},
 			{"value": "high", "name": "High"},
 		},
 	}
+}
+
+func effortInList(effort string, list []string) bool {
+	for _, e := range list {
+		if strings.EqualFold(strings.TrimSpace(e), effort) {
+			return true
+		}
+	}
+	return false
 }
 
 func modeConfigOption(current string) map[string]any {
