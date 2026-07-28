@@ -58,11 +58,16 @@ type sessionUpdateParams struct {
 }
 
 type sessionUpdate struct {
-	SessionUpdate string `json:"sessionUpdate"` // agent_message_chunk | …
+	SessionUpdate string `json:"sessionUpdate"` // agent_message_chunk | agent_thought_chunk | tool_call | …
 	Content       *struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content,omitempty"`
+	// tool_call / tool_call_update (peer progress while delegated).
+	ToolCallID string `json:"toolCallId,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Status     string `json:"status,omitempty"`
 }
 
 // Session modes advertised to the client (Zed mode switcher).

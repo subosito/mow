@@ -440,9 +440,9 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			a.mu.Unlock()
 		}()
 
-		// Stream deltas as session/update agent_message_chunk.
-		a.eng.SetOnToken(func(d string) {
-			if d == "" {
+		// Stream main-model tokens + acp_delegate peer activity to the client.
+		writeAgentText := func(text string) {
+			if text == "" {
 				return
 			}
 			a.write(notification{
@@ -455,10 +455,57 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 						Content: &struct {
 							Type string `json:"type"`
 							Text string `json:"text"`
-						}{Type: "text", Text: d},
+						}{Type: "text", Text: text},
 					},
 				}),
 			})
+		}
+		writeThought := func(text string) {
+			if text == "" {
+				return
+			}
+			a.write(notification{
+				JSONRPC: "2.0",
+				Method:  "session/update",
+				Params: mustJSON(sessionUpdateParams{
+					SessionID: p.SessionID,
+					Update: sessionUpdate{
+						SessionUpdate: "agent_thought_chunk",
+						Content: &struct {
+							Type string `json:"type"`
+							Text string `json:"text"`
+						}{Type: "text", Text: text},
+					},
+				}),
+			})
+		}
+		a.eng.SetOnToken(writeAgentText)
+		// Fan-in peer events while Prompt runs (does not replace host listeners).
+		unsub := a.eng.AddOnEvent(func(ev mow.Event) {
+			switch ev.Type {
+			case mow.EventDelegateChunk:
+				// Peer answer text — visible as normal agent stream.
+				writeAgentText(ev.Delta)
+			case mow.EventDelegateProgress:
+				// Tool/thought status from peer. Prefer thought_chunk so clients
+				// can collapse it; include agent label for multi-peer clarity.
+				agent := strings.TrimSpace(ev.Agent)
+				line := strings.TrimSpace(ev.Delta)
+				if line == "" {
+					return
+				}
+				if agent != "" {
+					line = "[" + agent + "] " + line
+				}
+				writeThought(line + "\n")
+			case mow.EventToolStart:
+				// Parent tools (including acp_delegate start) as thought progress.
+				label := strings.TrimSpace(ev.Tool)
+				if label == "" {
+					return
+				}
+				writeThought("→ " + label + "\n")
+			}
 		})
 		popt := mow.PromptOpts{}
 		if mode == ModeAsk {
@@ -466,6 +513,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			popt.SystemAppend = "Session mode is ask (read-only): do not use write, edit, or bash. Prefer read/glob/grep and explanations."
 		}
 		res, err := a.eng.PromptWith(ctx, text, popt)
+		unsub()
 		a.eng.SetOnToken(nil)
 		if err != nil {
 			if ctx.Err() != nil {

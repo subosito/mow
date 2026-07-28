@@ -30,14 +30,15 @@ func EngineFromContext(ctx context.Context) *Engine {
 type EventType string
 
 const (
-	EventRunStart      EventType = "run.start"
-	EventToken         EventType = "token"     // answer content delta
-	EventReasoning     EventType = "reasoning" // reasoning delta (UI/host optional)
-	EventToolStart     EventType = "tool.start"
-	EventToolEnd       EventType = "tool.end"
-	EventTurn          EventType = "turn"           // assistant message after LLM step
-	EventDelegateChunk EventType = "delegate.chunk" // peer ACP text delta
-	EventRunEnd        EventType = "run.end"
+	EventRunStart         EventType = "run.start"
+	EventToken            EventType = "token"     // answer content delta
+	EventReasoning        EventType = "reasoning" // reasoning delta (UI/host optional)
+	EventToolStart        EventType = "tool.start"
+	EventToolEnd          EventType = "tool.end"
+	EventTurn             EventType = "turn"              // assistant message after LLM step
+	EventDelegateChunk    EventType = "delegate.chunk"    // peer ACP answer text delta
+	EventDelegateProgress EventType = "delegate.progress" // peer tool/thought status (not final answer)
+	EventRunEnd           EventType = "run.end"
 )
 
 // Stop reasons for EventRunEnd / RunResult.StopReason.
@@ -59,7 +60,7 @@ type Event struct {
 
 	// Prompt text (run.start) or final assistant text (run.end).
 	Text string `json:"text,omitempty"`
-	// Streaming deltas (token / reasoning / delegate.chunk).
+	// Streaming deltas (token / reasoning / delegate.chunk / delegate.progress).
 	Delta string `json:"delta,omitempty"`
 
 	// Tool fields

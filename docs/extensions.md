@@ -425,7 +425,11 @@ Agent methods (Zed-oriented): `initialize`, `authenticate`, `logout`, `session/n
 
 **Why ACP for delegate (not a private RPC):** same wire for editors and peer agents; avoid inventing mow↔claude, mow↔codex one-offs. Core stays **one loop**; delegation is a tool with workspace jail + timeout.
 
-**Delegate v2:** peer process + ACP session are **reused** across `acp_delegate` calls (same agent + cwd) until idle TTL or death. Partial peer text is emitted as `EventDelegateChunk` on the parent Engine (`AddOnEvent` / `OnEvent` / rpc `event` lines). Tool result still returns the full concatenated answer.
+**Delegate v2:** peer process + ACP session are **reused** across `acp_delegate` calls (same agent + cwd) until idle TTL or death. While the peer runs, the parent Engine emits:
+- `delegate.chunk` — peer **answer** text (`agent_message_chunk`)
+- `delegate.progress` — peer **status** (tool_call / thought; not part of the tool result)
+
+CLI (`mow run --stream`) prints chunks on stderr and progress as `↳ agent: …`. `mow acp` forwards both to the editor as `session/update` (message + thought). Tool result still returns the full concatenated answer only.
 
 **OnEvent fan-out:** `Engine.AddOnEvent` registers additional listeners; `SetOnEvent` replaces all. `mow rpc` uses `AddOnEvent` so a host can keep its own listener on the same Engine.
 

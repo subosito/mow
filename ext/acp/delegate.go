@@ -251,7 +251,18 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 			})
 		}
 	})
+	slot.client.SetOnProgress(func(kind, text string) {
+		if eng := mow.EngineFromContext(ctx); eng != nil {
+			eng.Emit(mow.Event{
+				Type:  mow.EventDelegateProgress,
+				Agent: agentName,
+				Tool:  kind,
+				Delta: text,
+			})
+		}
+	})
 	defer slot.client.SetOnChunk(nil)
+	defer slot.client.SetOnProgress(nil)
 
 	reply, stop, err := slot.client.Prompt(pctx, slot.sessionID, prompt)
 	t.peersMu.Lock()

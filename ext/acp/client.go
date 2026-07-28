@@ -37,6 +37,9 @@ type Client struct {
 	// OnChunk receives agent_message_chunk deltas while Prompt is in flight.
 	// Set it via SetOnChunk; direct writes race with the read loop.
 	OnChunk func(delta string)
+	// OnProgress receives non-answer peer activity (thoughts, tool_call status).
+	// Does not append to the Prompt reply buffer. Set via SetOnProgress.
+	OnProgress func(kind, text string)
 	// sessionID from last successful Start (for reuse).
 	SessionID string
 	// procMu guards started/exited/cmd across Start, Close, and Alive.
@@ -140,7 +143,8 @@ func (c *Client) startProcess() error {
 }
 
 // Prompt runs session/prompt and returns concatenated agent message text + stop reason.
-// OnChunk (if set) receives each agent_message_chunk delta as it arrives.
+// OnChunk receives answer text deltas; OnProgress receives tool/thought status
+// (not included in the reply string).
 func (c *Client) Prompt(ctx context.Context, sessionID, text string) (reply string, stopReason string, err error) {
 	c.textMu.Lock()
 	c.text.Reset()
@@ -217,12 +221,20 @@ func (c *Client) Alive() bool {
 	}
 }
 
-// SetOnChunk installs (or clears, with nil) the delta callback. It must be
-// used instead of writing OnChunk directly: the read loop reads the field
+// SetOnChunk installs (or clears, with nil) the answer-delta callback. It must
+// be used instead of writing OnChunk directly: the read loop reads the field
 // concurrently under the same lock.
 func (c *Client) SetOnChunk(fn func(delta string)) {
 	c.textMu.Lock()
 	c.OnChunk = fn
+	c.textMu.Unlock()
+}
+
+// SetOnProgress installs (or clears) the peer-activity callback (thoughts,
+// tool_call lines). Not part of the final reply text.
+func (c *Client) SetOnProgress(fn func(kind, text string)) {
+	c.textMu.Lock()
+	c.OnProgress = fn
 	c.textMu.Unlock()
 }
 
@@ -324,8 +336,13 @@ func (c *Client) onNotification(n notification) {
 	if err := json.Unmarshal(n.Params, &p); err != nil {
 		return
 	}
-	if p.Update.SessionUpdate == "agent_message_chunk" && p.Update.Content != nil {
-		delta := p.Update.Content.Text
+	u := p.Update
+	switch u.SessionUpdate {
+	case "agent_message_chunk":
+		if u.Content == nil {
+			return
+		}
+		delta := u.Content.Text
 		c.textMu.Lock()
 		c.text.WriteString(delta)
 		fn := c.OnChunk
@@ -333,5 +350,58 @@ func (c *Client) onNotification(n notification) {
 		if fn != nil && delta != "" {
 			fn(delta)
 		}
+	case "agent_thought_chunk":
+		// Peer reasoning — progress only, not final answer.
+		if u.Content == nil {
+			return
+		}
+		delta := strings.TrimSpace(u.Content.Text)
+		if delta == "" {
+			return
+		}
+		c.textMu.Lock()
+		fn := c.OnProgress
+		c.textMu.Unlock()
+		if fn != nil {
+			fn("thought", delta)
+		}
+	case "tool_call", "tool_call_update":
+		line := formatPeerToolProgress(u)
+		if line == "" {
+			return
+		}
+		c.textMu.Lock()
+		fn := c.OnProgress
+		c.textMu.Unlock()
+		if fn != nil {
+			fn("tool", line)
+		}
+	}
+}
+
+// formatPeerToolProgress builds a short one-line status from a peer tool update.
+func formatPeerToolProgress(u sessionUpdate) string {
+	kind := strings.TrimSpace(u.Kind)
+	title := strings.TrimSpace(u.Title)
+	status := strings.TrimSpace(u.Status)
+	if kind == "" && title == "" {
+		return ""
+	}
+	// Prefer human title; fall back to kind.
+	label := title
+	if label == "" {
+		label = kind
+	} else if kind != "" && !strings.EqualFold(kind, title) {
+		label = kind + " " + title
+	}
+	switch strings.ToLower(status) {
+	case "", "pending", "in_progress", "running":
+		return label
+	case "completed", "done", "success":
+		return label + " ✓"
+	case "failed", "error", "cancelled", "canceled":
+		return label + " ✗"
+	default:
+		return label + " (" + status + ")"
 	}
 }
