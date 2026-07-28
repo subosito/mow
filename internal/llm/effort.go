@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// Effort levels (canonical). Empty = provider default when the model has no
-// tiered family; for AG-style families, empty effort on a bare base defaults
-// to medium at request time.
+// Effort levels (canonical). Empty = provider / gateway default.
+// Effort is never encoded in the model id on the wire — gateways that need
+// upstream tier suffixes (e.g. Antigravity) map that themselves.
 const (
 	EffortNone   = "none"
 	EffortLow    = "low"
@@ -20,12 +20,12 @@ const (
 
 // EffortPlan is the resolved request shape for one chat call.
 type EffortPlan struct {
-	Model           string // model id to send (may include tier suffix)
+	Model           string // always the lean model id (no -low|-medium|-high)
 	ReasoningEffort string // body reasoning_effort when set
 	ThinkingBudget  *int   // body thinking_budget when set
 }
 
-var reEffortTier = regexp.MustCompile(`(?i)^(.+)-(low|medium|high)$`)
+var reEffortTiers = regexp.MustCompile(`(?i)^(.+)-(low|medium|high)$`)
 
 // NormalizeEffort canonicalizes an effort string.
 // Empty / default / auto → "" (unset). Invalid values return an error.
@@ -43,51 +43,46 @@ func NormalizeEffort(s string) (string, error) {
 	}
 }
 
-// StripEffortTier removes a trailing -low|-medium|-high tier from a model id.
-func StripEffortTier(model string) string {
-	base, _, ok := ParseEffortTier(model)
+// StripEffortTiers removes a trailing -low|-medium|-high tier from a model id.
+// Used only to migrate legacy configs / collapse catalogs — not for request rewriting.
+func StripEffortTiers(model string) string {
+	base, _, ok := ParseEffortTiers(model)
 	if ok {
 		return base
 	}
 	return strings.TrimSpace(model)
 }
 
-// ParseEffortTier splits model into base + tier when id ends with -low|medium|high.
-func ParseEffortTier(model string) (base, effort string, ok bool) {
+// ParseEffortTiers splits a legacy tiered model id into base + effort.
+func ParseEffortTiers(model string) (base, effort string, ok bool) {
 	model = strings.TrimSpace(model)
-	m := reEffortTier.FindStringSubmatch(model)
+	m := reEffortTiers.FindStringSubmatch(model)
 	if len(m) != 3 {
 		return model, "", false
 	}
 	return m[1], strings.ToLower(m[2]), true
 }
 
-// HasEffortTier reports whether the model id already ends with a known tier.
-func HasEffortTier(model string) bool {
-	_, _, ok := ParseEffortTier(model)
+// HasEffortTiers reports whether the model id ends with a legacy effort suffix.
+func HasEffortTiers(model string) bool {
+	_, _, ok := ParseEffortTiers(model)
 	return ok
 }
 
-// CollapseEffortTiersInCatalog returns a lean catalog for pickers: tiered
-// families (ag/*-low|medium|high or any base that appears with those suffixes)
-// are shown once as the base id. Wire metadata is preserved from the first
-// chat-capable entry. Non-tiered ids are unchanged.
-//
-// CatalogIDs for ResolveEffort should still be the raw gateway list (full ids).
+// CollapseEffortTiersInCatalog returns a lean catalog for pickers: ids with
+// legacy -low|medium|high suffixes collapse to the base name once.
+// Wire metadata is preserved from the first entry.
 func CollapseEffortTiersInCatalog(list []ModelInfo) []ModelInfo {
 	if len(list) == 0 {
 		return nil
 	}
-	// Bases that appear with at least one tiered id.
 	tieredBase := map[string]bool{}
 	for _, m := range list {
-		if base, _, ok := ParseEffortTier(m.ID); ok {
+		if base, _, ok := ParseEffortTiers(m.ID); ok {
 			tieredBase[strings.ToLower(base)] = true
 		}
 	}
-	type acc struct {
-		info ModelInfo
-	}
+	type acc struct{ info ModelInfo }
 	order := make([]string, 0, len(list))
 	byKey := map[string]*acc{}
 	for _, m := range list {
@@ -95,7 +90,7 @@ func CollapseEffortTiersInCatalog(list []ModelInfo) []ModelInfo {
 		if id == "" {
 			continue
 		}
-		base := StripEffortTier(id)
+		base := StripEffortTiers(id)
 		key := strings.ToLower(base)
 		displayID := id
 		if tieredBase[key] {
@@ -125,13 +120,13 @@ func CollapseEffortTiersInCatalog(list []ModelInfo) []ModelInfo {
 	return out
 }
 
-// NormalizeConfiguredModel splits a tiered config model into lean base + effort.
-// If model is "ag/foo-medium" and effort is empty, returns base "ag/foo" and effort "medium".
-// Non-tiered models are returned unchanged.
+// NormalizeConfiguredModel migrates legacy tiered model ids into lean base + effort.
+// Example: "gemini-3.6-flash-medium" + "" → ("gemini-3.6-flash", "medium").
+// Explicit effort wins over a suffix. Non-tiered models are unchanged.
 func NormalizeConfiguredModel(model, effort string) (base, eff string) {
 	base = strings.TrimSpace(model)
 	eff, _ = NormalizeEffort(effort)
-	if b, t, ok := ParseEffortTier(base); ok {
+	if b, t, ok := ParseEffortTiers(base); ok {
 		base = b
 		if eff == "" {
 			eff = t
@@ -140,120 +135,34 @@ func NormalizeConfiguredModel(model, effort string) (base, eff string) {
 	return base, eff
 }
 
-// ResolveEffort maps a canonical effort onto model id and/or request body fields.
-// catalog is optional ids from GET /models (full tiered ids preferred for AG pick).
-//
-// For tiered families (ag/*, or catalog shows -low|medium|high variants):
-//   - effort set → pick base-effort (catalog-aware fallback)
-//   - effort unset + model already tiered → keep as-is
-//   - effort unset + bare base → default medium for the request
+// ResolveEffort maps canonical effort onto body fields. The request model is
+// always the lean id (suffixes stripped). Gateways that still need upstream
+// tier strings map that server-side from catalog config + optional body hints.
 func ResolveEffort(model, wire, effort string, catalog []string) EffortPlan {
-	plan := EffortPlan{Model: strings.TrimSpace(model)}
+	_ = catalog // reserved for future catalog-driven body maps
+	plan := EffortPlan{Model: StripEffortTiers(model)}
 	eff, err := NormalizeEffort(effort)
-	if err != nil {
-		return plan
-	}
-	base := StripEffortTier(plan.Model)
-	if base == "" {
+	if err != nil || eff == "" {
 		return plan
 	}
 
-	if useModelIDTier(plan.Model, base, catalog) {
-		if eff == "" {
-			if HasEffortTier(plan.Model) {
-				return plan // explicit tiered id, no separate effort
-			}
-			// Bare lean base (picker/config) → medium request id.
-			if id := pickTierModel(base, EffortMedium, catalog); id != "" {
-				plan.Model = id
-			} else if len(catalog) == 0 {
-				plan.Model = base + "-" + EffortMedium
-			}
-			return plan
-		}
-		if id := pickTierModel(base, eff, catalog); id != "" {
-			plan.Model = id
-			return plan
-		}
-		// Catalog miss: optimistic rewrite.
-		if eff == EffortNone {
-			plan.Model = base
-		} else {
-			plan.Model = base + "-" + eff
-		}
-		return plan
-	}
-
-	if eff == "" {
-		return plan
-	}
-
-	// Body adapters when model-id tier is not applicable.
 	switch NormalizeWire(wire) {
 	case WireOpenAIChat, WireOpenAIResponses:
-		if looksGeminiFamily(base) {
+		if looksGeminiFamily(plan.Model) {
+			// Cloud Code / Gemini-compatible path (e.g. chacha thinking_budget).
 			plan.ThinkingBudget = thinkingBudgetFor(eff)
 		} else if eff != EffortNone {
 			plan.ReasoningEffort = eff
 		}
 	case WireAnthropicMsg:
-		// No portable effort field yet.
+		// No portable effort body field yet.
 	}
 	return plan
 }
 
-func useModelIDTier(model, base string, catalog []string) bool {
-	if HasEffortTier(model) {
-		return true
-	}
-	lower := strings.ToLower(base)
-	if strings.HasPrefix(lower, "ag/") {
-		return true
-	}
-	for _, id := range catalog {
-		id = strings.TrimSpace(id)
-		if strings.EqualFold(StripEffortTier(id), base) && HasEffortTier(id) {
-			return true
-		}
-	}
-	return false
-}
-
-func pickTierModel(base, effort string, catalog []string) string {
-	var candidates []string
-	switch effort {
-	case EffortNone:
-		candidates = []string{base, base + "-" + EffortLow}
-	case EffortLow:
-		candidates = []string{base + "-" + EffortLow, base + "-" + EffortMedium, base + "-" + EffortHigh, base}
-	case EffortMedium:
-		candidates = []string{base + "-" + EffortMedium, base + "-" + EffortHigh, base + "-" + EffortLow, base}
-	case EffortHigh:
-		candidates = []string{base + "-" + EffortHigh, base + "-" + EffortMedium, base + "-" + EffortLow, base}
-	default:
-		return ""
-	}
-	if len(catalog) == 0 {
-		return candidates[0]
-	}
-	index := map[string]string{}
-	for _, id := range catalog {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		index[strings.ToLower(id)] = id
-	}
-	for _, c := range candidates {
-		if orig, ok := index[strings.ToLower(c)]; ok {
-			return orig
-		}
-	}
-	return ""
-}
-
 func looksGeminiFamily(model string) bool {
 	m := strings.ToLower(model)
+	// Bare product names (gemini-3.6-flash) and legacy ag/ prefix.
 	return strings.HasPrefix(m, "ag/") ||
 		strings.Contains(m, "gemini") ||
 		strings.HasPrefix(m, "models/gemini")
@@ -276,7 +185,7 @@ func thinkingBudgetFor(effort string) *int {
 	return &n
 }
 
-// requestModel returns the model id to put on the wire after effort resolution.
+// requestModel returns the lean model id for the request body.
 func (c *Client) requestModel() string {
 	if c == nil {
 		return ""
@@ -284,22 +193,20 @@ func (c *Client) requestModel() string {
 	return ResolveEffort(c.Model, c.Wire, c.Effort, c.CatalogIDs).Model
 }
 
-// finalizeChatBody patches model / effort body fields into a marshaled JSON body.
-// requestModel() is already used for the model field; this injects body extras
-// and corrects model when resolution rewrote it (e.g. bare AG base → -medium).
+// finalizeChatBody injects effort body fields and ensures lean model id.
 func (c *Client) finalizeChatBody(raw []byte) ([]byte, error) {
 	if c == nil || len(raw) == 0 {
 		return raw, nil
 	}
 	plan := ResolveEffort(c.Model, c.Wire, c.Effort, c.CatalogIDs)
-	needBody := plan.ReasoningEffort != "" || plan.ThinkingBudget != nil
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return raw, err
 	}
 	cur, _ := m["model"].(string)
 	needModel := plan.Model != "" && plan.Model != cur
-	if !needBody && !needModel {
+	needBody := plan.ReasoningEffort != "" || plan.ThinkingBudget != nil
+	if !needModel && !needBody {
 		return raw, nil
 	}
 	if plan.Model != "" {
@@ -318,7 +225,7 @@ func (c *Client) finalizeChatBody(raw []byte) ([]byte, error) {
 	return out, nil
 }
 
-// SetCatalogIDs stores raw model ids for effort tier resolution (from ListModels).
+// SetCatalogIDs stores model ids from ListModels (lean after collapse).
 func (c *Client) SetCatalogIDs(ids []string) {
 	if c == nil {
 		return

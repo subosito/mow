@@ -421,11 +421,10 @@ Agent methods (Zed-oriented): `initialize`, `authenticate`, `logout`, `session/n
 
 **Model picker:** `configOptions` entry `id=model` (`category: model`) lists `GET /models` for the configured endpoint. Plain OpenAI-compatible catalogs (OpenAI, DeepSeek, local gateways, …) show every id; optional gateway `wire` metadata filters to chat wires only and is applied on switch via `SetModelWithWire` (not shown in labels). Multimodal clone ids ending in `:image` / `:video` / `:audio` are omitted when present.
 
-**Effort / thought level:** `llm.effort` / `MOW_EFFORT` / `--effort` / ACP `id=effort` (`category: thought_level`): `none|low|medium|high` (empty = provider default). Catalog and pickers use **lean** model ids; tiered gateways (e.g. Antigravity `ag/*-low|medium|high`) are collapsed to the base name in `ListModels`. mow applies adapters on each chat call:
-- **Model-id tier** (AG-style): request model becomes `base-effort` (catalog-aware; bare base defaults to medium).
-- **Body** `reasoning_effort` on OpenAI chat/responses for non-Gemini models.
-- **Body** `thinking_budget` for Gemini-family models on OpenAI-compatible chat.
-Config `model: ag/foo-medium` is normalized to `model: ag/foo` + `effort: medium` at engine start. Peer harnesses may set `extensions.acp.agents[].effort` to inject `--reasoning-effort` into the peer command.
+**Effort / thought level:** `llm.effort` / `MOW_EFFORT` / `--effort` / ACP `id=effort` (`category: thought_level`): `none|low|medium|high` (empty = provider default). Effort is **never** part of the model id on the wire — use a lean catalog name (e.g. `gemini-3.6-flash`) and set effort separately. Gateways that still need upstream tier strings map them server-side. On each chat call mow may add:
+- **Body** `thinking_budget` for Gemini-family models on OpenAI-compatible chat (chacha/Cloud Code).
+- **Body** `reasoning_effort` on OpenAI chat/responses for other models.
+Legacy config ids like `gemini-3.6-flash-medium` are normalized at engine start to lean `model` + `effort`. Catalog collapse strips residual `-low|medium|high` suffixes for pickers. Peer harnesses may set `extensions.acp.agents[].effort` to inject `--reasoning-effort` into the peer command.
 
 **Why ACP for delegate (not a private RPC):** same wire for editors and peer agents; avoid inventing mow↔claude, mow↔codex one-offs. Core stays **one loop**; delegation is a tool with workspace jail + timeout.
 
