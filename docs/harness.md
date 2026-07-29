@@ -305,13 +305,11 @@ Workspace, power tools, stream, media models → **yaml** and/or **CLI flags** (
 | CLI | `--extra-root /path` (repeatable for multiple roots) |
 | User config | `policy.extra_roots: [/path, …]` in `$MOW_HOME/config.yaml` or `--config` |
 | Embed | `Options.ExtraRoots` |
-
-Relative tool paths still resolve against the primary workspace. **Absolute** paths
-under an extra root are allowed. The system prompt lists configured extra roots so
-the model knows they are in the jail (not “restricted”).
 | Project `.mow/config` | **Not allowed** (stripped like credentials / power tools) |
 
-Relative tool paths still resolve against the primary `--workspace`. Absolute paths (or paths under an extra root) are allowed when they fall inside workspace or an extra root.
+Relative tool paths resolve against the primary `--workspace`. **Absolute** paths are
+allowed under the workspace or an extra root. The system prompt lists configured
+extra roots so the model knows they are in the jail (not “restricted”).
 
 Example template: [`internal/config/mow.yaml.example`](../internal/config/mow.yaml.example).
 
