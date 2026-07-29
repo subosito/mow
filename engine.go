@@ -450,6 +450,23 @@ func (e *Engine) Workspace() string {
 	return e.cfg.Workspace
 }
 
+// ExtraRoots returns additional FS jail roots (copy). Empty when none configured.
+func (e *Engine) ExtraRoots() []string {
+	if e == nil || e.pol == nil || len(e.pol.ExtraRoots) == 0 {
+		return nil
+	}
+	return append([]string(nil), e.pol.ExtraRoots...)
+}
+
+// ResolvePath applies the same path jail as FS tools: under Workspace or any
+// ExtraRoot (symlink-safe). Relative paths join Workspace.
+func (e *Engine) ResolvePath(rel string) (string, error) {
+	if e == nil || e.pol == nil {
+		return "", fmt.Errorf("mow: nil engine")
+	}
+	return e.pol.ResolvePath(rel)
+}
+
 // SessionID returns the active session id, if any.
 func (e *Engine) SessionID() string {
 	if e == nil {
