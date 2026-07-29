@@ -131,6 +131,15 @@ func CollapseEffortTiersInCatalog(list []ModelInfo) []ModelInfo {
 			if existing.info.Facet == "" && strings.TrimSpace(m.Facet) != "" {
 				existing.info.Facet = strings.TrimSpace(m.Facet)
 			}
+			if existing.info.ContextWindow == 0 && m.ContextWindow > 0 {
+				existing.info.ContextWindow = m.ContextWindow
+			}
+			if existing.info.MaxOutputTokens == 0 && m.MaxOutputTokens > 0 {
+				existing.info.MaxOutputTokens = m.MaxOutputTokens
+			}
+			if existing.info.Pricing.InputPerMTok == 0 && m.Pricing.InputPerMTok > 0 {
+				existing.info.Pricing = m.Pricing
+			}
 			continue
 		}
 		order = append(order, dkey)
@@ -314,6 +323,29 @@ func (c *Client) SetCatalogModels(list []ModelInfo) {
 		m[strings.ToLower(id)] = cp
 	}
 	c.CatalogModels = m
+}
+
+// CatalogEntry returns the cached GET /models entry for id (exact, then
+// effort-tier stripped). Empty ID on miss. Filled by ListModels.
+func (c *Client) CatalogEntry(model string) (ModelInfo, bool) {
+	if c == nil || len(c.CatalogModels) == 0 {
+		return ModelInfo{}, false
+	}
+	key := strings.ToLower(strings.TrimSpace(model))
+	if key == "" {
+		return ModelInfo{}, false
+	}
+	if info, ok := c.CatalogModels[key]; ok {
+		return info, true
+	}
+	// Lean base after AG effort-tier collapse (gemini-x-medium → gemini-x).
+	base := strings.ToLower(StripEffortTiers(key))
+	if base != key {
+		if info, ok := c.CatalogModels[base]; ok {
+			return info, true
+		}
+	}
+	return ModelInfo{}, false
 }
 
 // EffortsForModel returns catalog efforts for a model id, or nil.

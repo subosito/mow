@@ -90,3 +90,40 @@ func TestListModelsParsesFacet(t *testing.T) {
 		t.Fatalf("search facet: %+v", byID["model-x:search"])
 	}
 }
+
+func TestListModelsParsesContextAndPricing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id": "gpt-5-mini",
+					"context_window": 1100000,
+					"max_output_tokens": 0,
+					"pricing": map[string]any{
+						"currency": "USD",
+						"input_per_mtok": 2.5,
+						"output_per_mtok": 15,
+						"cache_read_per_mtok": 0.25,
+					},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+	c := &llm.Client{BaseURL: srv.URL + "/v1", APIKey: "k"}
+	list, err := c.ListModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("len=%d", len(list))
+	}
+	m := list[0]
+	if m.ContextWindow != 1_100_000 || m.Pricing.InputPerMTok != 2.5 || m.Pricing.OutputPerMTok != 15 {
+		t.Fatalf("parsed %+v", m)
+	}
+	info, ok := c.CatalogEntry("gpt-5-mini")
+	if !ok || info.ContextWindow != 1_100_000 {
+		t.Fatalf("catalog %+v ok=%v", info, ok)
+	}
+}

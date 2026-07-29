@@ -308,6 +308,13 @@ func New(opt Options) (*Engine, error) {
 		if client.ExtraHeaders[llm.HeaderComponent] == "" {
 			client.ExtraHeaders[llm.HeaderComponent] = "turn.chat"
 		}
+		// Prefetch GET /v1/models so Limits() has gateway context_window/pricing
+		// without waiting for an interactive /model. Failure is non-fatal.
+		go func(c *llm.Client) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = c.ListModels(ctx)
+		}(client)
 		e.chat = func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
 			e.onTokenMu.Lock()
 			hooks := llm.StreamHooks{OnContent: e.onToken, OnReasoning: e.onReasoning}

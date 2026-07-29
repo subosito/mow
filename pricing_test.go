@@ -1,34 +1,13 @@
 package mow
 
-import "testing"
-
-func TestLookupModelLimits(t *testing.T) {
-	cases := map[string]int{
-		"claude-sonnet-4": 200_000,
-		"gpt-5-mini":      400_000,
-		"gpt-5":           400_000,
-		"gpt-5.4-mini":    400_000,
-		"gpt-5.4":         1_000_000,
-		"deepseek-chat":   128_000,
-		"gemini-2.5-flash": 1_000_000,
-		"totally-unknown": 0,
-	}
-	for model, wantCtx := range cases {
-		if got := lookupModelLimits(model).ContextWindow; got != wantCtx {
-			t.Errorf("%s ctx=%d want %d", model, got, wantCtx)
-		}
-	}
-	// mini must not match the broader gpt-5 / gpt-5.4 row's price.
-	if lookupModelLimits("gpt-5-mini").InputPrice != 0.25 {
-		t.Fatalf("gpt-5-mini price=%v", lookupModelLimits("gpt-5-mini").InputPrice)
-	}
-	if lookupModelLimits("gpt-5.4-mini").InputPrice != 0.25 {
-		t.Fatalf("gpt-5.4-mini price=%v", lookupModelLimits("gpt-5.4-mini").InputPrice)
-	}
-	if lookupModelLimits("gpt-5.4").ContextWindow != 1_000_000 {
-		t.Fatalf("gpt-5.4 ctx=%d", lookupModelLimits("gpt-5.4").ContextWindow)
-	}
-}
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
 
 func TestUsageCost(t *testing.T) {
 	u := Usage{InputTokens: 1_000_000, OutputTokens: 500_000}
@@ -39,5 +18,74 @@ func TestUsageCost(t *testing.T) {
 	}
 	if got := u.Cost(ModelLimits{}); got != 0 {
 		t.Fatalf("unknown price cost=%v want 0", got)
+	}
+}
+
+// Limits must come from GET /v1/models (gateway), not a client-side catalog.
+func TestLimitsFromGatewayModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":             "gpt-5-mini",
+					"context_window": 1_100_000,
+					"pricing": map[string]any{
+						"currency":        "USD",
+						"input_per_mtok":  2.5,
+						"output_per_mtok": 15.0,
+					},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MOW_HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_MODEL", "gpt-5-mini")
+	t.Setenv("OPENAI_BASE_URL", srv.URL+"/v1")
+
+	eng, err := New(Options{
+		NoSession: true,
+		BaseURL:   srv.URL + "/v1",
+		Model:     "gpt-5-mini",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	// Prefer explicit ListModels (also what /model does) over racing the prefetch.
+	if _, err := eng.ListModels(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Prefetch may still be in flight; brief wait if needed.
+	var lim ModelLimits
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		lim = eng.Limits()
+		if lim.ContextWindow == 1_100_000 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if lim.ContextWindow != 1_100_000 {
+		t.Fatalf("context_window=%d want 1100000 lim=%+v", lim.ContextWindow, lim)
+	}
+	if lim.InputPrice != 2.5 || lim.OutputPrice != 15 {
+		t.Fatalf("prices=%v/%v want 2.5/15", lim.InputPrice, lim.OutputPrice)
+	}
+	// No speculative fallback for unknown models.
+	eng.mu.Lock()
+	if eng.client != nil {
+		eng.client.Model = "totally-unknown-model-xyz"
+	}
+	eng.mu.Unlock()
+	if got := eng.Limits(); got.ContextWindow != 0 || got.InputPrice != 0 {
+		t.Fatalf("unknown model should not invent limits: %+v", got)
 	}
 }

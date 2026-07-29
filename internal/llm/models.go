@@ -13,6 +13,7 @@ import (
 
 // ModelInfo is one entry from GET /v1/models.
 // Wire/Wires/Efforts/Facet are optional metadata some gateways attach; plain providers omit them.
+// ContextWindow / Pricing come from gateway catalogs (e.g. catalog-service) — not client speculation.
 type ModelInfo struct {
 	ID      string   `json:"id"`
 	OwnedBy string   `json:"owned_by,omitempty"`
@@ -27,6 +28,25 @@ type ModelInfo struct {
 	// Facet is a gateway capability token ("chat", "search", "image", …).
 	// Empty on plain OpenAI catalogs. Do not infer from ":" in the model id.
 	Facet string `json:"facet,omitempty"`
+	// ContextWindow is max context tokens when the gateway publishes it (0 = unknown).
+	ContextWindow int `json:"context_window,omitempty"`
+	// MaxOutputTokens is the gateway's generation cap when published (0 = unknown).
+	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
+	// Pricing is gateway-published token pricing (USD per 1M tokens when set).
+	Pricing ModelPricing `json:"pricing,omitempty"`
+}
+
+// ModelPricing is the optional pricing object on GET /v1/models entries.
+// Chat metering uses InputPerMTok / OutputPerMTok (USD per 1M tokens).
+// Media models may use PerUnit/Unit instead; those are ignored for chat Limits.
+type ModelPricing struct {
+	Currency         string  `json:"currency,omitempty"`
+	InputPerMTok     float64 `json:"input_per_mtok,omitempty"`
+	OutputPerMTok    float64 `json:"output_per_mtok,omitempty"`
+	CacheReadPerMTok float64 `json:"cache_read_per_mtok,omitempty"`
+	CacheWritePerMTok float64 `json:"cache_write_per_mtok,omitempty"`
+	PerUnit          float64 `json:"per_unit,omitempty"`
+	Unit             string  `json:"unit,omitempty"`
 }
 
 type modelsResponse struct {
@@ -91,12 +111,15 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		}
 		seen[id] = true
 		info := ModelInfo{
-			ID:            id,
-			OwnedBy:       m.OwnedBy,
-			Wire:          strings.TrimSpace(m.Wire),
-			Wires:         m.Wires,
-			DefaultEffort: strings.TrimSpace(m.DefaultEffort),
-			Facet:         strings.TrimSpace(m.Facet),
+			ID:              id,
+			OwnedBy:         m.OwnedBy,
+			Wire:            strings.TrimSpace(m.Wire),
+			Wires:           m.Wires,
+			DefaultEffort:   strings.TrimSpace(m.DefaultEffort),
+			Facet:           strings.TrimSpace(m.Facet),
+			ContextWindow:   m.ContextWindow,
+			MaxOutputTokens: m.MaxOutputTokens,
+			Pricing:         m.Pricing,
 		}
 		if len(m.Efforts) > 0 {
 			info.Efforts = append([]string(nil), m.Efforts...)
