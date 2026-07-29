@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/subosito/mow/internal/llm"
 )
@@ -11,14 +13,15 @@ const DefaultMaxToolResultChars = 24_000
 
 // CompactOpts reduces message history to roughly maxChars while keeping system
 // and the most recent turns; maxToolChars is the per-tool-result char budget.
-// Older middle content is replaced with a short summary stub. This is a soft
+// Older middle content is replaced with a summary stub. This is a soft
 // overflow guard, not token-accurate.
 // If summary is non-empty it is used as the stub content instead of the default.
 //
 // Strategy (token-lean):
 //  1. Trim all tool bodies to maxToolChars (recent slightly larger budget).
 //  2. If still over maxChars, drop the middle of history (keep system + last keepLast).
-//  3. If still over, aggressively shrink older tool results again.
+//  3. Stub carries the earliest user request(s) so the model does not forget the task.
+//  4. If still over, aggressively shrink older tool results again.
 func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolChars int) []llm.Message {
 	if maxChars <= 0 || estChars(messages) <= maxChars {
 		// Still proactively trim oversized tool results so one bash dump cannot
@@ -40,7 +43,7 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 
 	// Keep system (if any) + last keepLast messages; drop middle.
 	// keepLast is large enough for a few tool rounds (assistant + tools + user).
-	keepLast := 12
+	keepLast := 16
 	if keepLast >= len(msgs) {
 		keepLast = len(msgs) - 1
 	}
@@ -58,22 +61,9 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 	// Prefer cutting on a user boundary so we do not orphan tool_results.
 	kept = alignKeepAtUser(kept)
 
-	stub := summary
+	stub := strings.TrimSpace(summary)
 	if stub == "" {
-		// Count dropped roles so the model knows what vanished (tools vs dialogue).
-		var nUser, nAsst, nTool int
-		for _, m := range dropped {
-			switch m.Role {
-			case "user":
-				nUser++
-			case "assistant":
-				nAsst++
-			case "tool":
-				nTool++
-			}
-		}
-		stub = fmt.Sprintf("[context compacted: dropped %d messages (%d user, %d assistant, %d tool) to fit limit; older tool bodies trimmed]",
-			len(dropped), nUser, nAsst, nTool)
+		stub = defaultCompactStub(dropped, kept)
 	}
 	summaryMsg := llm.Message{
 		Role:    "user",
@@ -92,6 +82,72 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 		out = trimAllToolResults(out, 800, 400)
 	}
 	return out
+}
+
+// defaultCompactStub builds a task-preserving summary when no PreCompact hook
+// supplied one. A bare "dropped N messages" stub made models forget the user's
+// original request after long tool-heavy runs.
+func defaultCompactStub(dropped, kept []llm.Message) string {
+	var nUser, nAsst, nTool int
+	var users []string
+	for _, m := range dropped {
+		switch m.Role {
+		case "user":
+			nUser++
+			if t := compactSnippet(m.Content, 280); t != "" {
+				users = append(users, t)
+			}
+		case "assistant":
+			nAsst++
+		case "tool":
+			nTool++
+		}
+	}
+	// Also note the first user still in the kept window so the stub can say
+	// what remains live.
+	keptUser := ""
+	for _, m := range kept {
+		if m.Role == "user" {
+			keptUser = compactSnippet(m.Content, 160)
+			break
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("[context compacted to fit the model window]\n")
+	b.WriteString(fmt.Sprintf("Dropped %d messages (%d user, %d assistant, %d tool); older tool bodies trimmed.\n",
+		len(dropped), nUser, nAsst, nTool))
+	b.WriteString("Continue the same task — do not ask the user to restate unless these notes are empty or contradictory.\n")
+	if len(users) > 0 {
+		b.WriteString("\nTask so far (earliest user messages that were dropped):\n")
+		// First user = original request; last dropped user = latest steer before the kept window.
+		show := users
+		if len(show) > 3 {
+			show = append([]string{users[0]}, users[len(users)-2:]...)
+		}
+		for i, u := range show {
+			fmt.Fprintf(&b, "%d. %s\n", i+1, u)
+		}
+	}
+	if keptUser != "" {
+		b.WriteString("\nFirst user turn still in live context: ")
+		b.WriteString(keptUser)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// compactSnippet collapses whitespace and truncates for the compact stub.
+func compactSnippet(s string, maxRunes int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if s == "" {
+		return ""
+	}
+	if maxRunes <= 0 || utf8.RuneCountInString(s) <= maxRunes {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:maxRunes-1]) + "…"
 }
 
 // alignKeepAtUser drops leading non-user messages so the kept window starts at

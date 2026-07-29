@@ -359,7 +359,7 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 			}
 		}
 		if !found {
-			return "", fmt.Errorf("line_hash not found")
+			return "", fmt.Errorf("edit: line_hash %s not found — re-read the file for a fresh N:hash|line", hh)
 		}
 		s2, err := applyHashlineEdit(s, hh, a.NewString)
 		if err != nil {
@@ -371,7 +371,7 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 			return "", fmt.Errorf("old_string or line_hash required")
 		}
 		if !strings.Contains(s, a.OldString) {
-			return "", fmt.Errorf("old_string not found")
+			return "", fmt.Errorf("edit: old_string not found — re-read the file; content may have changed")
 		}
 		oldSnippet = a.OldString
 		s = strings.Replace(s, a.OldString, a.NewString, 1)
@@ -493,7 +493,7 @@ func applyHashlineEdit(content, hash, newLine string) (string, error) {
 			return strings.Join(lines, "\n"), nil
 		}
 	}
-	return "", fmt.Errorf("hashline: no line with hash %s", hash)
+	return "", fmt.Errorf("edit: line_hash %s not found — re-read the file for a fresh N:hash|line", hash)
 }
 
 // nearbyHint suggests real files when a read path does not exist: name-stem

@@ -128,3 +128,38 @@ func TestCompactNoOrphanToolResults(t *testing.T) {
 		t.Fatalf("kept window starts with orphan tool result: %+v", out[i])
 	}
 }
+
+func TestCompactStubPreservesTask(t *testing.T) {
+	// Long tool thrash after a clear user goal: the default stub must keep the
+	// original request so the model does not ask to restate the task.
+	msgs := []llm.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "Please fix the line_hash bug in tui.go and add a test"},
+	}
+	for i := 0; i < 40; i++ {
+		msgs = append(msgs, llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{ID: "id", Type: "function",
+				Function: llm.FunctionCall{Name: "read", Arguments: `{}`}}},
+		})
+		msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: "id", Name: "read",
+			Content: strings.Repeat("x", 500)})
+	}
+	out := CompactOpts(msgs, 4_000, "", 2_000)
+	var stub string
+	for _, m := range out {
+		if m.Role == "user" && strings.Contains(m.Content, "context compacted") {
+			stub = m.Content
+			break
+		}
+	}
+	if stub == "" {
+		t.Fatalf("no compact stub in %#v", out)
+	}
+	if !strings.Contains(stub, "line_hash bug") || !strings.Contains(stub, "tui.go") {
+		t.Fatalf("stub lost original task: %q", stub)
+	}
+	if !strings.Contains(strings.ToLower(stub), "do not ask the user to restate") {
+		t.Fatalf("stub should discourage restate: %q", stub)
+	}
+}
