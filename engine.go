@@ -105,6 +105,9 @@ func New(opt Options) (*Engine, error) {
 	if w := strings.TrimSpace(opt.Workspace); w != "" {
 		cfg.Workspace = w
 	}
+	if len(opt.ExtraRoots) > 0 {
+		cfg.Policy.ExtraRoots = append(append([]string(nil), cfg.Policy.ExtraRoots...), opt.ExtraRoots...)
+	}
 	if m := strings.TrimSpace(opt.Model); m != "" {
 		cfg.LLM.Model = m
 	}
@@ -139,6 +142,7 @@ func New(opt Options) (*Engine, error) {
 
 	pol := &policy.Policy{
 		Workspace:      cfg.Workspace,
+		ExtraRoots:     append([]string(nil), cfg.Policy.ExtraRoots...),
 		AllowWrite:     cfg.ToolEnabled("write") || cfg.ToolEnabled("edit"),
 		AllowShell:     cfg.ToolEnabled("bash"),
 		MaxReadBytes:   cfg.Policy.MaxReadBytes,

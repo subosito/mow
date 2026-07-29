@@ -111,6 +111,11 @@ type PolicyConfig struct {
 	// MaxParallelTools caps concurrent tool Exec in one assistant batch (default 8).
 	// Set to 1 for sequential execution.
 	MaxParallelTools int `yaml:"max_parallel_tools"`
+	// ExtraRoots are additional directory trees FS tools may access (read/write
+	// still follow allow-write). Absolute or relative (resolved at load).
+	// User/host config and CLI only — stripped from project .mow/config.
+	// CLI: repeatable --extra-root PATH.
+	ExtraRoots []string `yaml:"extra_roots"`
 }
 
 type SessionConfig struct {
@@ -227,6 +232,8 @@ func mergeProjectFile(dst *File, path string) error {
 	overlay.LLM.SystemPrefix = nil
 	overlay.LLM.SystemPrefixModels = nil
 	overlay.Session.Dir = ""
+	// Extra FS roots expand the jail — host/CLI only (not project-controlled).
+	overlay.Policy.ExtraRoots = nil
 	overlay.Tools.Enable = dropPowerTools(overlay.Tools.Enable)
 	mergeOverlay(dst, &overlay)
 	return nil
@@ -241,6 +248,29 @@ func dropPowerTools(enable []string) []string {
 			continue
 		}
 		out = append(out, t)
+	}
+	return out
+}
+
+// mergeStringList appends unique non-empty trimmed strings (order preserved).
+func mergeStringList(base, add []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range base {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for _, s := range add {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
 	}
 	return out
 }
@@ -277,6 +307,9 @@ func mergeOverlay(dst *File, overlay *File) {
 	}
 	if overlay.Policy.MaxToolResultChars > 0 {
 		dst.Policy.MaxToolResultChars = overlay.Policy.MaxToolResultChars
+	}
+	if len(overlay.Policy.ExtraRoots) > 0 {
+		dst.Policy.ExtraRoots = mergeStringList(dst.Policy.ExtraRoots, overlay.Policy.ExtraRoots)
 	}
 	if overlay.Policy.MaxParallelTools > 0 {
 		dst.Policy.MaxParallelTools = overlay.Policy.MaxParallelTools

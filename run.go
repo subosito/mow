@@ -42,6 +42,11 @@ type Options struct {
 	Logger *slog.Logger
 	// Workspace overrides config/env workspace when non-empty.
 	Workspace string
+	// ExtraRoots appends directory trees to the FS path jail (in addition to
+	// Workspace). Relative paths resolve against the process cwd at New.
+	// Same as policy.extra_roots / repeatable --extra-root. Not settable from
+	// project .mow/config.
+	ExtraRoots []string
 	// Model overrides config/env model when non-empty.
 	Model string
 	// Effort overrides config/env reasoning effort when non-empty

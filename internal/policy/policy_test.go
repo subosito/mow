@@ -78,6 +78,40 @@ func TestResolvePathSymlinkEscapeNewFile(t *testing.T) {
 	}
 }
 
+func TestResolvePathExtraRoots(t *testing.T) {
+	ws := t.TempDir()
+	extra := t.TempDir()
+	if err := os.WriteFile(filepath.Join(extra, "lib.go"), []byte("package lib\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: ws, ExtraRoots: []string{extra}}
+
+	// Relative still joins primary workspace.
+	got, err := p.ResolvePath("in-ws.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != filepath.Join(ws, "in-ws.txt") {
+		t.Fatalf("ws rel: %q", got)
+	}
+
+	// Absolute under extra root is allowed.
+	lib := filepath.Join(extra, "lib.go")
+	got, err = p.ResolvePath(lib)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != lib {
+		t.Fatalf("extra abs: %q want %q", got, lib)
+	}
+
+	// Outside both roots still fails.
+	out := t.TempDir()
+	if _, err := p.ResolvePath(filepath.Join(out, "x")); err == nil {
+		t.Fatal("expected escape outside workspace and extra roots")
+	}
+}
+
 func TestAllowToolPowerDenied(t *testing.T) {
 	p := &policy.Policy{Workspace: t.TempDir()}
 	for _, name := range []string{"write", "edit", "bash"} {

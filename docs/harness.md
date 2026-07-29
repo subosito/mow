@@ -298,6 +298,17 @@ Project trust: `mow trust` (stored out-of-band in `$MOW_HOME/trusted`) or env `M
 
 Workspace, power tools, stream, media models → **yaml** and/or **CLI flags** (`--workspace`, `--allow-write`, `--stream`, …). MCP OAuth automation may use `MOW_MCP_AUTH_CODE` (pack-only).
 
+**Extra FS roots** (optional): paths outside the primary workspace that FS tools may still touch (same symlink jail rules).
+
+| Source | How |
+|--------|-----|
+| CLI | `--extra-root /path` (repeatable for multiple roots) |
+| User config | `policy.extra_roots: [/path, …]` in `$MOW_HOME/config.yaml` or `--config` |
+| Embed | `Options.ExtraRoots` |
+| Project `.mow/config` | **Not allowed** (stripped like credentials / power tools) |
+
+Relative tool paths still resolve against the primary `--workspace`. Absolute paths (or paths under an extra root) are allowed when they fall inside workspace or an extra root.
+
 Example template: [`internal/config/mow.yaml.example`](../internal/config/mow.yaml.example).
 
 ---

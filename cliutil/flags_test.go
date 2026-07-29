@@ -77,3 +77,19 @@ func TestMaxTurnsOmittedLeavesConfig(t *testing.T) {
 		t.Fatalf("Options.MaxTurns=%d want 0 (leave config)", opt.MaxTurns)
 	}
 }
+
+func TestExtraRootRepeatable(t *testing.T) {
+	var ef cliutil.EngineFlags
+	fs := cliutil.NewFlagSet("run")
+	ef.Bind(fs)
+	if err := fs.Parse([]string{"--extra-root", "/a", "--extra-root", "/b"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(ef.ExtraRoots) != 2 || ef.ExtraRoots[0] != "/a" || ef.ExtraRoots[1] != "/b" {
+		t.Fatalf("ExtraRoots=%v", ef.ExtraRoots)
+	}
+	opt := ef.Options()
+	if len(opt.ExtraRoots) != 2 {
+		t.Fatalf("Options.ExtraRoots=%v", opt.ExtraRoots)
+	}
+}

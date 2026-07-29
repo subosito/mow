@@ -14,6 +14,7 @@ import (
 type EngineFlags struct {
 	Config     string
 	Workspace  string
+	ExtraRoots []string // repeatable --extra-root
 	Model      string
 	Effort     string
 	BaseURL    string
@@ -34,6 +35,7 @@ type EngineFlags struct {
 func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.Config, "config", "", "optional config yaml")
 	fs.StringVar(&f.Workspace, "workspace", "", "workspace root")
+	fs.Var((*stringList)(&f.ExtraRoots), "extra-root", "extra FS root for path jail (repeatable)")
 	fs.StringVar(&f.Model, "model", "", "model id")
 	fs.StringVar(&f.Effort, "effort", "", "reasoning effort (catalog efforts when listed; else none|low|medium|high)")
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
@@ -45,6 +47,25 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.BoolVar(&f.Continue, "continue", false, "resume latest session")
 	fs.BoolVar(&f.Stream, "stream", false, "stream token deltas")
 	fs.BoolVar(&f.Verbose, "verbose", false, "debug lifecycle logs (run/tool) on stderr")
+}
+
+// stringList is a repeatable flag.String-like value (append on each Set).
+type stringList []string
+
+func (s *stringList) String() string {
+	if s == nil {
+		return ""
+	}
+	return strings.Join(*s, ",")
+}
+
+func (s *stringList) Set(v string) error {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	*s = append(*s, v)
+	return nil
 }
 
 // maxTurnsFlag tracks whether --max-turns was explicitly set so 0 can mean
@@ -85,6 +106,7 @@ func (f *EngineFlags) Options() mow.Options {
 	opt := mow.Options{
 		ConfigPaths: paths,
 		Workspace:   f.Workspace,
+		ExtraRoots:  append([]string(nil), f.ExtraRoots...),
 		Model:       f.Model,
 		Effort:      f.Effort,
 		BaseURL:     f.BaseURL,

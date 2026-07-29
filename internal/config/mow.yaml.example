@@ -75,6 +75,9 @@ policy:
   max_context_chars: 100000       # soft history compaction (default); -1 disables
   max_tool_result_chars: 24000    # cap each tool result in model history (default)
   max_parallel_tools: 8           # concurrent tools per assistant batch; 1 = sequential
+  # extra_roots:                  # more FS trees for read/write/edit/glob/grep
+  #   - /path/to/sibling-repo     # user/host config only (not project .mow/config)
+  # CLI: --extra-root PATH (repeatable)
 
 skills:
   # dirs: [/path/to/skills]   # *.md files appended to system prompt

@@ -10,7 +10,11 @@ import (
 
 // Policy is the runtime security policy for tool execution.
 type Policy struct {
-	Workspace    string
+	Workspace string
+	// ExtraRoots are additional absolute directory trees FS tools may touch
+	// (same symlink rules as Workspace). Set only from user/host config or CLI
+	// — never from project .mow/config.
+	ExtraRoots   []string
 	AllowWrite   bool
 	AllowShell   bool
 	MaxReadBytes int
@@ -54,21 +58,24 @@ func (p *Policy) AllowTool(name string) error {
 	return nil
 }
 
-// ResolvePath joins rel to workspace and ensures the result stays inside workspace.
-// Returns absolute cleaned path.
+// ResolvePath joins rel to workspace (when relative) and ensures the result
+// stays inside the workspace or an ExtraRoot. Returns absolute cleaned path.
 func (p *Policy) ResolvePath(rel string) (string, error) {
-	if p.Workspace == "" {
+	if p == nil || p.Workspace == "" {
 		return "", fmt.Errorf("workspace not set")
 	}
-	root, err := filepath.Abs(p.Workspace)
+	roots, err := p.jailRoots()
 	if err != nil {
 		return "", err
 	}
-	root = filepath.Clean(root)
+	if len(roots) == 0 {
+		return "", fmt.Errorf("workspace not set")
+	}
+	primary := roots[0]
 
 	candidate := rel
 	if !filepath.IsAbs(candidate) {
-		candidate = filepath.Join(root, candidate)
+		candidate = filepath.Join(primary, candidate)
 	}
 	candidate = filepath.Clean(candidate)
 
@@ -81,15 +88,53 @@ func (p *Policy) ResolvePath(rel string) (string, error) {
 		return "", err
 	}
 	candidate = resolved
-	if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolvedRoot
-	}
 
 	sep := string(filepath.Separator)
-	if candidate != root && !strings.HasPrefix(candidate, root+sep) {
-		return "", fmt.Errorf("path %q escapes workspace %q", rel, root)
+	for _, root := range roots {
+		r := root
+		if resolvedRoot, err := filepath.EvalSymlinks(r); err == nil {
+			r = resolvedRoot
+		}
+		if candidate == r || strings.HasPrefix(candidate, r+sep) {
+			return candidate, nil
+		}
 	}
-	return candidate, nil
+	return "", fmt.Errorf("path %q escapes workspace (and extra roots)", rel)
+}
+
+// jailRoots returns cleaned absolute roots: workspace first, then ExtraRoots.
+func (p *Policy) jailRoots() ([]string, error) {
+	if p == nil {
+		return nil, fmt.Errorf("nil policy")
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(raw string) error {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil
+		}
+		abs, err := filepath.Abs(raw)
+		if err != nil {
+			return err
+		}
+		abs = filepath.Clean(abs)
+		if seen[abs] {
+			return nil
+		}
+		seen[abs] = true
+		out = append(out, abs)
+		return nil
+	}
+	if err := add(p.Workspace); err != nil {
+		return nil, err
+	}
+	for _, r := range p.ExtraRoots {
+		if err := add(r); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 const maxSymlinkDepth = 40
