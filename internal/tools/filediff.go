@@ -43,6 +43,8 @@ func formatReplaceDiff(path, oldContent, newContent string) string {
 }
 
 // formatEditDiff reports a search-replace edit with path and the changed hunk.
+// Emits a numbered @@ header so UIs can show line ranges (relative to the hunk;
+// absolute file offsets are unknown for search-replace).
 func formatEditDiff(path, oldString, newString string) string {
 	var b strings.Builder
 	b.WriteString("edited " + path + "\n")
@@ -50,7 +52,17 @@ func formatEditDiff(path, oldString, newString string) string {
 	b.WriteString("+++ " + path + "\n")
 	oldLines := splitLines(oldString)
 	newLines := splitLines(newString)
-	b.WriteString("@@\n")
+	oc, nc := len(oldLines), len(newLines)
+	switch {
+	case oc == 0 && nc == 0:
+		b.WriteString("@@ -0,0 +0,0 @@\n")
+	case oc == 0:
+		b.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", nc))
+	case nc == 0:
+		b.WriteString(fmt.Sprintf("@@ -1,%d +0,0 @@\n", oc))
+	default:
+		b.WriteString(fmt.Sprintf("@@ -1,%d +1,%d @@\n", oc, nc))
+	}
 	writePrefixed(&b, "-", oldLines, maxDiffBodyLines)
 	writePrefixed(&b, "+", newLines, maxDiffBodyLines)
 	return b.String()
