@@ -50,14 +50,23 @@ func Registry(p *policy.Policy, enable []string) []agent.Tool {
 	return out
 }
 
+// pathJailHint describes where file tools may touch (workspace ± extra roots).
+func pathJailHint(p *policy.Policy) string {
+	if p != nil && len(p.ExtraRoots) > 0 {
+		return "under the path jail (workspace or extra roots)"
+	}
+	return "under the workspace path jail"
+}
+
 type readTool struct{ p *policy.Policy }
 
 func (t *readTool) Name() string { return "read" }
 func (t *readTool) Description() string {
+	jail := pathJailHint(t.p)
 	if t.p != nil && t.p.Hashline {
-		return "Read a UTF-8 text file under the workspace. Lines are numbered with short hashes (N:hash|text) for hashline edit. Args: path."
+		return "Read a UTF-8 text file " + jail + ". Lines are numbered with short hashes (N:hash|text) for hashline edit. Args: path."
 	}
-	return "Read a UTF-8 text file under the workspace. Args: path (relative to workspace)."
+	return "Read a UTF-8 text file " + jail + ". Args: path (relative → workspace; absolute → must be in jail)."
 }
 func (t *readTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)
@@ -108,7 +117,7 @@ type globTool struct{ p *policy.Policy }
 
 func (t *globTool) Name() string { return "glob" }
 func (t *globTool) Description() string {
-	return "List files matching a glob under the workspace. Args: pattern (e.g. **/*.go)."
+	return "List files matching a glob " + pathJailHint(t.p) + ". Args: pattern (e.g. **/*.go; absolute under jail OK)."
 }
 func (t *globTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}`)
@@ -170,7 +179,7 @@ type grepTool struct{ p *policy.Policy }
 
 func (t *grepTool) Name() string { return "grep" }
 func (t *grepTool) Description() string {
-	return "Search for a fixed string in files under the workspace. Args: pattern, path (optional dir/file, default .)."
+	return "Search for a fixed string in files " + pathJailHint(t.p) + ". Args: pattern, path (optional dir/file, default .; absolute under jail OK)."
 }
 func (t *grepTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"]}`)
@@ -249,7 +258,7 @@ type writeTool struct{ p *policy.Policy }
 
 func (t *writeTool) Name() string { return "write" }
 func (t *writeTool) Description() string {
-	return "Write content to a file under the workspace (creates parent dirs). Returns path + unified diff of the change. Args: path, content."
+	return "Write content to a file " + pathJailHint(t.p) + " (creates parent dirs). Returns path + unified diff of the change. Args: path, content."
 }
 func (t *writeTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}`)
@@ -298,10 +307,11 @@ type editTool struct{ p *policy.Policy }
 
 func (t *editTool) Name() string { return "edit" }
 func (t *editTool) Description() string {
+	jail := pathJailHint(t.p)
 	if t.p != nil && t.p.Hashline {
-		return "Edit a file. Prefer hashline: path + line_hash (8 hex from read) + new_string replaces that line. Or classic old_string/new_string. Returns path + diff."
+		return "Edit a file " + jail + ". Prefer hashline: path + line_hash (8 hex from read) + new_string replaces that line. Or classic old_string/new_string. Returns path + diff."
 	}
-	return "Replace old_string with new_string in a file (first occurrence). Returns path + unified diff of the hunk. Args: path, old_string, new_string."
+	return "Replace old_string with new_string in a file " + jail + " (first occurrence). Returns path + unified diff of the hunk. Args: path, old_string, new_string."
 }
 func (t *editTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"line_hash":{"type":"string"}},"required":["path","new_string"]}`)

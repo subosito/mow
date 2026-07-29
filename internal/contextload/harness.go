@@ -20,8 +20,10 @@ const DefaultHarnessIdentity = `You are mow, a coding agent in a headless harnes
 // no product names, verify scripts, or host fleet details. No second identity.
 const DefaultHarnessRules = `Harness operating rules (tool loop, workspace path jail, sessions):
 
-Workspace
-- Stay inside the workspace path jail. Treat the current workspace as the only project root.
+Workspace and path jail
+- File tools (read, glob, grep, write, edit) are path-jailed: only the workspace and any host-configured extra roots.
+- Relative paths resolve against the workspace. Absolute paths are allowed when they fall under the workspace or an extra root.
+- When the system lists extra roots, use those absolute paths to read or edit there — do not refuse as "outside workspace".
 - Follow project instruction files (AGENTS.md, CLAUDE.md, skills) when present. They describe this repo; do not invent other products or hosts.
 
 Tools
@@ -61,6 +63,38 @@ func ComposeSystem(parts ...string) string {
 		}
 	}
 	return strings.Join(out, "\n\n")
+}
+
+// PathJailFacts is a short system segment listing the workspace and any extra
+// FS roots so the model uses absolute paths under extra roots instead of
+// refusing them as "restricted".
+func PathJailFacts(workspace string, extraRoots []string) string {
+	ws := strings.TrimSpace(workspace)
+	if ws == "" && len(extraRoots) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Path jail (read/glob/grep/write/edit):\n")
+	if ws != "" {
+		b.WriteString("- Workspace (relative paths resolve here): ")
+		b.WriteString(ws)
+		b.WriteByte('\n')
+	}
+	if len(extraRoots) == 0 {
+		b.WriteString("- No extra roots; absolute paths must stay under the workspace.")
+		return b.String()
+	}
+	b.WriteString("- Extra roots (use absolute paths under these — they are allowed):\n")
+	for _, r := range extraRoots {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		b.WriteString("  - ")
+		b.WriteString(r)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // WithOptionalIdentity prepends DefaultHarnessIdentity when include is true.

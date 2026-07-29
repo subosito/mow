@@ -14,6 +14,7 @@ func TestDefaultHarnessRules_core(t *testing.T) {
 		"Never discard uncommitted work",
 		"Continue",
 		"workspace",
+		"extra root",
 	} {
 		if !strings.Contains(strings.ToLower(s), strings.ToLower(want)) {
 			t.Errorf("harness rules missing %q", want)
@@ -59,5 +60,18 @@ func TestComposeSystem_rulesFirst(t *testing.T) {
 	}
 	if strings.HasPrefix(got, "You are mow") {
 		t.Fatal("ComposeSystem must not include identity")
+	}
+}
+
+func TestPathJailFacts(t *testing.T) {
+	got := contextload.PathJailFacts("/ws", []string{"/extra/lib"})
+	if !strings.Contains(got, "/ws") || !strings.Contains(got, "/extra/lib") {
+		t.Fatalf("facts: %q", got)
+	}
+	if !strings.Contains(strings.ToLower(got), "extra root") {
+		t.Fatalf("want extra roots wording: %q", got)
+	}
+	if contextload.PathJailFacts("", nil) != "" {
+		t.Fatal("empty should be empty")
 	}
 }

@@ -208,7 +208,10 @@ func New(opt Options) (*Engine, error) {
 	}
 	skillDirs = append([]string{config.SkillsDir()}, skillDirs...)
 	skills := contextload.LoadSkills(skillDirs)
-	sys := contextload.ComposeSystem(agents, skills, opt.SystemAppend)
+	// Concrete workspace + extra roots so the model does not refuse --extra-root
+	// paths as "restricted" (policy already allows them; instructions must match).
+	jailFacts := contextload.PathJailFacts(cfg.Workspace, pol.ExtraRoots)
+	sys := contextload.ComposeSystem(jailFacts, agents, skills, opt.SystemAppend)
 
 	loopHooks, life := mergeHooks(opt.Hooks)
 
