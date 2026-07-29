@@ -29,12 +29,34 @@ func (c *Client) doHTTP(req *http.Request) (*http.Response, error) {
 }
 
 // doHTTPStream is like doHTTP but uses a long-lived client when c.HTTP is nil.
+// Timeout is 0 for the overall body (streams can run for minutes) but dial and
+// response-header waits are bounded so a silent gateway cannot freeze forever.
 func (c *Client) doHTTPStream(req *http.Request) (*http.Response, error) {
 	hc := c.HTTP
 	if hc == nil {
-		hc = &http.Client{Timeout: 0} // stream can be long
+		hc = streamHTTPClient()
 	}
 	return doWithRetry(hc, req, maxHTTPAttempts)
+}
+
+// streamHTTPClient: no overall Timeout (SSE can be long); bound connect + headers.
+func streamHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 0,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          16,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   15 * time.Second,
+			ResponseHeaderTimeout: 120 * time.Second, // wait for first byte/headers
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
 }
 
 func doWithRetry(hc *http.Client, req *http.Request, attempts int) (*http.Response, error) {
