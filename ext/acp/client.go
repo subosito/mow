@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+	"unicode/utf8"
 )
 
 // Client talks to a peer ACP agent (subprocess) as a *client*.
@@ -106,7 +108,9 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 func (c *Client) startProcess() error {
 	c.pending = map[string]chan response{}
 	// Long-lived peer: do not use CommandContext(ctx) so Prompt timeout does not kill the process.
+	// Own process group (unix) so Close can tear down npx/node/claude trees.
 	c.cmd = exec.Command(c.Command[0], c.Command[1:]...)
+	setPeerProcAttr(c.cmd)
 	if c.Dir != "" {
 		c.cmd.Dir = c.Dir
 	}
@@ -142,9 +146,17 @@ func (c *Client) startProcess() error {
 	return nil
 }
 
+// cancelGrace is how long we wait after session/cancel for the peer to finish
+// session/prompt before returning the context error (process may still be
+// killed by dropPeer).
+const cancelGrace = 2 * time.Second
+
 // Prompt runs session/prompt and returns concatenated agent message text + stop reason.
 // OnChunk receives answer text deltas; OnProgress receives tool/thought status
 // (not included in the reply string).
+//
+// On context cancel/timeout, sends session/cancel so the peer stops work, then
+// waits briefly for a response before returning ctx.Err().
 func (c *Client) Prompt(ctx context.Context, sessionID, text string) (reply string, stopReason string, err error) {
 	c.textMu.Lock()
 	c.text.Reset()
@@ -155,6 +167,9 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) (reply stri
 		"prompt": []ContentBlock{
 			{Type: "text", Text: text},
 		},
+	}, func() {
+		// Soft stop first — better than only SIGKILL after timeout.
+		c.Cancel(sessionID)
 	})
 	if err != nil {
 		return "", "", err
@@ -171,10 +186,13 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) (reply stri
 
 // Cancel sends session/cancel for the session.
 func (c *Client) Cancel(sessionID string) {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
 	c.notify("session/cancel", map[string]any{"sessionId": sessionID})
 }
 
-// Close terminates the peer process.
+// Close terminates the peer process (and its process group on unix).
 func (c *Client) Close() error {
 	c.procMu.Lock()
 	c.started = false
@@ -191,10 +209,14 @@ func (c *Client) Close() error {
 	}
 	c.encMu.Unlock()
 	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Kill()
+		killPeerTree(cmd)
 		if exited != nil {
 			// The reaper goroutine owns cmd.Wait; wait for it to finish.
-			<-exited
+			select {
+			case <-exited:
+			case <-time.After(3 * time.Second):
+				// Reaper stuck — do not block dropPeer forever.
+			}
 		} else {
 			_, _ = cmd.Process.Wait()
 		}
@@ -238,10 +260,13 @@ func (c *Client) SetOnProgress(fn func(kind, text string)) {
 	c.textMu.Unlock()
 }
 
-func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+func (c *Client) call(ctx context.Context, method string, params any, onCancel ...func()) (json.RawMessage, error) {
 	id := fmt.Sprintf("%d", c.nextID.Add(1))
 	ch := make(chan response, 1)
 	c.pendMu.Lock()
+	if c.pending == nil {
+		c.pending = map[string]chan response{}
+	}
 	c.pending[id] = ch
 	c.pendMu.Unlock()
 	defer func() {
@@ -262,7 +287,23 @@ func (c *Client) call(ctx context.Context, method string, params any) (json.RawM
 	}
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		for _, fn := range onCancel {
+			if fn != nil {
+				fn()
+			}
+		}
+		// Give the peer a short window to acknowledge cancel (session/prompt
+		// result or error). Then surface the context error so the tool loop
+		// can drop a hung peer.
+		timer := time.NewTimer(cancelGrace)
+		defer timer.Stop()
+		select {
+		case <-ch:
+			// Response after cancel — still report cancel/timeout to caller.
+			return nil, ctx.Err()
+		case <-timer.C:
+			return nil, ctx.Err()
+		}
 	case resp := <-ch:
 		if resp.Error != nil {
 			return nil, fmt.Errorf("acp %s: %s", method, resp.Error.Message)
@@ -352,10 +393,11 @@ func (c *Client) onNotification(n notification) {
 		}
 	case "agent_thought_chunk":
 		// Peer reasoning — progress only, not final answer.
+		// Clip: hosts paint this on a spinner; multi-KB thoughts thrash the UI.
 		if u.Content == nil {
 			return
 		}
-		delta := strings.TrimSpace(u.Content.Text)
+		delta := clipProgressText(u.Content.Text)
 		if delta == "" {
 			return
 		}
@@ -377,6 +419,22 @@ func (c *Client) onNotification(n notification) {
 			fn("tool", line)
 		}
 	}
+}
+
+// clipProgressText keeps peer progress UI-safe: first line, ≤80 runes.
+func clipProgressText(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	if utf8.RuneCountInString(s) <= 80 {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:80]) + "…"
 }
 
 // formatPeerToolProgress builds a short one-line status from a peer tool update.

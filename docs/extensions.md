@@ -131,7 +131,7 @@ extensions:
     agents:
       - name: peer
         command: [peer-agent, --acp]
-        # timeout_sec: 600
+        # timeout_sec: 300
   # other packs: job, mcp, lsp, …
 ```
 
@@ -147,7 +147,7 @@ extensions:
 | `agents[].name` | Id for `acp_delegate` arg `agent` |
 | `agents[].command` | Peer argv that speaks ACP on stdio |
 | `agents[].dir` | Optional cwd (default: workspace) |
-| `agents[].timeout_sec` | Cap per delegated prompt (default 600) |
+| `agents[].timeout_sec` | Cap per delegated prompt (default 300). On timeout/cancel: `session/cancel` then peer process tree is dropped |
 
 When agents are present, `RegisterFromConfig` (via `BeforeNew`) registers tool **`acp_delegate`**.
 

@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -22,7 +23,8 @@ type AgentSpec struct {
 	Command []string `yaml:"command" json:"command"`
 	// Dir optional working directory (default: mow workspace).
 	Dir string `yaml:"dir" json:"dir"`
-	// TimeoutSec caps one delegated prompt (default 600).
+	// TimeoutSec caps one delegated prompt (default 300). On timeout the peer
+	// gets session/cancel then the process tree is dropped.
 	TimeoutSec int `yaml:"timeout_sec" json:"timeout_sec"`
 	// Effort optional peer reasoning intensity. When set and command does not
 	// already pass --reasoning-effort/--effort, mow appends
@@ -127,7 +129,7 @@ func indexAgents(list []AgentSpec) map[string]AgentSpec {
 			continue
 		}
 		if a.TimeoutSec <= 0 {
-			a.TimeoutSec = 600
+			a.TimeoutSec = 300
 		}
 		m[name] = a
 	}
@@ -166,6 +168,7 @@ func (t *delegateTool) Description() string {
 	}
 	return "Delegate a task to another harness via ACP (Agent Client Protocol). " +
 		"Peer process/session is reused across calls when possible. " +
+		"Long peer runs are capped by timeout_sec (default 300s); cancel the host turn to abort. " +
 		"Args: agent (one of: " + strings.Join(names, ", ") + "), prompt (required), cwd (optional absolute or workspace-relative)."
 }
 func (t *delegateTool) Parameters() json.RawMessage {
@@ -242,6 +245,15 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	defer slot.mu.Unlock()
 
 	agentName := spec.Name
+	// Immediate UI signal so hosts show "claude: prompt running…" during TTFT.
+	if eng := mow.EngineFromContext(ctx); eng != nil {
+		eng.Emit(mow.Event{
+			Type:  mow.EventDelegateProgress,
+			Agent: agentName,
+			Tool:  "prompt",
+			Delta: "running…",
+		})
+	}
 	slot.client.SetOnChunk(func(delta string) {
 		if eng := mow.EngineFromContext(ctx); eng != nil {
 			eng.Emit(mow.Event{
@@ -257,7 +269,7 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 				Type:  mow.EventDelegateProgress,
 				Agent: agentName,
 				Tool:  kind,
-				Delta: text,
+				Delta: clipProgressText(text),
 			})
 		}
 	})
@@ -269,9 +281,17 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	slot.lastUsed = time.Now()
 	t.peersMu.Unlock()
 	if err != nil {
-		// Drop dead peer so next call restarts.
-		if !slot.client.Alive() || pctx.Err() != nil {
+		// Cancel/timeout/dead peer: always drop so the next call does not
+		// reuse a half-dead stdio session (orphaned npx/claude trees).
+		if !slot.client.Alive() || pctx.Err() != nil ||
+			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			t.dropPeer(peerKey(spec.Name, dir), slot)
+		}
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(pctx.Err(), context.DeadlineExceeded) {
+			return "", fmt.Errorf("acp_delegate: agent %q timed out after %ds", spec.Name, spec.TimeoutSec)
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(pctx.Err(), context.Canceled) {
+			return "", fmt.Errorf("acp_delegate: agent %q cancelled", spec.Name)
 		}
 		return "", err
 	}
