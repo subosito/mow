@@ -26,7 +26,7 @@ func TestDefaultHarnessRules_core(t *testing.T) {
 	if strings.Contains(strings.ToLower(s), "system prefix") {
 		t.Error("rules must not discuss system_prefix dual-identity")
 	}
-	for _, ban := range []string{"chacha", "cincai", "review-hard", "dguard", "claude code"} {
+	for _, ban := range []string{"catalog-service", "host-product", "review-profile", "review-service", "claude code"} {
 		if strings.Contains(strings.ToLower(s), ban) {
 			t.Errorf("harness must stay agnostic; found %q", ban)
 		}

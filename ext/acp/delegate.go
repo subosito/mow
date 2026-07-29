@@ -26,7 +26,7 @@ type AgentSpec struct {
 	TimeoutSec int `yaml:"timeout_sec" json:"timeout_sec"`
 	// Effort optional peer reasoning intensity. When set and command does not
 	// already pass --reasoning-effort/--effort, mow appends
-	// --reasoning-effort <value> (Grok CLI and similar).
+	// --reasoning-effort <value> (peer CLIs that accept it).
 	Effort string `yaml:"effort" json:"effort"`
 }
 

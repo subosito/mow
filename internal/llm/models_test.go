@@ -20,9 +20,9 @@ func TestListModels(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]string{
-				{"id": "glm-5.2"},
+				{"id": "deepseek-chat"},
 				{"id": "gpt-test"},
-				{"id": "glm-5.2"}, // dedupe
+				{"id": "deepseek-chat"}, // dedupe
 			},
 		})
 	}))
@@ -36,7 +36,7 @@ func TestListModels(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("len=%d %#v", len(list), list)
 	}
-	if list[0].ID != "glm-5.2" || list[1].ID != "gpt-test" {
+	if list[0].ID != "deepseek-chat" || list[1].ID != "gpt-test" {
 		t.Fatalf("sorted=%v", list)
 	}
 }

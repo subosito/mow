@@ -399,9 +399,23 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	// Re-read short-circuit: do not re-dump the same file into context.
+	// Re-read short-circuit: do not re-dump the same file into context
+	// (read tool and bash cat/sed/head/tail of already-seen paths).
 	if name == "read" {
 		if stub, ok := opt.thrash.maybeDedupeRead(args); ok {
+			return toolSlot{
+				ok: true,
+				msg: llm.Message{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Name:       name,
+					Content:    stub,
+				},
+			}
+		}
+	}
+	if name == "bash" {
+		if stub, ok := opt.thrash.maybeDedupeBash(args); ok {
 			return toolSlot{
 				ok: true,
 				msg: llm.Message{
