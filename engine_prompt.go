@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/subosito/mow/internal/agent"
+	"github.com/subosito/mow/internal/contextload"
+	"github.com/subosito/mow/internal/llm"
 	"github.com/subosito/mow/internal/session"
 )
 
@@ -32,9 +34,26 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	sys := e.sys
 	sid := e.sid
 	ws := ""
+	model := ""
+	var sysPrefix, sysPrefixModels []string
 	if e.cfg != nil {
 		ws = e.cfg.Workspace
+		model = e.cfg.LLM.Model
+		sysPrefix = e.cfg.LLM.SystemPrefix
+		sysPrefixModels = e.cfg.LLM.SystemPrefixModels
 	}
+	if e.client != nil {
+		if e.client.Model != "" {
+			model = e.client.Model
+		}
+		// Live client holds the active prefix config (may match SetModel).
+		if len(e.client.SystemPrefix) > 0 {
+			sysPrefix = e.client.SystemPrefix
+			sysPrefixModels = e.client.SystemPrefixModels
+		}
+	}
+	// Identity only when no system_prefix applies — avoid dual "You are …".
+	sys = contextload.WithOptionalIdentity(!llm.HasActiveSystemPrefix(sysPrefix, sysPrefixModels, model), sys)
 	userPromptHooks := append([]UserPromptFunc(nil), e.life.onUserPrompt...)
 	stopHooks := append([]StopFunc(nil), e.life.onStop...)
 	sess := e.sess

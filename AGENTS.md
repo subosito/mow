@@ -28,6 +28,10 @@ No separate lint step. Format with `gofmt`. Do not invent Make/npm scripts.
 policy jail (`internal/policy`) → session JSONL. Study **`engine.go`** +
 **`engine_prompt.go`** first, then `internal/agent/loop.go`.
 
+**System prompt:** `llm.system_prefix` (optional identity) → optional default
+“You are mow” only if no prefix applies → harness rules (always) → project
+AGENTS/skills. See `internal/contextload/harness.go`.
+
 Events: `OnEvent` / `AddOnEvent` / `Emit` (`event.go`; `tool.end` includes `duration_ms`,
 `run.end` includes token usage). Inline `<think>` CoT is stripped by the loop
 (`internal/agent/think.go`) — committed history/sessions are always tag-free.

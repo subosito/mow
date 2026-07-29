@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// effectiveSystemPrefix returns prefix entries that apply to model.
+// EffectiveSystemPrefix returns prefix entries that apply to model.
 // Empty patterns → always apply when prefix is non-empty.
 // Non-empty patterns → case-insensitive path.Match globs (*, ?).
-func effectiveSystemPrefix(prefix, patterns []string, model string) []string {
+func EffectiveSystemPrefix(prefix, patterns []string, model string) []string {
 	if len(prefix) == 0 {
 		return nil
 	}
@@ -16,6 +16,17 @@ func effectiveSystemPrefix(prefix, patterns []string, model string) []string {
 		return nil
 	}
 	return prefix
+}
+
+// HasActiveSystemPrefix reports whether a system_prefix segment applies to model.
+// When true, the harness omits its default "You are mow" identity line.
+func HasActiveSystemPrefix(prefix, patterns []string, model string) bool {
+	return len(EffectiveSystemPrefix(prefix, patterns, model)) > 0
+}
+
+// effectiveSystemPrefix is the internal name used by Client helpers.
+func effectiveSystemPrefix(prefix, patterns []string, model string) []string {
+	return EffectiveSystemPrefix(prefix, patterns, model)
 }
 
 // modelMatchesAny reports whether model matches any pattern.

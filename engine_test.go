@@ -3,6 +3,7 @@ package mow_test
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -262,5 +263,60 @@ func TestPromptWithSystemAppend(t *testing.T) {
 	}
 	if !strings.Contains(sawSys, "GOAL_PROTOCOL_MARKER") {
 		t.Fatalf("system missing append: %q", sawSys)
+	}
+	// Always-on harness rules; default identity when no system_prefix.
+	if !strings.Contains(sawSys, "Never discard uncommitted work") {
+		t.Fatalf("system missing harness rules: %q", sawSys[:min(200, len(sawSys))])
+	}
+	if !strings.Contains(sawSys, "You are mow, a coding agent in a headless harness") {
+		t.Fatalf("expected default identity without system_prefix: %q", sawSys[:min(200, len(sawSys))])
+	}
+}
+
+func TestHarnessSkipsIdentityWhenSystemPrefixActive(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	cfgPath := home + "/config.yaml"
+	// Minimal yaml: system_prefix applies to all models when globs empty.
+	const yaml = `
+llm:
+  model: claude-x
+  api_key: k
+  base_url: http://127.0.0.1:9/v1
+  system_prefix:
+    - "You are Claude Code, Anthropic's official CLI."
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var sawSys string
+	eng, err := mow.New(mow.Options{
+		NoSession:   true,
+		ConfigPaths: []string{cfgPath},
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			for _, m := range messages {
+				if m.Role == "system" {
+					sawSys = m.Content
+				}
+			}
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	// Identity line only — AGENTS.md may still mention "mow" elsewhere.
+	const idLine = "You are mow, a coding agent in a headless harness"
+	if strings.Contains(sawSys, idLine) {
+		t.Fatalf("identity line must be omitted when system_prefix active: %q", sawSys[:min(300, len(sawSys))])
+	}
+	if !strings.HasPrefix(strings.TrimSpace(sawSys), "Harness operating rules") {
+		t.Fatalf("expected rules-first system: %q", sawSys[:min(120, len(sawSys))])
+	}
+	if !strings.Contains(sawSys, "Never discard uncommitted work") {
+		t.Fatalf("rules still required: %q", sawSys[:min(200, len(sawSys))])
 	}
 }

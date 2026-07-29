@@ -24,7 +24,11 @@ llm:
   #   # Gateways map lean model ids to upstream tiers themselves
   # stream: true
   #
-  # Optional system segments before AGENTS.md / skills / default system.
+  # Optional system segments prepended *before* the compiled system prompt.
+  # Use for product identity / provider preambles (e.g. "You are …").
+  # When this applies to the model, mow omits its default "You are mow" identity
+  # line so there is only one persona. Harness operating rules still follow.
+  # Compiled system after prefix = [optional identity] + rules + AGENTS.md + skills.
   # Each list item is a separate segment. Limit by model id with globs
   # (case-insensitive); omit system_prefix_models to apply for every model.
   # system_prefix:

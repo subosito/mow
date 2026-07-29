@@ -147,10 +147,12 @@ type Client struct {
 	// and the last message). OpenAI caches automatically and ignores this.
 	PromptCache bool
 	// SystemPrefix is optional text segments prepended before the compiled
-	// system prompt (AGENTS.md / skills / default). Each entry is a separate
-	// segment. On anthropic-messages they become separate system text blocks;
-	// on other wires they are leading role=system messages. Configure via
-	// llm.system_prefix — mow does not hardcode vendor text.
+	// system prompt (harness + AGENTS.md / skills). Each entry is a separate
+	// segment. Typical use: product identity / provider preambles. May override
+	// self-name/tone; harness operating rules still apply. On anthropic-messages
+	// they become separate system text blocks; on other wires they are leading
+	// role=system messages. Configure via llm.system_prefix — mow does not
+	// hardcode vendor text.
 	SystemPrefix []string
 	// SystemPrefixModels are case-insensitive globs against Client.Model.
 	// Empty = always apply SystemPrefix when set. Non-empty = apply only on match.

@@ -232,7 +232,7 @@ func SystemAppend(st State) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are working toward THIS goal only (outer loop step %d of %d):\n%s\n\n",
 		st.Step+1, st.MaxSteps, st.Goal)
-	b.WriteString("The summary you report must answer THIS goal — ignore unrelated prior chat or git leftovers.\n\n")
+	b.WriteString("The summary you report must answer THIS goal — ignore unrelated prior chat. Do not discard uncommitted work to tidy the tree.\n\n")
 	if st.Plan.HasItems() {
 		b.WriteString("Checklist:\n")
 		b.WriteString(st.Plan.Format())
@@ -255,7 +255,7 @@ func SystemAppend(st State) string {
 			"- goal_report status=failed reason=… (or %s <reason>).\n"+
 			"- goal_report status=continue for progress / plan / item updates.\n"+
 			"- Long-lived servers: goal_process_start / status / stop (not bare bash &).\n"+
-			"- Do not nest another `mow run` or `mow goal` inside bash.\n"+
+			"- Do not nest another agent loop or outer goal runner inside bash.\n"+
 			"- Do not claim done until THIS goal is actually met.\n",
 		MarkerDone, MarkerFailed)
 	return b.String()

@@ -44,8 +44,9 @@ type LLMConfig struct {
 	// set false for gateways that reject cache_control fields.
 	PromptCache *bool `yaml:"prompt_cache"`
 	// SystemPrefix is optional text segments prepended before the compiled
-	// system prompt (AGENTS.md / skills / default). Each list item is a
-	// separate segment (not one joined string). Applies on all wires when
+	// system prompt (mow harness + AGENTS.md / skills). Each list item is a
+	// separate segment (not one joined string). Use for product identity /
+	// provider preambles; harness rules still apply. Applies on all wires when
 	// the model matches SystemPrefixModels. Not loadable from project
 	// .mow/config.
 	SystemPrefix []string `yaml:"system_prefix"`

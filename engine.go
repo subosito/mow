@@ -189,7 +189,9 @@ func New(opt Options) (*Engine, error) {
 		}
 	}
 
-	sys, _ := contextload.Load(cfg.Workspace)
+	// Compiled system: harness charter (always) + project AGENTS + skills + Options.SystemAppend.
+	// llm.system_prefix is separate: prepended at request time (may set product identity).
+	agents, _ := contextload.Load(cfg.Workspace)
 	skillDirs := append([]string(nil), cfg.Skills.Dirs...)
 	if contextload.ProjectTrusted(cfg.Workspace) {
 		skillDirs = append(skillDirs, filepath.Join(cfg.Workspace, ".mow", "skills"))
@@ -201,23 +203,8 @@ func New(opt Options) (*Engine, error) {
 		logger.Info("mow: project .mow present but untrusted; run `mow trust` to load project config/skills")
 	}
 	skillDirs = append([]string{config.SkillsDir()}, skillDirs...)
-	if sk := contextload.LoadSkills(skillDirs); sk != "" {
-		if sys != "" {
-			sys += "\n\n" + sk
-		} else {
-			sys = sk
-		}
-	}
-	if s := strings.TrimSpace(opt.SystemAppend); s != "" {
-		if sys != "" {
-			sys += "\n\n" + s
-		} else {
-			sys = s
-		}
-	}
-	if sys == "" {
-		sys = "You are mow, a careful coding assistant. Prefer read-only tools unless write/shell are available. Stay within the workspace."
-	}
+	skills := contextload.LoadSkills(skillDirs)
+	sys := contextload.ComposeSystem(agents, skills, opt.SystemAppend)
 
 	loopHooks, life := mergeHooks(opt.Hooks)
 
