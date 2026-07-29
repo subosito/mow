@@ -180,7 +180,7 @@ func defaults() *File {
 			MaxTurns:           120,
 			BashTimeoutSec:     60,
 			MaxReadBytes:       512 << 10, // 512 KiB — enough for code files; loop also caps tool results
-			MaxContextChars:    100_000,   // soft compaction on by default (~25–30k tokens rough)
+			MaxContextChars:    100_000,   // default floor; Engine scales up from gateway context_window
 			MaxToolResultChars: 24_000,    // ~6k tokens max per tool result in history
 			MaxParallelTools:   8,         // concurrent tools per assistant batch
 		},

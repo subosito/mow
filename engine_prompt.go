@@ -69,6 +69,10 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	}
 	if e.opt.MaxContextChars > 0 {
 		maxCtx = e.opt.MaxContextChars
+	} else {
+		// Scale soft compaction budget from gateway context_window when using
+		// the default flat 100k — otherwise 1M-token models compact absurdly early.
+		maxCtx = resolveMaxContextChars(maxCtx, e.Limits().ContextWindow)
 	}
 	if e.opt.MaxToolResultChars > 0 {
 		maxToolRes = e.opt.MaxToolResultChars
@@ -323,6 +327,29 @@ func stopReasonFrom(err error) string {
 		return StopStuck
 	}
 	return StopError
+}
+
+// resolveMaxContextChars picks the soft history budget.
+// - cfgMax 0 → compaction off
+// - cfgMax == default (100k) and window known → scale from window (1M → ~2.2M chars)
+// - cfgMax explicit other value → respect config (floor under auto not applied)
+// - no window → keep cfgMax
+func resolveMaxContextChars(cfgMax, windowTokens int) int {
+	if cfgMax <= 0 {
+		return 0
+	}
+	if windowTokens <= 0 {
+		return cfgMax
+	}
+	// Only auto-raise when still on the built-in default; explicit yaml wins.
+	if cfgMax != agent.DefaultMaxContextChars {
+		return cfgMax
+	}
+	scaled := agent.ContextCharsBudget(windowTokens)
+	if scaled > cfgMax {
+		return scaled
+	}
+	return cfgMax
 }
 
 func errString(err error) string {

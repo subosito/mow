@@ -7,7 +7,25 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/subosito/mow/internal/agent"
 )
+
+func TestResolveMaxContextChars(t *testing.T) {
+	if got := resolveMaxContextChars(0, 1_000_000); got != 0 {
+		t.Fatalf("disabled → %d", got)
+	}
+	got := resolveMaxContextChars(agent.DefaultMaxContextChars, 1_000_000)
+	if got <= agent.DefaultMaxContextChars {
+		t.Fatalf("1M window should raise budget, got %d", got)
+	}
+	if got := resolveMaxContextChars(200_000, 1_000_000); got != 200_000 {
+		t.Fatalf("explicit cfg → %d", got)
+	}
+	if got := resolveMaxContextChars(agent.DefaultMaxContextChars, 0); got != agent.DefaultMaxContextChars {
+		t.Fatalf("no window → %d", got)
+	}
+}
 
 func TestUsageCost(t *testing.T) {
 	u := Usage{InputTokens: 1_000_000, OutputTokens: 500_000}

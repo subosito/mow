@@ -11,21 +11,42 @@ import (
 // Default tool-result size when Options.MaxToolResultChars is unset.
 const DefaultMaxToolResultChars = 24_000
 
+// DefaultMaxContextChars is the config default (~25–30k tokens). When the
+// gateway publishes a larger context_window, Engine scales the soft budget up
+// from this floor instead of compacting early on 1M-token models.
+const DefaultMaxContextChars = 100_000
+
+// ContextCharsBudget converts a gateway context_window (tokens) into a soft
+// history char budget. ~4 chars/token; uses ~55% of the window so system +
+// reply + headroom remain. Returns 0 when window is unknown.
+func ContextCharsBudget(windowTokens int) int {
+	if windowTokens <= 0 {
+		return 0
+	}
+	// 4 chars/token × 55% of window
+	b := windowTokens * 4 * 55 / 100
+	const floor = 80_000
+	const ceil = 3_500_000 // ~875k tokens of history — memory/safety cap
+	if b < floor {
+		return floor
+	}
+	if b > ceil {
+		return ceil
+	}
+	return b
+}
+
 // CompactOpts reduces message history to roughly maxChars while keeping system
 // and the most recent turns; maxToolChars is the per-tool-result char budget.
-// Older middle content is replaced with a summary stub. This is a soft
-// overflow guard, not token-accurate.
-// If summary is non-empty it is used as the stub content instead of the default.
+// Older middle content is replaced with a task-preserving anchor + summary.
+// Soft overflow guard (char estimate), not token-accurate.
 //
-// Strategy (token-lean):
-//  1. Trim all tool bodies to maxToolChars (recent slightly larger budget).
-//  2. If still over maxChars, drop the middle of history (keep system + last keepLast).
-//  3. Stub carries the earliest user request(s) so the model does not forget the task.
-//  4. If still over, aggressively shrink older tool results again.
+// Strategy:
+//  1. Trim tool bodies.
+//  2. If still over: keep system + pinned user intents + stub + last keepLast.
+//  3. Further trim tools if needed.
 func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolChars int) []llm.Message {
 	if maxChars <= 0 || estChars(messages) <= maxChars {
-		// Still proactively trim oversized tool results so one bash dump cannot
-		// dominate even under the budget.
 		return trimAllToolResults(messages, maxToolChars, maxToolChars/2)
 	}
 	if maxToolChars <= 0 {
@@ -35,15 +56,12 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 		return trimAllToolResults(messages, maxToolChars, maxToolChars/2)
 	}
 
-	// First pass: cap tool payloads (recent tools get full budget; older get half).
 	msgs := trimAllToolResults(messages, maxToolChars, maxToolChars/2)
 	if estChars(msgs) <= maxChars {
 		return msgs
 	}
 
-	// Keep system (if any) + last keepLast messages; drop middle.
-	// keepLast is large enough for a few tool rounds (assistant + tools + user).
-	keepLast := 16
+	keepLast := keepLastForBudget(maxChars)
 	if keepLast >= len(msgs) {
 		keepLast = len(msgs) - 1
 	}
@@ -58,83 +76,191 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 	}
 	dropped := rest[:len(rest)-keepLast]
 	kept := rest[len(rest)-keepLast:]
-	// Prefer cutting on a user boundary so we do not orphan tool_results.
 	kept = alignKeepAtUser(kept)
+
+	// Pin user intents from the full conversation (not only dropped) so a
+	// trailing "hi" or thrash window cannot erase the real task.
+	pins := collectUserPins(rest, kept)
 
 	stub := strings.TrimSpace(summary)
 	if stub == "" {
-		stub = defaultCompactStub(dropped, kept)
+		stub = defaultCompactStub(dropped, kept, pins)
 	}
-	summaryMsg := llm.Message{
-		Role:    "user",
-		Content: stub,
-	}
+
 	out := append([]llm.Message{}, system...)
-	out = append(out, summaryMsg)
+	if len(pins) > 0 {
+		out = append(out, llm.Message{
+			Role:    "user",
+			Content: formatTaskAnchor(pins),
+		})
+	}
+	out = append(out, llm.Message{Role: "user", Content: stub})
 	out = append(out, kept...)
 
-	// Second pass: shrink tool bodies further if still over budget.
 	if estChars(out) > maxChars {
 		out = trimAllToolResults(out, maxToolChars/3, 800)
 	}
-	// Last resort: hard-cap every tool body.
 	if estChars(out) > maxChars {
 		out = trimAllToolResults(out, 800, 400)
+	}
+	// Last resort: shrink pin/stub bodies (never drop the anchor entirely).
+	if estChars(out) > maxChars {
+		out = shrinkAnchors(out, maxChars)
 	}
 	return out
 }
 
-// defaultCompactStub builds a task-preserving summary when no PreCompact hook
-// supplied one. A bare "dropped N messages" stub made models forget the user's
-// original request after long tool-heavy runs.
-func defaultCompactStub(dropped, kept []llm.Message) string {
+func keepLastForBudget(maxChars int) int {
+	switch {
+	case maxChars >= 1_500_000:
+		return 64
+	case maxChars >= 500_000:
+		return 40
+	case maxChars >= 200_000:
+		return 28
+	default:
+		return 20
+	}
+}
+
+// collectUserPins gathers substantive user messages to preserve across compact.
+// Skips pure noise ("hi", "ok") when longer intents exist; always keeps at least
+// the first user turn if nothing else qualifies.
+func collectUserPins(all, kept []llm.Message) []string {
+	keptSet := map[string]bool{}
+	for _, m := range kept {
+		if m.Role == "user" {
+			keptSet[compactSnippet(m.Content, 120)] = true
+		}
+	}
+	var pins []string
+	var first string
+	for _, m := range all {
+		if m.Role != "user" {
+			continue
+		}
+		// Skip compaction machinery / anchors from prior rounds.
+		if strings.Contains(m.Content, "[context compacted") ||
+			strings.Contains(m.Content, "[task anchors") {
+			continue
+		}
+		snip := compactSnippet(m.Content, 600)
+		if snip == "" {
+			continue
+		}
+		if first == "" {
+			first = snip
+		}
+		if isTrivialUser(snip) {
+			continue
+		}
+		// Skip if this intent already lives in the kept window.
+		if keptSet[compactSnippet(snip, 120)] {
+			continue
+		}
+		// Dedupe exact pins.
+		dup := false
+		for _, p := range pins {
+			if p == snip {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			continue
+		}
+		pins = append(pins, snip)
+		if len(pins) >= 8 {
+			break
+		}
+	}
+	if len(pins) == 0 && first != "" && !keptSet[compactSnippet(first, 120)] {
+		pins = []string{first}
+	}
+	return pins
+}
+
+func isTrivialUser(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "", "hi", "hello", "hey", "ok", "okay", "yes", "no", "thanks", "thank you", "continue", "go on", "y", "n":
+		return true
+	}
+	// Very short non-task pings
+	if utf8.RuneCountInString(s) < 12 && !strings.ContainsAny(s, "/\\.") {
+		return true
+	}
+	return false
+}
+
+func formatTaskAnchor(pins []string) string {
+	var b strings.Builder
+	b.WriteString("[task anchors — preserved across context compaction]\n")
+	b.WriteString("These are the user's requests so far. Continue this work; do not invent a new task.\n")
+	for i, p := range pins {
+		fmt.Fprintf(&b, "\n%d. %s\n", i+1, p)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// defaultCompactStub builds a short note when no PreCompact summary is supplied.
+func defaultCompactStub(dropped, kept []llm.Message, pins []string) string {
 	var nUser, nAsst, nTool int
-	var users []string
 	for _, m := range dropped {
 		switch m.Role {
 		case "user":
 			nUser++
-			if t := compactSnippet(m.Content, 280); t != "" {
-				users = append(users, t)
-			}
 		case "assistant":
 			nAsst++
 		case "tool":
 			nTool++
 		}
 	}
-	// Also note the first user still in the kept window so the stub can say
-	// what remains live.
-	keptUser := ""
-	for _, m := range kept {
-		if m.Role == "user" {
-			keptUser = compactSnippet(m.Content, 160)
-			break
-		}
-	}
-
 	var b strings.Builder
 	b.WriteString("[context compacted to fit the model window]\n")
-	b.WriteString(fmt.Sprintf("Dropped %d messages (%d user, %d assistant, %d tool); older tool bodies trimmed.\n",
-		len(dropped), nUser, nAsst, nTool))
-	b.WriteString("Continue the same task — do not ask the user to restate unless these notes are empty or contradictory.\n")
-	if len(users) > 0 {
-		b.WriteString("\nTask so far (earliest user messages that were dropped):\n")
-		// First user = original request; last dropped user = latest steer before the kept window.
-		show := users
-		if len(show) > 3 {
-			show = append([]string{users[0]}, users[len(users)-2:]...)
+	fmt.Fprintf(&b, "Dropped %d messages (%d user, %d assistant, %d tool); older tool bodies trimmed.\n",
+		len(dropped), nUser, nAsst, nTool)
+	b.WriteString("Continue the same task using the task anchors above (if any) and the live turns below.\n")
+	b.WriteString("Do not ask the user to restate the task unless anchors and live context are empty or contradictory.\n")
+	if len(pins) == 0 {
+		// Fallback: snag something from dropped users (may include trivial).
+		var users []string
+		for _, m := range dropped {
+			if m.Role != "user" {
+				continue
+			}
+			if t := compactSnippet(m.Content, 400); t != "" && !strings.Contains(t, "[context compacted") {
+				users = append(users, t)
+			}
 		}
-		for i, u := range show {
-			fmt.Fprintf(&b, "%d. %s\n", i+1, u)
+		if len(users) > 0 {
+			b.WriteString("\nDropped user messages (fallback — no non-trivial anchors found):\n")
+			show := users
+			if len(show) > 4 {
+				show = append([]string{users[0]}, users[len(users)-2:]...)
+			}
+			for i, u := range show {
+				fmt.Fprintf(&b, "%d. %s\n", i+1, u)
+			}
 		}
-	}
-	if keptUser != "" {
-		b.WriteString("\nFirst user turn still in live context: ")
-		b.WriteString(keptUser)
-		b.WriteByte('\n')
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func shrinkAnchors(msgs []llm.Message, maxChars int) []llm.Message {
+	out := append([]llm.Message(nil), msgs...)
+	for i := range out {
+		if out[i].Role != "user" {
+			continue
+		}
+		if strings.Contains(out[i].Content, "[task anchors") || strings.Contains(out[i].Content, "[context compacted") {
+			out[i].Content = compactSnippet(out[i].Content, 1_200)
+		}
+	}
+	if estChars(out) > maxChars {
+		// Drop oldest non-system, non-anchor tool-heavy kept? leave as-is — better over budget than empty task.
+	}
+	return out
 }
 
 // compactSnippet collapses whitespace and truncates for the compact stub.
@@ -197,7 +323,6 @@ func TruncateToolResult(s string, maxChars int) string {
 	if maxChars <= 0 || len(s) <= maxChars {
 		return s
 	}
-	// Prefer cutting at a newline near the limit.
 	cut := maxChars
 	if i := lastIndexByte(s[:maxChars], '\n'); i > maxChars*3/4 {
 		cut = i

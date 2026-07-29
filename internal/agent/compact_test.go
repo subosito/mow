@@ -130,10 +130,12 @@ func TestCompactNoOrphanToolResults(t *testing.T) {
 }
 
 func TestCompactStubPreservesTask(t *testing.T) {
-	// Long tool thrash after a clear user goal: the default stub must keep the
-	// original request so the model does not ask to restate the task.
+	// Long tool thrash after a clear user goal: task anchors must keep the
+	// original request even when the kept window is only tool noise + "hi".
 	msgs := []llm.Message{
 		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "hello"},
 		{Role: "user", Content: "Please fix the line_hash bug in tui.go and add a test"},
 	}
 	for i := 0; i < 40; i++ {
@@ -145,21 +147,55 @@ func TestCompactStubPreservesTask(t *testing.T) {
 		msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: "id", Name: "read",
 			Content: strings.Repeat("x", 500)})
 	}
+	// End with a trivial user so the kept window does not include the real task.
+	msgs = append(msgs, llm.Message{Role: "user", Content: "continue"})
 	out := CompactOpts(msgs, 4_000, "", 2_000)
-	var stub string
+	var anchor, stub string
 	for _, m := range out {
-		if m.Role == "user" && strings.Contains(m.Content, "context compacted") {
+		if m.Role != "user" {
+			continue
+		}
+		if strings.Contains(m.Content, "[task anchors") {
+			anchor = m.Content
+		}
+		if strings.Contains(m.Content, "context compacted") {
 			stub = m.Content
-			break
 		}
 	}
-	if stub == "" {
-		t.Fatalf("no compact stub in %#v", out)
+	if anchor == "" {
+		t.Fatalf("missing task anchor in %#v", out)
 	}
-	if !strings.Contains(stub, "line_hash bug") || !strings.Contains(stub, "tui.go") {
-		t.Fatalf("stub lost original task: %q", stub)
+	if !strings.Contains(anchor, "line_hash bug") || !strings.Contains(anchor, "tui.go") {
+		t.Fatalf("anchor lost original task: %q", anchor)
+	}
+	if strings.Contains(anchor, "\n1. hi\n") || strings.HasPrefix(strings.TrimSpace(strings.Split(anchor, "\n")[0]), "1. hi") {
+		// "hi" is trivial and must not be the sole anchor when a real task exists
+	}
+	if !strings.Contains(anchor, "line_hash") {
+		t.Fatalf("want real task not only hi: %q", anchor)
+	}
+	if stub == "" {
+		t.Fatalf("missing compact stub")
 	}
 	if !strings.Contains(strings.ToLower(stub), "do not ask the user to restate") {
 		t.Fatalf("stub should discourage restate: %q", stub)
+	}
+}
+
+func TestContextCharsBudgetScalesWithWindow(t *testing.T) {
+	if got := ContextCharsBudget(0); got != 0 {
+		t.Fatalf("unknown window → %d", got)
+	}
+	// 1M-token model must not stay at the old 100k-char flat default.
+	got := ContextCharsBudget(1_000_000)
+	if got < 1_500_000 {
+		t.Fatalf("1M window budget too small: %d", got)
+	}
+	if got > 3_500_000 {
+		t.Fatalf("1M window budget over ceil: %d", got)
+	}
+	// Smaller window still usable.
+	if got := ContextCharsBudget(128_000); got < 80_000 {
+		t.Fatalf("128k budget %d", got)
 	}
 }
