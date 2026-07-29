@@ -66,6 +66,9 @@ type Options struct {
 	// MaxParallelTools caps concurrent Exec in one assistant tool batch.
 	// 0 → DefaultMaxParallelTools; 1 → sequential (legacy).
 	MaxParallelTools int
+	// Workspace is the project root (absolute preferred). Used by thrash
+	// guards to unify absolute vs relative path re-reads.
+	Workspace string
 	// Steer, when set, is called at each turn boundary (after a tool batch,
 	// before the next LLM call). Any returned strings are appended as user
 	// messages, so a host can steer a running turn without cancelling it.
@@ -139,7 +142,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	var (
 		lastToolFP string
 		sameToolFP int
-		thrash     = newThrashState()
+		thrash     = newThrashState(opt.Workspace)
 	)
 	opt.thrash = thrash
 
@@ -232,6 +235,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 }
 
 // toolCallFingerprint is a stable key for stall detection (name + args per call).
+// Bash args are normalized (cd prefixes collapsed) so status thrash collides.
 func toolCallFingerprint(calls []llm.ToolCall) string {
 	if len(calls) == 0 {
 		return ""
@@ -241,9 +245,10 @@ func toolCallFingerprint(calls []llm.ToolCall) string {
 		if i > 0 {
 			b.WriteByte('|')
 		}
-		b.WriteString(tc.Function.Name)
+		name := tc.Function.Name
+		b.WriteString(name)
 		b.WriteByte('=')
-		b.WriteString(strings.TrimSpace(tc.Function.Arguments))
+		b.WriteString(normalizeArgsFP(name, json.RawMessage(tc.Function.Arguments)))
 	}
 	return b.String()
 }

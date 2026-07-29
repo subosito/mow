@@ -190,6 +190,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		MaxContextChars:    maxCtx,
 		MaxToolResultChars: maxToolRes,
 		MaxParallelTools:   maxPar,
+		Workspace:          ws,
 		Steer:              e.drainSteer,
 		AllowTool: func(name string) error {
 			// Read-only prompts allow only known side-effect-free tools.

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -37,6 +38,32 @@ func TestIsProductiveBash(t *testing.T) {
 	}
 }
 
+func TestIsDestructiveBash(t *testing.T) {
+	bad := []string{
+		"git checkout -- internal/foo.go",
+		"git restore internal/foo.go",
+		"git reset --hard HEAD",
+		"rm -rf internal/analytics",
+		"git clean -fd",
+	}
+	for _, c := range bad {
+		if !isDestructiveBash(c) {
+			t.Errorf("want destructive: %q", c)
+		}
+	}
+	ok := []string{
+		"git checkout -b feature",
+		"go test ./...",
+		"rm /tmp/scratch.txt",
+		"git status",
+	}
+	for _, c := range ok {
+		if isDestructiveBash(c) {
+			t.Errorf("want allow: %q", c)
+		}
+	}
+}
+
 func TestBashReadPaths(t *testing.T) {
 	cases := []struct {
 		cmd  string
@@ -44,10 +71,11 @@ func TestBashReadPaths(t *testing.T) {
 	}{
 		{`cat internal/adminplane/admin/server.go`, []string{"internal/adminplane/admin/server.go"}},
 		{`sed -n '1,80p' internal/adminplane/admin/server.go`, []string{"internal/adminplane/admin/server.go"}},
-		{`cd "$(pwd)" && head -n 40 docs-internal/x.md`, []string{"docs-internal/x.md"}},
+		{`cd /proj && head -n 40 docs-internal/x.md`, []string{filepath.Join("/proj", "docs-internal/x.md")}},
 		{`git status`, nil},
 		{`go test ./...`, nil},
 		{`cat a.go && cat b.go`, []string{"a.go", "b.go"}},
+		{`grep -n "func" internal/foo.go`, []string{"internal/foo.go"}},
 	}
 	for _, c := range cases {
 		got := bashReadPaths(c.cmd)
@@ -56,7 +84,7 @@ func TestBashReadPaths(t *testing.T) {
 			continue
 		}
 		for i := range got {
-			if got[i] != c.want[i] {
+			if filepath.Clean(got[i]) != filepath.Clean(c.want[i]) {
 				t.Errorf("cmd=%q got[%d]=%q want %q", c.cmd, i, got[i], c.want[i])
 			}
 		}
@@ -64,7 +92,7 @@ func TestBashReadPaths(t *testing.T) {
 }
 
 func TestMaybeDedupeBash(t *testing.T) {
-	s := newThrashState()
+	s := newThrashState("")
 	args1, _ := json.Marshal(map[string]string{"command": "cat foo.go"})
 	if stub, ok := s.maybeDedupeBash(args1); ok {
 		t.Fatalf("first cat should run: stub=%q", stub)
@@ -80,8 +108,52 @@ func TestMaybeDedupeBash(t *testing.T) {
 	}
 }
 
+func TestMaybeDedupeBash_inventory(t *testing.T) {
+	s := newThrashState("")
+	for i := 0; i < inventoryLimit; i++ {
+		args, _ := json.Marshal(map[string]string{"command": "git status --short"})
+		if stub, ok := s.maybeDedupeBash(args); ok {
+			t.Fatalf("status %d should run: %q", i+1, stub)
+		}
+	}
+	args, _ := json.Marshal(map[string]string{"command": `cd "$(pwd)" && git status`})
+	stub, ok := s.maybeDedupeBash(args)
+	if !ok || !strings.Contains(stub, "inventory") {
+		t.Fatalf("third status should inventory-stub: ok=%v %q", ok, stub)
+	}
+}
+
+func TestMaybeDedupeBash_destructive(t *testing.T) {
+	s := newThrashState("")
+	args, _ := json.Marshal(map[string]string{"command": "git checkout -- foo.go && rm -rf internal/analytics"})
+	stub, ok := s.maybeDedupeBash(args)
+	if !ok || !strings.Contains(stub, "blocked") {
+		t.Fatalf("want blocked: ok=%v %q", ok, stub)
+	}
+}
+
+func TestPathKeyUnifiesAbsRel(t *testing.T) {
+	ws := t.TempDir()
+	s := newThrashState(ws)
+	rel := "internal/foo.go"
+	abs := filepath.Join(ws, rel)
+	if k1, k2 := s.pathKey(rel), s.pathKey(abs); k1 != k2 {
+		t.Fatalf("path keys differ: rel=%q abs=%q", k1, k2)
+	}
+	// Access via abs then relative bash should stub.
+	args1, _ := json.Marshal(map[string]string{"command": "cat " + abs})
+	if _, ok := s.maybeDedupeBash(args1); ok {
+		t.Fatal("first should run")
+	}
+	args2, _ := json.Marshal(map[string]string{"command": "cat " + rel})
+	stub, ok := s.maybeDedupeBash(args2)
+	if !ok || !strings.Contains(stub, "already viewed") {
+		t.Fatalf("want stub: ok=%v %q", ok, stub)
+	}
+}
+
 func TestBatchExploreOnly_productiveBashResets(t *testing.T) {
-	s := newThrashState()
+	s := newThrashState("")
 	bashCall := func(cmd string) []llm.ToolCall {
 		args, _ := json.Marshal(map[string]string{"command": cmd})
 		return []llm.ToolCall{{
@@ -89,10 +161,17 @@ func TestBatchExploreOnly_productiveBashResets(t *testing.T) {
 			Function: llm.FunctionCall{Name: "bash", Arguments: string(args)},
 		}}
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < exploreWarnEvery-1; i++ {
 		if s.noteTurn(bashCall(`git status`)) {
 			t.Fatalf("unexpected warn at explore %d", i+1)
 		}
+	}
+	if !s.noteTurn(bashCall(`git status`)) {
+		t.Fatal("want warn at exploreWarnEvery")
+	}
+	// After threshold, every explore turn warns.
+	if !s.noteTurn(bashCall(`ls`)) {
+		t.Fatal("want warn every turn after threshold")
 	}
 	if s.noteTurn(bashCall(`go test ./...`)) {
 		t.Fatal("productive should not warn")
@@ -100,18 +179,10 @@ func TestBatchExploreOnly_productiveBashResets(t *testing.T) {
 	if s.exploreStreak != 0 {
 		t.Fatalf("streak=%d want 0 after productive bash", s.exploreStreak)
 	}
-	for i := 0; i < 5; i++ {
-		if s.noteTurn(bashCall(`ls`)) {
-			t.Fatalf("warn too early at %d", i+1)
-		}
-	}
-	if !s.noteTurn(bashCall(`ls`)) {
-		t.Fatal("want warn on 6th explore")
-	}
 }
 
 func TestReadAndBashSharePathDedupe(t *testing.T) {
-	s := newThrashState()
+	s := newThrashState("")
 	readArgs, _ := json.Marshal(map[string]string{"path": "pkg/x.go"})
 	if _, ok := s.maybeDedupeRead(readArgs); ok {
 		t.Fatal("first read should run")
@@ -120,5 +191,13 @@ func TestReadAndBashSharePathDedupe(t *testing.T) {
 	stub, ok := s.maybeDedupeBash(bashArgs)
 	if !ok || !strings.Contains(stub, "already viewed") {
 		t.Fatalf("bash cat after read should stub: ok=%v %q", ok, stub)
+	}
+}
+
+func TestNormalizeBashCmd_collidesStatus(t *testing.T) {
+	a := normalizeBashCmd(`cd "$(pwd)" && git status --short`)
+	b := normalizeBashCmd(`git status --short`)
+	if inventoryKey(a) != inventoryKey(b) || inventoryKey(a) != "git-status" {
+		t.Fatalf("a=%q b=%q keyA=%q keyB=%q", a, b, inventoryKey(a), inventoryKey(b))
 	}
 }
