@@ -41,7 +41,7 @@ func TestFilterChatModels(t *testing.T) {
 		{ID: "image-model", Wire: "openai-images-generations"},
 		{ID: "claude-model", Wire: "anthropic-messages", Facet: "chat"},
 	}
-	got := filterChatModels(in)
+	got := mow.FilterChatModels(in)
 	want := map[string]bool{
 		"deepseek-chat":       true,
 		"gpt-5-mini":          true,

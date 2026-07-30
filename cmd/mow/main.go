@@ -380,6 +380,8 @@ func replModel(ctx context.Context, eng *mow.Engine, filter string) error {
 		fmt.Fprintf(os.Stderr, "model → %s · %s (catalog unavailable: %v)\n", eng.Model(), eng.Wire(), err)
 		return nil
 	}
+	// Chat UI: hide image/search/speech facets and non-chat wires.
+	list = mow.FilterChatModels(list)
 	if filter == "" {
 		fmt.Fprintf(os.Stderr, "models · current %s · wire %s\n", cur, wire)
 		const maxShow = 80

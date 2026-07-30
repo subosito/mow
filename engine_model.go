@@ -121,8 +121,8 @@ type ModelInfo struct {
 	Efforts       []string // catalog-advertised; empty = use static none|low|medium|high
 	DefaultEffort string
 	// Facet is a gateway capability token ("chat", "search", "image", …).
-	// Empty when the catalog omits it. ACP filters to chat (or empty) only —
-	// never by parsing ":" in the model id.
+	// Empty when the catalog omits it. Chat UIs use FilterChatModels (facet
+	// chat or empty only — never by parsing ":" in the model id).
 	Facet string
 	// From gateway catalog (0 = not published).
 	ContextWindow   int
@@ -130,6 +130,40 @@ type ModelInfo struct {
 	// USD per 1M tokens when the gateway publishes pricing (0 = unknown).
 	InputPrice  float64
 	OutputPrice float64
+}
+
+// FilterChatModels keeps catalog rows suitable for agent chat pickers
+// (mow REPL /model, mowi, ACP). Rules:
+//   - facet set → keep only empty or "chat" (gateway capability; do not parse
+//     ":" from the model id — some providers use colon in the id)
+//   - no wire metadata → keep (plain OpenAI-style catalogs are chat models)
+//   - preferred wire set → keep only known chat wires; drop images/speech/…
+func FilterChatModels(list []ModelInfo) []ModelInfo {
+	out := make([]ModelInfo, 0, len(list))
+	for _, m := range list {
+		if IsChatModel(m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// IsChatModel reports whether m is suitable for the agent chat loop.
+func IsChatModel(m ModelInfo) bool {
+	id := strings.TrimSpace(m.ID)
+	if id == "" {
+		return false
+	}
+	// Facet is authoritative when the gateway advertises it.
+	if f := strings.ToLower(strings.TrimSpace(m.Facet)); f != "" && f != "chat" {
+		return false
+	}
+	w := strings.TrimSpace(m.Wire)
+	if w == "" {
+		// Plain catalogs (OpenAI, DeepSeek, local servers, …): id only.
+		return true
+	}
+	return llm.IsKnownChatWire(w)
 }
 
 // ListModels returns available models from GET /models.

@@ -263,50 +263,9 @@ func (a *agentServer) listModels(ctx context.Context) ([]mow.ModelInfo, error) {
 	return a.eng.ListModels(lctx)
 }
 
-// filterChatModels keeps catalog rows suitable for the agent chat picker.
-//
-// Rules (portable across gateways and plain OpenAI catalogs):
-//   - facet set → keep only empty or "chat" (gateway-advertised capability;
-//     never parse ":" from the model id — some providers use colon in the id)
-//   - no wire metadata → keep (plain catalogs are chat models)
-//   - preferred wire set → keep only known chat wires; drop images/speech/…
-//
-// Wire is never shown in the UI; it is only used for SetModelWithWire.
+// filterChatModels is the ACP alias for mow.FilterChatModels (chat pickers).
 func filterChatModels(list []mow.ModelInfo) []mow.ModelInfo {
-	out := make([]mow.ModelInfo, 0, len(list))
-	for _, m := range list {
-		if isChatModel(m) {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-func isChatModel(m mow.ModelInfo) bool {
-	id := strings.TrimSpace(m.ID)
-	if id == "" {
-		return false
-	}
-	// Facet is authoritative when the gateway advertises it. Do not drop by
-	// ":" in the id — colon can be part of a legitimate model identifier.
-	if f := strings.ToLower(strings.TrimSpace(m.Facet)); f != "" && f != "chat" {
-		return false
-	}
-	w := strings.TrimSpace(m.Wire)
-	if w == "" {
-		// Plain catalogs (OpenAI, DeepSeek, local servers, …): id only.
-		return true
-	}
-	return isChatWire(w)
-}
-
-func isChatWire(w string) bool {
-	switch strings.ToLower(strings.TrimSpace(w)) {
-	case "openai-chat-completions", "openai-responses", "openai-response", "anthropic-messages":
-		return true
-	default:
-		return false
-	}
+	return mow.FilterChatModels(list)
 }
 
 // applyModelConfig sets the engine model (+ catalog wire when known).
