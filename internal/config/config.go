@@ -29,8 +29,12 @@ type File struct {
 type LLMConfig struct {
 	// Wire is the client protocol:
 	//   openai-chat-completions (default) | openai-responses | anthropic-messages
-	Wire      string            `yaml:"wire"`
-	BaseURL   string            `yaml:"base_url"`
+	Wire string `yaml:"wire"`
+	// WireExplicit is true when wire was set by yaml, MOW_WIRE, or SetWire —
+	// not merely the built-in default. Engine skips catalog wire auto-align
+	// when this is true so a pinned openai-chat-completions is not overridden.
+	WireExplicit bool `yaml:"-"`
+	BaseURL      string `yaml:"base_url"`
 	APIKey    string            `yaml:"api_key"`
 	APIKeyEnv string            `yaml:"api_key_env"`
 	Model     string            `yaml:"model"` // provider (or gateway) model id
@@ -378,6 +382,7 @@ func (f *File) Extension(name string, dst any) error {
 func mergeLLM(dst *LLMConfig, o LLMConfig) {
 	if s := strings.TrimSpace(o.Wire); s != "" {
 		dst.Wire = s
+		dst.WireExplicit = true
 	}
 	if s := strings.TrimSpace(o.BaseURL); s != "" {
 		dst.BaseURL = s
@@ -437,6 +442,7 @@ func mergeLLM(dst *LLMConfig, o LLMConfig) {
 func applyEnv(f *File) {
 	if v := firstEnv("MOW_WIRE"); v != "" {
 		f.LLM.Wire = v
+		f.LLM.WireExplicit = true
 	}
 	keyEnvs := []string{"MOW_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"}
 	baseEnvs := []string{"MOW_BASE_URL", "OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"}

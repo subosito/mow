@@ -72,10 +72,14 @@ func (e *Engine) SetModel(id string) error {
 		e.cfg.LLM.Model = id
 		e.cfg.LLM.Effort = e.client.Effort
 	}
+	// Prefer catalog wire for this model when the user did not pin wire
+	// (same as /model catalog pick). Under e.mu — do not call SetWire.
+	e.applyPreferredWireLocked()
 	return nil
 }
 
 // SetWire switches the client wire (openai-chat-completions | openai-responses | anthropic-messages).
+// Marks wire as explicit so catalog auto-align will not override it later.
 func (e *Engine) SetWire(wire string) error {
 	if e == nil {
 		return fmt.Errorf("mow: nil engine")
@@ -90,10 +94,45 @@ func (e *Engine) SetWire(wire string) error {
 		return fmt.Errorf("mow: wire switch requires live LLM client")
 	}
 	e.client.Wire = wire
+	e.wireExplicit = true
 	if e.cfg != nil {
 		e.cfg.LLM.Wire = wire
+		e.cfg.LLM.WireExplicit = true
 	}
 	return nil
+}
+
+// applyPreferredWireFromCatalog sets client wire from GET /models metadata for
+// the active model when wire was not user-pinned. Safe at any lock state.
+func (e *Engine) applyPreferredWireFromCatalog() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.applyPreferredWireLocked()
+}
+
+// applyPreferredWireLocked requires e.mu held.
+func (e *Engine) applyPreferredWireLocked() {
+	if e.wireExplicit || e.client == nil {
+		return
+	}
+	info, ok := e.client.CatalogEntry(e.client.Model)
+	if !ok {
+		return
+	}
+	w := llm.NormalizeWire(info.Wire)
+	if !llm.IsKnownChatWire(w) {
+		return
+	}
+	if e.client.Wire == w {
+		return
+	}
+	e.client.Wire = w
+	if e.cfg != nil {
+		e.cfg.LLM.Wire = w
+	}
 }
 
 // Wire returns the active client wire id.

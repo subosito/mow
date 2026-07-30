@@ -173,10 +173,10 @@ Compaction is **character-estimate**, not a real tokenizer. It keeps the system 
 | `llm.api_key` / `api_key_env` | Provider key **or** gateway key |
 | `llm.model` | Model id |
 | `llm.effort` | Reasoning intensity: `none` \| `low` \| `medium` \| `high` (optional body fields; never part of model id) |
-| `llm.wire` | `openai-chat-completions` (default) \| `openai-responses` \| `anthropic-messages` |
+| `llm.wire` | `openai-chat-completions` (default) \| `openai-responses` \| `anthropic-messages`. If unset, Engine aligns to the **catalog preferred wire** for `llm.model` after `GET /v1/models` (e.g. `claude-sonnet-4` → `anthropic-messages`). Explicit `llm.wire` / `MOW_WIRE` is never overridden |
 | `llm.headers` | Optional extra headers |
 | `llm.stream` | SSE content deltas (both wires) |
-| `llm.prompt_cache` | Provider prompt caching (default on). Anthropic: `cache_control` on system/tools/history → repeated prefixes bill ~90% cheaper. Set `false` for gateways that reject the field |
+| `llm.prompt_cache` | Provider prompt caching (default on). **Only effective on `anthropic-messages`**: mow sends `cache_control` on system / tools / last message so Anthropic bills repeated prefixes as cache reads (~90% cheaper input). On `openai-chat-completions` mow does not emit Anthropic cache breakpoints — a gateway **O2A** translator (`adapter:wire-translate-o2a`) typically shows `cache_read_tokens=0` and full input rates. Prefer native `anthropic-messages` for Claude. Set `false` only if a gateway rejects `cache_control` |
 | `llm.system_prefix` | Optional text segments prepended **before** the compiled system (each list item separate). For product identity / provider preambles. User config only — not project `.mow/config` |
 | `llm.system_prefix_models` | Case-insensitive globs limiting when `system_prefix` applies. **Empty = every model** when prefix is set. Re-evaluated each call (follows `SetModel`) |
 
@@ -192,6 +192,8 @@ When prefix matches the model (e.g. Claude family → “You are Claude Code”)
 
 | `llm.generate.*` | Side-lane model ids for generate tools |
 | `llm.understand.*` | Side-lane model ids for understand tools |
+
+**Wire vs cost (Claude / Anthropic):** `--model claude-…` without an explicit wire used to stay on `openai-chat-completions`. Gateways often accept that and translate (O2A), but **prompt cache is not applied** on that path, so large sessions (100k+ input tokens every call) cost far more than native Anthropic with cache hits. Catalog auto-align (and `/model` via `SetModelWithWire`) select `anthropic-messages` when the catalog advertises it.
 
 No provider OAuth in mow. Streaming: `OnToken` / `OnEvent` / ACP `session/update` chunks.
 

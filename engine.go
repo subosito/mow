@@ -51,6 +51,9 @@ type Engine struct {
 	// lastCtxTokens is the most recent LLM call's input tokens ≈ current context
 	// size (for a context-window fullness indicator). 0 until the first call.
 	lastCtxTokens int
+	// wireExplicit: user pinned wire (yaml/env/SetWire). When false, catalog
+	// preferred wire for the active model is applied after ListModels / SetModel.
+	wireExplicit bool
 	// steer holds host guidance injected into the running turn at the next turn
 	// boundary (Engine.Steer); drained by the loop, cleared at each run start.
 	steer []string
@@ -304,17 +307,22 @@ func New(opt Options) (*Engine, error) {
 			SystemPrefixModels: append([]string(nil), cfg.LLM.SystemPrefixModels...),
 		}
 		e.client = client
+		e.wireExplicit = cfg.LLM.WireExplicit
 		mediaClient = llm.FromClient(client)
 		if client.ExtraHeaders[llm.HeaderComponent] == "" {
 			client.ExtraHeaders[llm.HeaderComponent] = "turn.chat"
 		}
-		// Prefetch GET /v1/models so Limits() has gateway context_window/pricing
-		// without waiting for an interactive /model. Failure is non-fatal.
-		go func(c *llm.Client) {
+		// Fetch GET /v1/models for Limits() (window/pricing) and to align wire
+		// with the catalog preferred protocol for this model (e.g. --model
+		// claude-* → anthropic-messages) when the user did not pin llm.wire.
+		// Sync so the first Prompt is not still on openai-chat-completions
+		// while a gateway O2A adapter drops Anthropic prompt cache.
+		{
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_, _ = c.ListModels(ctx)
-		}(client)
+			_, _ = client.ListModels(ctx)
+			cancel()
+			e.applyPreferredWireFromCatalog()
+		}
 		e.chat = func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
 			e.onTokenMu.Lock()
 			hooks := llm.StreamHooks{OnContent: e.onToken, OnReasoning: e.onReasoning}

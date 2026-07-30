@@ -11,8 +11,12 @@
 workspace: .
 
 llm:
-  # Client wire. Default: openai-chat-completions.
-  wire: openai-chat-completions
+  # Client wire. Default: openai-chat-completions when unset.
+  # Omit wire to auto-align from GET /v1/models for the active model
+  # (e.g. claude-* → anthropic-messages so Anthropic prompt cache works).
+  # Explicit wire is never overridden by the catalog.
+  # wire: openai-chat-completions
+  # wire: anthropic-messages
   # wire: openai-responses   # POST /v1/responses (OpenAI Responses API)
   # wire: anthropic-messages
   # base_url: https://api.openai.com/v1   # or any OpenAI-compatible /v1
