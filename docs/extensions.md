@@ -200,6 +200,31 @@ Embed: `goal.Runner{Engine, Store}.RunSpec(ctx, spec)`; optional `goal.Executor`
 
 Also: `mow goal delete --id NAME`.
 
+### `ext/review` (code review + security review)
+
+Two subcommands over one read-only workflow — `mow review` (general) and
+`mow sec` (security profile). Full reference: [review.md](review.md).
+
+```bash
+mow review                                  # uncommitted work
+mow review --diff main...HEAD --format json
+mow sec ./internal/auth --fail-on high
+mow sec --format sarif --output sec.sarif   # code scanning
+```
+
+| Aspect | Behaviour |
+|--------|-----------|
+| Passes | 1 discovery → 2 verification; both `ReadOnly` + `Ephemeral` |
+| Safety | write/shell forced off regardless of config; no session |
+| Scope | `--diff` → `--staged` → `--base` → paths → dirty worktree → tree |
+| Formats | `text`, `json`, `jsonl`, `sarif` (SARIF 2.1.0) |
+| Exit | 0 clean · 1 findings at/above `--fail-on` · 2 error (`--exit-zero` for advisory CI) |
+
+Findings are validated against the resolved scope before rendering (paths
+normalized, lines clamped to real file length, out-of-scope and duplicate
+findings dropped with a reason), so a hallucinated citation cannot reach the
+report. Unverified candidates are suppressed unless `--include-unverified`.
+
 ### `ext/job`
 
 **Inline** (no schedule file — same idea as `mow goal run --goal …`):

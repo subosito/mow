@@ -1,4 +1,4 @@
-# mow documentation
+# Mow documentation
 
 **mow** is a minimal Go agentic harness: secure by default, configured with files or extended programmatically via packs. Standalone module — no other product required.
 
@@ -7,6 +7,7 @@
 - **Embedding mow in a Go program?** [architecture.md](architecture.md) for the public/internal line → [embedding.md](embedding.md) for the how-to (options, events, custom tools/providers, hooks, sessions).
 - **Operating the CLI?** [../README.md](../README.md) to run it → [harness.md](harness.md) for config, tools, sessions, and the token/policy knobs.
 - **Writing or wiring a pack?** [extensions.md](extensions.md) — core-vs-pack boundary, CLI ownership, hooks table, ACP, media, cmdhook.
+- **Running or scripting code review?** [review.md](review.md) — `mow review` / `mow sec`, the report schema, exit codes, CI.
 - **Contributing / an AI agent working here?** [../CONTRIBUTING.md](../CONTRIBUTING.md) and [../AGENTS.md](../AGENTS.md).
 
 | Doc | Audience | Contents |
@@ -16,6 +17,7 @@
 | [embedding.md](embedding.md) | Go integrators | Options, events, custom tools/providers, hooks, sessions — with code |
 | [harness.md](harness.md) | Implementers | Loop, tools, config, sessions, policy |
 | [extensions.md](extensions.md) | Integrators | `ext/` packs, CLI ownership, ACP, media, decisions |
+| [review.md](review.md) | CI + reviewers | `mow review` / `mow sec`: two-pass workflow, schema, formats, exit codes |
 
 ## Dev shell
 
@@ -35,6 +37,7 @@ devenv shell -- just build    # → bin/mow
 | Media: `generate_*` / `understand_*`, filesystem I/O | extensions |
 | Optional attribution labels: `X-Mow-*` | extensions |
 | Goals / MCP / LSP stay packs, not core | extensions |
+| General and security review share one read-only workflow | review |
 
 ## Name
 

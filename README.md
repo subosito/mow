@@ -64,6 +64,8 @@ export OPENAI_MODEL=gpt-5-mini
 ./bin/mow run -p "Reply with exactly: hi"
 ./bin/mow repl
 ./bin/mow goal run --goal "Make CI green"   # ext/goal — multi-step
+./bin/mow review                 # ext/review — advisory code review
+./bin/mow sec --format sarif     # security profile, SARIF for code scanning
 ./bin/mow job                    # interval jobs (goals/prompts)
 ./bin/mow acp                    # ext/acp — editors
 ./bin/mow rpc                    # ext/rpc — JSON-lines

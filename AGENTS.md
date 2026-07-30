@@ -44,7 +44,7 @@ Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool batches: `policy.max_
 | `mow` (root `*.go`) | Public Engine API (`engine_*.go`, `run.go`, `hooks.go`, `event.go`) |
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
 | `packcfg/` | Decode `extensions.<name>` (**not** a pack) |
-| `ext/` | Registration (`ext.go`) + packs: acp, rpc, goal, mcp, lsp, job, ops, proc, cmdhook |
+| `ext/` | Registration (`ext.go`) + packs: acp, rpc, goal, review, mcp, lsp, job, ops, proc, cmdhook |
 | `internal/` | Implementation — **not** an integrator import surface |
 | `cmd/mow/` | Thin CLI; blank-imports packs |
 | `docs/` | architecture, harness, extensions |
@@ -157,3 +157,4 @@ Also apply **Public samples (OSS)** above when the commit includes docs or fixtu
 | [docs/embedding.md](docs/embedding.md) | Embedding in Go: options, events, custom tools/providers, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config, sessions |
 | [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP/LSP |
+| [docs/review.md](docs/review.md) | `mow review` / `mow sec`: two-pass workflow, report schema, exit codes |
