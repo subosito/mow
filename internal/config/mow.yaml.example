@@ -72,7 +72,8 @@ policy:
   max_turns: 120
   bash_timeout_sec: 60
   max_read_bytes: 524288          # 512 KiB per read (default)
-  max_context_chars: 100000       # soft history compaction (default); -1 disables
+  max_context_chars: 100000       # soft history floor (default); auto-scales from context_window; -1 disables
+  compact_ratio: 0.8              # of gateway context_window when auto-scaling (1M → ~800k tok-eq history)
   max_tool_result_chars: 24000    # cap each tool result in model history (default)
   max_parallel_tools: 8           # concurrent tools per assistant batch; 1 = sequential
   # extra_roots:                  # more FS trees for read/write/edit/glob/grep

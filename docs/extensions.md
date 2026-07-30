@@ -360,7 +360,7 @@ ACP agent supports **terminal/** PTY methods when `-allow-shell` (`create` / `ou
 | LLM HTTP (openai + anthropic) + stream | Pluggable endpoint |
 | Config yaml + env + skills | Operator ergonomics |
 | AGENTS.md / CLAUDE.md load | Project instructions |
-| Soft context compaction | On by default (`max_context_chars` ~100k); tool results capped (`max_tool_result_chars` ~24k) |
+| Soft context compaction | On by default; auto-scales to `context_window × compact_ratio` (default 0.8); tool results capped (`max_tool_result_chars` ~24k) |
 | Media side-lanes when configured | `generate_*` / `understand_*` |
 
 Not core: RPC, ACP, MCP, LSP, job, goals — **packs or hosts**.
@@ -477,7 +477,7 @@ OnStop                  // after Prompt returns (success or error)
 |----------|-----|
 | `RegisterSessionStart` | Append system text for the Engine lifetime |
 | `RegisterUserPrompt` | Rewrite user text; append system for this turn |
-| `RegisterPreCompact` | Skip compaction or supply summary stub |
+| `RegisterPreCompact` | Skip compaction or supply summary stub (`MessageCount` on ext event; full `Messages` on `mow.Options.OnPreCompact`) |
 | `RegisterPreTool` | Deny, rewrite args, add context on the tool result |
 | `RegisterPostTool` | Rewrite tool result the model sees |
 | `RegisterAfterTurn` | Observe assistant text / tool-call turns |

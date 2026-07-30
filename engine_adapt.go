@@ -166,7 +166,11 @@ func adaptPostToolExt(fn ext.PostToolFunc) agent.PostToolFunc {
 
 func adaptPreCompact(fn PreCompactFunc) agent.PreCompactFunc {
 	return func(ctx context.Context, e agent.PreCompactEvent) (agent.PreCompactDecision, error) {
-		d, err := fn(ctx, PreCompactEvent{EstChars: e.EstChars, MaxChars: e.MaxChars})
+		d, err := fn(ctx, PreCompactEvent{
+			EstChars: e.EstChars,
+			MaxChars: e.MaxChars,
+			Messages: toPublicMessages(e.Messages),
+		})
 		if err != nil {
 			return agent.PreCompactDecision{}, err
 		}
@@ -176,7 +180,11 @@ func adaptPreCompact(fn PreCompactFunc) agent.PreCompactFunc {
 
 func adaptPreCompactExt(fn ext.PreCompactFunc) agent.PreCompactFunc {
 	return func(ctx context.Context, e agent.PreCompactEvent) (agent.PreCompactDecision, error) {
-		d, err := fn(ctx, ext.PreCompactEvent{EstChars: e.EstChars, MaxChars: e.MaxChars})
+		d, err := fn(ctx, ext.PreCompactEvent{
+			EstChars:     e.EstChars,
+			MaxChars:     e.MaxChars,
+			MessageCount: len(e.Messages),
+		})
 		if err != nil {
 			return agent.PreCompactDecision{}, err
 		}

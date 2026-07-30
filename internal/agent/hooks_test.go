@@ -141,6 +141,12 @@ func TestPreCompactSummary(t *testing.T) {
 		Hooks: agent.Hooks{
 			PreCompact: []agent.PreCompactFunc{
 				func(ctx context.Context, e agent.PreCompactEvent) (agent.PreCompactDecision, error) {
+					if e.EstChars <= 0 || e.MaxChars != 500 {
+						t.Errorf("event est=%d max=%d", e.EstChars, e.MaxChars)
+					}
+					if len(e.Messages) == 0 {
+						t.Error("expected Messages on PreCompactEvent for custom summary")
+					}
 					return agent.PreCompactDecision{Summary: "CUSTOM_SUMMARY"}, nil
 				},
 			},

@@ -16,15 +16,34 @@ const DefaultMaxToolResultChars = 24_000
 // from this floor instead of compacting early on 1M-token models.
 const DefaultMaxContextChars = 100_000
 
+// DefaultCompactRatio is the fraction of gateway context_window used as the
+// soft history budget when auto-scaling (1M window → ~800k tokens of history
+// at ~4 chars/token before compaction).
+const DefaultCompactRatio = 0.8
+
+// ClampCompactRatio bounds ratio for auto budget. Non-positive → default.
+func ClampCompactRatio(ratio float64) float64 {
+	if ratio <= 0 {
+		return DefaultCompactRatio
+	}
+	if ratio < 0.3 {
+		return 0.3
+	}
+	if ratio > 0.95 {
+		return 0.95
+	}
+	return ratio
+}
+
 // ContextCharsBudget converts a gateway context_window (tokens) into a soft
-// history char budget. ~4 chars/token; uses ~55% of the window so system +
-// reply + headroom remain. Returns 0 when window is unknown.
-func ContextCharsBudget(windowTokens int) int {
+// history char budget. ~4 chars/token × ratio of the window (default 0.8 so
+// system, tools, and reply keep headroom). Returns 0 when window is unknown.
+func ContextCharsBudget(windowTokens int, ratio float64) int {
 	if windowTokens <= 0 {
 		return 0
 	}
-	// 4 chars/token × 55% of window
-	b := windowTokens * 4 * 55 / 100
+	ratio = ClampCompactRatio(ratio)
+	b := int(float64(windowTokens) * 4 * ratio)
 	const floor = 80_000
 	const ceil = 3_500_000 // ~875k tokens of history — memory/safety cap
 	if b < floor {
@@ -80,7 +99,7 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 
 	// Pin user intents from the full conversation (not only dropped) so a
 	// trailing "hi" or thrash window cannot erase the real task.
-	pins := collectUserPins(rest, kept)
+	pins := collectUserPins(rest, kept, maxChars)
 
 	stub := strings.TrimSpace(summary)
 	if stub == "" {
@@ -125,8 +144,9 @@ func keepLastForBudget(maxChars int) int {
 
 // collectUserPins gathers substantive user messages to preserve across compact.
 // Skips pure noise ("hi", "ok") when longer intents exist; always keeps at least
-// the first user turn if nothing else qualifies.
-func collectUserPins(all, kept []llm.Message) []string {
+// the first user turn if nothing else qualifies. Larger budgets keep more/longer pins.
+func collectUserPins(all, kept []llm.Message, maxChars int) []string {
+	maxPins, snipLen := pinBudget(maxChars)
 	keptSet := map[string]bool{}
 	for _, m := range kept {
 		if m.Role == "user" {
@@ -144,7 +164,7 @@ func collectUserPins(all, kept []llm.Message) []string {
 			strings.Contains(m.Content, "[task anchors") {
 			continue
 		}
-		snip := compactSnippet(m.Content, 600)
+		snip := compactSnippet(m.Content, snipLen)
 		if snip == "" {
 			continue
 		}
@@ -170,7 +190,7 @@ func collectUserPins(all, kept []llm.Message) []string {
 			continue
 		}
 		pins = append(pins, snip)
-		if len(pins) >= 8 {
+		if len(pins) >= maxPins {
 			break
 		}
 	}
@@ -178,6 +198,18 @@ func collectUserPins(all, kept []llm.Message) []string {
 		pins = []string{first}
 	}
 	return pins
+}
+
+// pinBudget scales how many / how long user intents we preserve with window size.
+func pinBudget(maxChars int) (maxPins, snipLen int) {
+	switch {
+	case maxChars >= 1_500_000:
+		return 16, 1_200
+	case maxChars >= 500_000:
+		return 12, 900
+	default:
+		return 8, 600
+	}
 }
 
 func isTrivialUser(s string) bool {
@@ -204,6 +236,7 @@ func formatTaskAnchor(pins []string) string {
 }
 
 // defaultCompactStub builds a short note when no PreCompact summary is supplied.
+// It records what was dropped and which tools ran so work is not silently erased.
 func defaultCompactStub(dropped, kept []llm.Message, pins []string) string {
 	var nUser, nAsst, nTool int
 	for _, m := range dropped {
@@ -220,6 +253,13 @@ func defaultCompactStub(dropped, kept []llm.Message, pins []string) string {
 	b.WriteString("[context compacted to fit the model window]\n")
 	fmt.Fprintf(&b, "Dropped %d messages (%d user, %d assistant, %d tool); older tool bodies trimmed.\n",
 		len(dropped), nUser, nAsst, nTool)
+	if tools := toolsUsed(dropped); len(tools) > 0 {
+		show := tools
+		if len(show) > 24 {
+			show = show[:24]
+		}
+		fmt.Fprintf(&b, "Tools used in dropped span: %s.\n", strings.Join(show, ", "))
+	}
 	b.WriteString("Continue the same task using the task anchors above (if any) and the live turns below.\n")
 	b.WriteString("Do not ask the user to restate the task unless anchors and live context are empty or contradictory.\n")
 	if len(pins) == 0 {
@@ -245,6 +285,33 @@ func defaultCompactStub(dropped, kept []llm.Message, pins []string) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// toolsUsed returns distinct tool names seen in assistant tool_calls / tool msgs.
+func toolsUsed(msgs []llm.Message) []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, m := range msgs {
+		if m.Role == "assistant" {
+			for _, tc := range m.ToolCalls {
+				n := strings.TrimSpace(tc.Function.Name)
+				if n == "" || seen[n] {
+					continue
+				}
+				seen[n] = true
+				names = append(names, n)
+			}
+		}
+		if m.Role == "tool" {
+			n := strings.TrimSpace(m.Name)
+			if n == "" || seen[n] {
+				continue
+			}
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	return names
 }
 
 func shrinkAnchors(msgs []llm.Message, maxChars int) []llm.Message {

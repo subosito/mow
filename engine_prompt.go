@@ -61,18 +61,22 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	maxCtx := 0
 	maxToolRes := 0
 	maxPar := 0
+	compactRatio := agent.DefaultCompactRatio
 	if e.cfg != nil {
 		maxTurns = e.cfg.Policy.MaxTurns
 		maxCtx = e.cfg.Policy.MaxContextChars
 		maxToolRes = e.cfg.Policy.MaxToolResultChars
 		maxPar = e.cfg.Policy.MaxParallelTools
+		if e.cfg.Policy.CompactRatio > 0 {
+			compactRatio = e.cfg.Policy.CompactRatio
+		}
 	}
 	if e.opt.MaxContextChars > 0 {
 		maxCtx = e.opt.MaxContextChars
 	} else {
-		// Scale soft compaction budget from gateway context_window when using
-		// the default flat 100k — otherwise 1M-token models compact absurdly early.
-		maxCtx = resolveMaxContextChars(maxCtx, e.Limits().ContextWindow)
+		// Scale soft compaction budget from gateway context_window × ratio when
+		// still on the default floor — otherwise 1M models compact absurdly early.
+		maxCtx = resolveMaxContextChars(maxCtx, e.Limits().ContextWindow, compactRatio)
 	}
 	if e.opt.MaxToolResultChars > 0 {
 		maxToolRes = e.opt.MaxToolResultChars
@@ -331,10 +335,11 @@ func stopReasonFrom(err error) string {
 
 // resolveMaxContextChars picks the soft history budget.
 // - cfgMax 0 → compaction off
-// - cfgMax == default (100k) and window known → scale from window (1M → ~2.2M chars)
-// - cfgMax explicit other value → respect config (floor under auto not applied)
+// - cfgMax == default (100k) and window known → scale from window × ratio
+//   (default ratio 0.8 → 1M tokens ≈ 3.2M chars ≈ 800k tok-eq history)
+// - cfgMax explicit other value → respect absolute config
 // - no window → keep cfgMax
-func resolveMaxContextChars(cfgMax, windowTokens int) int {
+func resolveMaxContextChars(cfgMax, windowTokens int, ratio float64) int {
 	if cfgMax <= 0 {
 		return 0
 	}
@@ -345,7 +350,7 @@ func resolveMaxContextChars(cfgMax, windowTokens int) int {
 	if cfgMax != agent.DefaultMaxContextChars {
 		return cfgMax
 	}
-	scaled := agent.ContextCharsBudget(windowTokens)
+	scaled := agent.ContextCharsBudget(windowTokens, ratio)
 	if scaled > cfgMax {
 		return scaled
 	}

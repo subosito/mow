@@ -94,18 +94,22 @@ type SessionStartDecision struct {
 type SessionStartFunc func(ctx context.Context, e SessionStartEvent) (SessionStartDecision, error)
 
 // PreCompactEvent is emitted when soft history compaction is about to run.
+// Messages is the current history (read-only intent). Use it to draft Summary
+// (e.g. LLM distill) when the default stub is not enough; task anchors still pin user intents.
 type PreCompactEvent struct {
 	EstChars int
 	MaxChars int
+	Messages []Message
 }
 
 // PreCompactDecision may skip compaction or supply the stub summary text.
+// Summary replaces the default compact note (task anchors still applied).
 type PreCompactDecision struct {
 	Skip    bool
 	Summary string
 }
 
-// PreCompactFunc runs before Compact when MaxContextChars is set.
+// PreCompactFunc runs before Compact when MaxContextChars is set and history is over budget.
 type PreCompactFunc func(ctx context.Context, e PreCompactEvent) (PreCompactDecision, error)
 
 // AfterTurnEvent is emitted after each LLM assistant message is appended.

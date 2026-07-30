@@ -103,8 +103,15 @@ type PolicyConfig struct {
 	BashTimeoutSec int `yaml:"bash_timeout_sec"`
 	MaxReadBytes   int `yaml:"max_read_bytes"`
 	// MaxContextChars soft-limits history before each LLM call (char estimate, not tokens).
-	// Default ~100k. Set to -1 to disable compaction.
+	// Default ~100k floor; Engine auto-scales from gateway context_window × CompactRatio
+	// when still on the built-in default. Set to -1 to disable compaction. An explicit
+	// positive value is an absolute budget (ignores CompactRatio auto-scale).
 	MaxContextChars int `yaml:"max_context_chars"`
+	// CompactRatio is the fraction of gateway context_window used as soft history
+	// budget when auto-scaling (default 0.8 → 1M tokens ≈ 800k tok-eq history).
+	// Clamped to [0.3, 0.95]. 0 / omit → default. Ignored when MaxContextChars is
+	// an explicit non-default absolute.
+	CompactRatio float64 `yaml:"compact_ratio"`
 	// MaxToolResultChars caps each tool result stored in history (default 24k).
 	// Protects the model from huge read/bash dumps.
 	MaxToolResultChars int `yaml:"max_tool_result_chars"`
@@ -181,6 +188,7 @@ func defaults() *File {
 			BashTimeoutSec:     60,
 			MaxReadBytes:       512 << 10, // 512 KiB — enough for code files; loop also caps tool results
 			MaxContextChars:    100_000,   // default floor; Engine scales up from gateway context_window
+			CompactRatio:       0.8,       // of context_window when auto-scaling (1M → ~800k tok-eq)
 			MaxToolResultChars: 24_000,    // ~6k tokens max per tool result in history
 			MaxParallelTools:   8,         // concurrent tools per assistant batch
 		},
@@ -304,6 +312,9 @@ func mergeOverlay(dst *File, overlay *File) {
 	// MaxContextChars: positive sets budget; -1 disables (normalize → 0).
 	if overlay.Policy.MaxContextChars != 0 {
 		dst.Policy.MaxContextChars = overlay.Policy.MaxContextChars
+	}
+	if overlay.Policy.CompactRatio > 0 {
+		dst.Policy.CompactRatio = overlay.Policy.CompactRatio
 	}
 	if overlay.Policy.MaxToolResultChars > 0 {
 		dst.Policy.MaxToolResultChars = overlay.Policy.MaxToolResultChars
@@ -503,6 +514,14 @@ func (f *File) normalize() error {
 	// -1 in yaml disables compaction; normalize to 0 for the agent (off).
 	if f.Policy.MaxContextChars < 0 {
 		f.Policy.MaxContextChars = 0
+	}
+	// Compact ratio: default 0.8; clamp to a safe band for headroom.
+	if f.Policy.CompactRatio <= 0 {
+		f.Policy.CompactRatio = 0.8
+	} else if f.Policy.CompactRatio < 0.3 {
+		f.Policy.CompactRatio = 0.3
+	} else if f.Policy.CompactRatio > 0.95 {
+		f.Policy.CompactRatio = 0.95
 	}
 	if f.Policy.MaxToolResultChars <= 0 {
 		f.Policy.MaxToolResultChars = 24_000

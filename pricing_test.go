@@ -12,17 +12,22 @@ import (
 )
 
 func TestResolveMaxContextChars(t *testing.T) {
-	if got := resolveMaxContextChars(0, 1_000_000); got != 0 {
+	if got := resolveMaxContextChars(0, 1_000_000, 0.8); got != 0 {
 		t.Fatalf("disabled → %d", got)
 	}
-	got := resolveMaxContextChars(agent.DefaultMaxContextChars, 1_000_000)
-	if got <= agent.DefaultMaxContextChars {
-		t.Fatalf("1M window should raise budget, got %d", got)
+	got := resolveMaxContextChars(agent.DefaultMaxContextChars, 1_000_000, 0.8)
+	// 1M × 4 × 0.8 = 3.2M chars
+	if got != 3_200_000 {
+		t.Fatalf("1M @0.8 → %d want 3200000", got)
 	}
-	if got := resolveMaxContextChars(200_000, 1_000_000); got != 200_000 {
+	got55 := resolveMaxContextChars(agent.DefaultMaxContextChars, 1_000_000, 0.55)
+	if got55 != 2_200_000 {
+		t.Fatalf("1M @0.55 → %d", got55)
+	}
+	if got := resolveMaxContextChars(200_000, 1_000_000, 0.8); got != 200_000 {
 		t.Fatalf("explicit cfg → %d", got)
 	}
-	if got := resolveMaxContextChars(agent.DefaultMaxContextChars, 0); got != agent.DefaultMaxContextChars {
+	if got := resolveMaxContextChars(agent.DefaultMaxContextChars, 0, 0.8); got != agent.DefaultMaxContextChars {
 		t.Fatalf("no window → %d", got)
 	}
 }

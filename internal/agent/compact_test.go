@@ -183,19 +183,60 @@ func TestCompactStubPreservesTask(t *testing.T) {
 }
 
 func TestContextCharsBudgetScalesWithWindow(t *testing.T) {
-	if got := ContextCharsBudget(0); got != 0 {
+	if got := ContextCharsBudget(0, 0); got != 0 {
 		t.Fatalf("unknown window → %d", got)
 	}
-	// 1M-token model must not stay at the old 100k-char flat default.
-	got := ContextCharsBudget(1_000_000)
-	if got < 1_500_000 {
-		t.Fatalf("1M window budget too small: %d", got)
+	// Default 0.8 ratio: 1M × 4 × 0.8 = 3.2M chars (~800k tok-eq).
+	got := ContextCharsBudget(1_000_000, 0)
+	if got != 3_200_000 {
+		t.Fatalf("1M @0.8 default: got %d want 3200000", got)
 	}
-	if got > 3_500_000 {
-		t.Fatalf("1M window budget over ceil: %d", got)
+	// Explicit lower ratio.
+	if got := ContextCharsBudget(1_000_000, 0.55); got != 2_200_000 {
+		t.Fatalf("1M @0.55: got %d", got)
 	}
 	// Smaller window still usable.
-	if got := ContextCharsBudget(128_000); got < 80_000 {
+	if got := ContextCharsBudget(128_000, DefaultCompactRatio); got < 80_000 {
 		t.Fatalf("128k budget %d", got)
+	}
+	if ClampCompactRatio(0) != DefaultCompactRatio {
+		t.Fatal("zero ratio → default")
+	}
+	if ClampCompactRatio(0.1) != 0.3 || ClampCompactRatio(0.99) != 0.95 {
+		t.Fatal("clamp bounds")
+	}
+}
+
+func TestCompactPreservesTaskAndTools(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "Implement the payment refund API with idempotency keys"},
+		{Role: "assistant", Content: "I'll explore", ToolCalls: []llm.ToolCall{{
+			ID: "1", Type: "function",
+			Function: llm.FunctionCall{Name: "grep", Arguments: `{"pattern":"refund"}`},
+		}}},
+		{Role: "tool", ToolCallID: "1", Name: "grep", Content: strings.Repeat("hit\n", 500)},
+		{Role: "assistant", Content: "found handlers"},
+	}
+	// Fill with noise so compact drops the middle.
+	for i := 0; i < 30; i++ {
+		msgs = append(msgs, llm.Message{Role: "user", Content: "ok continue"})
+		msgs = append(msgs, llm.Message{Role: "assistant", Content: strings.Repeat("x", 200)})
+	}
+	msgs = append(msgs, llm.Message{Role: "user", Content: "ship it"})
+
+	out := CompactOpts(msgs, 4_000, "", 2_000)
+	var joined strings.Builder
+	for _, m := range out {
+		joined.WriteString(m.Content)
+		joined.WriteByte('\n')
+	}
+	s := joined.String()
+	if !strings.Contains(s, "payment refund") && !strings.Contains(s, "idempotency") {
+		t.Fatalf("task pin lost:\n%s", s)
+	}
+	// Default stub should mention tools from dropped span when present.
+	if !strings.Contains(s, "grep") && !strings.Contains(s, "task anchors") {
+		t.Fatalf("expected tool or anchor signal:\n%s", s)
 	}
 }

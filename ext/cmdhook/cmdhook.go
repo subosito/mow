@@ -393,6 +393,9 @@ func (b *bridge) register() {
 		ext.RegisterPreCompact(func(ctx context.Context, e ext.PreCompactEvent) (ext.PreCompactDecision, error) {
 			payload := b.basePayload(ctx, "PreCompact")
 			payload["trigger"] = "auto"
+			payload["est_chars"] = e.EstChars
+			payload["max_chars"] = e.MaxChars
+			payload["message_count"] = e.MessageCount
 			_ = b.run(ctx, "PreCompact", "", payload)
 			return ext.PreCompactDecision{}, nil
 		})

@@ -95,18 +95,22 @@ type SessionStartDecision struct {
 type SessionStartFunc func(ctx context.Context, e SessionStartEvent) (SessionStartDecision, error)
 
 // PreCompactEvent is emitted when soft history compaction is about to run.
+// MessageCount is len(history). Full messages are available on mow.Options.OnPreCompact
+// (avoids duplicating Message types here and import cycles).
 type PreCompactEvent struct {
-	EstChars int
-	MaxChars int
+	EstChars     int
+	MaxChars     int
+	MessageCount int
 }
 
 // PreCompactDecision may skip compaction or supply the stub summary text.
+// Summary replaces the default compact note (task anchors still applied).
 type PreCompactDecision struct {
 	Skip    bool
 	Summary string
 }
 
-// PreCompactFunc runs before Compact when MaxContextChars is set.
+// PreCompactFunc runs before Compact when MaxContextChars is set and history is over budget.
 type PreCompactFunc func(ctx context.Context, e PreCompactEvent) (PreCompactDecision, error)
 
 // AfterTurnEvent is emitted after each LLM assistant message is appended.

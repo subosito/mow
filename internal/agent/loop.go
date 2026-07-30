@@ -474,7 +474,11 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options) ([]l
 		if h == nil {
 			continue
 		}
-		d, err := h(ctx, PreCompactEvent{EstChars: est, MaxChars: opt.MaxContextChars})
+		d, err := h(ctx, PreCompactEvent{
+			EstChars: est,
+			MaxChars: opt.MaxContextChars,
+			Messages: messages,
+		})
 		if err != nil {
 			return nil, err
 		}

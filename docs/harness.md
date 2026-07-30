@@ -149,14 +149,17 @@ Lifecycle slog (`mow run/tool start|end`) is **Debug** by default. Stock CLI pri
 | Knob | Default | Effect |
 |------|---------|--------|
 | `policy.max_turns` | `120` | Optional budget: LLM round-trips per Prompt (a turn may batch up to 8 tools). Default 120 for casual use. `0` / CLI `--max-turns 0` / yaml `-1` = **no turn limit** (hours/days OK; stop with Ctrl+C). Only enforced when > 0 — no hidden safety cap on unlimited |
-| `policy.max_context_chars` | `100000` | Soft history budget (chars). Default auto-scales from `GET /v1/models` `context_window` (1M-token models no longer compact at a flat 100k). Set `-1` to disable. Compaction pins user task anchors so the goal is not lost |
+| `policy.max_context_chars` | `100000` | Soft history budget (chars). When still on this default, auto-scales from `GET /v1/models` `context_window` × `compact_ratio`. Explicit positive value = absolute budget. Set `-1` to disable. Compaction pins user task anchors + tools used so the goal is not lost |
+| `policy.compact_ratio` | `0.8` | Fraction of gateway `context_window` used as history budget when auto-scaling (1M → ~800k tok-eq ≈ 3.2M chars). Clamped to 0.3–0.95. Ignored when `max_context_chars` is an explicit non-default absolute |
 | `llm.context_window` / `input_price` / `output_price` | (optional) | Override metering; otherwise `Engine.Limits()` uses `GET /v1/models` fields (`context_window`, `pricing.input_per_mtok` / `output_per_mtok`) — no client-side price table |
 | `policy.max_tool_result_chars` | `24000` | Cap each tool result stored for the model (~6k tokens) |
 | `policy.max_read_bytes` | `512KiB` | Cap `read` tool raw file size |
 | `policy.max_parallel_tools` | `8` | Concurrent tool Exec per assistant batch; `1` = sequential |
 | Loop truncate | always | Oversized tools trimmed even under context budget |
 
-Compaction is **character-estimate**, not a real tokenizer. It keeps the system message + recent turns (aligned on a user boundary), stubs the middle, and shrinks older tool bodies first. Use `RegisterPostTool` for smarter summarization when needed.
+Compaction is **character-estimate**, not a real tokenizer. It keeps the system message + **task anchors** (substantive user intents) + recent turns (aligned on a user boundary), stubs the middle (including which tools ran in the dropped span), and shrinks older tool bodies first.
+
+**PreCompact hooks** (`RegisterPreCompact` / `Options.OnPreCompact`) already run when history exceeds the budget: skip compaction, or supply a better `Summary` (event includes `Messages` on the public API). Use that for LLM distill if the default stub is not enough; anchors still pin user intents either way.
 
 **Hooks concurrency:** when `max_parallel_tools > 1`, PreTool/PostTool may run on multiple tools at once. Keep hooks non-blocking and concurrency-safe (the built-in event emitter is).
 
