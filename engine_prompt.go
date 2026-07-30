@@ -76,7 +76,8 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	} else {
 		// Scale soft compaction budget from gateway context_window × ratio when
 		// still on the default floor — otherwise 1M models compact absurdly early.
-		maxCtx = resolveMaxContextChars(maxCtx, e.Limits().ContextWindow, compactRatio)
+		// Use limitsLocked: e.mu is held; Limits() would re-lock and deadlock.
+		maxCtx = resolveMaxContextChars(maxCtx, e.limitsLocked().ContextWindow, compactRatio)
 	}
 	if e.opt.MaxToolResultChars > 0 {
 		maxToolRes = e.opt.MaxToolResultChars

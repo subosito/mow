@@ -11,6 +11,34 @@ import (
 	"github.com/subosito/mow/internal/agent"
 )
 
+// Prompt must not deadlock when scaling max_context_chars from Limits while
+// holding e.mu (regression: Limits re-locked mu under PromptWith).
+func TestPromptNoDeadlockOnLimits(t *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		eng, err := New(Options{
+			NoSession: true,
+			Chat: func(ctx context.Context, messages []Message, tools []ToolSpec) (Message, error) {
+				return Message{Role: "assistant", Content: "ok"}, nil
+			},
+		})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer eng.Close()
+		if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+			t.Error(err)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Prompt deadlocked (likely Limits under e.mu)")
+	}
+}
+
 func TestResolveMaxContextChars(t *testing.T) {
 	if got := resolveMaxContextChars(0, 1_000_000, 0.8); got != 0 {
 		t.Fatalf("disabled → %d", got)

@@ -28,6 +28,13 @@ func (e *Engine) Limits() ModelLimits {
 		return ModelLimits{}
 	}
 	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.limitsLocked()
+}
+
+// limitsLocked is Limits while e.mu is already held. CatalogEntry is lock-free
+// (map read on the live client); do not call Limits() under e.mu — deadlock.
+func (e *Engine) limitsLocked() ModelLimits {
 	model := ""
 	var client *llm.Client
 	if e.client != nil {
@@ -41,7 +48,6 @@ func (e *Engine) Limits() ModelLimits {
 	if e.cfg != nil {
 		cfgCW, cfgIP, cfgOP = e.cfg.LLM.ContextWindow, e.cfg.LLM.InputPrice, e.cfg.LLM.OutputPrice
 	}
-	e.mu.Unlock()
 
 	var l ModelLimits
 	if client != nil {
