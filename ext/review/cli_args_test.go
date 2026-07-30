@@ -15,7 +15,6 @@ func newArgFlagSet() *flag.FlagSet {
 	fs.SetOutput(new(strings.Builder))
 	var rf CLIFlags
 	rf.Bind(fs)
-	rf.BindProfile(fs)
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
 	return fs
@@ -64,7 +63,6 @@ func TestParseArgsAppliesTrailingFlags(t *testing.T) {
 	fs.SetOutput(new(strings.Builder))
 	var rf CLIFlags
 	rf.Bind(fs)
-	rf.BindProfile(fs)
 
 	paths, err := parseArgs(fs, []string{"./internal", "--no-verify", "--format", "sarif", "--min-severity=high"})
 	if err != nil {

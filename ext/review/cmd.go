@@ -1,5 +1,6 @@
 // Package review also provides the `mow review` and `mow sec` subcommands.
-// Both run the same workflow; only the profile and defaults differ.
+// Both run the same workflow. Profile (general vs security) is an internal
+// implementation detail: the public surface is the two commands, not a flag.
 package review
 
 import (
@@ -62,8 +63,8 @@ func fail(cmd string, err error) int {
 	return ExitError
 }
 
-// runCommand is the shared entry point. cmd is "review" or "sec"; the only
-// difference is the default profile and whether --profile is offered.
+// runCommand is the shared entry point. cmd is "review" or "sec"; that alone
+// selects the internal profile (general vs security).
 func runCommand(cmd string, args []string) int {
 	if wantsHelp(args) {
 		printUsage(cmd)
@@ -74,10 +75,11 @@ func runCommand(cmd string, args []string) int {
 
 	var rf CLIFlags
 	rf.Bind(fs)
-	if cmd == "review" {
-		rf.BindProfile(fs)
-	} else {
+	// Profile is not a user flag: the command name is the product surface.
+	if cmd == "sec" {
 		rf.Profile = "security"
+	} else {
+		rf.Profile = "general"
 	}
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)

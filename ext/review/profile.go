@@ -1,8 +1,9 @@
 package review
 
-// Profile is a review persona: taxonomy, defaults, and (later) prompt text.
-// Profiles are registered here so both the CLI and library callers resolve the
-// same names; hosts may register their own.
+// Profile is an internal review persona: taxonomy, defaults, and prompt text.
+// Users pick a command (`mow review` / `mow sec`), not a profile flag. Profile
+// still appears in report JSON/SARIF as provenance so machines can tell the
+// two products apart. Library callers pass *Profile on Request.
 type Profile struct {
 	// Name is the wire value written to report.profile ("general", "security").
 	Name string

@@ -57,7 +57,6 @@ CI:
 
 Other:
 
-  --profile general|security   security is equivalent to 'mow sec'
   --no-verify              skip the verification pass (faster, noisier)
   [engine flags]           --model --base-url --workspace --config …
 
@@ -72,7 +71,7 @@ Examples:
 The review runs read-only: write and shell tools are disabled regardless of
 config, so it can never modify the code it is reviewing.
 
-Security review: mow sec
+For an adversarial security read of the same scope, use: mow sec
 `)
 }
 
@@ -88,8 +87,9 @@ Usage:
 
   mow sec [paths...] [flags]
 
-Equivalent to 'mow review --profile security' with stricter defaults:
-reports from medium severity up and applies the security taxonomy and playbook.
+Same scope engine and two-pass workflow as mow review, with an adversarial
+security playbook: medium+ findings by default, security taxonomy (authn/authz,
+injection, secrets, crypto, …), and extra fields (CWE, exploitability, …).
 
 Scope (mutually exclusive; default reviews uncommitted changes, else the tree):
 

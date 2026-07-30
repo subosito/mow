@@ -618,9 +618,6 @@ func TestUsageDocumentsRealFlags(t *testing.T) {
 		fs := flag.NewFlagSet("mow "+cmd, flag.ContinueOnError)
 		var rf CLIFlags
 		rf.Bind(fs)
-		if cmd == "review" {
-			rf.BindProfile(fs)
-		}
 		var ef cliutil.EngineFlags
 		ef.Bind(fs)
 
@@ -636,13 +633,12 @@ func TestUsageDocumentsRealFlags(t *testing.T) {
 				t.Errorf("%s help documents --%s but it is not bound", cmd, name)
 			}
 		}
-		// --profile is review-only: sec may mention the equivalent review
-		// invocation in prose, but must not list --profile as its own flag.
-		if cmd == "sec" && strings.Contains(help, "\n  --profile") {
-			t.Error("sec help must not offer --profile as a flag (it is pinned)")
+		// Profile is internal: neither command documents or binds --profile.
+		if strings.Contains(help, "--profile") {
+			t.Errorf("%s help must not document --profile (use mow review / mow sec)", cmd)
 		}
-		if cmd == "review" && !strings.Contains(help, "--profile") {
-			t.Error("review help must document --profile")
+		if fs.Lookup("profile") != nil {
+			t.Errorf("%s must not bind --profile", cmd)
 		}
 		// Exit codes are the CI contract; they must be documented.
 		if !strings.Contains(help, "Exit codes") {

@@ -19,10 +19,11 @@ func parseFlags(t *testing.T, cmd string, args ...string) (CLIFlags, []string, e
 	fs.SetOutput(new(strings.Builder))
 	var rf CLIFlags
 	rf.Bind(fs)
-	if cmd == "review" {
-		rf.BindProfile(fs)
-	} else {
+	// Profile is pinned by command name (not a public flag).
+	if cmd == "sec" {
 		rf.Profile = "security"
+	} else {
+		rf.Profile = "general"
 	}
 	err := fs.Parse(args)
 	return rf, fs.Args(), err
@@ -41,8 +42,7 @@ func resolveFlags(t *testing.T, cmd string, args ...string) (Request, Format, Ex
 	return req, format, policy
 }
 
-// `mow sec` must be the security profile with its stricter default floor even
-// though it never binds --profile.
+// `mow sec` must use the internal security profile (stricter default floor).
 func TestSecPinsSecurityProfile(t *testing.T) {
 	req, format, policy := resolveFlags(t, "sec")
 	if req.Profile.Name != "security" {
@@ -59,14 +59,13 @@ func TestSecPinsSecurityProfile(t *testing.T) {
 	}
 }
 
-// --profile is a review-only flag; `mow sec --profile general` must not parse,
-// otherwise "sec" could silently run a non-security review.
-func TestSecRejectsProfileFlag(t *testing.T) {
+// --profile is not a public flag on either command (profile is internal).
+func TestCommandsRejectProfileFlag(t *testing.T) {
 	if _, _, err := parseFlags(t, "sec", "--profile", "general"); err == nil {
 		t.Fatal("mow sec --profile should be rejected")
 	}
-	if _, _, err := parseFlags(t, "review", "--profile", "security"); err != nil {
-		t.Fatalf("mow review --profile: %v", err)
+	if _, _, err := parseFlags(t, "review", "--profile", "security"); err == nil {
+		t.Fatal("mow review --profile should be rejected")
 	}
 }
 
@@ -83,7 +82,6 @@ func TestResolveRejectsBadValues(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"profile", []string{"--profile", "nope"}, "unknown profile"},
 		{"format", []string{"--format", "yaml"}, "unknown format"},
 		{"budget", []string{"--budget", "huge"}, "unknown budget"},
 		{"min-severity", []string{"--min-severity", "spicy"}, "unknown --min-severity"},

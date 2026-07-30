@@ -202,8 +202,8 @@ Also: `mow goal delete --id NAME`.
 
 ### `ext/review` (code review + security review)
 
-Two subcommands over one read-only workflow — `mow review` (general) and
-`mow sec` (security profile). Full reference: [review.md](review.md).
+Two subcommands over one read-only workflow — `mow review` (code review) and
+`mow sec` (security review). Full reference: [review.md](review.md).
 
 ```bash
 mow review                                  # uncommitted work

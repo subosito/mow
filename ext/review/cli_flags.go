@@ -8,11 +8,15 @@ import (
 
 // CLIFlags are the user-facing flags shared by `mow review` and `mow sec`.
 // Kept in the pack (not cliutil) because they are review-specific.
+//
+// Profile is set by the command entry (review → general, sec → security), not
+// by a public flag. Library callers may set it before Resolve; unknown names
+// still fail validation.
 type CLIFlags struct {
 	Diff        string
 	Staged      bool
 	Base        string
-	Profile     string
+	Profile     string // internal: "general" | "security" (not a CLI flag)
 	Format      string
 	Output      string
 	MinSeverity string
@@ -48,11 +52,6 @@ func (f *CLIFlags) Bind(fs *flag.FlagSet) {
 	fs.BoolVar(&f.Quiet, "quiet", false, "suppress progress output on stderr")
 }
 
-// BindProfile adds --profile (only `mow review` exposes it; `mow sec` pins it).
-func (f *CLIFlags) BindProfile(fs *flag.FlagSet) {
-	fs.StringVar(&f.Profile, "profile", "general", "review profile: "+strings.Join(ProfileNames(), "|"))
-}
-
 // repeatable is an append-on-Set string slice flag.
 type repeatable []string
 
@@ -75,10 +74,15 @@ func (r *repeatable) Set(v string) error {
 // command surface fails fast with a clear message instead of mid-review.
 func (f *CLIFlags) Resolve(workspace string, paths []string) (Request, Format, ExitPolicy, error) {
 	var req Request
-	prof, ok := LookupProfile(strings.TrimSpace(f.Profile))
+	// Empty → general (mow review). Callers that pin sec set Profile first.
+	name := strings.TrimSpace(f.Profile)
+	if name == "" {
+		name = "general"
+	}
+	prof, ok := LookupProfile(name)
 	if !ok {
-		return req, "", ExitPolicy{}, fmt.Errorf("unknown profile %q (want %s)",
-			f.Profile, strings.Join(ProfileNames(), ", "))
+		return req, "", ExitPolicy{}, fmt.Errorf("unknown profile %q (internal: want %s)",
+			name, strings.Join(ProfileNames(), ", "))
 	}
 	format, err := ParseFormat(f.Format)
 	if err != nil {

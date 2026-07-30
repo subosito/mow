@@ -3,8 +3,9 @@
 Two AI-assisted review commands over one read-only workflow. `mow review` looks
 for correctness and maintainability problems; `mow sec` reads the same code
 adversarially for security problems. They share a schema, a scope resolver, a
-two-pass verification workflow, and a set of renderers — only the **profile**
-differs.
+two-pass verification workflow, and a set of renderers. Specialization is
+internal (persona, taxonomy, defaults) — the public surface is the two
+commands, not a profile flag.
 
 Both are **advisory**. They are not a scanner, not a pentest, and not proof
 that the code is correct or secure. Static analyzers (Semgrep, CodeQL, gosec,
@@ -152,10 +153,10 @@ the report is the artifact, not the conversation.
 
 ## Design notes
 
-- **Profiles, not two implementations.** `mow sec` is `--profile security` with
-  a stricter default floor (medium vs low), the security taxonomy, extra
-  finding fields, and adversarial verification questions (reachability,
-  attacker control, upstream validation, framework protection).
+- **Two commands, one implementation.** Internally a *profile* selects persona,
+  taxonomy, severity floors, and extras; users only run `mow review` or
+  `mow sec`. Report JSON still includes `"profile"` for machine provenance
+  (SARIF rule ids are namespaced the same way).
 - **Validation over prompting.** Anything that can be checked mechanically —
   paths, lines, scope, duplicates, ordering, ids — is checked in code, so the
   prompt only has to carry judgment.
