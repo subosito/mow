@@ -19,14 +19,16 @@ func parseFlags(t *testing.T, cmd string, args ...string) (CLIFlags, []string, e
 	fs.SetOutput(new(strings.Builder))
 	var rf CLIFlags
 	rf.Bind(fs)
-	// Profile is pinned by command name (not a public flag).
-	if cmd == "sec" {
-		rf.Profile = "security"
-	} else {
-		rf.Profile = "general"
-	}
 	err := fs.Parse(args)
 	return rf, fs.Args(), err
+}
+
+// profileFor mirrors runCommand's command→persona mapping.
+func profileFor(cmd string) *Profile {
+	if cmd == "sec" {
+		return SecurityProfile()
+	}
+	return GeneralProfile()
 }
 
 func resolveFlags(t *testing.T, cmd string, args ...string) (Request, Format, ExitPolicy) {
@@ -35,7 +37,7 @@ func resolveFlags(t *testing.T, cmd string, args ...string) (Request, Format, Ex
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	req, format, policy, err := rf.Resolve("/ws", paths)
+	req, format, policy, err := rf.Resolve(profileFor(cmd), "/ws", paths)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -59,13 +61,56 @@ func TestSecPinsSecurityProfile(t *testing.T) {
 	}
 }
 
-// --profile is not a public flag on either command (profile is internal).
+// --profile is not a public flag on either command (profile is internal), and
+// the persona comes from the command name alone.
 func TestCommandsRejectProfileFlag(t *testing.T) {
 	if _, _, err := parseFlags(t, "sec", "--profile", "general"); err == nil {
 		t.Fatal("mow sec --profile should be rejected")
 	}
 	if _, _, err := parseFlags(t, "review", "--profile", "security"); err == nil {
 		t.Fatal("mow review --profile should be rejected")
+	}
+	// There is no flag-struct field that could disagree with the command, so
+	// identical flags must still yield different personas.
+	rf, paths, err := parseFlags(t, "review")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	gen, _, _, err := rf.Resolve(profileFor("review"), "/ws", paths)
+	if err != nil {
+		t.Fatalf("resolve review: %v", err)
+	}
+	sec, _, _, err := rf.Resolve(profileFor("sec"), "/ws", paths)
+	if err != nil {
+		t.Fatalf("resolve sec: %v", err)
+	}
+	if gen.Profile.Name != "general" || sec.Profile.Name != "security" {
+		t.Fatalf("persona must follow the command: got %q and %q", gen.Profile.Name, sec.Profile.Name)
+	}
+}
+
+// An unregistered command must fail loudly rather than silently inheriting the
+// general review: a future "mow audit" that forgets its persona would
+// otherwise run a plain code review under a security-sounding name.
+func TestRunCommandRejectsUnknownCommand(t *testing.T) {
+	if got := runCommand("audit", []string{"--quiet"}); got != ExitError {
+		t.Fatalf("unknown command exit = %d, want %d", got, ExitError)
+	}
+}
+
+// A nil profile is the general review, so a library caller cannot accidentally
+// produce a report with no persona at all.
+func TestResolveNilProfileDefaultsToGeneral(t *testing.T) {
+	rf, paths, err := parseFlags(t, "review")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	req, _, _, err := rf.Resolve(nil, "/ws", paths)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if req.Profile == nil || req.Profile.Name != "general" {
+		t.Fatalf("nil profile should default to general, got %+v", req.Profile)
 	}
 }
 
@@ -96,7 +141,7 @@ func TestResolveRejectsBadValues(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			_, _, _, err = rf.Resolve("/ws", paths)
+			_, _, _, err = rf.Resolve(profileFor("review"), "/ws", paths)
 			if err == nil {
 				t.Fatalf("expected error for %v", tc.args)
 			}
@@ -114,7 +159,7 @@ func TestResolveRejectsPathsWithSelector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if _, _, _, err := rf.Resolve("/ws", []string{"./internal"}); err == nil {
+	if _, _, _, err := rf.Resolve(profileFor("review"), "/ws", []string{"./internal"}); err == nil {
 		t.Fatal("paths + --staged should be rejected")
 	}
 }

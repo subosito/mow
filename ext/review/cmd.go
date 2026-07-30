@@ -66,6 +66,19 @@ func fail(cmd string, err error) int {
 // runCommand is the shared entry point. cmd is "review" or "sec"; that alone
 // selects the internal profile (general vs security).
 func runCommand(cmd string, args []string) int {
+	// The command name is the product surface, so map it to a persona
+	// explicitly: a future subcommand that forgets to register one must fail
+	// loudly rather than silently inherit the general review.
+	var prof *Profile
+	switch cmd {
+	case "review":
+		prof = GeneralProfile()
+	case "sec":
+		prof = SecurityProfile()
+	default:
+		fmt.Fprintf(os.Stderr, "mow %s: no review profile registered for this command\n", cmd)
+		return ExitError
+	}
 	if wantsHelp(args) {
 		printUsage(cmd)
 		return ExitClean
@@ -75,12 +88,6 @@ func runCommand(cmd string, args []string) int {
 
 	var rf CLIFlags
 	rf.Bind(fs)
-	// Profile is not a user flag: the command name is the product surface.
-	if cmd == "sec" {
-		rf.Profile = "security"
-	} else {
-		rf.Profile = "general"
-	}
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
 	paths, err := parseArgs(fs, args)
@@ -97,7 +104,7 @@ func runCommand(cmd string, args []string) int {
 	if err != nil {
 		return fail(cmd, err)
 	}
-	req, format, policy, err := rf.Resolve(workspace, paths)
+	req, format, policy, err := rf.Resolve(prof, workspace, paths)
 	if err != nil {
 		return fail(cmd, err)
 	}

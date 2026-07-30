@@ -9,14 +9,13 @@ import (
 // CLIFlags are the user-facing flags shared by `mow review` and `mow sec`.
 // Kept in the pack (not cliutil) because they are review-specific.
 //
-// Profile is set by the command entry (review → general, sec → security), not
-// by a public flag. Library callers may set it before Resolve; unknown names
-// still fail validation.
+// There is deliberately no profile field: the persona is chosen by the command
+// entry point and passed to Resolve, so a flag struct can never disagree with
+// the command the user actually typed.
 type CLIFlags struct {
 	Diff        string
 	Staged      bool
 	Base        string
-	Profile     string // internal: "general" | "security" (not a CLI flag)
 	Format      string
 	Output      string
 	MinSeverity string
@@ -72,17 +71,13 @@ func (r *repeatable) Set(v string) error {
 // Resolve turns parsed flags plus positional paths into a Request, an output
 // Format, and an ExitPolicy. All user-facing validation happens here so the
 // command surface fails fast with a clear message instead of mid-review.
-func (f *CLIFlags) Resolve(workspace string, paths []string) (Request, Format, ExitPolicy, error) {
+//
+// prof is the internal persona selected by the command entry point; a nil
+// profile defaults to general.
+func (f *CLIFlags) Resolve(prof *Profile, workspace string, paths []string) (Request, Format, ExitPolicy, error) {
 	var req Request
-	// Empty → general (mow review). Callers that pin sec set Profile first.
-	name := strings.TrimSpace(f.Profile)
-	if name == "" {
-		name = "general"
-	}
-	prof, ok := LookupProfile(name)
-	if !ok {
-		return req, "", ExitPolicy{}, fmt.Errorf("unknown profile %q (internal: want %s)",
-			name, strings.Join(ProfileNames(), ", "))
+	if prof == nil {
+		prof = GeneralProfile()
 	}
 	format, err := ParseFormat(f.Format)
 	if err != nil {
