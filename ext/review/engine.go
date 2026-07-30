@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -30,14 +31,23 @@ func (r *engineReviewer) Ask(ctx context.Context, system, prompt string) (string
 		ReadOnly:     true,
 		Ephemeral:    true,
 	})
+	// Turn exhaustion arrives as an error, and it is the single most likely
+	// way a review fails on a real repo: the pass spent its budget exploring
+	// and never emitted its JSON. Say so in the user's terms — the generic
+	// "max turns exceeded" points at --max-turns, but the review surface is
+	// --budget, and the fix is usually a narrower scope.
+	if errors.Is(err, mow.ErrAgentMaxTurns) {
+		return "", fmt.Errorf("the review pass ran out of turns before reporting; " +
+			"narrow the scope, or raise the budget with --budget large / --max-turns")
+	}
 	if err != nil {
 		return "", err
 	}
-	// A pass that ran out of turns has usually not emitted its JSON yet.
-	// Surfacing this as an error beats parsing a half-finished reply and
-	// reporting the leftovers as if they were a complete review.
+	// Belt and braces: if a future wire reports exhaustion as a stop reason
+	// rather than an error, an empty reply must still not read as "no findings".
 	if res.StopReason == "max_turns" && strings.TrimSpace(res.Text) == "" {
-		return "", fmt.Errorf("review pass hit the turn limit before producing a report (raise --budget or narrow the scope)")
+		return "", fmt.Errorf("the review pass ran out of turns before reporting; " +
+			"narrow the scope or raise the budget (--budget large)")
 	}
 	return res.Text, nil
 }

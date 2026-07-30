@@ -197,8 +197,25 @@ before ruling. Practical guidance:
 Progress is printed on stderr as tool lines so a long run is visibly working
 rather than hung; `--quiet` suppresses it for scripted use.
 
-Each budget also caps agent turns (12 / 20 / 36). This is deliberate: left
-uncapped, a capable model will spend twenty-plus turns re-reading files it
-already has in the scope briefing, costing minutes without improving the
-findings. If a pass exhausts its turns before emitting a report, the run fails
-with exit `2` rather than reporting a partial result as a finished review.
+Each budget also caps agent turns (30 / 45 / 70). The cap has two failure modes
+and sits between them: uncapped, a capable model will spend twenty-plus turns
+re-reading files it already has in the scope briefing; capped too tightly, the
+pass spends its whole budget exploring and never emits a report. If a pass does
+exhaust its turns, the run fails with exit `2` and says so, rather than
+reporting a partial result — or an empty one — as a finished review.
+
+### Does it depend on the model?
+
+Yes, but less than you would expect, and the failure mode is safe. Against a
+fixture with five planted flaws (SQL injection, command injection, path
+traversal, missing authorization, hardcoded credential), the security profile
+found all five, with correct CWE ids and line numbers, and the verification
+pass confirmed each one while reasoning explicitly about reachability.
+
+Refusal was not observed: framing the task as defensive review of code the user
+controls, with a strict output contract, keeps models on task. What does vary
+is *thoroughness* and *turn economy* — weaker or faster models explore less and
+may miss subtler issues, and a model that never emits contract-shaped JSON
+fails the run instead of returning a clean report. That asymmetry is deliberate:
+a review can under-report, but it must never claim a clean result it did not
+earn.

@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -199,6 +200,38 @@ func TestPromptsCarryContractAndScope(t *testing.T) {
 		}
 		if !strings.Contains(sys, "advisory") {
 			t.Errorf("system prompt %d lost the advisory rule", i)
+		}
+	}
+}
+
+// A pass that exhausts its turn budget must fail loudly. Turn exhaustion
+// arrives from the engine as an error, so an adapter that only inspected
+// StopReason would let it fall through as an empty reply — and an empty reply
+// is indistinguishable from "no findings", i.e. a silent false clean review.
+func TestReviewerReportsTurnExhaustion(t *testing.T) {
+	rev := &fakeReviewer{err: fmt.Errorf("agent: max turns exceeded: 12")}
+	sc := testScope(t)
+	_, err := Run(context.Background(), rev, sc, Request{Profile: SecurityProfile()})
+	if err == nil {
+		t.Fatal("turn exhaustion must not produce a report")
+	}
+	if !strings.Contains(err.Error(), "max turns") {
+		t.Errorf("error should name the cause: %v", err)
+	}
+}
+
+// Budgets must leave room to answer after exploring: a cap so tight that the
+// pass cannot emit its JSON turns every review into a failed run.
+func TestBudgetTurnsAllowExplorationAndAnswer(t *testing.T) {
+	for _, name := range BudgetNames() {
+		b, ok := LookupBudget(name)
+		if !ok {
+			t.Fatalf("budget %q missing", name)
+		}
+		// Observed floor: a single-file security review used ~10 tool calls
+		// before answering; anything under 20 risks starving the report.
+		if b.MaxTurns < 20 {
+			t.Errorf("budget %q MaxTurns=%d is too tight to explore and still answer", name, b.MaxTurns)
 		}
 	}
 }

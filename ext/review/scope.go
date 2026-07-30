@@ -22,15 +22,16 @@ type Budget struct {
 
 // Budgets are the named sizes accepted by --budget.
 //
-// MaxTurns is deliberately tight: each turn is a tool call, and a review that
-// re-reads the whole package costs the user minutes without improving the
-// findings. Dogfooding showed a capable model will happily spend 20+ turns
-// re-reading files it already had.
+// MaxTurns has to cover exploration *and* the final JSON answer. Dogfooding
+// calibrated both ends: left uncapped, a capable model spends 20+ turns
+// re-reading files it already has; capped too tightly (12), it spends the
+// budget exploring and never emits its report, which surfaces as a failed run.
+// These values leave room to answer after a normal amount of looking around.
 func Budgets() map[string]Budget {
 	return map[string]Budget{
-		"small":  {Name: "small", MaxFiles: 15, MaxBytes: 120_000, MaxFileBytes: 40_000, MaxTurns: 12},
-		"medium": {Name: "medium", MaxFiles: 40, MaxBytes: 400_000, MaxFileBytes: 80_000, MaxTurns: 20},
-		"large":  {Name: "large", MaxFiles: 120, MaxBytes: 1_200_000, MaxFileBytes: 160_000, MaxTurns: 36},
+		"small":  {Name: "small", MaxFiles: 15, MaxBytes: 120_000, MaxFileBytes: 40_000, MaxTurns: 30},
+		"medium": {Name: "medium", MaxFiles: 40, MaxBytes: 400_000, MaxFileBytes: 80_000, MaxTurns: 45},
+		"large":  {Name: "large", MaxFiles: 120, MaxBytes: 1_200_000, MaxFileBytes: 160_000, MaxTurns: 70},
 	}
 }
 
