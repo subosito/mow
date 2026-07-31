@@ -386,6 +386,12 @@ func mergeOverlay(dst *File, overlay *File) {
 	if len(overlay.Tools.Enable) > 0 {
 		dst.Tools.Enable = append([]string(nil), overlay.Tools.Enable...)
 	}
+	// Hashline is a bool flag — only a true overlay can turn it on (yaml
+	// `tools.hashline: false` is indistinguishable from "absent", and the
+	// secure default is off anyway).
+	if overlay.Tools.Hashline {
+		dst.Tools.Hashline = true
+	}
 	// MaxTurns: positive sets the cap; -1 (or any negative) means unlimited (→ 0).
 	// Plain 0 in a YAML overlay is indistinguishable from "absent", so use -1
 	// or set max_turns: 0 only via a full defaults replace is not supported —

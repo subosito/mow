@@ -218,3 +218,30 @@ tools:
 		t.Fatalf("enable=%v", f.Tools.Enable)
 	}
 }
+
+func TestMergeHashlineFromYAML(t *testing.T) {
+	t.Setenv(config.EnvHome, t.TempDir()) // isolate from developer ~/.mow
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "c.yaml")
+	if err := os.WriteFile(cfg, []byte("tools:\n  hashline: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := config.Load(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.Tools.Hashline {
+		t.Fatal("tools.hashline: true from yaml should reach the merged File")
+	}
+}
+
+func TestMergeHashlineDefaultOff(t *testing.T) {
+	t.Setenv(config.EnvHome, t.TempDir()) // isolate from developer ~/.mow
+	f, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Tools.Hashline {
+		t.Fatal("hashline should default to off")
+	}
+}
