@@ -54,7 +54,10 @@ type PostToolFunc func(ctx context.Context, e PostToolEvent) (PostToolDecision, 
 type PreCompactEvent struct {
 	EstChars int
 	MaxChars int
-	Messages []llm.Message
+	// CharsPerToken is the calibrated chars/token ratio used to derive
+	// EstChars from raw history size (seeded at 4, clamped to [2,8]).
+	CharsPerToken float64
+	Messages      []llm.Message
 }
 
 // PreCompactDecision may skip compaction or supply the stub summary text.

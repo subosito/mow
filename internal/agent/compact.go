@@ -55,6 +55,93 @@ func ContextCharsBudget(windowTokens int, ratio float64) int {
 	return b
 }
 
+// Chars-per-token calibration. MaxContextChars is a char budget authored
+// against the classic ~4 chars/token heuristic. Real ratios vary a lot: dense
+// code / JSON tool output tokenizes near ~2.5 chars/token, English prose near
+// ~5–6. We observe provider-reported input tokens against the chars we actually
+// sent and smooth the result, so the pre-call budget check tracks the real
+// window instead of a fixed guess. Config keys are unchanged.
+const (
+	defaultCharsPerToken = 4.0
+	minCharsPerToken     = 2.0
+	maxCharsPerToken     = 8.0
+	// ratioAlpha is the EWMA weight of a new sample (low = stable, high = jumpy).
+	ratioAlpha = 0.3
+)
+
+// ratioCalibrator maintains a smoothed chars/token estimate. Zero value is not
+// usable; use newRatioCalibrator. Not safe for concurrent use (loop-owned).
+type ratioCalibrator struct {
+	ratio   float64
+	samples int
+}
+
+func newRatioCalibrator() *ratioCalibrator {
+	return &ratioCalibrator{ratio: defaultCharsPerToken}
+}
+
+// Ratio returns the current smoothed chars/token estimate, always in
+// [minCharsPerToken, maxCharsPerToken]; seeded at defaultCharsPerToken.
+func (c *ratioCalibrator) Ratio() float64 {
+	if c == nil || c.ratio <= 0 {
+		return defaultCharsPerToken
+	}
+	return clampRatio(c.ratio)
+}
+
+// Observe records one call: chars sent to the provider vs the input tokens the
+// provider billed. Non-positive or implausible samples are ignored so a
+// provider that omits usage (or reports cached-only tokens) cannot poison the
+// estimate; the seed then stays in effect.
+func (c *ratioCalibrator) Observe(chars, inputTokens int) {
+	if c == nil || chars <= 0 || inputTokens <= 0 {
+		return
+	}
+	sample := clampRatio(float64(chars) / float64(inputTokens))
+	c.ratio = c.ratio + ratioAlpha*(sample-c.ratio)
+	c.samples++
+}
+
+func clampRatio(r float64) float64 {
+	if r < minCharsPerToken {
+		return minCharsPerToken
+	}
+	if r > maxCharsPerToken {
+		return maxCharsPerToken
+	}
+	return r
+}
+
+// budgetChars rescales a raw char count into "budget chars" — the char count
+// the same text would have at the ~4 chars/token heuristic MaxContextChars was
+// written against. Code-heavy history (low ratio) inflates, prose deflates.
+func budgetChars(chars int, ratio float64) int {
+	if chars <= 0 {
+		return 0
+	}
+	if ratio <= 0 {
+		ratio = defaultCharsPerToken
+	}
+	return int(float64(chars) * defaultCharsPerToken / clampRatio(ratio))
+}
+
+// compactTarget converts the configured char budget into the raw char budget
+// CompactOpts should trim to, given the calibrated ratio (inverse of
+// budgetChars, so compaction stops exactly at the scaled limit).
+func compactTarget(maxChars int, ratio float64) int {
+	if maxChars <= 0 {
+		return maxChars
+	}
+	if ratio <= 0 {
+		ratio = defaultCharsPerToken
+	}
+	t := int(float64(maxChars) * clampRatio(ratio) / defaultCharsPerToken)
+	if t < 1 {
+		t = 1
+	}
+	return t
+}
+
 // CompactOpts reduces message history to roughly maxChars while keeping system
 // and the most recent turns; maxToolChars is the per-tool-result char budget.
 // Older middle content is replaced with a task-preserving anchor + summary.

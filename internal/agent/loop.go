@@ -153,6 +153,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		lastToolFP string
 		sameToolFP int
 		thrash     = newThrashState(opt.Workspace)
+		calib      = newRatioCalibrator()
 	)
 	opt.thrash = thrash
 
@@ -164,14 +165,18 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		if len(toolSpecs) > 0 {
 			specs = toolSpecs
 		}
-		send, err := applyCompact(ctx, messages, opt)
+		send, err := applyCompact(ctx, messages, opt, calib)
 		if err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}
+		sentChars := estChars(send)
 		msg, err := chat(ctx, send, specs)
 		if err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}
+		// Calibrate chars/token from what the provider actually billed for the
+		// history we just sent, so the next pre-call budget check is empirical.
+		calib.Observe(sentChars, msg.Usage.InputTokens)
 		// Inline CoT normalization: models that wrap thinking in <think>-style
 		// tags (instead of the reasoning channel) must never leak it into
 		// committed history, sessions, or Result.Text. Stripping here also
@@ -483,7 +488,7 @@ func toolResultLimit(opt Options) int {
 	return DefaultMaxToolResultChars
 }
 
-func applyCompact(ctx context.Context, messages []llm.Message, opt Options) ([]llm.Message, error) {
+func applyCompact(ctx context.Context, messages []llm.Message, opt Options, calib *ratioCalibrator) ([]llm.Message, error) {
 	toolLim := toolResultLimit(opt)
 	// Always trim oversized tool bodies before the LLM call (cheap, high impact).
 	messages = trimAllToolResults(messages, toolLim, toolLim/2)
@@ -491,7 +496,12 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options) ([]l
 	if opt.MaxContextChars <= 0 {
 		return messages, nil
 	}
-	est := estChars(messages)
+	// Estimate in "budget chars": raw chars rescaled by the calibrated
+	// chars/token ratio, so a code-heavy history (which tokenizes denser than
+	// the 4 chars/token heuristic) compacts before it blows the real window.
+	ratio := calib.Ratio()
+	raw := estChars(messages)
+	est := budgetChars(raw, ratio)
 	if est <= opt.MaxContextChars {
 		return messages, nil
 	}
@@ -501,9 +511,10 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options) ([]l
 			continue
 		}
 		d, err := h(ctx, PreCompactEvent{
-			EstChars: est,
-			MaxChars: opt.MaxContextChars,
-			Messages: messages,
+			EstChars:      est,
+			MaxChars:      opt.MaxContextChars,
+			CharsPerToken: ratio,
+			Messages:      messages,
 		})
 		if err != nil {
 			return nil, err
@@ -515,7 +526,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options) ([]l
 			summary = d.Summary
 		}
 	}
-	return CompactOpts(messages, opt.MaxContextChars, summary, toolLim), nil
+	return CompactOpts(messages, compactTarget(opt.MaxContextChars, ratio), summary, toolLim), nil
 }
 
 // runTool applies PreTool → Exec (or deny) → PostTool and returns the model-visible result.
