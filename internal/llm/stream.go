@@ -18,43 +18,119 @@ const streamIdleTimeout = 5 * time.Minute
 
 // idleReader wraps an io.Reader and fails if a single Read blocks longer than idle
 // or if the parent ctx is cancelled. Used for SSE so Timeout:0 clients cannot hang forever.
+//
+// The upstream Read runs on a pump goroutine with its own buffer: after an idle
+// timeout or ctx cancel we abandon that read, and it must not keep writing into
+// the caller's slice (bufio.Scanner reuses its buffer) — that would be a data
+// race and could corrupt an unrelated later read.
 type idleReader struct {
 	r    io.Reader
 	idle time.Duration
 	ctx  context.Context
+
+	pump    chan pumpResult // results from the background reader
+	want    chan struct{}   // request one read from the pump
+	buf     []byte          // pump-owned scratch buffer
+	pending []byte          // bytes read by the pump but not yet handed to caller
+	err     error           // sticky terminal error from the pump
+	done    bool            // pump abandoned (timeout/cancel) — never reuse it
+}
+
+type pumpResult struct {
+	n   int
+	err error
+}
+
+func (i *idleReader) idleDur() time.Duration {
+	if i.idle <= 0 {
+		return streamIdleTimeout
+	}
+	return i.idle
+}
+
+func (i *idleReader) ctxDone() <-chan struct{} {
+	if i.ctx == nil {
+		return nil // nil channel: never ready
+	}
+	return i.ctx.Done()
+}
+
+func (i *idleReader) ctxErr() error {
+	if i.ctx == nil {
+		return nil
+	}
+	return i.ctx.Err()
 }
 
 func (i *idleReader) Read(p []byte) (int, error) {
 	if i == nil || i.r == nil {
 		return 0, io.EOF
 	}
-	if i.ctx != nil {
-		if err := i.ctx.Err(); err != nil {
-			return 0, err
-		}
+	if err := i.ctxErr(); err != nil {
+		return 0, err
 	}
-	type result struct {
-		n   int
-		err error
+	if len(i.pending) > 0 {
+		n := copy(p, i.pending)
+		i.pending = i.pending[n:]
+		return n, nil
 	}
-	ch := make(chan result, 1)
-	go func() {
-		n, err := i.r.Read(p)
-		ch <- result{n, err}
-	}()
-	idle := i.idle
-	if idle <= 0 {
-		idle = streamIdleTimeout
+	if i.err != nil {
+		return 0, i.err
 	}
-	timer := time.NewTimer(idle)
+	if i.done {
+		return 0, fmt.Errorf("llm: stream reader abandoned")
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	if i.pump == nil {
+		i.pump = make(chan pumpResult, 1)
+		i.want = make(chan struct{}, 1)
+		i.buf = make([]byte, 32*1024)
+		go i.run()
+	}
+	// Ask the pump for exactly one read; it never touches i.buf again until
+	// the next request, so the copy below is race-free.
+	i.want <- struct{}{}
+
+	timer := time.NewTimer(i.idleDur())
 	defer timer.Stop()
 	select {
-	case <-i.ctx.Done():
-		return 0, i.ctx.Err()
+	case <-i.ctxDone():
+		i.done = true
+		return 0, i.ctxErr()
 	case <-timer.C:
-		return 0, fmt.Errorf("llm: stream idle timeout after %s (no data from upstream)", idle)
-	case res := <-ch:
-		return res.n, res.err
+		i.done = true
+		return 0, fmt.Errorf("llm: stream idle timeout after %s (no data from upstream)", i.idleDur())
+	case res := <-i.pump:
+		if res.n > 0 {
+			n := copy(p, i.buf[:res.n])
+			if n < res.n {
+				i.pending = append(i.pending[:0], i.buf[n:res.n]...)
+			}
+			if res.err != nil {
+				i.err = res.err
+			}
+			return n, nil
+		}
+		if res.err != nil {
+			i.err = res.err
+			return 0, res.err
+		}
+		return 0, nil
+	}
+}
+
+// run pumps one Read per request from Read; it stops as soon as a read fails
+// or the caller abandons it (want is never signalled again).
+func (i *idleReader) run() {
+	for range i.want {
+		n, err := i.r.Read(i.buf)
+		i.pump <- pumpResult{n, err}
+		if err != nil {
+			return
+		}
 	}
 }
 
