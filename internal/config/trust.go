@@ -37,8 +37,22 @@ func WorkspaceTrusted(workspace string) bool {
 }
 
 // TrustedWorkspaces returns the trust list (canonicalized, comments skipped).
+// The file must be a regular file with no group/other permissions (0600);
+// anything else is treated as untrusted so a tampered or world-writable list
+// can never grant trust.
 func TrustedWorkspaces() []string {
-	raw, err := os.ReadFile(TrustedPath())
+	path := TrustedPath()
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil
+	}
+	if !fi.Mode().IsRegular() {
+		return nil
+	}
+	if fi.Mode().Perm()&0o077 != 0 {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -61,21 +75,13 @@ func TrustWorkspace(workspace string) error {
 	if !ok {
 		return fmt.Errorf("trust: cannot resolve workspace %q", workspace)
 	}
-	for _, t := range TrustedWorkspaces() {
+	cur := TrustedWorkspaces()
+	for _, t := range cur {
 		if t == ws {
 			return nil
 		}
 	}
-	if err := os.MkdirAll(Home(), 0o700); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(TrustedPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(ws + "\n")
-	return err
+	return writeTrusted(append(cur, ws))
 }
 
 // RevokeWorkspace removes workspace from the trust list (idempotent).
@@ -101,7 +107,35 @@ func RevokeWorkspace(workspace string) error {
 		}
 		return err
 	}
-	return os.WriteFile(TrustedPath(), []byte(strings.Join(keep, "\n")+"\n"), 0o600)
+	return writeTrusted(keep)
+}
+
+// writeTrusted replaces the trust list atomically (temp file + rename) so
+// concurrent trust/revoke invocations cannot interleave partial writes, and
+// the result always has 0600 permissions.
+func writeTrusted(workspaces []string) error {
+	if err := os.MkdirAll(Home(), 0o700); err != nil {
+		return err
+	}
+	dir := Home()
+	tmp, err := os.CreateTemp(dir, ".trusted-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after successful rename
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.WriteString(strings.Join(workspaces, "\n") + "\n"); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, TrustedPath())
 }
 
 // canonicalWorkspace makes a path absolute, clean, and symlink-resolved so a

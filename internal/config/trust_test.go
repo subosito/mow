@@ -162,3 +162,46 @@ func TestApplyEnvWireAware(t *testing.T) {
 		t.Fatalf("openai wire model=%q", f.LLM.Model)
 	}
 }
+
+func TestTrustFileHardening(t *testing.T) {
+	t.Setenv(config.EnvHome, t.TempDir())
+	t.Setenv("MOW_TRUST_PROJECT", "")
+	ws := t.TempDir()
+	if err := config.TrustWorkspace(ws); err != nil {
+		t.Fatal(err)
+	}
+	// A group/other-readable trust list must not grant trust.
+	if err := os.Chmod(config.TrustedPath(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if config.WorkspaceTrusted(ws) {
+		t.Fatal("world-readable trust file must be ignored")
+	}
+	// A directory in place of the trust file must not grant trust.
+	if err := os.Remove(config.TrustedPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.TrustedPath(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if config.WorkspaceTrusted(ws) {
+		t.Fatal("non-regular trust path must be ignored")
+	}
+	// Recovery: re-trust after cleanup restores a working 0600 file.
+	if err := os.Remove(config.TrustedPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.TrustWorkspace(ws); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(config.TrustedPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("trust file mode=%o want 600", fi.Mode().Perm())
+	}
+	if !config.WorkspaceTrusted(ws) {
+		t.Fatal("workspace should be trusted again after rewrite")
+	}
+}
