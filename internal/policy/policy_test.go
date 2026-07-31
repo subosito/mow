@@ -131,3 +131,23 @@ func TestAllowToolPowerDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestResolvePathRejectsFilesystemRoot(t *testing.T) {
+	// Workspace must not be "/".
+	p := &policy.Policy{Workspace: "/"}
+	if _, err := p.ResolvePath("etc/passwd"); err == nil {
+		t.Fatal("workspace=/ must be rejected")
+	}
+	// Extra root of "/" must not open the whole FS.
+	ws := t.TempDir()
+	p2 := &policy.Policy{Workspace: ws, ExtraRoots: []string{"/"}}
+	if _, err := p2.ResolvePath("/etc/passwd"); err == nil {
+		t.Fatal("extra_roots=/ must not allow /etc/passwd")
+	}
+	// Normal workspace path still works.
+	if _, err := p2.ResolvePath("ok.txt"); err != nil {
+		// ok.txt fails because extra root / fails jailRoots entirely —
+		// that is acceptable (misconfiguration fails closed).
+		t.Logf("with extra_roots=/: ResolvePath in-ws: %v", err)
+	}
+}

@@ -95,7 +95,12 @@ func (p *Policy) ResolvePath(rel string) (string, error) {
 	for _, root := range roots {
 		r := root
 		if resolvedRoot, err := filepath.EvalSymlinks(r); err == nil {
-			r = resolvedRoot
+			r = filepath.Clean(resolvedRoot)
+		}
+		// Re-check after symlink resolution: a root that resolves to "/" would
+		// otherwise match every absolute path via a broken or overly broad prefix.
+		if r == string(filepath.Separator) {
+			return "", fmt.Errorf("%s resolves to filesystem root (not allowed as path jail root)", root)
 		}
 		if candidate == r || strings.HasPrefix(candidate, r+sep) {
 			return candidate, nil
@@ -105,13 +110,15 @@ func (p *Policy) ResolvePath(rel string) (string, error) {
 }
 
 // jailRoots returns cleaned absolute roots: workspace first, then ExtraRoots.
+// The filesystem root ("/") is never a jail root: granting it disables the
+// jail, and the prefix check (`root+sep`) becomes "//" which matches nothing.
 func (p *Policy) jailRoots() ([]string, error) {
 	if p == nil {
 		return nil, fmt.Errorf("nil policy")
 	}
 	var out []string
 	seen := map[string]bool{}
-	add := func(raw string) error {
+	add := func(raw string, label string) error {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			return nil
@@ -121,6 +128,9 @@ func (p *Policy) jailRoots() ([]string, error) {
 			return err
 		}
 		abs = filepath.Clean(abs)
+		if abs == string(filepath.Separator) {
+			return fmt.Errorf("%s: filesystem root is not allowed as a path jail root", label)
+		}
 		if seen[abs] {
 			return nil
 		}
@@ -128,11 +138,11 @@ func (p *Policy) jailRoots() ([]string, error) {
 		out = append(out, abs)
 		return nil
 	}
-	if err := add(p.Workspace); err != nil {
+	if err := add(p.Workspace, "workspace"); err != nil {
 		return nil, err
 	}
 	for _, r := range p.ExtraRoots {
-		if err := add(r); err != nil {
+		if err := add(r, "extra_roots"); err != nil {
 			return nil, err
 		}
 	}
