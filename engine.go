@@ -399,13 +399,21 @@ func New(opt Options) (*Engine, error) {
 			if err != nil {
 				return nil, fmt.Errorf("session continue: %w", err)
 			}
+			// Re-validate: session dir listings can include non-id names if a
+			// file was planted; never resume an id that fails ValidateID.
 			if latest != "" {
+				if err := session.ValidateID(latest); err != nil {
+					return nil, fmt.Errorf("session continue: %w", err)
+				}
 				sid = latest
 			}
 		}
 		if sid == "" {
 			sid = session.NewID()
 		} else {
+			if err := session.ValidateID(sid); err != nil {
+				return nil, err
+			}
 			store := &session.Store{Dir: sessDir, ID: sid}
 			prior, err := store.LoadMessages()
 			if err != nil {
