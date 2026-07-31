@@ -195,6 +195,13 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		exploreWarn := thrash.noteTurn(msg.ToolCalls)
 
 		toolMsgs, err := runToolBatch(ctx, msg.ToolCalls, byName, opt)
+		// Every advertised tool_call must have a matching tool result or the
+		// history is unreplayable (providers 400 on orphaned tool_calls).
+		// Fail-fast / cancel can drop siblings mid batch, so pad here — this
+		// history is returned to the caller and persisted to the session.
+		if err != nil && !errors.Is(err, ErrDone) {
+			toolMsgs = repairToolResults(msg.ToolCalls, toolMsgs, err)
+		}
 		messages = append(messages, toolMsgs...)
 		// Tool requested clean end (e.g. goal_report) — keep results, stop successfully.
 		if errors.Is(err, ErrDone) {
