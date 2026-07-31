@@ -2,6 +2,7 @@ package llm
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -145,6 +146,63 @@ type StreamHooks struct {
 	OnReasoning DeltaFn
 }
 
+// streamChunk is one OpenAI chat-completions SSE payload. Declared once (not
+// inside the scan loop) so the decoder can reuse it (and its slice capacity)
+// across deltas; callers must call reset() before each Unmarshal.
+type streamChunk struct {
+	Choices []streamChoice `json:"choices"`
+	Usage   *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+type streamChoice struct {
+	Delta        streamDelta `json:"delta"`
+	FinishReason string      `json:"finish_reason"`
+}
+
+type streamDelta struct {
+	Content          string           `json:"content"`
+	Reasoning        string           `json:"reasoning"`         // some OpenAI-compat
+	ReasoningContent string           `json:"reasoning_content"` // some OpenAI-compat
+	Thinking         string           `json:"thinking"`          // some gateways
+	ToolCalls        []streamToolCall `json:"tool_calls"`
+}
+
+type streamToolCall struct {
+	Index            int    `json:"index"`
+	ID               string `json:"id"`
+	Type             string `json:"type"`
+	ThoughtSignature string `json:"thought_signature"`
+	Function         struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// reset clears every field the decoder could leave stale while keeping the
+// Choices/ToolCalls backing arrays, so a long stream reuses one allocation.
+// encoding/json decodes into existing slice elements without zeroing absent
+// fields, so the zeroing here is required for correctness, not just hygiene.
+func (c *streamChunk) reset() {
+	c.Usage = nil
+	c.Error = nil
+	for i := range c.Choices {
+		ch := &c.Choices[i]
+		tcs := ch.Delta.ToolCalls
+		for j := range tcs {
+			tcs[j] = streamToolCall{}
+		}
+		ch.Delta = streamDelta{ToolCalls: tcs[:0]}
+		ch.FinishReason = ""
+	}
+	c.Choices = c.Choices[:0]
+}
+
 // streamReq is ChatRequest plus stream flag.
 type streamReq struct {
 	Model    string          `json:"model"`
@@ -213,9 +271,13 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	}
 
 	msg := Message{Role: "assistant"}
+	// Content is appended into a builder and flushed to msg.Content once after
+	// the loop: `msg.Content += delta` per SSE chunk is O(n²) copying.
+	var content strings.Builder
 	// tool call index -> accumulating function (+ optional thought_signature)
 	type acc struct {
-		id, name, args, thoughtSig string
+		id, name, thoughtSig string
+		args                 strings.Builder
 	}
 	toolsAcc := map[int]*acc{}
 
@@ -224,47 +286,32 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	streamBody := &idleReader{r: res.Body, idle: streamIdleTimeout, ctx: ctx}
 	sc := bufio.NewScanner(streamBody)
 	sc.Buffer(make([]byte, 0, 64*1024), 2<<20)
+	// chunk is reused across deltas (reset before each decode) so a long stream
+	// does not allocate one decode struct per SSE line. dec/decBuf reuse the
+	// json scanner too: json.Unmarshal re-validates and re-allocates parse
+	// state for every call, which dominates a 2k-delta stream.
+	var chunk streamChunk
+	decBuf := new(bytes.Reader)
+	dec := json.NewDecoder(decBuf)
 	for sc.Scan() {
-		line := sc.Text()
-		if line == "" || strings.HasPrefix(line, ":") {
+		// Bytes (not Text) avoids a string copy per line; the slice is only
+		// valid until the next Scan, and json.Unmarshal copies what it keeps.
+		line := bytes.TrimRight(sc.Bytes(), "\r")
+		if len(line) == 0 || line[0] == ':' {
 			continue
 		}
-		if !strings.HasPrefix(line, "data:") {
+		if !bytes.HasPrefix(line, []byte("data:")) {
 			continue
 		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "[DONE]" {
+		data := bytes.TrimSpace(line[len("data:"):])
+		if string(data) == "[DONE]" {
 			break
 		}
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content          string `json:"content"`
-					Reasoning        string `json:"reasoning"`         // some OpenAI-compat
-					ReasoningContent string `json:"reasoning_content"` // some OpenAI-compat
-					Thinking         string `json:"thinking"`          // some gateways
-					ToolCalls        []struct {
-						Index            int    `json:"index"`
-						ID               string `json:"id"`
-						Type             string `json:"type"`
-						ThoughtSignature string `json:"thought_signature"`
-						Function         struct {
-							Name      string `json:"name"`
-							Arguments string `json:"arguments"`
-						} `json:"function"`
-					} `json:"tool_calls"`
-				} `json:"delta"`
-				FinishReason string `json:"finish_reason"`
-			} `json:"choices"`
-			Usage *struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-			} `json:"usage"`
-			Error *struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		chunk.reset()
+		decBuf.Reset(data)
+		if err := dec.Decode(&chunk); err != nil {
+			// Re-sync the decoder: a malformed line must not poison later ones.
+			dec = json.NewDecoder(decBuf)
 			continue
 		}
 		if chunk.Error != nil && chunk.Error.Message != "" {
@@ -285,7 +332,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		}
 		d := chunk.Choices[0].Delta
 		if d.Content != "" {
-			msg.Content += d.Content
+			content.WriteString(d.Content)
 			if hooks.OnContent != nil {
 				hooks.OnContent(d.Content)
 			}
@@ -313,7 +360,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 			if tc.Function.Name != "" {
 				a.name = tc.Function.Name
 			}
-			a.args += tc.Function.Arguments
+			a.args.WriteString(tc.Function.Arguments)
 			// Some providers send thought_signature once on the start chunk; keep first non-empty.
 			if a.thoughtSig == "" {
 				if s := strings.TrimSpace(tc.ThoughtSignature); s != "" {
@@ -325,6 +372,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	if err := sc.Err(); err != nil {
 		return Message{}, err
 	}
+	msg.Content = content.String()
 	// Order tool calls by index. Some gateways send non-contiguous indices (or
 	// start above 0), so iterate the actual keys in order — never 0..len-1.
 	idxs := make([]int, 0, len(toolsAcc))
@@ -332,12 +380,15 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		idxs = append(idxs, i)
 	}
 	sort.Ints(idxs)
+	if len(idxs) > 0 {
+		msg.ToolCalls = make([]ToolCall, 0, len(idxs))
+	}
 	for _, i := range idxs {
 		a := toolsAcc[i]
 		if a == nil {
 			continue
 		}
-		args := a.args
+		args := a.args.String()
 		if strings.TrimSpace(args) == "" {
 			args = "{}"
 		}

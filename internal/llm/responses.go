@@ -274,7 +274,10 @@ func (c *Client) chatOpenAIResponses(ctx context.Context, messages []Message, to
 }
 
 type responsesToolAcc struct {
-	callID, name, args string
+	callID, name string
+	// args accumulates streamed argument fragments; `args += delta` per SSE
+	// event is O(n^2) copying for a large tool call.
+	args strings.Builder
 }
 
 // chatOpenAIResponsesStream is the SSE path for WireOpenAIResponses.
@@ -320,6 +323,9 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 	toolsByIdx := map[int]*responsesToolAcc{}
 	// item_id → output_index for argument deltas that only carry item_id.
 	itemToIdx := map[string]int{}
+	// Text deltas accumulate here and are flushed to msg.Content after the
+	// stream (see applyResponsesSSE).
+	var content strings.Builder
 
 	streamBody := &idleReader{r: res.Body, idle: streamIdleTimeout, ctx: ctx}
 	sc := bufio.NewScanner(streamBody)
@@ -345,13 +351,15 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 		if data == "" || data == "[DONE]" {
 			continue
 		}
-		if err := applyResponsesSSE(data, eventName, &msg, toolsByIdx, itemToIdx, hooks); err != nil {
+		if err := applyResponsesSSE(data, eventName, &msg, &content, toolsByIdx, itemToIdx, hooks); err != nil {
 			return Message{}, err
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return Message{}, err
 	}
+
+	msg.Content = content.String()
 
 	idxs := make([]int, 0, len(toolsByIdx))
 	for i := range toolsByIdx {
@@ -363,7 +371,7 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 		if a == nil {
 			continue
 		}
-		args := a.args
+		args := a.args.String()
 		if strings.TrimSpace(args) == "" {
 			args = "{}"
 		}
@@ -386,7 +394,10 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 	return msg, nil
 }
 
-func applyResponsesSSE(data, event string, msg *Message, toolsByIdx map[int]*responsesToolAcc, itemToIdx map[string]int, hooks StreamHooks) error {
+// applyResponsesSSE folds one SSE event into msg. Text deltas go into content
+// (flushed to msg.Content by the caller after the stream) so a long reply does
+// not re-copy the whole answer once per delta.
+func applyResponsesSSE(data, event string, msg *Message, content *strings.Builder, toolsByIdx map[int]*responsesToolAcc, itemToIdx map[string]int, hooks StreamHooks) error {
 	var base struct {
 		Type string `json:"type"`
 	}
@@ -423,7 +434,7 @@ func applyResponsesSSE(data, event string, msg *Message, toolsByIdx map[int]*res
 			return nil
 		}
 		if ev.Delta != "" {
-			msg.Content += ev.Delta
+			content.WriteString(ev.Delta)
 			if hooks.OnContent != nil {
 				hooks.OnContent(ev.Delta)
 			}
@@ -476,8 +487,8 @@ func applyResponsesSSE(data, event string, msg *Message, toolsByIdx map[int]*res
 			a.name = ev.Item.Name
 		}
 		// xAI may deliver the whole call in one chunk (no argument deltas).
-		if typ == "response.output_item.done" && ev.Item.Arguments != "" && a.args == "" {
-			a.args = ev.Item.Arguments
+		if typ == "response.output_item.done" && ev.Item.Arguments != "" && a.args.Len() == 0 {
+			a.args.WriteString(ev.Item.Arguments)
 		}
 
 	case "response.function_call_arguments.delta":
@@ -498,7 +509,7 @@ func applyResponsesSSE(data, event string, msg *Message, toolsByIdx map[int]*res
 			a = &responsesToolAcc{}
 			toolsByIdx[idx] = a
 		}
-		a.args += ev.Delta
+		a.args.WriteString(ev.Delta)
 
 	case "response.function_call_arguments.done":
 		var ev struct {
@@ -519,7 +530,8 @@ func applyResponsesSSE(data, event string, msg *Message, toolsByIdx map[int]*res
 			toolsByIdx[idx] = a
 		}
 		if ev.Arguments != "" {
-			a.args = ev.Arguments
+			a.args.Reset()
+			a.args.WriteString(ev.Arguments)
 		}
 
 	case "response.completed":
@@ -539,19 +551,20 @@ func applyResponsesSSE(data, event string, msg *Message, toolsByIdx map[int]*res
 		}
 		// If stream deltas were empty but completed carries full text/tools
 		// (some gateways batch), fill gaps without duplicating.
-		if msg.Content == "" && full.Content != "" {
-			msg.Content = full.Content
+		if content.Len() == 0 && full.Content != "" {
+			content.WriteString(full.Content)
 			if hooks.OnContent != nil {
 				hooks.OnContent(full.Content)
 			}
 		}
 		if len(toolsByIdx) == 0 && len(full.ToolCalls) > 0 {
 			for i, tc := range full.ToolCalls {
-				toolsByIdx[i] = &responsesToolAcc{
+				a := &responsesToolAcc{
 					callID: tc.ID,
 					name:   tc.Function.Name,
-					args:   tc.Function.Arguments,
 				}
+				a.args.WriteString(tc.Function.Arguments)
+				toolsByIdx[i] = a
 			}
 		}
 
