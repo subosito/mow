@@ -437,3 +437,28 @@ func TestHTTPBearerHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOAuthTokenErrorRedactsSecrets(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, "client_secret=abc123&access_token=tok456&detail="+strings.Repeat("x", 300))
+	}))
+	defer srv.Close()
+	ts := newTokenSource(AuthConfig{
+		Type: "oauth2_client_credentials", TokenURL: srv.URL, ClientID: "id", ClientSecret: "abc123",
+	})
+	req, _ := http.NewRequest(http.MethodGet, "http://example.test", nil)
+	err := ts.apply(req)
+	if err == nil {
+		t.Fatal("expected token endpoint error")
+	}
+	got := err.Error()
+	for _, secret := range []string{"abc123", "tok456"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("error leaked %q: %s", secret, got)
+		}
+	}
+	if len(got) > 260 {
+		t.Fatalf("error body was not bounded: len=%d", len(got))
+	}
+}

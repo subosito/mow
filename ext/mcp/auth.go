@@ -18,6 +18,50 @@ import (
 	"time"
 )
 
+const oauthErrorBodyLimit = 200
+
+func safeOAuthErrorBody(body []byte) string {
+	s := string(body)
+	for _, key := range []string{"client_secret", "access_token", "refresh_token", "code"} {
+		// Scan forward with a cursor: after a redaction we must NOT re-scan
+		// the already-emitted "[REDACTED]" text (it still contains the key
+		// name, which used to loop forever) — resume after the replacement.
+		pos := 0
+		for pos < len(s) {
+			lower := strings.ToLower(s[pos:])
+			i := strings.Index(lower, key)
+			if i < 0 {
+				break
+			}
+			i += pos
+			j := i + len(key)
+			for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '"' || s[j] == '\'') {
+				j++
+			}
+			if j >= len(s) || (s[j] != '=' && s[j] != ':') {
+				// Unrelated occurrence (e.g. "code" inside another word or an
+				// already-redacted marker): skip past it, do not rewrite.
+				pos = j
+				continue
+			}
+			j++
+			for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '"' || s[j] == '\'') {
+				j++
+			}
+			k := j
+			for k < len(s) && !strings.ContainsRune("&\r\n,}\"' \t", rune(s[k])) {
+				k++
+			}
+			s = s[:j] + "[REDACTED]" + s[k:]
+			pos = j + len("[REDACTED]")
+		}
+	}
+	if len(s) > oauthErrorBodyLimit {
+		s = s[:oauthErrorBodyLimit] + "…"
+	}
+	return s
+}
+
 // AuthConfig configures remote MCP authentication.
 //
 //	auth:
@@ -158,7 +202,7 @@ func (t *tokenSource) accessToken(ctx context.Context) (string, error) {
 	defer res.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return "", fmt.Errorf("mcp auth: token endpoint %d: %s", res.StatusCode, string(body))
+		return "", fmt.Errorf("mcp auth: token endpoint %d: %s", res.StatusCode, safeOAuthErrorBody(body))
 	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
@@ -214,7 +258,7 @@ func (t *tokenSource) deviceAccessToken(ctx context.Context) (string, error) {
 	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return "", fmt.Errorf("mcp auth: device endpoint %d: %s", res.StatusCode, string(body))
+		return "", fmt.Errorf("mcp auth: device endpoint %d: %s", res.StatusCode, safeOAuthErrorBody(body))
 	}
 	var dev struct {
 		DeviceCode              string `json:"device_code"`
@@ -301,7 +345,7 @@ func (t *tokenSource) deviceAccessToken(ctx context.Context) (string, error) {
 			if tres.StatusCode == http.StatusBadRequest && tok.Error != "" {
 				return "", fmt.Errorf("mcp auth: device token %s", tok.Error)
 			}
-			return "", fmt.Errorf("mcp auth: token endpoint %d: %s", tres.StatusCode, string(tbody))
+			return "", fmt.Errorf("mcp auth: token endpoint %d: %s", tres.StatusCode, safeOAuthErrorBody(tbody))
 		}
 	}
 }
@@ -440,7 +484,7 @@ func (t *tokenSource) exchangeAuthCode(ctx context.Context, code, redirect, clie
 	defer tres.Body.Close()
 	tbody, _ := io.ReadAll(io.LimitReader(tres.Body, 1<<20))
 	if tres.StatusCode < 200 || tres.StatusCode >= 300 {
-		return "", fmt.Errorf("mcp auth: token endpoint %d: %s", tres.StatusCode, string(tbody))
+		return "", fmt.Errorf("mcp auth: token endpoint %d: %s", tres.StatusCode, safeOAuthErrorBody(tbody))
 	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
