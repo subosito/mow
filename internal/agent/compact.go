@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/subosito/mow/internal/llm"
@@ -418,16 +419,70 @@ func shrinkAnchors(msgs []llm.Message, maxChars int) []llm.Message {
 }
 
 // compactSnippet collapses whitespace and truncates for the compact stub.
+// compactSnippet collapses whitespace runs to single spaces and truncates to
+// maxRunes (last rune replaced by "…"). It stops scanning once one rune past
+// the budget has been emitted: pinning reads only ~120 runes, so normalizing a
+// whole multi-KB message first was the dominant allocation in CompactOpts.
 func compactSnippet(s string, maxRunes int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if s == "" {
+	var b strings.Builder
+	if maxRunes > 0 {
+		b.Grow(min(len(s), 4*(maxRunes+1)))
+	} else {
+		b.Grow(len(s))
+	}
+	runes := 0
+	wrote := false
+	inField := false
+	truncated := false
+	for _, r := range s {
+		if isSpaceRune(r) {
+			inField = false
+			continue
+		}
+		if !inField {
+			inField = true
+			if wrote {
+				b.WriteByte(' ')
+				runes++
+			}
+		}
+		b.WriteRune(r)
+		wrote = true
+		runes++
+		// One rune past the budget is enough to know truncation is needed.
+		if maxRunes > 0 && runes > maxRunes {
+			truncated = true
+			break
+		}
+	}
+	if !wrote {
 		return ""
 	}
-	if maxRunes <= 0 || utf8.RuneCountInString(s) <= maxRunes {
-		return s
+	out := b.String()
+	if !truncated {
+		return out
 	}
-	r := []rune(s)
-	return string(r[:maxRunes-1]) + "…"
+	// Re-cut the buffered prefix at maxRunes-1 runes, then the ellipsis.
+	keep := maxRunes - 1
+	if keep <= 0 {
+		return "…"
+	}
+	n := 0
+	for i := range out {
+		if n == keep {
+			return out[:i] + "…"
+		}
+		n++
+	}
+	return out + "…"
+}
+
+func isSpaceRune(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\v', '\f', '\r', 0x85, 0xA0:
+		return true
+	}
+	return r > 0xFF && unicode.IsSpace(r)
 }
 
 // alignKeepAtUser drops leading non-user messages so the kept window starts at

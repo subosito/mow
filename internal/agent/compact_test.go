@@ -240,3 +240,45 @@ func TestCompactPreservesTaskAndTools(t *testing.T) {
 		t.Fatalf("expected tool or anchor signal:\n%s", s)
 	}
 }
+
+// TestCompactSnippet locks the whitespace-collapsing + truncation semantics of
+// compactSnippet after it was rewritten to stop scanning at the rune budget.
+func TestCompactSnippet(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       string
+		maxRunes int
+		want     string
+	}{
+		{"empty", "", 10, ""},
+		{"only spaces", "   \t\n ", 10, ""},
+		{"collapse runs", "  a \t\n b   c  ", 10, "a b c"},
+		{"exact budget", "abcde", 5, "abcde"},
+		{"truncate", "abcdefgh", 5, "abcd…"},
+		{"truncate collapsed", "aa  bb  cc  dd", 6, "aa bb…"},
+		{"no budget keeps all", strings.Repeat("ab ", 5), 0, "ab ab ab ab ab"},
+		{"multibyte truncate", "héllo wörld", 4, "hél…"},
+		{"multibyte fits", "héllo", 5, "héllo"},
+		{"unicode space collapses", "a\u00a0\u2003b", 10, "a b"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := compactSnippet(tc.in, tc.maxRunes); got != tc.want {
+				t.Fatalf("compactSnippet(%q, %d) = %q, want %q", tc.in, tc.maxRunes, got, tc.want)
+			}
+		})
+	}
+}
+
+// Long input must not be normalized past the budget (perf invariant): the
+// result length stays bounded regardless of input size.
+func TestCompactSnippetLongInputBounded(t *testing.T) {
+	in := strings.Repeat("word ", 100_000)
+	got := compactSnippet(in, 120)
+	if n := len([]rune(got)); n != 120 {
+		t.Fatalf("rune len = %d, want 120", n)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("want ellipsis suffix, got %q", got)
+	}
+}
