@@ -197,6 +197,53 @@ func TestChatStreamHooksFinishReasonLength(t *testing.T) {
 	}
 }
 
+func TestChatStreamHooksTruncatedToolCallJSON(t *testing.T) {
+	// Output limit hit mid-tool-call: the arguments stream is partial JSON
+	// ({"path": "fo). Passing that to the tool layer would surface a confusing
+	// parse error — the stream must report the provider truncation instead.
+	const body = "" +
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\": \\\"fo\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
+	_, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err == nil {
+		t.Fatal("expected provider truncation error")
+	}
+	if !strings.Contains(err.Error(), "truncated tool call") || !strings.Contains(err.Error(), "read") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestChatStreamHooksCompleteToolCallAtLength(t *testing.T) {
+	// finish_reason length with VALID tool args is a completed call — the
+	// stream must not reject it (truncation was after the call finished).
+	const body = "" +
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"glob\",\"arguments\":\"{\\\"pattern\\\":\\\"**\\\"}\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
+	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.ToolCalls) != 1 || msg.ToolCalls[0].Function.Name != "glob" {
+		t.Fatalf("tool_calls=%+v", msg.ToolCalls)
+	}
+}
+
 func TestUsageParsedAcrossPaths(t *testing.T) {
 	t.Run("openai stream usage chunk", func(t *testing.T) {
 		body := "" +

@@ -341,6 +341,13 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		if strings.TrimSpace(args) == "" {
 			args = "{}"
 		}
+		// A provider that hits its output limit mid-tool-call streams partial
+		// JSON ({"path": "fo). The tool layer would report a confusing parse
+		// failure with no hint that the provider truncated it — surface the
+		// real cause instead and drop the broken call.
+		if msg.StopReason == "length" && !json.Valid([]byte(args)) {
+			return Message{}, fmt.Errorf("llm: provider truncated tool call %s (%s) at output limit; arguments are incomplete JSON", a.name, a.id)
+		}
 		msg.ToolCalls = append(msg.ToolCalls, ToolCall{
 			ID:               a.id,
 			Type:             "function",
