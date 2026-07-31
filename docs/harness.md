@@ -41,7 +41,7 @@ mow run -p "Summarize this repo"
 ### B. Interactive / multi-step
 
 ```text
-mow repl                 # line REPL (core)
+mow tty                  # line session (core; alias: mow repl)
 mow goal run --goal "…"  # multi-step outer loop (or --id NAME)
 mow run -p "…"           # one-shot
 ```
@@ -139,7 +139,7 @@ for turn in 1..max_turns:
 | Mid-batch | Remaining / sibling tools are cancelled (fail-fast); finished soft results still append in order |
 | Soft tool errors | Model-visible `"error: …"` string; batch continues |
 | Child-only timeout (e.g. bash 300s) | Soft error if parent ctx still alive |
-| `mow repl` Ctrl+C | Cancels **current turn only**; REPL stays up for the next prompt |
+| `mow tty` Ctrl+C | Cancels **current turn only**; session stays up for the next prompt |
 | `mow run` Ctrl+C | Exit code 130 |
 
 Lifecycle slog (`mow run/tool start|end`) is **Debug** by default. Stock CLI prints compact progress on stderr (`→ read path`, `→ grep pattern`) via `OnEvent`; use `--verbose` for Debug logs.
@@ -346,11 +346,11 @@ Example template: [`internal/config/mow.yaml.example`](../internal/config/mow.ya
 JSONL under `session.dir` (default `$MOW_HOME/sessions/<project-hash>/`).  
 Default: new session. Resume: `--continue` (latest) or `--session ID` (loads agent prior). `--no-session` for tests/CI. Agent prior uses the last full message snapshot.
 
-Works on **`mow run`** and **`mow repl`** (same `Options.Continue` / `SessionID`). REPL prints `session=…` at start (and a short transcript when resuming) and again on exit with a resume hint (`mow repl --session <id>` or `--continue`).
+Works on **`mow run`** and **`mow tty`** (same `Options.Continue` / `SessionID`). The line session prints `session=…` at start (and a short transcript when resuming) and again on exit with a resume hint (`mow tty --session <id>` or `--continue`).
 
 Embedders build a session picker with **`Engine.Sessions()`** → `[]SessionInfo{ID, Updated, Preview}` (newest first, `Preview` = first user line), then resume via `Options.SessionID`.
 
-**Ephemeral asides:** `PromptWith(ctx, text, PromptOpts{Ephemeral: true})` runs a turn against the current context but does **not** append it to history or the session file, so it never re-enters a later prompt (events/streaming still fire). `mow repl` exposes this as **`/btw <question>`** — a mid-conversation side question that doesn't pollute context. Host UIs can offer the same via `PromptOpts{Ephemeral: true}`.
+**Ephemeral asides:** `PromptWith(ctx, text, PromptOpts{Ephemeral: true})` runs a turn against the current context but does **not** append it to history or the session file, so it never re-enters a later prompt (events/streaming still fire). `mow tty` exposes this as **`/btw <question>`** — a mid-conversation side question that doesn't pollute context. Host UIs can offer the same via `PromptOpts{Ephemeral: true}`.
 
 **Cancel mid tool batch:** hard-abort fails fast (siblings cancelled). Soft results already finished still append to history in call order; incomplete tools are omitted. Session prior keeps whatever was appended before cancel (`StopReason=cancelled`).
 

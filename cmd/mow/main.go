@@ -1,4 +1,4 @@
-// Command mow is a thin shell: core commands (run, repl) plus whatever
+// Command mow is a thin shell: core commands (run, tty) plus whatever
 // extension packs are blank-imported below. Packs own their subcommands via
 // ext.RegisterCommand — drop an import and the subcommand disappears.
 package main
@@ -50,8 +50,8 @@ func run(args []string) int {
 	switch args[0] {
 	case "run":
 		return runCmd(args[1:])
-	case "repl":
-		return replCmd(args[1:])
+	case "tty", "repl": // repl = compatibility alias for tty
+		return ttyCmd(args[1:])
 	case "trust":
 		return trustCmd(args[1:])
 	case "version", "-v", "--version":
@@ -87,7 +87,7 @@ func suggestCommand(name string) string {
 	if name == "" {
 		return ""
 	}
-	cands := []string{"run", "repl", "trust", "version", "help"}
+	cands := []string{"run", "tty", "repl", "trust", "version", "help"}
 	for _, c := range ext.Commands() {
 		cands = append(cands, c.Name)
 	}
@@ -248,14 +248,14 @@ Trust is stored under $MOW_HOME/trusted (not inside the repo).
 	return 0
 }
 
-func replCmd(args []string) int {
+func ttyCmd(args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" || a == "help" {
-			printReplUsage()
+			printTtyUsage()
 			return 0
 		}
 	}
-	fs := cliutil.NewFlagSet("repl")
+	fs := cliutil.NewFlagSet("tty")
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
 	if err := fs.Parse(args); err != nil {
@@ -264,18 +264,18 @@ func replCmd(args []string) int {
 	opt := ef.OptionsCLI()
 	eng, err := mow.New(opt)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mow repl: %v\n", err)
+		fmt.Fprintf(os.Stderr, "mow tty: %v\n", err)
 		return 1
 	}
 	defer eng.Close() // tear down session-scoped resources (ext/proc procs) on exit
-	fmt.Fprintln(os.Stderr, "mow repl — empty line or /quit to exit; Ctrl+C aborts the current turn")
+	fmt.Fprintln(os.Stderr, "mow tty — line session (not the full TUI); empty line or /quit to exit; Ctrl+C aborts the current turn")
 	fmt.Fprintln(os.Stderr, "  /btw <question>  ask an aside without adding it to context")
 	fmt.Fprintln(os.Stderr, "  /model [id]      list models or switch (catalog wire when present)")
 	if ef.Stream {
 		fmt.Fprintln(os.Stderr, "(token stream on stderr via --stream)")
 	}
 	// --continue / --session use the same Options path as mow run; surface that here.
-	printReplSession(eng, ef)
+	printTtySession(eng, ef)
 	sc := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Fprint(os.Stderr, "mow> ")
@@ -288,7 +288,7 @@ func replCmd(args []string) int {
 		}
 		// Slash meta-commands (not sent to the model).
 		if strings.HasPrefix(line, "/") {
-			if handled, err := handleReplSlash(context.Background(), eng, line); handled {
+			if handled, err := handleTtySlash(context.Background(), eng, line); handled {
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "mow: %v\n", err)
 				}
@@ -310,7 +310,7 @@ func replCmd(args []string) int {
 		if ef.Stream {
 			fmt.Fprint(os.Stderr, "\n")
 		}
-		// Per-prompt cancel: first Ctrl+C aborts this turn only; REPL stays up.
+		// Per-prompt cancel: first Ctrl+C aborts this turn only; session stays up.
 		pctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		res, err := eng.PromptWith(pctx, line, mow.PromptOpts{Ephemeral: btw})
 		stop()
@@ -328,13 +328,13 @@ func replCmd(args []string) int {
 			fmt.Println(res.Text)
 		}
 	}
-	printReplSessionExit(eng, ef)
+	printTtySessionExit(eng, ef)
 	return 0
 }
 
-// handleReplSlash runs meta slash commands. Returns handled=true when the line
+// handleTtySlash runs meta slash commands. Returns handled=true when the line
 // was a known command (and must not be sent as a user prompt).
-func handleReplSlash(ctx context.Context, eng *mow.Engine, line string) (handled bool, err error) {
+func handleTtySlash(ctx context.Context, eng *mow.Engine, line string) (handled bool, err error) {
 	parts := strings.Fields(line)
 	if len(parts) == 0 {
 		return false, nil
@@ -345,7 +345,7 @@ func handleReplSlash(ctx context.Context, eng *mow.Engine, line string) (handled
 		if len(parts) > 1 {
 			filter = strings.Join(parts[1:], " ")
 		}
-		return true, replModel(ctx, eng, filter)
+		return true, ttyModel(ctx, eng, filter)
 	case "/help", "/?":
 		fmt.Fprintln(os.Stderr, "commands: /model [id]  /btw <q>  /quit")
 		return true, nil
@@ -354,9 +354,9 @@ func handleReplSlash(ctx context.Context, eng *mow.Engine, line string) (handled
 	}
 }
 
-// replModel lists GET /models or switches. Catalog wire is applied when present;
+// ttyModel lists GET /models or switches. Catalog wire is applied when present;
 // empty wire keeps the current/default wire (SetModelWithWire).
-func replModel(ctx context.Context, eng *mow.Engine, filter string) error {
+func ttyModel(ctx context.Context, eng *mow.Engine, filter string) error {
 	if eng == nil {
 		return fmt.Errorf("nil engine")
 	}
@@ -458,10 +458,10 @@ func replModel(ctx context.Context, eng *mow.Engine, filter string) error {
 	return nil
 }
 
-// printReplSession announces session id and any resumed transcript (stderr).
-// --continue works on repl the same as run (Options.Continue → load latest prior);
+// printTtySession announces session id and any resumed transcript (stderr).
+// --continue works on tty the same as run (Options.Continue → load latest prior);
 // without this banner it looks like a blank new chat.
-func printReplSession(eng *mow.Engine, ef cliutil.EngineFlags) {
+func printTtySession(eng *mow.Engine, ef cliutil.EngineFlags) {
 	if eng == nil || ef.NoSession {
 		return
 	}
@@ -496,8 +496,8 @@ func printReplSession(eng *mow.Engine, ef cliutil.EngineFlags) {
 	fmt.Fprintf(os.Stderr, "session=%s\n", sid)
 }
 
-// printReplSessionExit reminds how to resume this chat next time.
-func printReplSessionExit(eng *mow.Engine, ef cliutil.EngineFlags) {
+// printTtySessionExit reminds how to resume this chat next time.
+func printTtySessionExit(eng *mow.Engine, ef cliutil.EngineFlags) {
 	if eng == nil || ef.NoSession {
 		return
 	}
@@ -506,8 +506,8 @@ func printReplSessionExit(eng *mow.Engine, ef cliutil.EngineFlags) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "session=%s\n", sid)
-	fmt.Fprintf(os.Stderr, "resume: mow repl --session %s\n", sid)
-	fmt.Fprintf(os.Stderr, "        mow repl --continue\n")
+	fmt.Fprintf(os.Stderr, "resume: mow tty --session %s\n", sid)
+	fmt.Fprintf(os.Stderr, "        mow tty --continue\n")
 }
 
 func printRunUsage() {
@@ -532,10 +532,11 @@ Examples:
 `)
 }
 
-func printReplUsage() {
-	fmt.Fprintf(os.Stderr, `mow repl — interactive line REPL
+func printTtyUsage() {
+	fmt.Fprintf(os.Stderr, `mow tty — interactive line session (plain terminal; not the full TUI)
 
-  mow repl [flags]
+  mow tty [flags]
+  mow repl [flags]   # compatibility alias
 
 In-session:
 
@@ -560,7 +561,8 @@ func printUsage() {
 Core:
 
   mow run  -p "…" [flags]     one-shot prompt
-  mow repl [flags]            interactive REPL  (/model /btw /quit)
+  mow tty  [flags]            interactive line session (/model /btw /quit)
+  mow repl [flags]            alias for tty
   mow trust [path]            trust workspace for project .mow config
   mow trust --list | --revoke
   mow version | help

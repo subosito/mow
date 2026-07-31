@@ -4,7 +4,7 @@
 
 ```text
 Embedder / tests ──┐
-CLI (run/repl) ────┼──▶  mow.Engine  ──▶  LLM HTTP (any compatible endpoint)
+CLI (run/tty) ────┼──▶  mow.Engine  ──▶  LLM HTTP (any compatible endpoint)
 ext packs ─────────┘     (acp · rpc · goal · mcp · …)
 ```
 
@@ -62,7 +62,7 @@ export OPENAI_MODEL=gpt-5-mini
 # export OPENAI_API_KEY=…
 
 ./bin/mow run -p "Reply with exactly: hi"
-./bin/mow repl
+./bin/mow tty
 ./bin/mow goal run --goal "Make CI green"   # ext/goal — multi-step
 ./bin/mow review                 # ext/review — advisory code review
 ./bin/mow sec --format sarif     # security profile, SARIF for code scanning

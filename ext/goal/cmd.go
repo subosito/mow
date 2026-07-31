@@ -285,7 +285,7 @@ func printGoalResume(st State) {
 	}
 	fmt.Fprintf(os.Stderr, "resume: mow goal run --id %s\n", id)
 	if sid := strings.TrimSpace(st.SessionID); sid != "" {
-		fmt.Fprintf(os.Stderr, "        mow repl --session %s\n", sid)
+		fmt.Fprintf(os.Stderr, "        mow tty --session %s\n", sid)
 	}
 	fmt.Fprintf(os.Stderr, "status: mow goal status --id %s\n", id)
 }

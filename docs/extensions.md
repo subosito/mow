@@ -17,7 +17,7 @@ Customization modes (see [harness.md](harness.md)):
 | Implementation | `internal/*` | Loop/llm/tools not a compatibility surface |
 | UIs & protocols | `ext/<name>` packs | Optional; not required for `Prompt()` |
 | CLI subcommands | Pack-owned via `RegisterCommand` | Unlink pack → command disappears |
-| Core CLI | `run`, `repl`, `version`, `help` only | Stock thin shell |
+| Core CLI | `run`, `tty` (alias `repl`), `version`, `help` only | Stock thin shell |
 | ACP | Pack (`ext/acp`), not core | Standard editor + peer-harness wire |
 | Sub-agents | Not core loop; use ACP delegate or multi-`Engine` | Single loop in core |
 | Media tools | Side-lane `generate_*` / `understand_*` | Chat model stays primary; filesystem is I/O |
@@ -65,7 +65,7 @@ ext/
   ops/                 # pack: continuous fleet ops (logs, restart, incidents, peer fixes)
   mcp/                 # pack: MCP → tools
   lsp/                 # pack: LSP hover/definition (gopls, …)
-cmd/mow/               # thin binary: run/repl + blank-import packs
+cmd/mow/               # thin binary: run/tty + blank-import packs
 ```
 
 | Path | Is a pack? | Role |
@@ -114,7 +114,7 @@ _ "github.com/subosito/mow/ext/rpc"
 | Remove `_ "…/ext/acp"` | `mow acp` gone; help line gone; `acp_delegate` not registered |
 | Add a new pack + import | Subcommand appears automatically |
 
-Core keeps: **`run`**, **`repl`**, **`version`**, **`help`**.  
+Core keeps: **`run`**, **`tty`** (alias **`repl`**), **`version`**, **`help`**.  
 Default interactive (no args + TTY): only if a linked pack sets `DefaultInteractive`.
 
 Shared flags for any Engine CLI: `cliutil.EngineFlags` → `NewEngine()` (runs `ext.BeforeNew` first).
@@ -262,7 +262,7 @@ Same id never overlaps a previous tick (skip if still running). Not HA — use h
 `proc_start` / `proc_status` / `proc_stop` tools + a `mow proc` CLI let an agent
 launch a long-lived process (dev server, watcher, mock) and **keep working while
 it runs** — start returns a pid immediately and the process is detached (new
-session, released), logging to a file. Available anywhere (run/repl/host), gated
+session, released), logging to a file. Available anywhere (run/tty/host), gated
 by `--allow-shell` (it runs shell commands). Storage: `$MOW_HOME/proc/<project>/`.
 
 ```bash
@@ -280,7 +280,7 @@ the supported way. Shares the mechanism with `ext/goal`'s goal-scoped
 `goal_process_*` (both use `internal/proc`).
 
 **Lifecycle:** processes are **auto-killed when the session exits** —
-`Engine.Close()` (deferred by `mow run`/`repl` and called by embedders on exit)
+`Engine.Close()` (deferred by `mow run`/`tty` and called by embedders on exit)
 stops everything `proc_start` launched, so nothing leaks. Pass `keep: true` to a
 `proc_start` call to let that process survive session exit (nohup-like). A
 crashed process skips cleanup; `mow proc stop-all` recovers.

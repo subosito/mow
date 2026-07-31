@@ -20,7 +20,7 @@ func EnableVerbose(on bool) {
 }
 
 // OptionsCLI is Options plus stock CLI UX: optional token stream and compact
-// tool progress on stderr. Used by run/repl and packs that drive Prompt.
+// tool progress on stderr. Used by run/tty and packs that drive Prompt.
 func (f *EngineFlags) OptionsCLI() mow.Options {
 	EnableVerbose(f.Verbose)
 	opt := f.Options()

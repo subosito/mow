@@ -51,7 +51,7 @@
 Integrators should not import `internal/*`. Custom tools use `ext.Tool` / `mow.Tool` and register via `ext.RegisterTool`.
 
 ```text
-  Embedder / tests     CLI (run/repl + cliutil)   ext packs (acp/rpc/…)
+  Embedder / tests     CLI (run/tty + cliutil)   ext packs (acp/rpc/…)
          │                      │                           │
          └────────────┬─────────┴───────────────────────────┘
                       ▼
@@ -70,7 +70,7 @@ Integrators should not import `internal/*`. Custom tools use `ext.Tool` / `mow.T
 |---------|-----|--------|
 | **API** | `mow.New` / `Engine.Prompt` / `OnEvent` / `Cancel` / `Status` | public module |
 | **run** | `mow run -p …` / `--allow-write` | **core** CLI |
-| **repl** | `mow repl` | **core** CLI |
+| **tty** | `mow tty` (alias: `mow repl`) | **core** CLI |
 | **rpc** | `mow rpc` | **ext/rpc** JSONL control plane (prompt + event stream + cancel/status) |
 | **acp** | `mow acp` | **ext/acp** (Agent Client Protocol agent) |
 | **goal** | `mow goal` | **ext/goal** (outer multi-step loop) |
