@@ -128,10 +128,14 @@ Core yaml stays agent/LLM-oriented. Pack knobs are opaque blobs:
 ```yaml
 extensions:
   acp:
+    # External peers (any ACP-speaking command)
     agents:
-      - name: peer
-        command: [peer-agent, --acp]
-        # timeout_sec: 300
+      - name: peer-agent
+        command: [env, ANTHROPIC_MODEL=claude-sonnet-4, npx, -y, "@agentclientprotocol/claude-agent-acp"]
+    # Native mow multi-model peers (expands to: mow acp --model …)
+    mow_agents:
+      peer-agent:
+        model: gpt-5-mini
   # other packs: job, mcp, lsp, …
 ```
 
@@ -141,15 +145,35 @@ extensions:
 
 ### `extensions.acp`
 
+Named **agents** are what the model calls via `acp_delegate` (arg `agent`, alias
+`subagent`). Under the hood each is an ACP peer process. Coming from harnesses
+that say “subagent”: same idea — a named helper you **delegate** work to.
+
 | Field | Meaning |
 |-------|---------|
 | `peer_idle_sec` | Drop idle peers after N seconds (default 900; `-1` = never). Always drop if process not alive. |
+| `agents[]` | **External** peers: full command that speaks ACP on stdio |
 | `agents[].name` | Id for `acp_delegate` arg `agent` |
-| `agents[].command` | Peer argv that speaks ACP on stdio |
+| `agents[].command` | Peer argv |
 | `agents[].dir` | Optional cwd (default: workspace) |
-| `agents[].timeout_sec` | Cap per delegated prompt (default 300). On timeout/cancel: `session/cancel` then peer process tree is dropped |
+| `agents[].timeout_sec` | Cap per delegated prompt (default 300) |
+| `agents[].effort` | Optional; appends `--reasoning-effort` when the peer CLI accepts it |
+| `mow_agents` | **Native** multi-model mow peers (map name → spec). Expands to `mow acp --model …` |
 
-When agents are present, `RegisterFromConfig` (via `BeforeNew`) registers tool **`acp_delegate`**.
+#### `mow_agents.<name>` fields
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `model` | *(required)* | Model id for the peer `mow acp` process |
+| `allow_write` | `true` | Pass `--allow-write` |
+| `allow_shell` | `true` | Pass `--allow-shell` |
+| `timeout_sec` | `600` | Cap per delegated prompt (longer default than external agents) |
+| `effort` | *(omit)* | Pass `--effort <value>` to the peer |
+| `dir` | workspace | Peer working directory |
+| `extra_args` | — | Extra argv after the standard flags (advanced) |
+
+Names must not collide between `agents` and `mow_agents`. When either list is
+non-empty, `RegisterFromConfig` (via `BeforeNew`) registers tool **`acp_delegate`**.
 
 ### `ext/goal` (outer loop + executor)
 
@@ -531,7 +555,7 @@ No `ext/contextmode` pack is required: wire any MCP or local optimizer to these 
 |---------|-------|----------------|
 | **Goals** | **No** | Host/UI or session events |
 | **MCP** | **No** | Pack that `RegisterTool`s from servers |
-| **Sub-agents** | **No** | Multi-`Engine` in host, or **`acp_delegate`** / future stricter child Engine |
+| **Sub-agents** | **No separate feature** | Same as **named agents** via `acp_delegate` (`agent` / alias `subagent`). Prefer `mow_agents` for multi-model mow; full `agents[]` for external tools |
 | **LSP / DAP** | **No** | Tool pack or via MCP |
 | **Browser / sandbox** | **No** | High risk; deploy-specific packs |
 

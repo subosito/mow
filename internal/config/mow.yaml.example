@@ -97,12 +97,21 @@ session:
 # Optional packs — packages under ext/<name>; config key extensions.<name>
 # extensions:
 #   acp:
-#     agents:                         # registers acp_delegate before mow.New
-#       - name: peer
-#         command: [peer-agent, --acp]
-#         # dir: /abs/path              # default: workspace
+#     # External peers (any ACP command). "Subagent" in other harnesses = named agent here.
+#     agents:
+#       - name: peer-agent
+#         command: [env, ANTHROPIC_MODEL=claude-sonnet-4, npx, -y, "@agentclientprotocol/claude-agent-acp"]
 #         # timeout_sec: 600
-#         # effort: high                # appends --reasoning-effort when the peer CLI accepts it
+#     # Native mow multi-model peers → mow acp --model … (same acp_delegate tool)
+#     mow_agents:
+#       peer-agent:
+#         model: gpt-5-mini      # required
+#         # allow_write: true       # default true
+#         # allow_shell: true       # default true
+#         # timeout_sec: 600        # default 600
+#         # effort: high            # optional --effort on the peer
+#         # dir: /abs/path
+#         # extra_args: [--stream]
 #   job:
 #     schedules:
 #       - id: hourly

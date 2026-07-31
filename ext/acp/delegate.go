@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -37,14 +38,21 @@ type AgentSpec struct {
 //	extensions:
 //	  acp:
 //	    peer_idle_sec: 900   # drop idle peers (default 900; -1 = never by idle)
-//	    agents:
-//	      - name: peer
-//	        command: [peer-agent, --acp]
+//	    agents:              # external ACP peers (any command)
+//	      - name: peer-agent
+//	        command: [env, ANTHROPIC_MODEL=…, npx, -y, "@agentclientprotocol/claude-agent-acp"]
+//	    mow_agents:          # native mow peers (same product, other model)
+//	      peer-agent:
+//	        model: gpt-5-mini
 type Config struct {
 	// PeerIdleSec drops unused peer processes after this many seconds.
 	// 0 or omitted → default 900. -1 → never idle-evict (still drop if !Alive()).
-	PeerIdleSec int         `yaml:"peer_idle_sec"`
-	Agents      []AgentSpec `yaml:"agents"`
+	PeerIdleSec int `yaml:"peer_idle_sec"`
+	// Agents are external peer harnesses (full command that speaks ACP on stdio).
+	Agents []AgentSpec `yaml:"agents"`
+	// MowAgents are native multi-model peers: each expands to `mow acp --model …`.
+	// Same acp_delegate tool as Agents. Names must not collide with agents[].
+	MowAgents map[string]MowAgentSpec `yaml:"mow_agents"`
 }
 
 // sharedDelegate is the singleton acp_delegate tool so packs (e.g. ops) can
@@ -55,7 +63,7 @@ var (
 )
 
 // RegisterFromConfig loads config (same paths as mow.New) and registers
-// acp_delegate when extensions.acp.agents is non-empty.
+// acp_delegate when agents and/or mow_agents are non-empty.
 // Must run *before* mow.New so the tool is in the registry.
 func RegisterFromConfig(configPaths ...string) error {
 	cfg, err := config.Load(configPaths...)
@@ -66,7 +74,11 @@ func RegisterFromConfig(configPaths ...string) error {
 	if err := cfg.Extension("acp", &c); err != nil {
 		return err
 	}
-	AppendAgents(c.Agents, cfg.Workspace, c.PeerIdleSec)
+	agents, err := resolveAgents(c)
+	if err != nil {
+		return err
+	}
+	AppendAgents(agents, cfg.Workspace, c.PeerIdleSec)
 	return nil
 }
 
@@ -80,7 +92,11 @@ func RegisterFromEngine(eng *mow.Engine) error {
 	if err := eng.Extension("acp", &c); err != nil {
 		return err
 	}
-	AppendAgents(c.Agents, eng.Workspace(), c.PeerIdleSec)
+	agents, err := resolveAgents(c)
+	if err != nil {
+		return err
+	}
+	AppendAgents(agents, eng.Workspace(), c.PeerIdleSec)
 	return nil
 }
 
@@ -166,13 +182,16 @@ func (t *delegateTool) Description() string {
 	for n := range t.agents {
 		names = append(names, n)
 	}
-	return "Delegate a task to another harness via ACP (Agent Client Protocol). " +
-		"Peer process/session is reused across calls when possible. " +
-		"Long peer runs are capped by timeout_sec (default 300s); cancel the host turn to abort. " +
-		"Args: agent (one of: " + strings.Join(names, ", ") + "), prompt (required), cwd (optional absolute or workspace-relative)."
+	sort.Strings(names)
+	return "Delegate a task to a named agent (in other harnesses often called a subagent). " +
+		"Agents are configured under extensions.acp (agents = external tools; mow_agents = other mow models). " +
+		"Process/session is reused across calls when possible. " +
+		"Long runs are capped by the agent's timeout_sec; cancel the host turn to abort. " +
+		"Args: agent (one of: " + strings.Join(names, ", ") + "), prompt (required), cwd (optional absolute or workspace-relative). " +
+		"Alias: subagent is accepted as a synonym for agent."
 }
 func (t *delegateTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"agent":{"type":"string"},"prompt":{"type":"string"},"cwd":{"type":"string"}},"required":["agent","prompt"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"agent":{"type":"string","description":"Named agent id (alias: subagent)"},"subagent":{"type":"string","description":"Synonym for agent (other harnesses use this term)"},"prompt":{"type":"string"},"cwd":{"type":"string"}},"required":["prompt"]}`)
 }
 
 func peerKey(agent, dir string) string {
@@ -196,16 +215,24 @@ func peerCommand(spec AgentSpec) []string {
 
 func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
-		Agent  string `json:"agent"`
-		Prompt string `json:"prompt"`
-		Cwd    string `json:"cwd"`
+		Agent    string `json:"agent"`
+		Subagent string `json:"subagent"` // synonym for agent (other harnesses)
+		Prompt   string `json:"prompt"`
+		Cwd      string `json:"cwd"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	spec, ok := t.agents[strings.ToLower(strings.TrimSpace(a.Agent))]
+	agentName := strings.TrimSpace(a.Agent)
+	if agentName == "" {
+		agentName = strings.TrimSpace(a.Subagent)
+	}
+	if agentName == "" {
+		return "", fmt.Errorf("acp_delegate: agent (or subagent) is required")
+	}
+	spec, ok := t.agents[strings.ToLower(agentName)]
 	if !ok {
-		return "", fmt.Errorf("acp_delegate: unknown agent %q", a.Agent)
+		return "", fmt.Errorf("acp_delegate: unknown agent %q (configure extensions.acp.agents or mow_agents; \"subagent\" means the same thing)", agentName)
 	}
 	prompt := strings.TrimSpace(a.Prompt)
 	if prompt == "" {
@@ -244,7 +271,7 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
 
-	agentName := spec.Name
+	agentName = spec.Name
 	// Immediate UI signal so hosts show "claude: prompt running…" during TTFT.
 	if eng := mow.EngineFromContext(ctx); eng != nil {
 		eng.Emit(mow.Event{
