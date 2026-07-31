@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/subosito/mow/cliutil"
 )
 
 // Client talks to a peer ACP agent (subprocess) as a *client*.
@@ -462,4 +464,24 @@ func formatPeerToolProgress(u sessionUpdate) string {
 	default:
 		return label + " (" + status + ")"
 	}
+}
+
+// toolCallKindTitle maps a mow tool event into ACP tool_call kind + title so
+// hosts render "read engine.go" / "grep foo in pkg/" instead of bare tool names.
+// Title is the detail only (path, pattern, command); empty when none.
+func toolCallKindTitle(tool string, args json.RawMessage) (kind, title string) {
+	kind = strings.TrimSpace(tool)
+	if kind == "" {
+		kind = "?"
+	}
+	line := strings.TrimSpace(cliutil.FormatToolProgress(tool, args))
+	if line == "" || line == kind {
+		return kind, ""
+	}
+	// FormatToolProgress is "kind detail…"; strip the kind prefix for Title.
+	if strings.HasPrefix(line, kind+" ") {
+		return kind, strings.TrimSpace(line[len(kind)+1:])
+	}
+	// Unknown shape (e.g. tool renamed in formatter) — keep full line as title.
+	return kind, line
 }

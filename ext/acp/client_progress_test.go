@@ -25,6 +25,27 @@ func TestFormatPeerToolProgress(t *testing.T) {
 	}
 }
 
+func TestToolCallKindTitle(t *testing.T) {
+	cases := []struct {
+		tool, args   string
+		wantKind     string
+		wantTitle    string
+	}{
+		{"read", `{"path":"engine.go"}`, "read", "engine.go"},
+		{"grep", `{"pattern":"TODO","path":"pkg/"}`, "grep", "TODO in pkg/"},
+		{"bash", `{"command":"ls -la"}`, "bash", "ls -la"},
+		{"read", `{}`, "read", ""},
+		{"", `{}`, "?", ""},
+	}
+	for _, c := range cases {
+		k, title := toolCallKindTitle(c.tool, json.RawMessage(c.args))
+		if k != c.wantKind || title != c.wantTitle {
+			t.Fatalf("toolCallKindTitle(%q,%s)=(%q,%q) want (%q,%q)",
+				c.tool, c.args, k, title, c.wantKind, c.wantTitle)
+		}
+	}
+}
+
 func TestOnNotificationProgressAndChunk(t *testing.T) {
 	c := &Client{}
 	var mu sync.Mutex

@@ -479,6 +479,27 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				}),
 			})
 		}
+		// writeToolCall emits ACP tool_call / tool_call_update so hosts can show
+		// "read engine.go" / "grep foo in pkg/" instead of bare "→ read".
+		writeToolCall := func(updateKind, callID, kind, title, status string) {
+			if kind == "" && title == "" {
+				return
+			}
+			a.write(notification{
+				JSONRPC: "2.0",
+				Method:  "session/update",
+				Params: mustJSON(sessionUpdateParams{
+					SessionID: p.SessionID,
+					Update: sessionUpdate{
+						SessionUpdate: updateKind,
+						ToolCallID:    callID,
+						Kind:          kind,
+						Title:         title,
+						Status:        status,
+					},
+				}),
+			})
+		}
 		a.eng.SetOnToken(writeAgentText)
 		// Fan-in peer events while Prompt runs (does not replace host listeners).
 		unsub := a.eng.AddOnEvent(func(ev mow.Event) {
@@ -487,8 +508,8 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				// Peer answer text — visible as normal agent stream.
 				writeAgentText(ev.Delta)
 			case mow.EventDelegateProgress:
-				// Tool/thought status from peer. Prefer thought_chunk so clients
-				// can collapse it; include agent label for multi-peer clarity.
+				// Nested peer tool/thought. Prefer thought_chunk so clients can
+				// collapse it; include agent label for multi-peer clarity.
 				agent := strings.TrimSpace(ev.Agent)
 				line := strings.TrimSpace(ev.Delta)
 				if line == "" {
@@ -499,12 +520,15 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				}
 				writeThought(line + "\n")
 			case mow.EventToolStart:
-				// Parent tools (including acp_delegate start) as thought progress.
-				label := strings.TrimSpace(ev.Tool)
-				if label == "" {
-					return
+				kind, title := toolCallKindTitle(ev.Tool, ev.Args)
+				writeToolCall("tool_call", ev.ToolCallID, kind, title, "in_progress")
+			case mow.EventToolEnd:
+				kind, title := toolCallKindTitle(ev.Tool, ev.Args)
+				status := "completed"
+				if ev.Denied || strings.TrimSpace(ev.Error) != "" {
+					status = "failed"
 				}
-				writeThought("→ " + label + "\n")
+				writeToolCall("tool_call_update", ev.ToolCallID, kind, title, status)
 			}
 		})
 		popt := mow.PromptOpts{}
