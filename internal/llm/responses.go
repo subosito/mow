@@ -145,7 +145,7 @@ func toResponsesTools(tools []ToolSpec) []map[string]any {
 			"type":        "function",
 			"name":        t.Function.Name,
 			"description": t.Function.Description,
-			"parameters":   schema,
+			"parameters":  schema,
 			"strict":      false,
 		})
 	}

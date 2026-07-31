@@ -10,14 +10,14 @@ import (
 
 // LogEvent is one line in goals/<id>/events.jsonl.
 type LogEvent struct {
-	TS      time.Time   `json:"ts"`
-	Kind    string      `json:"kind"` // start|step|done|fail|retry|budget
-	Step    int         `json:"step,omitempty"`
-	Text    string      `json:"text,omitempty"`
-	Outcome string      `json:"outcome,omitempty"`
-	Error   string      `json:"error,omitempty"`
-	Status  Status      `json:"status,omitempty"`
-	Plan    *Plan       `json:"plan,omitempty"`
+	TS      time.Time `json:"ts"`
+	Kind    string    `json:"kind"` // start|step|done|fail|retry|budget
+	Step    int       `json:"step,omitempty"`
+	Text    string    `json:"text,omitempty"`
+	Outcome string    `json:"outcome,omitempty"`
+	Error   string    `json:"error,omitempty"`
+	Status  Status    `json:"status,omitempty"`
+	Plan    *Plan     `json:"plan,omitempty"`
 }
 
 // eventsPath is $dir/<id>/events.jsonl (alongside <id>.json).

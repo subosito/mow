@@ -66,7 +66,7 @@ func TestChatOpenAISendsSystemPrefix(t *testing.T) {
 
 	c := &Client{
 		Wire: WireOpenAIChat, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "family-x-1",
-		HTTP: srv.Client(),
+		HTTP:               srv.Client(),
 		SystemPrefix:       []string{"prefix-block-a"},
 		SystemPrefixModels: []string{"family-*"},
 	}

@@ -33,16 +33,16 @@ type LLMConfig struct {
 	// WireExplicit is true when wire was set by yaml, MOW_WIRE, or SetWire —
 	// not merely the built-in default. Engine skips catalog wire auto-align
 	// when this is true so a pinned openai-chat-completions is not overridden.
-	WireExplicit bool `yaml:"-"`
+	WireExplicit bool   `yaml:"-"`
 	BaseURL      string `yaml:"base_url"`
-	APIKey    string            `yaml:"api_key"`
-	APIKeyEnv string            `yaml:"api_key_env"`
-	Model     string            `yaml:"model"` // provider (or gateway) model id
+	APIKey       string `yaml:"api_key"`
+	APIKeyEnv    string `yaml:"api_key_env"`
+	Model        string `yaml:"model"` // provider (or gateway) model id
 	// Effort is canonical reasoning intensity: none|low|medium|high.
 	// Empty = provider default. Applied by mow (model-id tier rewrite and/or body fields).
-	Effort    string            `yaml:"effort"`
-	Headers   map[string]string `yaml:"headers"`
-	Stream    bool              `yaml:"stream"`
+	Effort  string            `yaml:"effort"`
+	Headers map[string]string `yaml:"headers"`
+	Stream  bool              `yaml:"stream"`
 	// PromptCache toggles provider prompt caching (anthropic-messages: cache
 	// system/tools/history). Nil = enabled (pure win for repeated prefixes);
 	// set false for gateways that reject cache_control fields.
@@ -103,9 +103,16 @@ type PolicyConfig struct {
 	// MaxTurns caps LLM round-trips per Prompt (default 120). 0 = unlimited
 	// after load. In YAML use max_turns: -1 for unlimited (0 is indistinguishable
 	// from "omit" in overlays). CLI: --max-turns 0.
-	MaxTurns       int `yaml:"max_turns"`
+	MaxTurns int `yaml:"max_turns"`
+	// BashTimeoutSec is the default per-call bash timeout (default 300).
+	// A coding agent runs builds and test suites, so this is minutes, not
+	// seconds. A single call may ask for longer via the tool's timeout_sec
+	// argument, bounded by MaxBashTimeoutSec.
 	BashTimeoutSec int `yaml:"bash_timeout_sec"`
-	MaxReadBytes   int `yaml:"max_read_bytes"`
+	// MaxBashTimeoutSec bounds what one bash call may request via timeout_sec
+	// (default 900). Keeps a model from parking on a hung command forever.
+	MaxBashTimeoutSec int `yaml:"max_bash_timeout_sec"`
+	MaxReadBytes      int `yaml:"max_read_bytes"`
 	// MaxContextChars soft-limits history before each LLM call (char estimate, not tokens).
 	// Default ~100k floor; Engine auto-scales from gateway context_window × CompactRatio
 	// when still on the built-in default. Set to -1 to disable compaction. An explicit
@@ -188,8 +195,14 @@ func defaults() *File {
 			Enable: []string{"read", "glob", "grep"},
 		},
 		Policy: PolicyConfig{
-			MaxTurns:           120,
-			BashTimeoutSec:     60,
+			MaxTurns: 120,
+			// 300s: a coding agent runs test suites and builds, not one-liners.
+			// A cold `go test ./...` or a nested harness subcommand routinely
+			// needs minutes; 60s forced agents into background-process
+			// workarounds for ordinary work. Individual calls may request more
+			// via the bash timeout_sec arg, up to MaxBashTimeoutSec.
+			BashTimeoutSec:     300,
+			MaxBashTimeoutSec:  900,
 			MaxReadBytes:       512 << 10, // 512 KiB — enough for code files; loop also caps tool results
 			MaxContextChars:    100_000,   // default floor; Engine scales up from gateway context_window
 			CompactRatio:       0.8,       // of context_window when auto-scaling (1M → ~800k tok-eq)
@@ -306,6 +319,9 @@ func mergeOverlay(dst *File, overlay *File) {
 	}
 	if overlay.Policy.BashTimeoutSec > 0 {
 		dst.Policy.BashTimeoutSec = overlay.Policy.BashTimeoutSec
+	}
+	if overlay.Policy.MaxBashTimeoutSec > 0 {
+		dst.Policy.MaxBashTimeoutSec = overlay.Policy.MaxBashTimeoutSec
 	}
 	if overlay.Policy.MaxReadBytes > 0 {
 		dst.Policy.MaxReadBytes = overlay.Policy.MaxReadBytes
@@ -515,7 +531,15 @@ func (f *File) normalize() error {
 		f.Policy.MaxReadBytes = 512 << 10
 	}
 	if f.Policy.BashTimeoutSec <= 0 {
-		f.Policy.BashTimeoutSec = 60
+		f.Policy.BashTimeoutSec = 300
+	}
+	if f.Policy.MaxBashTimeoutSec <= 0 {
+		f.Policy.MaxBashTimeoutSec = 900
+	}
+	// A configured default above the ceiling would be silently clamped per
+	// call; raise the ceiling instead so an explicit setting is honoured.
+	if f.Policy.MaxBashTimeoutSec < f.Policy.BashTimeoutSec {
+		f.Policy.MaxBashTimeoutSec = f.Policy.BashTimeoutSec
 	}
 	// -1 in yaml disables compaction; normalize to 0 for the agent (off).
 	if f.Policy.MaxContextChars < 0 {

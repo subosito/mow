@@ -138,7 +138,7 @@ for turn in 1..max_turns:
 | `context` cancel (`Engine.Cancel`, Ctrl+C, ACP `session/cancel`) | Hard-abort the run |
 | Mid-batch | Remaining / sibling tools are cancelled (fail-fast); finished soft results still append in order |
 | Soft tool errors | Model-visible `"error: …"` string; batch continues |
-| Child-only timeout (e.g. bash 60s) | Soft error if parent ctx still alive |
+| Child-only timeout (e.g. bash 300s) | Soft error if parent ctx still alive |
 | `mow repl` Ctrl+C | Cancels **current turn only**; REPL stays up for the next prompt |
 | `mow run` Ctrl+C | Exit code 130 |
 
@@ -154,6 +154,8 @@ Lifecycle slog (`mow run/tool start|end`) is **Debug** by default. Stock CLI pri
 | `llm.context_window` / `input_price` / `output_price` | (optional) | Override metering; otherwise `Engine.Limits()` uses `GET /v1/models` fields (`context_window`, `pricing.input_per_mtok` / `output_per_mtok`) — no client-side price table |
 | `policy.max_tool_result_chars` | `24000` | Cap each tool result stored for the model (~6k tokens) |
 | `policy.max_read_bytes` | `512KiB` | Cap `read` tool raw file size |
+| `policy.bash_timeout_sec` | `300` | Per bash call. A coding agent runs builds and test suites, so the default is minutes; a single call may request longer via the tool's `timeout_sec` argument |
+| `policy.max_bash_timeout_sec` | `900` | Ceiling on a per-call `timeout_sec` request, so a hung command cannot park the loop |
 | `policy.max_parallel_tools` | `8` | Concurrent tool Exec per assistant batch; `1` = sequential |
 | Loop truncate | always | Oversized tools trimmed even under context budget |
 

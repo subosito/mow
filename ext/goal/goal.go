@@ -24,31 +24,44 @@ const (
 	StatusFailed  Status = "failed"
 )
 
+// Step budget defaults. A step is one full Prompt (itself up to
+// policy.max_turns tool round-trips), so these are outer iterations, not
+// tool calls.
+const (
+	// DefaultMaxSteps is the default outer budget. Real multi-phase work
+	// ("make CI green": explore → fix → retest → lint → fix again) commonly
+	// needs a dozen-plus steps; 8 stopped useful runs mid-flight and forced a
+	// resume just to continue.
+	DefaultMaxSteps = 16
+	// MaxMaxSteps is the hard ceiling a Spec may request.
+	MaxMaxSteps = 64
+)
+
 // Spec is the input to create / run a goal.
 type Spec struct {
 	// ID is a filesystem-safe name (slug). Empty → derived from Goal.
 	ID string
 	// Goal is the natural-language objective.
 	Goal string
-	// MaxSteps caps Prompt iterations (default 8).
+	// MaxSteps caps Prompt iterations (default DefaultMaxSteps).
 	MaxSteps int
 }
 
 // State is durable progress (JSON under $MOW_HOME/goals/<id>.json).
 type State struct {
-	ID        string    `json:"id"`
-	Goal      string    `json:"goal"`
-	Status    Status    `json:"status"`
-	Step      int       `json:"step"`
-	MaxSteps  int       `json:"max_steps"`
-	SessionID string    `json:"session_id,omitempty"`
-	LastReply string    `json:"last_reply,omitempty"`
-	Summary   string    `json:"summary,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	ID        string `json:"id"`
+	Goal      string `json:"goal"`
+	Status    Status `json:"status"`
+	Step      int    `json:"step"`
+	MaxSteps  int    `json:"max_steps"`
+	SessionID string `json:"session_id,omitempty"`
+	LastReply string `json:"last_reply,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+	Error     string `json:"error,omitempty"`
 	// Plan is an optional checklist. When set, status=done requires all items done/skipped.
 	Plan Plan `json:"plan,omitempty"`
 	// CurrentItem is the plan item id this step should focus (hint; empty = next pending).
-	CurrentItem string `json:"current_item,omitempty"`
+	CurrentItem string    `json:"current_item,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	// InputTokens / OutputTokens are cumulative across all steps (zero when
 	// the provider reports no usage).
@@ -133,10 +146,10 @@ func NormalizeSpec(s Spec) (Spec, error) {
 		return s, err
 	}
 	if s.MaxSteps <= 0 {
-		s.MaxSteps = 8
+		s.MaxSteps = DefaultMaxSteps
 	}
-	if s.MaxSteps > 64 {
-		s.MaxSteps = 64
+	if s.MaxSteps > MaxMaxSteps {
+		s.MaxSteps = MaxMaxSteps
 	}
 	return s, nil
 }

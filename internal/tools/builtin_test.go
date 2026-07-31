@@ -166,7 +166,7 @@ func jsonQuote(s string) string {
 }
 
 func TestBashCustomTimeoutFromPolicy(t *testing.T) {
-	// BashTimeoutSec=0 (unset) defaults to 60s; an explicit small value wins.
+	// BashTimeoutSec=0 (unset) defaults to 300s; an explicit small value wins.
 	root := t.TempDir()
 	for _, tc := range []struct {
 		name string
@@ -188,6 +188,66 @@ func TestBashCustomTimeoutFromPolicy(t *testing.T) {
 				t.Fatalf("got %q", out)
 			}
 		})
+	}
+}
+
+// A slow command can ask for more time than the policy default, so an agent
+// running a cold build or full test suite does not have to fall back to
+// background-process workarounds.
+func TestBashPerCallTimeoutExtendsDefault(t *testing.T) {
+	root := t.TempDir()
+	p := &policy.Policy{Workspace: root, AllowShell: true, BashTimeoutSec: 1, MaxBashTimeoutSec: 900}
+	reg := tools.Registry(p, []string{"bash"})
+
+	// Without the override, a 2s command exceeds the 1s policy default.
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"sleep 2; echo late"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "timed out") {
+		t.Fatalf("expected timeout without override, got %q", out)
+	}
+	// With timeout_sec it completes.
+	out, err = reg[0].Exec(context.Background(), json.RawMessage(`{"command":"sleep 2; echo late","timeout_sec":30}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "late") {
+		t.Fatalf("expected completion with timeout_sec, got %q", out)
+	}
+}
+
+// A per-call request may not exceed the configured ceiling, so a model cannot
+// park the loop on a hung command by asking for an enormous timeout.
+func TestBashPerCallTimeoutClampedToCeiling(t *testing.T) {
+	root := t.TempDir()
+	p := &policy.Policy{Workspace: root, AllowShell: true, BashTimeoutSec: 1, MaxBashTimeoutSec: 2}
+	reg := tools.Registry(p, []string{"bash"})
+	start := time.Now()
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"sleep 60","timeout_sec":600}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "timed out") {
+		t.Fatalf("expected clamped timeout, got %q", out)
+	}
+	if elapsed := time.Since(start); elapsed > 20*time.Second {
+		t.Fatalf("ceiling not enforced: waited %s", elapsed)
+	}
+}
+
+// The timeout message must teach the recovery path, since that text is the
+// only feedback the model gets.
+func TestBashTimeoutMessageSuggestsRetry(t *testing.T) {
+	root := t.TempDir()
+	p := &policy.Policy{Workspace: root, AllowShell: true, BashTimeoutSec: 1}
+	reg := tools.Registry(p, []string{"bash"})
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"sleep 5"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "timeout_sec") {
+		t.Fatalf("timeout message should point at timeout_sec: %q", out)
 	}
 }
 

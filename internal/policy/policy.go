@@ -18,8 +18,10 @@ type Policy struct {
 	AllowWrite   bool
 	AllowShell   bool
 	MaxReadBytes int
-	// BashTimeoutSec caps each bash tool Exec (default 60). Soft-returns on timeout.
+	// BashTimeoutSec caps each bash tool Exec (default 300). Soft-returns on timeout.
 	BashTimeoutSec int
+	// MaxBashTimeoutSec bounds a per-call timeout_sec request (default 900).
+	MaxBashTimeoutSec int
 	// Hashline enables N:hash|line read format and line_hash edits (tools.hashline).
 	Hashline bool
 }

@@ -386,20 +386,22 @@ type bashTool struct{ p *policy.Policy }
 
 func (t *bashTool) Name() string { return "bash" }
 func (t *bashTool) Description() string {
-	return "Run a shell command with cwd=workspace (default timeout 60s). Args: command. " +
-		"Keep scripts short. Do NOT start long-lived servers in the foreground, and do NOT " +
-		"nest another full `mow run/goal` inside bash (it will block the tool until timeout). " +
-		"For a smoke server: start with `&`, redirect logs, sleep briefly, curl once, exit."
+	return "Run a shell command with cwd=workspace (default timeout 300s). Args: command, " +
+		"optional timeout_sec for slow builds/test suites. Do NOT start long-lived servers " +
+		"in the foreground, and do NOT nest another full `mow run/goal` inside bash (it will " +
+		"block the tool until timeout). For a smoke server: start with `&`, redirect logs, " +
+		"sleep briefly, curl once, exit."
 }
 func (t *bashTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"timeout_sec":{"type":"integer","description":"override the default timeout for one slow command (e.g. a full test suite)"}},"required":["command"]}`)
 }
 func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
 	if err := t.p.AllowTool("bash"); err != nil {
 		return "", err
 	}
 	var a struct {
-		Command string `json:"command"`
+		Command    string `json:"command"`
+		TimeoutSec int    `json:"timeout_sec"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
@@ -407,9 +409,24 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if strings.TrimSpace(a.Command) == "" {
 		return "", fmt.Errorf("command required")
 	}
-	timeout := 60 * time.Second
+	timeout := 300 * time.Second
 	if t.p != nil && t.p.BashTimeoutSec > 0 {
 		timeout = time.Duration(t.p.BashTimeoutSec) * time.Second
+	}
+	// A caller may ask for longer for one slow command (test suite, cold
+	// build), bounded so a hung command cannot park the loop indefinitely.
+	if a.TimeoutSec > 0 {
+		maxSec := 900
+		if t.p != nil && t.p.MaxBashTimeoutSec > 0 {
+			maxSec = t.p.MaxBashTimeoutSec
+		}
+		req := a.TimeoutSec
+		if req > maxSec {
+			req = maxSec
+		}
+		if d := time.Duration(req) * time.Second; d > timeout {
+			timeout = d
+		}
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -453,8 +470,9 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if err != nil {
 		if cctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
 			msg := fmt.Sprintf(
-				"\nerror: bash timed out after %s (raise policy.bash_timeout_sec; "+
-					"do not nest `mow run` or leave servers in the foreground — use `cmd &` + curl + exit)",
+				"\nerror: bash timed out after %s (retry with a larger timeout_sec for a slow "+
+					"build/test, or raise policy.bash_timeout_sec; do not nest `mow run` or leave "+
+					"servers in the foreground — use `cmd &` + curl + exit)",
 				timeout)
 			return out + msg, nil
 		}

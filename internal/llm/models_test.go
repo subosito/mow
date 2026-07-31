@@ -96,13 +96,13 @@ func TestListModelsParsesContextAndPricing(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{
-					"id": "gpt-5-mini",
-					"context_window": 1100000,
+					"id":                "gpt-5-mini",
+					"context_window":    1100000,
 					"max_output_tokens": 0,
 					"pricing": map[string]any{
-						"currency": "USD",
-						"input_per_mtok": 2.5,
-						"output_per_mtok": 15,
+						"currency":            "USD",
+						"input_per_mtok":      2.5,
+						"output_per_mtok":     15,
 						"cache_read_per_mtok": 0.25,
 					},
 				},

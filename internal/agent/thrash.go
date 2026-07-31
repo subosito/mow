@@ -19,10 +19,10 @@ import (
 //  4. treat test/build/commit bash as productive (resets explore streak)
 //  5. warn every turn after exploreWarnEvery consecutive explore turns
 const (
-	exploreWarnEvery   = 6
-	rereadLimit        = 1 // second access to same path stubs
-	inventoryLimit     = 2 // third identical inventory class stubs
-	sameToolWarnAfter  = 3
+	exploreWarnEvery  = 6
+	rereadLimit       = 1 // second access to same path stubs
+	inventoryLimit    = 2 // third identical inventory class stubs
+	sameToolWarnAfter = 3
 )
 
 // thrashState tracks per-Prompt exploration for soft hints only.

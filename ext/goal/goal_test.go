@@ -15,8 +15,16 @@ func TestNormalizeAndSlug(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.ID == "" || s.MaxSteps != 8 {
+	if s.ID == "" || s.MaxSteps != goal.DefaultMaxSteps {
 		t.Fatalf("%+v", s)
+	}
+	// The ceiling still clamps an over-large request.
+	big, err := goal.NormalizeSpec(goal.Spec{Goal: "x", MaxSteps: goal.MaxMaxSteps + 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if big.MaxSteps != goal.MaxMaxSteps {
+		t.Fatalf("MaxSteps=%d want clamp to %d", big.MaxSteps, goal.MaxMaxSteps)
 	}
 	if _, err := goal.NormalizeSpec(goal.Spec{Goal: "x", ID: "../evil"}); err == nil {
 		t.Fatal("expected bad id")

@@ -62,7 +62,7 @@ Commands:
   mow goal reset  --id NAME          clear progress → pending
   mow goal delete --id NAME
 
-  --max-steps N   outer Prompt budget (default 8; raise on resume to continue)
+  --max-steps N   outer Prompt budget (default 16; raise on resume to continue)
 
 Examples:
 
@@ -83,7 +83,7 @@ func cmdNew(args []string) int {
 	fs := cliutil.NewFlagSet("goal new")
 	id := fs.String("id", "", "goal id (slug)")
 	goalText := fs.String("goal", "", "natural-language objective")
-	maxSteps := fs.Int("max-steps", 8, "max Prompt iterations")
+	maxSteps := fs.Int("max-steps", DefaultMaxSteps, "max Prompt iterations")
 	dir := fs.String("dir", "", "store dir (default $MOW_HOME/goals)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -105,7 +105,7 @@ func cmdRun(args []string) int {
 	ef.Bind(fs)
 	id := fs.String("id", "", "existing goal id")
 	goalText := fs.String("goal", "", "one-shot goal text (creates/resumes id)")
-	maxSteps := fs.Int("max-steps", 8, "outer step budget (resume: raises stored max_steps if higher)")
+	maxSteps := fs.Int("max-steps", DefaultMaxSteps, "outer step budget (resume: raises stored max_steps if higher)")
 	dir := fs.String("dir", "", "store dir (default $MOW_HOME/goals)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -135,7 +135,7 @@ func cmdRun(args []string) int {
 	case strings.TrimSpace(*goalText) != "":
 		st, err = r.RunSpec(ctx, Spec{ID: *id, Goal: *goalText, MaxSteps: *maxSteps})
 	case strings.TrimSpace(*id) != "":
-		// --max-steps N raises the stored budget when N is larger (continue past 8/8).
+		// --max-steps N raises the stored budget when N is larger (continue past 16/16).
 		st, err = r.RunRaise(ctx, *id, *maxSteps)
 	default:
 		fmt.Fprintln(os.Stderr, "mow goal run: need --id or --goal")

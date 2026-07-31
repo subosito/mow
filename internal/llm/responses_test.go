@@ -113,11 +113,11 @@ func TestChatOpenAIResponsesNonStream(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{
-		Wire:   WireOpenAIResponses,
+		Wire:    WireOpenAIResponses,
 		BaseURL: srv.URL + "/v1",
-		APIKey: "k",
-		Model:  "test-model",
-		HTTP:   srv.Client(),
+		APIKey:  "k",
+		Model:   "test-model",
+		HTTP:    srv.Client(),
 	}
 	msg, err := c.Chat(context.Background(), []Message{
 		{Role: "user", Content: "read x"},
@@ -179,12 +179,12 @@ func TestChatOpenAIResponsesStream(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{
-		Wire:   WireOpenAIResponses,
+		Wire:    WireOpenAIResponses,
 		BaseURL: srv.URL + "/v1",
-		APIKey: "k",
-		Model:  "m",
-		HTTP:   srv.Client(),
-		Stream: true,
+		APIKey:  "k",
+		Model:   "m",
+		HTTP:    srv.Client(),
+		Stream:  true,
 	}
 	var content strings.Builder
 	msg, err := c.ChatWithStream(context.Background(), []Message{

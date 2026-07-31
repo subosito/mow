@@ -40,13 +40,13 @@ type ModelInfo struct {
 // Chat metering uses InputPerMTok / OutputPerMTok (USD per 1M tokens).
 // Media models may use PerUnit/Unit instead; those are ignored for chat Limits.
 type ModelPricing struct {
-	Currency         string  `json:"currency,omitempty"`
-	InputPerMTok     float64 `json:"input_per_mtok,omitempty"`
-	OutputPerMTok    float64 `json:"output_per_mtok,omitempty"`
-	CacheReadPerMTok float64 `json:"cache_read_per_mtok,omitempty"`
+	Currency          string  `json:"currency,omitempty"`
+	InputPerMTok      float64 `json:"input_per_mtok,omitempty"`
+	OutputPerMTok     float64 `json:"output_per_mtok,omitempty"`
+	CacheReadPerMTok  float64 `json:"cache_read_per_mtok,omitempty"`
 	CacheWritePerMTok float64 `json:"cache_write_per_mtok,omitempty"`
-	PerUnit          float64 `json:"per_unit,omitempty"`
-	Unit             string  `json:"unit,omitempty"`
+	PerUnit           float64 `json:"per_unit,omitempty"`
+	Unit              string  `json:"unit,omitempty"`
 }
 
 type modelsResponse struct {
