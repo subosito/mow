@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,6 +122,31 @@ func TestValidateID(t *testing.T) {
 		if err := ValidateID(id); err == nil {
 			t.Errorf("ValidateID(%q) = nil, want error", id)
 		}
+	}
+}
+
+func TestAppendRejectsPathEscapeID(t *testing.T) {
+	dir := t.TempDir()
+	// Classic Join escape: Join(dir, "../../../tmp/x.jsonl") leaves dir.
+	s := &Store{Dir: dir, ID: "../../../tmp/mow-session-escape"}
+	if err := s.Append(Event{Type: "user", Role: "user", Content: "nope"}); err == nil {
+		t.Fatal("Append with path-escape id must fail")
+	}
+	// Path() must not point outside dir even for a bad id.
+	p := s.Path()
+	if !strings.HasPrefix(p, dir+string(os.PathSeparator)) && p != filepath.Join(dir, "_invalid.jsonl") {
+		// basenamed fallback stays under dir
+		if filepath.Dir(p) != dir {
+			t.Fatalf("Path() escaped dir: %q (dir=%q)", p, dir)
+		}
+	}
+	// Clean id still works.
+	ok := &Store{Dir: dir, ID: "good-id"}
+	if err := ok.Append(Event{Type: "user", Role: "user", Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(ok.Path()); err != nil {
+		t.Fatal(err)
 	}
 }
 

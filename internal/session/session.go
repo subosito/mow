@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/subosito/mow/internal/llm"
@@ -29,15 +30,48 @@ type Store struct {
 	ID  string
 }
 
-// Path returns the session file path.
+// Path returns the session file path. ID must pass ValidateID so Join cannot
+// escape Dir (filepath.Join cleans ".." segments into a path outside Dir).
 func (s *Store) Path() string {
-	return filepath.Join(s.Dir, s.ID+".jsonl")
+	p, err := s.resolvedPath()
+	if err != nil {
+		// Callers that need the error use resolvedPath via Append/Load*;
+		// Path keeps a string API for listings and keeps a non-escaping
+		// fallback (basename only) if ID is malformed.
+		id := filepath.Base(strings.TrimSpace(s.ID))
+		if id == "" || id == "." || id == ".." {
+			id = "_invalid"
+		}
+		return filepath.Join(s.Dir, id+".jsonl")
+	}
+	return p
 }
 
-// Append writes one event.
+// resolvedPath is Path with validation (used by read/write).
+func (s *Store) resolvedPath() (string, error) {
+	if s == nil || s.Dir == "" {
+		return "", fmt.Errorf("session: dir required")
+	}
+	if err := ValidateID(s.ID); err != nil {
+		return "", err
+	}
+	// Defense in depth: never join a multi-component id even if ValidateID
+	// regresses (Join("dir", "../x.jsonl") → outside dir).
+	if filepath.Base(s.ID) != s.ID {
+		return "", fmt.Errorf("session: invalid id %q", s.ID)
+	}
+	return filepath.Join(s.Dir, s.ID+".jsonl"), nil
+}
+
+// Append writes one event. Exclusive flock serializes multi-process writers
+// so concurrent hosts sharing a session id cannot interleave partial lines.
 func (s *Store) Append(ev Event) error {
 	if s.Dir == "" || s.ID == "" {
 		return fmt.Errorf("session: dir and id required")
+	}
+	path, err := s.resolvedPath()
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return err
@@ -45,11 +79,15 @@ func (s *Store) Append(ev Event) error {
 	if ev.TS.IsZero() {
 		ev.TS = time.Now().UTC()
 	}
-	f, err := os.OpenFile(s.Path(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	// Best-effort exclusive lock for the append. Failure to lock is not fatal
+	// (some FS types lack flock); the write still proceeds.
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
 	enc := json.NewEncoder(f)
 	return enc.Encode(ev)
 }
@@ -61,7 +99,11 @@ func (s *Store) Append(ev Event) error {
 // history exponentially. We take the **last system-started message snapshot**
 // when present; otherwise fall back to simple user/assistant turns only.
 func (s *Store) LoadMessages() ([]llm.Message, error) {
-	raw, err := os.ReadFile(s.Path())
+	path, err := s.resolvedPath()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -138,7 +180,11 @@ func repairToolCalls(msgs []llm.Message) []llm.Message {
 // LoadTranscript returns user/assistant turns for UI display (no tool dumps,
 // no system prompts). Uses the simple type=user/assistant events written each turn.
 func (s *Store) LoadTranscript() ([]llm.Message, error) {
-	raw, err := os.ReadFile(s.Path())
+	path, err := s.resolvedPath()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
