@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -64,17 +63,12 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
-	res, err := c.doHTTP(req)
+	status, respBody, err := c.doJSON(req)
 	if err != nil {
 		return Message{}, err
 	}
-	defer res.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(res.Body, 8<<20))
-	if err != nil {
-		return Message{}, err
-	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return Message{}, fmt.Errorf("llm: anthropic HTTP %d: %s", res.StatusCode, truncate(string(respBody), 300))
+	if status < 200 || status >= 300 {
+		return Message{}, fmt.Errorf("llm: anthropic HTTP %d: %s", status, truncate(string(respBody), 300))
 	}
 	var parsed struct {
 		Content []struct {

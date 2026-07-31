@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -260,24 +259,19 @@ func (c *Client) chatOpenAI(ctx context.Context, messages []Message, tools []Too
 		req.Header.Set(k, v)
 	}
 
-	res, err := c.doHTTP(req)
-	if err != nil {
-		return Message{}, err
-	}
-	defer res.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(res.Body, 8<<20))
+	status, respBody, err := c.doJSON(req)
 	if err != nil {
 		return Message{}, err
 	}
 	var parsed ChatResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return Message{}, fmt.Errorf("llm: decode: %w (status %d body %s)", err, res.StatusCode, truncate(string(respBody), 200))
+		return Message{}, fmt.Errorf("llm: decode: %w (status %d body %s)", err, status, truncate(string(respBody), 200))
 	}
 	if parsed.Error != nil && parsed.Error.Message != "" {
 		return Message{}, fmt.Errorf("llm: %s", parsed.Error.Message)
 	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return Message{}, fmt.Errorf("llm: HTTP %d: %s", res.StatusCode, truncate(string(respBody), 300))
+	if status < 200 || status >= 300 {
+		return Message{}, fmt.Errorf("llm: HTTP %d: %s", status, truncate(string(respBody), 300))
 	}
 	if len(parsed.Choices) == 0 {
 		return Message{}, fmt.Errorf("llm: empty choices")

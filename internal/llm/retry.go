@@ -21,6 +21,10 @@ import (
 const maxHTTPAttempts = 3
 
 // doHTTP runs req with retries. req must be replayable (GetBody set when Body non-nil).
+//
+// Deprecated for LLM calls: the non-streaming wires use doJSON, which also
+// bounds each attempt and retries HTTP 200 bodies that carry a transient
+// error envelope. Kept for callers that need a raw streaming-free response.
 func (c *Client) doHTTP(req *http.Request) (*http.Response, error) {
 	hc := c.HTTP
 	if hc == nil {
