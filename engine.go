@@ -204,11 +204,14 @@ func New(opt Options) (*Engine, error) {
 	if contextload.ProjectTrusted(cfg.Workspace) {
 		skillDirs = append(skillDirs, filepath.Join(cfg.Workspace, ".mow", "skills"))
 	} else if _, serr := os.Stat(filepath.Join(cfg.Workspace, ".mow")); serr == nil {
-		logger := opt.Logger
-		if logger == nil {
-			logger = slog.Default()
+		// The trust cue is a user-facing hint, not log noise: emit it as a
+		// plain stderr line unless the host configured its own logger.
+		msg := "mow: project .mow/ found but not trusted — run `mow trust` to load its config/skills"
+		if opt.Logger != nil {
+			opt.Logger.Warn(msg)
+		} else {
+			fmt.Fprintln(os.Stderr, msg)
 		}
-		logger.Info("mow: project .mow present but untrusted; run `mow trust` to load project config/skills")
 	}
 	skillDirs = append([]string{config.SkillsDir()}, skillDirs...)
 	skills := contextload.LoadSkills(skillDirs)
@@ -287,7 +290,7 @@ func New(opt Options) (*Engine, error) {
 	default:
 		key := cfg.ResolveAPIKey()
 		if key == "" {
-			return nil, fmt.Errorf("api key required (OPENAI_API_KEY / MOW_API_KEY / ANTHROPIC_API_KEY or llm.api_key)")
+			return nil, fmt.Errorf("api key required (OPENAI_API_KEY / MOW_API_KEY / ANTHROPIC_API_KEY, or llm.api_key in the config file under MOW_HOME)")
 		}
 		if strings.TrimSpace(cfg.LLM.Model) == "" {
 			return nil, fmt.Errorf("model required (OPENAI_MODEL / MOW_MODEL / ANTHROPIC_MODEL or llm.model)")

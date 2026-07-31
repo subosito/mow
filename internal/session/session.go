@@ -192,14 +192,14 @@ func ValidateID(id string) error {
 		return fmt.Errorf("session: empty id")
 	}
 	if strings.HasPrefix(id, ".") {
-		return fmt.Errorf("session: invalid id %q", id)
+		return fmt.Errorf("session: invalid id %q (use letters, digits, '-', '_', '.')", id)
 	}
 	for _, r := range id {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
 			r == '-', r == '_', r == '.':
 		default:
-			return fmt.Errorf("session: invalid id %q", id)
+			return fmt.Errorf("session: invalid id %q (use letters, digits, '-', '_', '.')", id)
 		}
 	}
 	return nil

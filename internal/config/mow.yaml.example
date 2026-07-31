@@ -18,7 +18,6 @@ llm:
   # wire: openai-chat-completions
   # wire: anthropic-messages
   # wire: openai-responses   # POST /v1/responses (OpenAI Responses API)
-  # wire: anthropic-messages
   # base_url: https://api.openai.com/v1   # or any OpenAI-compatible /v1
   # api_key_env: OPENAI_API_KEY
   # model: gpt-5-mini                 # chat agent loop (tools + reasoning)
