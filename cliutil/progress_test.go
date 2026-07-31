@@ -3,6 +3,8 @@ package cliutil_test
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -186,5 +188,37 @@ func TestConfigPaths(t *testing.T) {
 	got := ef.ConfigPaths()
 	if len(got) != 1 || got[0] != "/x.yaml" {
 		t.Fatalf("ConfigPaths=%v", got)
+	}
+}
+
+func TestToolProgressOnEventEnd(t *testing.T) {
+	// ToolProgressOnEvent writes to os.Stderr directly; capture it via a pipe.
+	capture := func(ev mow.Event) string {
+		old := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Stderr = w
+		fn := cliutil.ToolProgressOnEvent(false)
+		fn(ev)
+		w.Close()
+		os.Stderr = old
+		out, _ := io.ReadAll(r)
+		r.Close()
+		return string(out)
+	}
+	args := json.RawMessage(`{"command":"go test ./..."}`)
+
+	if got := capture(mow.Event{Type: mow.EventToolEnd, Tool: "bash", Args: args, DurationMs: 500}); got != "" {
+		t.Fatalf("fast success should print nothing, got %q", got)
+	}
+	got := capture(mow.Event{Type: mow.EventToolEnd, Tool: "bash", Args: args, DurationMs: 3210})
+	if !strings.Contains(got, "✓ bash go test ./... (3.2s)") {
+		t.Fatalf("slow success should print completion with wall time, got %q", got)
+	}
+	got = capture(mow.Event{Type: mow.EventToolEnd, Tool: "bash", Args: args, DurationMs: 3210, Error: "boom"})
+	if !strings.Contains(got, "✗") || strings.Contains(got, "✓") {
+		t.Fatalf("error end should print failure only, got %q", got)
 	}
 }

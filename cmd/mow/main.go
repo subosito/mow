@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -72,7 +73,10 @@ func run(args []string) int {
 				return 2
 			}
 			prompt := strings.Join(args, " ")
-			fmt.Fprintf(os.Stderr, "mow: treating as prompt (use `mow run -p …` or a known subcommand)\n")
+			// Only nudge interactive users; keep scripted free-form runs quiet.
+			if isTTY() {
+				fmt.Fprintf(os.Stderr, "mow: treating as prompt (use `mow run -p …` or a known subcommand)\n")
+			}
 			return runCmd([]string{"-p", prompt})
 		}
 		fmt.Fprintf(os.Stderr, "mow: unknown command %q\n", args[0])
@@ -151,11 +155,11 @@ func isTTY() bool {
 }
 
 func runCmd(args []string) int {
-	for _, a := range args {
-		if a == "-h" || a == "--help" || a == "help" {
-			printRunUsage()
-			return 0
-		}
+	// Help only when it is the first token, so `mow run -p "help …"` and
+	// free-form prompts containing the word "help" still reach the model.
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
+		printRunUsage()
+		return 0
 	}
 	fs := cliutil.NewFlagSet("run")
 	promptFlag := fs.String("p", "", "one-shot prompt")
@@ -184,7 +188,10 @@ func runCmd(args []string) int {
 		}
 		fmt.Fprintf(os.Stderr, "mow: %v\n", err)
 		if res.Text != "" {
-			fmt.Println(res.Text)
+			// Keep stdout clean on failure so pipelines don't misread partial
+			// output as a successful run; send it to stderr with a marker.
+			fmt.Fprintln(os.Stderr, "--- partial output before error ---")
+			fmt.Fprintln(os.Stderr, res.Text)
 		}
 		return 1
 	}
@@ -199,9 +206,8 @@ func runCmd(args []string) int {
 // Trust gates project-local .mow/config.yaml and skills; it is stored under
 // the user home so a cloned repo can never grant itself trust.
 func trustCmd(args []string) int {
-	for _, a := range args {
-		if a == "-h" || a == "--help" || a == "help" {
-			fmt.Fprintf(os.Stderr, `mow trust — allow project .mow/config and skills
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
+		fmt.Fprintf(os.Stderr, `mow trust — allow project .mow/config and skills
 
 Trust is stored under $MOW_HOME/trusted (not inside the repo).
 
@@ -210,10 +216,10 @@ Trust is stored under $MOW_HOME/trusted (not inside the repo).
   mow trust --revoke [path]  revoke trust
 
   --workspace path           same as [path] (flag form)
+  MOW_TRUST_PROJECT=1        trust project config for this run only
 
 `)
-			return 0
-		}
+		return 0
 	}
 	fs := cliutil.NewFlagSet("trust")
 	list := fs.Bool("list", false, "show trusted workspaces")
@@ -226,6 +232,11 @@ Trust is stored under $MOW_HOME/trusted (not inside the repo).
 	if fs.NArg() > 0 && (*dir == "." || *dir == "") {
 		*dir = fs.Arg(0)
 	}
+	// Confirm with the same canonical spelling the trust list stores.
+	abs, aerr := filepath.Abs(*dir)
+	if aerr != nil {
+		abs = *dir
+	}
 	if *list {
 		for _, ws := range mow.TrustedWorkspaces() {
 			fmt.Println(ws)
@@ -237,23 +248,21 @@ Trust is stored under $MOW_HOME/trusted (not inside the repo).
 			fmt.Fprintf(os.Stderr, "mow trust: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(os.Stderr, "mow: untrusted %s\n", *dir)
+		fmt.Fprintf(os.Stderr, "mow: untrusted %s\n", abs)
 		return 0
 	}
 	if err := mow.TrustWorkspace(*dir); err != nil {
 		fmt.Fprintf(os.Stderr, "mow trust: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "mow: trusted %s  (project .mow/config.yaml + skills load)\n", *dir)
+	fmt.Fprintf(os.Stderr, "mow: trusted %s  (project .mow/config.yaml + skills load)\n", abs)
 	return 0
 }
 
 func ttyCmd(args []string) int {
-	for _, a := range args {
-		if a == "-h" || a == "--help" || a == "help" {
-			printTtyUsage()
-			return 0
-		}
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
+		printTtyUsage()
+		return 0
 	}
 	fs := cliutil.NewFlagSet("tty")
 	var ef cliutil.EngineFlags
@@ -347,7 +356,7 @@ func handleTtySlash(ctx context.Context, eng *mow.Engine, line string) (handled 
 		}
 		return true, ttyModel(ctx, eng, filter)
 	case "/help", "/?":
-		fmt.Fprintln(os.Stderr, "commands: /model [id]  /btw <q>  /quit")
+		fmt.Fprintln(os.Stderr, "commands: /model [id]  /btw <q>  /quit (or /exit)")
 		return true, nil
 	default:
 		return false, nil
@@ -520,7 +529,7 @@ Flags:
 
   -p TEXT              prompt (or pass as args)
   --config --workspace --model --base-url
-  --allow-shell --allow-write --max-turns
+  --allow-shell --allow-write --max-turns --effort --extra-root
   --stream --verbose --session --continue --no-session
 
 Examples:

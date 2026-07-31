@@ -55,6 +55,10 @@ func ToolProgressOnEvent(stream bool) mow.EventFunc {
 					msg = "denied"
 				}
 				fmt.Fprintf(os.Stderr, "✗ %s: %s\n", FormatToolProgress(ev.Tool, ev.Args), msg)
+			} else if ev.DurationMs > 2000 {
+				// Long tools otherwise look hung; confirm completion with the
+				// wall time from tool.end.
+				fmt.Fprintf(os.Stderr, "✓ %s (%0.1fs)\n", FormatToolProgress(ev.Tool, ev.Args), float64(ev.DurationMs)/1000)
 			}
 		case mow.EventDelegateProgress:
 			// Peer tool/thought while acp_delegate is in flight.
