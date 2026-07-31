@@ -17,7 +17,7 @@ Customization modes (see [harness.md](harness.md)):
 | Implementation | `internal/*` | Loop/llm/tools not a compatibility surface |
 | UIs & protocols | `ext/<name>` packs | Optional; not required for `Prompt()` |
 | CLI subcommands | Pack-owned via `RegisterCommand` | Unlink pack → command disappears |
-| Core CLI | `run`, `tty` (alias `repl`), `version`, `help` only | Stock thin shell |
+| Core CLI | `run`, `tty`, `version`, `help` only | Stock thin shell |
 | ACP | Pack (`ext/acp`), not core | Standard editor + peer-harness wire |
 | Sub-agents | Not core loop; use ACP delegate or multi-`Engine` | Single loop in core |
 | Media tools | Side-lane `generate_*` / `understand_*` | Chat model stays primary; filesystem is I/O |
@@ -114,7 +114,7 @@ _ "github.com/subosito/mow/ext/rpc"
 | Remove `_ "…/ext/acp"` | `mow acp` gone; help line gone; `acp_delegate` not registered |
 | Add a new pack + import | Subcommand appears automatically |
 
-Core keeps: **`run`**, **`tty`** (alias **`repl`**), **`version`**, **`help`**.  
+Core keeps: **`run`**, **`tty`**, **`version`**, **`help`**.  
 Default interactive (no args + TTY): only if a linked pack sets `DefaultInteractive`.
 
 Shared flags for any Engine CLI: `cliutil.EngineFlags` → `NewEngine()` (runs `ext.BeforeNew` first).

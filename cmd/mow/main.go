@@ -50,7 +50,7 @@ func run(args []string) int {
 	switch args[0] {
 	case "run":
 		return runCmd(args[1:])
-	case "tty", "repl": // repl = compatibility alias for tty
+	case "tty":
 		return ttyCmd(args[1:])
 	case "trust":
 		return trustCmd(args[1:])
@@ -87,7 +87,7 @@ func suggestCommand(name string) string {
 	if name == "" {
 		return ""
 	}
-	cands := []string{"run", "tty", "repl", "trust", "version", "help"}
+	cands := []string{"run", "tty", "trust", "version", "help"}
 	for _, c := range ext.Commands() {
 		cands = append(cands, c.Name)
 	}
@@ -536,7 +536,6 @@ func printTtyUsage() {
 	fmt.Fprintf(os.Stderr, `mow tty — interactive line session (plain terminal; not the full TUI)
 
   mow tty [flags]
-  mow repl [flags]   # compatibility alias
 
 In-session:
 
@@ -562,7 +561,6 @@ Core:
 
   mow run  -p "…" [flags]     one-shot prompt
   mow tty  [flags]            interactive line session (/model /btw /quit)
-  mow repl [flags]            alias for tty
   mow trust [path]            trust workspace for project .mow config
   mow trust --list | --revoke
   mow version | help

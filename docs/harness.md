@@ -41,7 +41,7 @@ mow run -p "Summarize this repo"
 ### B. Interactive / multi-step
 
 ```text
-mow tty                  # line session (core; alias: mow repl)
+mow tty                  # line session (core)
 mow goal run --goal "…"  # multi-step outer loop (or --id NAME)
 mow run -p "…"           # one-shot
 ```
