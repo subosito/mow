@@ -2,8 +2,10 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -110,22 +112,28 @@ func (s *Store) LoadMessages() ([]llm.Message, error) {
 		}
 		return nil, err
 	}
+	// Scan the file bytes directly. Converting it to a string and building a
+	// []string for every line used to add an allocation per persisted event.
 	var simple []llm.Message
 	var snapshot []llm.Message
 	hasSystem := false
-	for _, line := range splitLines(string(raw)) {
-		if line == "" {
+	for len(raw) > 0 {
+		line, rest, _ := bytes.Cut(raw, []byte{'\n'})
+		raw = rest
+		if len(line) == 0 {
 			continue
 		}
 		var ev Event
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		if err := json.Unmarshal(line, &ev); err != nil {
 			continue
 		}
 		if ev.Message != nil {
 			m := *ev.Message
 			if m.Role == "system" {
 				hasSystem = true
-				snapshot = []llm.Message{m}
+				// A later system snapshot replaces the preceding one; retain its
+				// capacity for the following messages.
+				snapshot = append(snapshot[:0], m)
 			} else if hasSystem {
 				snapshot = append(snapshot, m)
 			}
@@ -288,17 +296,26 @@ func List(dir string) ([]Info, error) {
 }
 
 // firstUserLine reads the first user event's content (bounded).
+const previewReadLimit = 64 << 10
+
 func firstUserLine(path string) string {
-	raw, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return ""
 	}
-	for _, line := range splitLines(string(raw)) {
-		if line == "" {
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, previewReadLimit))
+	if err != nil {
+		return ""
+	}
+	for len(raw) > 0 {
+		line, rest, _ := bytes.Cut(raw, []byte{'\n'})
+		raw = rest
+		if len(line) == 0 {
 			continue
 		}
 		var ev Event
-		if json.Unmarshal([]byte(line), &ev) != nil {
+		if json.Unmarshal(line, &ev) != nil {
 			continue
 		}
 		if ev.Role == "user" && strings.TrimSpace(ev.Content) != "" {
