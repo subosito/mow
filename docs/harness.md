@@ -319,6 +319,24 @@ Relative tool paths resolve against the primary `--workspace`. **Absolute** path
 allowed under the workspace or an extra root. The system prompt lists configured
 extra roots so the model knows they are in the jail (not “restricted”).
 
+Roots are fixed for the life of an Engine: they are read once at `mow.New` and
+there is no API to add one mid-session. Grant the root at launch, or start a new
+session.
+
+> **Scope of the guarantee.** The path jail applies to the **FS tools**
+> (`read`, `write`, `edit`, `glob`, `grep`). It is **not** applied to `bash`,
+> which runs real commands with the workspace as cwd and can reach anything the
+> user can — a coding agent needs `git`, compilers, and toolchains outside the
+> tree. Treat the jail as a guardrail against accidental scope creep and
+> confused-deputy edits, **not** as containment against a hostile model or
+> prompt injection. `bash` is off by default and enabling it (`--allow-shell`)
+> is the real trust decision; for containment, run mow in a container or
+> sandbox with the filesystem restricted at the OS level.
+
+An extra root grants the **same** permissions as the workspace: if `--allow-write`
+is on, files under an extra root are writable too. There is currently no
+read-only root variant, so grant only what the task needs.
+
 Example template: [`internal/config/mow.yaml.example`](../internal/config/mow.yaml.example).
 
 ---

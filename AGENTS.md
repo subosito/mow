@@ -131,7 +131,11 @@ Also apply **Public samples (OSS)** above when the commit includes docs or fixtu
 - Default tools: **read, glob, grep** only. Write/shell require `--allow-write` /
   `--allow-shell` or config.
 - Workspace path jail on FS tools (optional `policy.extra_roots` / repeatable
-  `--extra-root` expand the jail — host/CLI only).
+  `--extra-root` expand the jail — host/CLI only; fixed at `mow.New`).
+  The jail covers **FS tools only** — `bash` is not path-jailed. It is a
+  guardrail against accidental scope creep, not containment against a hostile
+  model; `--allow-shell` is the real trust decision. See
+  [docs/harness.md](docs/harness.md) § Extra FS roots.
 - Workspace trust is out-of-band (`$MOW_HOME/trusted`, `mow trust`) — never a
   marker inside the workspace. Project config may not set credentials,
   `llm.base_url`, headers, `session.dir`, power tools, or `extra_roots`.
