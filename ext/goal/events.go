@@ -26,8 +26,16 @@ func (s *Store) eventsPath(id string) string {
 }
 
 // AppendEvent writes one JSONL event for the goal (best-effort; never fails the run).
+//
+// The id is validated exactly like Save/Load/Delete: this is a public method on
+// an exported Store, so it must not be the one path that trusts its caller. An
+// id such as "../../x" would otherwise resolve outside the goals directory via
+// filepath.Join, and "best-effort, never fails" would keep that silent.
 func (s *Store) AppendEvent(id string, ev LogEvent) {
-	if s == nil || strings.TrimSpace(id) == "" {
+	if s == nil {
+		return
+	}
+	if err := validateID(strings.TrimSpace(id)); err != nil {
 		return
 	}
 	if ev.TS.IsZero() {
