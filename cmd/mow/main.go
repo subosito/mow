@@ -58,7 +58,9 @@ func run(args []string) int {
 	case "version", "-v", "--version":
 		fmt.Println(mow.VersionString())
 		return 0
-	case "help", "-h", "--help":
+	case "help":
+		return helpCmd(args[1:])
+	case "-h", "--help":
 		printUsage()
 		return 0
 	default:
@@ -86,6 +88,30 @@ func run(args []string) int {
 }
 
 // suggestCommand returns a close core/pack command name, or "".
+// helpCmd routes `mow help <command>` to the same command-specific help
+// users get from `mow <command> help`.
+func helpCmd(args []string) int {
+	if len(args) == 0 {
+		printUsage()
+		return 0
+	}
+	switch args[0] {
+	case "run":
+		return runCmd(append([]string{"help"}, args[1:]...))
+	case "tty":
+		return ttyCmd(append([]string{"help"}, args[1:]...))
+	case "trust":
+		return trustCmd(append([]string{"help"}, args[1:]...))
+	default:
+		if c, ok := ext.LookupCommand(args[0]); ok {
+			return c.Run(append([]string{"help"}, args[1:]...))
+		}
+		fmt.Fprintf(os.Stderr, "mow help: unknown command %q\n", args[0])
+		fmt.Fprintln(os.Stderr, "  run `mow help` to list available commands")
+		return 2
+	}
+}
+
 func suggestCommand(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
@@ -558,7 +584,7 @@ Flags: same as mow run (--config --model --workspace --allow-write …).
   --continue      resume latest session
   --session ID    resume a specific session
 
-TTY with no args often lands here (default interactive pack if linked).
+Start an interactive session explicitly with mow tty.
 
 `)
 }

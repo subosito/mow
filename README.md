@@ -70,7 +70,8 @@ export OPENAI_MODEL=gpt-5-mini
 ./bin/mow acp                    # ext/acp — editors
 ./bin/mow rpc                    # ext/rpc — JSON-lines
 ./bin/mow help                   # lists linked packs dynamically
-./bin/mow run -h                 # --long flags in help (-long also works)
+./bin/mow help run               # command-specific help (also: mow run -h)
+# Help displays --long flags; -long also works.
 
 # Optional: $MOW_HOME/mcp.yaml, $MOW_HOME/lsp.yaml for MCP/LSP tools
 # export MOW_HOME=/tmp/mow-scratch
