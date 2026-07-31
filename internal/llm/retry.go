@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"strconv"
@@ -178,7 +179,7 @@ func retryDelay(attempt int, res *http.Response) time.Duration {
 			}
 		}
 	}
-	// 200ms, 400ms, 800ms…
+	// 200ms, 400ms, 800ms… plus jitter.
 	if attempt < 1 {
 		attempt = 1
 	}
@@ -187,7 +188,17 @@ func retryDelay(attempt int, res *http.Response) time.Duration {
 	if d > 5*time.Second {
 		d = 5 * time.Second
 	}
-	return d
+	return withJitter(d)
+}
+
+// withJitter spreads retries over [d, 1.25d). Without it, every concurrent
+// call that hit the same 429 wakes at the same instant and re-stampedes the
+// provider — parallel agent runs share one rate limit.
+func withJitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	return d + time.Duration(rand.Int64N(int64(d)/4+1))
 }
 
 // newJSONRequest builds a POST with replayable body for retries.

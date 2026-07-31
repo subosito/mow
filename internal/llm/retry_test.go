@@ -139,3 +139,38 @@ func TestRetryableStatus(t *testing.T) {
 		t.Fatal("400/200 should not retry")
 	}
 }
+
+func TestRetryDelayJitterBounds(t *testing.T) {
+	// Backoff must stay in [base, 1.25*base) so concurrent runs that hit the
+	// same 429 do not wake in lockstep.
+	for attempt := 1; attempt <= 4; attempt++ {
+		base := 200 * time.Millisecond * time.Duration(1<<(attempt-1))
+		if base > 5*time.Second {
+			base = 5 * time.Second
+		}
+		var distinct = map[time.Duration]bool{}
+		for i := 0; i < 200; i++ {
+			d := retryDelay(attempt, nil)
+			if d < base || d >= base+base/4+time.Millisecond {
+				t.Fatalf("attempt %d: delay %v out of [%v,%v)", attempt, d, base, base+base/4)
+			}
+			distinct[d] = true
+		}
+		if len(distinct) < 2 {
+			t.Fatalf("attempt %d: no jitter observed", attempt)
+		}
+	}
+}
+
+func TestRetryDelayHonorsRetryAfter(t *testing.T) {
+	res := &http.Response{Header: http.Header{}}
+	res.Header.Set("Retry-After", "2")
+	if got := retryDelay(1, res); got != 2*time.Second {
+		t.Fatalf("Retry-After ignored: %v", got)
+	}
+	// Server-directed waits are used verbatim (no jitter), but capped.
+	res.Header.Set("Retry-After", "600")
+	if got := retryDelay(1, res); got != 30*time.Second {
+		t.Fatalf("Retry-After not capped: %v", got)
+	}
+}
