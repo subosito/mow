@@ -331,15 +331,18 @@ func stopReasonFrom(err error) string {
 	if errors.Is(err, agent.ErrStuck) {
 		return StopStuck
 	}
+	if errors.Is(err, agent.ErrTruncated) {
+		return StopTruncated
+	}
 	return StopError
 }
 
 // resolveMaxContextChars picks the soft history budget.
-// - cfgMax 0 → compaction off
-// - cfgMax == default (100k) and window known → scale from window × ratio
-//   (default ratio 0.8 → 1M tokens ≈ 3.2M chars ≈ 800k tok-eq history)
-// - cfgMax explicit other value → respect absolute config
-// - no window → keep cfgMax
+//   - cfgMax 0 → compaction off
+//   - cfgMax == default (100k) and window known → scale from window × ratio
+//     (default ratio 0.8 → 1M tokens ≈ 3.2M chars ≈ 800k tok-eq history)
+//   - cfgMax explicit other value → respect absolute config
+//   - no window → keep cfgMax
 func resolveMaxContextChars(cfgMax, windowTokens int, ratio float64) int {
 	if cfgMax <= 0 {
 		return 0

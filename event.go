@@ -47,6 +47,9 @@ const (
 	StopCancelled = "cancelled"
 	StopMaxTurns  = "max_turns"
 	StopStuck     = "stuck"
+	// StopTruncated: the provider cut the final reply at its token limit and
+	// left no usable text (raise llm.max_tokens).
+	StopTruncated = "truncated"
 	StopError     = "error"
 )
 

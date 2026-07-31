@@ -26,6 +26,11 @@ var ErrDone = errors.New("agent: done")
 // (soft thrash hints only). Prefer ctx cancel for long-running stop.
 var ErrStuck = errors.New("agent: stuck repeating tool calls")
 
+// ErrTruncated is returned when the provider cut the final assistant reply at
+// its token limit and left no usable text (finish_reason length/max_tokens).
+// Result.Messages still holds the partial history.
+var ErrTruncated = errors.New("agent: response truncated at token limit")
+
 // DefaultMaxParallelTools is used when Options.MaxParallelTools is unset (0).
 const DefaultMaxParallelTools = 8
 
@@ -85,6 +90,11 @@ type Result struct {
 	// Usage is provider-reported tokens summed across every LLM call in the
 	// run (zero when the provider sent none).
 	Usage llm.Usage
+	// StopReason is the provider finish/stop reason of the final assistant
+	// message ("stop", "length", "max_tokens", …); empty when the provider
+	// sent none. "length"/"max_tokens" means the answer was cut off at the
+	// token limit — the text is incomplete even though err is nil.
+	StopReason string
 }
 
 // Run executes the agent loop until the model returns text without tool calls or max turns.
@@ -181,7 +191,15 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		}
 
 		if len(msg.ToolCalls) == 0 {
-			return Result{Text: strings.TrimSpace(msg.Content), Messages: messages, Usage: usage}, nil
+			text := strings.TrimSpace(msg.Content)
+			res := Result{Text: text, Messages: messages, Usage: usage, StopReason: msg.StopReason}
+			// A truncated turn with nothing usable is a silent dead end: the
+			// provider cut the reply at the token limit (often mid tool-call),
+			// so the loop would otherwise report "completed" with no output.
+			if text == "" && msg.Truncated() {
+				return res, fmt.Errorf("%w: provider stopped at the token limit with no answer (raise llm.max_tokens)", ErrTruncated)
+			}
+			return res, nil
 		}
 
 		// Soft: track identical batches for a hint only (never hard-stop).
@@ -206,9 +224,10 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		// Tool requested clean end (e.g. goal_report) — keep results, stop successfully.
 		if errors.Is(err, ErrDone) {
 			return Result{
-				Text:     strings.TrimSpace(msg.Content),
-				Messages: messages,
-				Usage:    usage,
+				Text:       strings.TrimSpace(msg.Content),
+				Messages:   messages,
+				Usage:      usage,
+				StopReason: msg.StopReason,
 			}, nil
 		}
 		if err != nil {
