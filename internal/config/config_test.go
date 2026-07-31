@@ -78,6 +78,57 @@ func TestMaxTurnsUnlimitedYAML(t *testing.T) {
 	}
 }
 
+func TestExtraRootsNormalizedAndRootRejected(t *testing.T) {
+	t.Setenv(config.EnvHome, t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "k")
+	t.Setenv("OPENAI_MODEL", "m")
+	t.Setenv("MOW_API_KEY", "")
+	t.Setenv("MOW_MODEL", "")
+	dir := t.TempDir()
+	// Relative extra root becomes absolute at load.
+	extra := t.TempDir()
+	rel, err := filepath.Rel(mustGetwd(t), extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "c.yaml")
+	yaml := "policy:\n  extra_roots:\n    - " + rel + "\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Policy.ExtraRoots) != 1 {
+		t.Fatalf("extra_roots=%v", f.Policy.ExtraRoots)
+	}
+	if f.Policy.ExtraRoots[0] != filepath.Clean(extra) {
+		// Abs may resolve symlinks differently; require absolute + equal Clean Abs.
+		want, _ := filepath.Abs(extra)
+		if f.Policy.ExtraRoots[0] != filepath.Clean(want) {
+			t.Fatalf("extra_roots[0]=%q want abs of %q", f.Policy.ExtraRoots[0], extra)
+		}
+	}
+	// Filesystem root rejected.
+	bad := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(bad, []byte("policy:\n  extra_roots: [/]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(bad); err == nil {
+		t.Fatal("extra_roots: [/] must be rejected")
+	}
+}
+
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
+}
+
 func TestExtensionsSection(t *testing.T) {
 	t.Setenv(config.EnvHome, t.TempDir())
 	dir := t.TempDir()

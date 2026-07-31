@@ -291,7 +291,7 @@ Load order: defaults → explicit `--config` paths → `$MOW_HOME/config.yaml` (
 
 `MOW_HOME` relocates the user data root (config, sessions, skills, global `AGENTS.md`). Default is `~/.mow`. Useful for tests/CI: `MOW_HOME=$(mktemp -d)`.
 
-Project trust: `mow trust` (stored out-of-band in `$MOW_HOME/trusted`) or env `MOW_TRUST_PROJECT=1` enables project config and `.mow/skills`. Trust is never read from inside the workspace — a cloned repo cannot grant itself trust. Even trusted, project config may not set `llm.base_url`, credentials, headers, `session.dir`, or enable power tools.
+Project trust: `mow trust` (stored out-of-band in `$MOW_HOME/trusted`) or env `MOW_TRUST_PROJECT=1` enables project config and `.mow/skills`. Trust is never read from inside the workspace — a cloned repo cannot grant itself trust. Even trusted, project config may not set `llm.base_url`, `llm.wire`, credentials, headers, media model ids (`llm.generate` / `llm.understand`), `session.dir`, `policy.extra_roots`, power tools (`write`/`edit`/`bash`), or media-write tools (`generate_*`). Project `tools.enable` only *adds* safe tools (never replaces the host list). Project `skills.dirs` entries outside the workspace are ignored.
 
 **Supported env (slim set):**
 

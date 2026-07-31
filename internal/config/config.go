@@ -232,10 +232,12 @@ func mergeFile(dst *File, path string) error {
 }
 
 // mergeProjectFile merges a workspace-local config with a reduced privilege
-// set: a project file may tune policy, skills, and extensions, but never
-// credentials, the LLM endpoint, headers, session location, or power tools —
-// a trusted-but-hostile repo must not be able to redirect the API key or
-// grant itself shell.
+// set: a project file may tune policy knobs, benign tools, and extensions, but
+// never credentials, the LLM endpoint/wire, headers, media model routing,
+// session location, extra FS roots, or power/media-write tools — a
+// trusted-but-hostile repo must not redirect the API key, flip the wire
+// (which changes credential preference), grant itself shell/write, or opt
+// into generate_* (those write under media/ without --allow-write).
 func mergeProjectFile(dst *File, path string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -253,26 +255,102 @@ func mergeProjectFile(dst *File, path string) error {
 	overlay.LLM.APIKey = ""
 	overlay.LLM.APIKeyEnv = ""
 	overlay.LLM.Headers = nil
+	// Wire selects protocol and credential env precedence — host/user only.
+	overlay.LLM.Wire = ""
 	// System prefix is user/host config only (not project-controlled).
 	overlay.LLM.SystemPrefix = nil
 	overlay.LLM.SystemPrefixModels = nil
+	// Media side-lanes share the chat key; project must not point them.
+	overlay.LLM.Generate = GenerateConfig{}
+	overlay.LLM.Understand = UnderstandConfig{}
 	overlay.Session.Dir = ""
 	// Extra FS roots expand the jail — host/CLI only (not project-controlled).
 	overlay.Policy.ExtraRoots = nil
-	overlay.Tools.Enable = dropPowerTools(overlay.Tools.Enable)
+
+	// tools.enable: project may only *add* safe tools; never replace the
+	// host list (which would drop user-granted power tools or sneak in
+	// generate_*). Handle outside mergeOverlay's replace semantics.
+	safeEnable := dropProjectTools(overlay.Tools.Enable)
+	overlay.Tools.Enable = nil
+
+	// skills.dirs: project may only add dirs under the workspace (no
+	// absolute paths into $HOME/.ssh etc.). Union, do not replace.
+	projectSkills := overlay.Skills.Dirs
+	overlay.Skills.Dirs = nil
+
 	mergeOverlay(dst, &overlay)
+	if len(safeEnable) > 0 {
+		dst.Tools.Enable = mergeStringList(dst.Tools.Enable, safeEnable)
+	}
+	if len(projectSkills) > 0 {
+		ws := dst.Workspace
+		if abs, err := filepath.Abs(ws); err == nil {
+			ws = abs
+		}
+		dst.Skills.Dirs = mergeStringList(dst.Skills.Dirs, skillDirsUnder(ws, projectSkills))
+	}
 	return nil
 }
 
-// dropPowerTools filters write/edit/bash out of a project enable list.
-func dropPowerTools(enable []string) []string {
+// dropProjectTools filters tools a project config must never enable:
+// write/edit/bash (power) and generate_* (write under media/ without
+// --allow-write). understand_* stay allowed (read-only side lane).
+func dropProjectTools(enable []string) []string {
 	var out []string
 	for _, t := range enable {
 		switch strings.ToLower(strings.TrimSpace(t)) {
-		case "write", "edit", "bash":
+		case "write", "edit", "bash",
+			"generate_image", "generate_speech", "generate_video":
 			continue
 		}
 		out = append(out, t)
+	}
+	return out
+}
+
+// dropPowerTools is the historical name used in tests/docs; same filter as
+// dropProjectTools (power + media-write).
+func dropPowerTools(enable []string) []string {
+	return dropProjectTools(enable)
+}
+
+// skillDirsUnder keeps only skill directories that resolve under workspace.
+// Prevents a trusted project from injecting SKILL.md from absolute paths
+// outside the tree (e.g. /etc, $HOME).
+func skillDirsUnder(workspace string, dirs []string) []string {
+	ws := strings.TrimSpace(workspace)
+	if ws == "" {
+		return nil
+	}
+	wsAbs, err := filepath.Abs(ws)
+	if err != nil {
+		return nil
+	}
+	wsAbs = filepath.Clean(wsAbs)
+	if r, err := filepath.EvalSymlinks(wsAbs); err == nil {
+		wsAbs = r
+	}
+	sep := string(filepath.Separator)
+	var out []string
+	for _, d := range dirs {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		if !filepath.IsAbs(d) {
+			d = filepath.Join(wsAbs, d)
+		}
+		abs, err := filepath.Abs(d)
+		if err != nil {
+			continue
+		}
+		abs = filepath.Clean(abs)
+		if r, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = r
+		}
+		if abs == wsAbs || strings.HasPrefix(abs, wsAbs+sep) {
+			out = append(out, abs)
+		}
 	}
 	return out
 }
@@ -577,6 +655,33 @@ func (f *File) normalize() error {
 		return err
 	}
 	f.Workspace = ws
+	// Extra roots: absolute + cleaned at load so later CWD changes cannot
+	// re-point a relative entry. Reject the filesystem root — it would either
+	// disable the jail entirely or fail the prefix check (`/` + sep → `//`).
+	if len(f.Policy.ExtraRoots) > 0 {
+		var roots []string
+		seen := map[string]bool{}
+		for _, r := range f.Policy.ExtraRoots {
+			r = strings.TrimSpace(r)
+			if r == "" {
+				continue
+			}
+			abs, err := filepath.Abs(r)
+			if err != nil {
+				return fmt.Errorf("policy.extra_roots %q: %w", r, err)
+			}
+			abs = filepath.Clean(abs)
+			if abs == string(filepath.Separator) {
+				return fmt.Errorf("policy.extra_roots: filesystem root %q is not allowed", r)
+			}
+			if seen[abs] {
+				continue
+			}
+			seen[abs] = true
+			roots = append(roots, abs)
+		}
+		f.Policy.ExtraRoots = roots
+	}
 	return nil
 }
 
