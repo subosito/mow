@@ -9,7 +9,8 @@ import (
 
 // ErrNoJSON means the model reply contained no JSON object at all. Callers
 // treat this as a tooling failure, never as "the code is clean".
-var ErrNoJSON = errors.New("review: model reply contained no JSON object")
+var ErrNoJSON = errors.New("review: model reply contained no JSON object " +
+	"(the pass answered in prose; a large scope is the usual cause — try fewer files or --diff)")
 
 // candidateEnvelope is the strict contract for the candidate pass.
 type candidateEnvelope struct {

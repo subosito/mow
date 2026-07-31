@@ -219,3 +219,20 @@ may miss subtler issues, and a model that never emits contract-shaped JSON
 fails the run instead of returning a clean report. That asymmetry is deliberate:
 a review can under-report, but it must never claim a clean result it did not
 earn.
+
+Model choice is a plain flag — `mow sec --model <id>` — and scope defaults to
+the working tree, so `mow sec` alone reviews uncommitted work, `mow sec PATH…`
+reviews paths, and `mow sec --diff HEAD~1...HEAD` reviews a commit. Reviewing
+this repository with three different models produced usable reports from each.
+
+### Keep the scope small
+
+The practical limit is scope size, not model quality. A 40-file scope asked a
+capable model to emit one JSON object covering everything, and it returned
+prose instead — the run failed with exit `2` rather than reporting partial
+results, which is the safe outcome but still a failed run. Two to fifteen files
+is the range where reports come back reliably.
+
+Prefer `--diff`/`--staged` on a change over a whole-tree sweep, and reach for
+`--budget large` only when the change really is broad. If a review fails to
+produce a report, narrowing the scope is usually the fix.
