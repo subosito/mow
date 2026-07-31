@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -101,25 +100,14 @@ const (
 )
 
 func writeWorkspaceFile(p *policy.Policy, rel string, data []byte) (string, error) {
-	abs, err := p.ResolvePath(rel)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(abs, data, 0o644); err != nil {
+	if _, err := writeFileJailed(p, rel, data, 0o644); err != nil {
 		return "", err
 	}
 	return rel, nil
 }
 
 func readWorkspaceFile(p *policy.Policy, rel string, max int) (abs string, data []byte, err error) {
-	abs, err = p.ResolvePath(rel)
-	if err != nil {
-		return "", nil, err
-	}
-	data, err = os.ReadFile(abs)
+	abs, data, err = readFileJailed(p, rel)
 	if err != nil {
 		return "", nil, err
 	}

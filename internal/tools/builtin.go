@@ -78,11 +78,7 @@ func (t *readTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	path, err := t.p.ResolvePath(a.Path)
-	if err != nil {
-		return "", err
-	}
-	f, err := os.Open(path)
+	f, path, err := openJailed(t.p, a.Path, os.O_RDONLY, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Models guess conventional filenames; naming the real neighbors
@@ -212,22 +208,25 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		if info.Size() > int64(t.p.MaxReadBytes) && t.p.MaxReadBytes > 0 {
 			return nil
 		}
-		// jail check before reading: a symlink to outside the workspace must
-		// not even pull bytes into memory
-		if _, err := t.p.ResolvePath(path); err != nil {
-			relp, rerr := filepath.Rel(t.p.Workspace, path)
-			if rerr != nil {
-				return nil
-			}
-			if _, err := t.p.ResolvePath(relp); err != nil {
-				return nil
-			}
-		}
-		// skip binary-ish
-		data, err := os.ReadFile(path)
-		if err != nil {
+		// Open under the jail with post-open fd verification so a symlink
+		// swap between Walk's lstat and read cannot leak outside bytes.
+		f, _, oerr := openJailed(t.p, path, os.O_RDONLY, 0)
+		if oerr != nil {
 			return nil
 		}
+		lim := t.p.MaxReadBytes
+		if lim <= 0 {
+			lim = 2 << 20
+		}
+		data, rerr := io.ReadAll(io.LimitReader(f, int64(lim+1)))
+		_ = f.Close()
+		if rerr != nil {
+			return nil
+		}
+		if len(data) > lim {
+			data = data[:lim]
+		}
+		// skip binary-ish
 		if bytes.IndexByte(data, 0) >= 0 {
 			return nil
 		}
@@ -274,28 +273,24 @@ func (t *writeTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	path, err := t.p.ResolvePath(a.Path)
-	if err != nil {
-		return "", err
-	}
+	// Probe prior content via jailed open (missing file → create).
 	rel := a.Path
-	if rel == "" {
-		rel = path
-	}
 	var old []byte
 	created := false
-	if b, err := os.ReadFile(path); err == nil {
+	if _, b, err := readFileJailed(t.p, a.Path); err == nil {
 		old = b
 	} else if os.IsNotExist(err) {
 		created = true
 	} else {
+		// Jail denial or I/O error — do not write.
 		return "", err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	path, err := writeFileJailed(t.p, a.Path, []byte(a.Content), 0o644)
+	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, []byte(a.Content), 0o644); err != nil {
-		return "", err
+	if rel == "" {
+		rel = path
 	}
 	if created {
 		return formatCreateDiff(rel, a.Content), nil
@@ -329,17 +324,13 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	path, err := t.p.ResolvePath(a.Path)
+	path, data, err := readFileJailed(t.p, a.Path)
 	if err != nil {
 		return "", err
 	}
 	rel := a.Path
 	if rel == "" {
 		rel = path
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
 	}
 	s := string(data)
 	var oldSnippet string
@@ -376,7 +367,7 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		oldSnippet = a.OldString
 		s = strings.Replace(s, a.OldString, a.NewString, 1)
 	}
-	if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+	if _, err := writeFileJailed(t.p, a.Path, []byte(s), 0o644); err != nil {
 		return "", err
 	}
 	return formatEditDiff(rel, oldSnippet, a.NewString), nil
