@@ -27,16 +27,16 @@ func openJailed(p *policy.Policy, rel string, flag int, perm os.FileMode) (*os.F
 	if afterResolveHook != nil {
 		afterResolveHook(path)
 	}
-	return openJailedPath(p, path, flag, perm)
+	return OpenJailedPath(p, path, flag, perm)
 }
 
-// openJailedPath opens an already-resolved absolute path and verifies the fd.
-func openJailedPath(p *policy.Policy, path string, flag int, perm os.FileMode) (*os.File, string, error) {
+// OpenJailedPath opens an already-resolved absolute path and verifies the fd.
+func OpenJailedPath(p *policy.Policy, path string, flag int, perm os.FileMode) (*os.File, string, error) {
 	f, err := os.OpenFile(path, flag, perm)
 	if err != nil {
 		return nil, path, err
 	}
-	if err := verifyFDInJail(p, f); err != nil {
+	if err := VerifyFDInJail(p, f); err != nil {
 		actual, _ := fdPath(f)
 		_ = f.Close()
 		// If create/trunc landed outside the jail, remove the stray file.
@@ -48,8 +48,8 @@ func openJailedPath(p *policy.Policy, path string, flag int, perm os.FileMode) (
 	return f, path, nil
 }
 
-// readFileJailed is os.ReadFile under the path jail with post-open verification.
-func readFileJailed(p *policy.Policy, rel string) (path string, data []byte, err error) {
+// ReadFileJailed reads a file under the path jail with post-open verification.
+func ReadFileJailed(p *policy.Policy, rel string) (path string, data []byte, err error) {
 	f, path, err := openJailed(p, rel, os.O_RDONLY, 0)
 	if err != nil {
 		return path, nil, err
@@ -59,10 +59,15 @@ func readFileJailed(p *policy.Policy, rel string) (path string, data []byte, err
 	return path, data, err
 }
 
-// writeFileJailed creates parent dirs, then writes data under the path jail
+// readFileJailed keeps the internal built-in tool call sites concise.
+func readFileJailed(p *policy.Policy, rel string) (string, []byte, error) {
+	return ReadFileJailed(p, rel)
+}
+
+// WriteFileJailed creates parent dirs, then writes data under the path jail
 // with post-open verification. On a post-open jail failure after create, the
 // outside file is removed.
-func writeFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode) (path string, err error) {
+func WriteFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode) (path string, err error) {
 	if p == nil {
 		return "", fmt.Errorf("workspace not set")
 	}
@@ -76,7 +81,7 @@ func writeFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return path, err
 	}
-	f, path, err := openJailedPath(p, path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	f, path, err := OpenJailedPath(p, path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return path, err
 	}
@@ -88,10 +93,14 @@ func writeFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode
 	return path, cerr
 }
 
-// verifyFDInJail ensures the file the kernel opened is still under the jail.
+func writeFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode) (string, error) {
+	return WriteFileJailed(p, rel, data, perm)
+}
+
+// VerifyFDInJail ensures the file the kernel opened is still under the jail.
 // Uses the platform fd→path mapping (see jailfile_*.go); fails closed if the
 // path cannot be determined.
-func verifyFDInJail(p *policy.Policy, f *os.File) error {
+func VerifyFDInJail(p *policy.Policy, f *os.File) error {
 	if f == nil {
 		return fmt.Errorf("path jail: nil file")
 	}
@@ -103,4 +112,8 @@ func verifyFDInJail(p *policy.Policy, f *os.File) error {
 		return fmt.Errorf("path %q escapes workspace after open", actual)
 	}
 	return nil
+}
+
+func verifyFDInJail(p *policy.Policy, f *os.File) error {
+	return VerifyFDInJail(p, f)
 }

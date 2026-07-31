@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/internal/policy"
+	toolspkg "github.com/subosito/mow/internal/tools"
 )
 
 // AgentOptions configures ACP agent mode over an Engine.
@@ -786,11 +786,8 @@ func resolveInWorkspace(ws, p string) (string, error) {
 }
 
 func (a *agentServer) readWorkspaceFile(p string) (string, error) {
-	full, err := a.jailPath(p)
-	if err != nil {
-		return "", err
-	}
-	data, err := os.ReadFile(full)
+	pol := &policy.Policy{Workspace: a.eng.Workspace()}
+	_, data, err := toolspkg.ReadFileJailed(pol, p)
 	if err != nil {
 		return "", err
 	}
@@ -802,14 +799,9 @@ func (a *agentServer) readWorkspaceFile(p string) (string, error) {
 }
 
 func (a *agentServer) writeWorkspaceFile(p string, data []byte) error {
-	full, err := a.jailPath(p)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(full, data, 0o644)
+	pol := &policy.Policy{Workspace: a.eng.Workspace()}
+	_, err := toolspkg.WriteFileJailed(pol, p, data, 0o644)
+	return err
 }
 
 func nilIfRunning(t *termSession) any {
