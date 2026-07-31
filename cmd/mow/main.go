@@ -64,12 +64,6 @@ func run(args []string) int {
 		if c, ok := ext.LookupCommand(args[0]); ok {
 			return c.Run(args[1:])
 		}
-		// Old name: repl was renamed to tty (no alias kept).
-		if args[0] == "repl" {
-			fmt.Fprintf(os.Stderr, "mow: %q was renamed to %q\n", "repl", "tty")
-			fmt.Fprintf(os.Stderr, "  try: mow tty %s\n", strings.Join(args[1:], " "))
-			return 2
-		}
 		// Free-form args: treat as a prompt, but catch likely subcommand typos first.
 		if !strings.HasPrefix(args[0], "-") {
 			if sug := suggestCommand(args[0]); sug != "" && len(args) == 1 {
