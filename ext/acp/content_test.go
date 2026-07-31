@@ -59,3 +59,23 @@ func TestModeState(t *testing.T) {
 		t.Fatal(modes)
 	}
 }
+
+func TestMaterializePromptRejectsMediaSymlinkEscape(t *testing.T) {
+	ws := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(ws, "media")); err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.StdEncoding.EncodeToString([]byte("outside"))
+	_, err := materializePrompt([]ContentBlock{{Type: "image", Data: b64, MimeType: "image/png"}}, ws, "s1")
+	if err == nil {
+		t.Fatal("expected media symlink escape to be rejected")
+	}
+	entries, readErr := os.ReadDir(outside)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("outside directory modified: %v", entries)
+	}
+}
