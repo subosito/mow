@@ -609,8 +609,10 @@ func (r *Runner) fire(e Event) {
 }
 
 func stepPrompt(st State) string {
+	current := "Current node: " + st.NodeSummary() + "\n\n"
 	if st.Step == 0 {
 		var b strings.Builder
+		b.WriteString(current)
 		b.WriteString("Begin work on the goal.\n\nGoal:\n")
 		b.WriteString(st.Goal)
 		b.WriteString("\n\nIf the goal has multiple parts, first call goal_report status=continue with plan=[...] (id+title+status=pending). ")
@@ -618,6 +620,7 @@ func stepPrompt(st State) string {
 		return b.String()
 	}
 	var b strings.Builder
+	b.WriteString(current)
 	b.WriteString("Continue work on the goal.\n\nGoal:\n")
 	b.WriteString(st.Goal)
 	if st.Plan.HasItems() {

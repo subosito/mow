@@ -128,6 +128,73 @@ type State struct {
 	OutputTokens int `json:"output_tokens,omitempty"`
 }
 
+// NodeStatus is the frozen host contract for one goal-plan node. Hosts should
+// derive task maps from State.Nodes rather than parsing prompt checklist prose.
+type NodeStatus struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+// Nodes returns the ordered node-status projection. It is derived from durable
+// State fields, so adding it requires no stored-state migration. A goal without
+// a checklist is represented by one synthetic "goal" node.
+func (st State) Nodes() []NodeStatus {
+	if !st.Plan.HasItems() {
+		status := string(st.Status)
+		if status == "" {
+			status = string(StatusPending)
+		}
+		return []NodeStatus{{ID: "goal", Title: strings.TrimSpace(st.Goal), Status: status}}
+	}
+	nodes := make([]NodeStatus, 0, len(st.Plan.Items))
+	for _, item := range st.Plan.Items {
+		status := string(item.Status)
+		if status == "" {
+			status = string(ItemPending)
+		}
+		nodes = append(nodes, NodeStatus{ID: item.ID, Title: item.Title, Status: status})
+	}
+	return nodes
+}
+
+// NodeSummary returns the bounded one-line current-node prompt injection.
+func (st State) NodeSummary() string {
+	nodes := st.Nodes()
+	idx := 0
+	if st.CurrentItem != "" {
+		for i := range nodes {
+			if nodes[i].ID == st.CurrentItem {
+				idx = i
+				break
+			}
+		}
+	} else if st.Plan.HasItems() {
+		idx = len(nodes) - 1
+		for i := range nodes {
+			if nodes[i].Status == string(ItemPending) {
+				idx = i
+				break
+			}
+		}
+	}
+	n := nodes[idx]
+	title := compactNodeTitle(n.Title, 80)
+	if title == "" {
+		title = n.ID
+	}
+	return fmt.Sprintf("node %d/%d [%s] %s (evidence: %d)", idx+1, len(nodes), n.ID, title, len(st.Facts))
+}
+
+func compactNodeTitle(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return strings.TrimSpace(string(runes[:max-1])) + "…"
+}
+
 // EventKind classifies progress signals for subscribers (logs, hosts, …).
 type EventKind string
 
@@ -142,6 +209,7 @@ const (
 )
 
 // Event is a progress notification. Safe for concurrent subscribers.
+// State carries the frozen Nodes projection for hosts; no separate node event is needed.
 type Event struct {
 	Kind  EventKind
 	State State
@@ -311,6 +379,7 @@ func contentWithoutMarkers(text string) string {
 // SystemAppend is injected each step (via PromptOpts) for the outer-loop protocol.
 func SystemAppend(st State) string {
 	var b strings.Builder
+	fmt.Fprintf(&b, "Current node: %s\n\n", st.NodeSummary())
 	fmt.Fprintf(&b, "You are working toward THIS goal only (outer loop step %d of %d):\n%s\n\n",
 		st.Step+1, st.MaxSteps, st.Goal)
 	b.WriteString("The summary you report must answer THIS goal — ignore unrelated prior chat. Do not discard uncommitted work to tidy the tree.\n\n")
