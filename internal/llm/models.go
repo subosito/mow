@@ -13,7 +13,7 @@ import (
 
 // ModelInfo is one entry from GET /v1/models.
 // Wire/Wires/Efforts/Facet are optional metadata some gateways attach; plain providers omit them.
-// ContextWindow / Pricing come from gateway catalogs (e.g. catalog-service) — not client speculation.
+// ContextWindow / Pricing come from gateway catalogs — not client speculation.
 type ModelInfo struct {
 	ID      string   `json:"id"`
 	OwnedBy string   `json:"owned_by,omitempty"`

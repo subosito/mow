@@ -30,21 +30,21 @@ func TestExpandMowAgents(t *testing.T) {
 	if specs[0].Name != "peer-a" || specs[1].Name != "peer-b" {
 		t.Fatalf("order/names: %+v %+v", specs[0], specs[1])
 	}
-	mog := specs[0]
+	peerA := specs[0]
 	wantPrefix := []string{"mow", "acp", "--model", "gemini-2.5-flash"}
 	for i, p := range wantPrefix {
 		if peerA.Command[i] != p {
-			t.Fatalf("mog cmd[%d]=%q want %q full=%v", i, peerA.Command[i], p, peerA.Command)
+			t.Fatalf("peer-a cmd[%d]=%q want %q full=%v", i, peerA.Command[i], p, peerA.Command)
 		}
 	}
 	// no write/shell flags when false
-	joined := strings.Join(mog.Command, " ")
+	joined := strings.Join(peerA.Command, " ")
 	if strings.Contains(joined, "--allow-write") || strings.Contains(joined, "--allow-shell") {
 		t.Fatalf("write/shell should be off: %v", peerA.Command)
 	}
 	wantCommand := []string{"mow", "acp", "--model", "gemini-2.5-flash", "--effort", "high", "--system-prefix", "You are a reviewer.", "--stream"}
 	if got := peerA.Command; !slices.Equal(got, wantCommand) {
-		t.Fatalf("mog command=%v want %v", got, wantCommand)
+		t.Fatalf("peer-a command=%v want %v", got, wantCommand)
 	}
 	if peerA.TimeoutSec != 120 {
 		t.Fatalf("timeout=%d", peerA.TimeoutSec)
