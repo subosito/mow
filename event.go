@@ -68,12 +68,19 @@ const (
 	//	  "path": "internal/x/y.go",  // workspace-relative when possible
 	//	  "count": 3,                 // total findings reported by the server
 	//	  "diagnostics": [            // bounded by MaxLSPDiagnostics
-	//	    {"severity": "error", "message": "undefined: foo", "line": 42}
+	//	    {
+	//	      "severity": "error",         // error|warning|information|hint
+	//	      "message": "undefined: foo",
+	//	      "line": 42,                  // 1-based
+	//	      "column": 9,                 // 1-based; 0 when the server omits it
+	//	      "source": "compiler"         // producing tool, "" when absent
+	//	    }
 	//	  ]
 	//	}
 	//
-	// severity is one of error|warning|information|hint; line is 1-based.
-	// count may exceed len(diagnostics) when the list was truncated.
+	// Diagnostics are sorted most severe first, then truncated, so a host that
+	// renders only the head still sees the errors. count may exceed
+	// len(diagnostics) when the list was truncated.
 	EventLSPDiagnostics EventType = "harness.lsp.diagnostics"
 )
 
@@ -81,11 +88,42 @@ const (
 // EventLSPDiagnostics payload.
 const MaxLSPDiagnostics = 10
 
+// DiagnosticSeverity is the severity vocabulary of EventLSPDiagnostics.
+type DiagnosticSeverity string
+
+// Diagnostic severities, most severe first (see SeverityRank).
+const (
+	SeverityError       DiagnosticSeverity = "error"
+	SeverityWarning     DiagnosticSeverity = "warning"
+	SeverityInformation DiagnosticSeverity = "information"
+	SeverityHint        DiagnosticSeverity = "hint"
+)
+
+// SeverityRank orders severities for display and truncation: lower is more
+// severe. Unknown values sort last.
+func SeverityRank(s DiagnosticSeverity) int {
+	switch s {
+	case SeverityError:
+		return 0
+	case SeverityWarning:
+		return 1
+	case SeverityInformation:
+		return 2
+	case SeverityHint:
+		return 3
+	}
+	return 4
+}
+
 // Diagnostic is one language-server finding (see EventLSPDiagnostics).
 type Diagnostic struct {
-	Severity string `json:"severity"` // error|warning|information|hint
-	Message  string `json:"message"`
-	Line     int    `json:"line"` // 1-based
+	Severity DiagnosticSeverity `json:"severity"`
+	Message  string             `json:"message"`
+	Line     int                `json:"line"`             // 1-based
+	Column   int                `json:"column,omitempty"` // 1-based; 0 when the server omits it
+	// Source is the producing tool as reported by the server (e.g. "compiler",
+	// "staticcheck"); empty when absent.
+	Source string `json:"source,omitempty"`
 }
 
 // Stop reasons for EventRunEnd / RunResult.StopReason.

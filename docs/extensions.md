@@ -381,8 +381,16 @@ accepted.
   appends the findings to the tool result the model sees, and emits
   `harness.lsp.diagnostics`. Diagnostics for the edit come back *with* the edit,
   so the model does not spend a turn running tests to learn it broke the build.
-  Bounded by `mow.MaxLSPDiagnostics`; a server that is down or silent never
-  fails an edit that already succeeded. No config → no process → no event.
+  Findings are sorted most severe first and then capped at
+  `mow.MaxLSPDiagnostics`, so truncation can never hide an error behind a pile
+  of hints. Each pull has its own 10s deadline: a server that is down, silent,
+  or wedged returns the original tool result unchanged and never fails an edit
+  that already succeeded. No config → no process → no event.
+
+  Payload (`mow.Diagnostic`): `severity` (`error`|`warning`|`information`|
+  `hint`), `message`, `line` (1-based), `column` (1-based, `0` when the server
+  omits it), `source` (producing tool, empty when absent). `count` is the
+  server total and may exceed `len(diagnostics)` after truncation.
 
 ```yaml
 extensions:

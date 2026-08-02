@@ -4,12 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 )
+
+// diagTimeout bounds one diagnostics pull (including the pack's single
+// reconnect attempt). A language server that hangs — indexing a large repo,
+// wedged, mid-restart — must never hold up a write that already succeeded.
+// Var, not const, so tests can shorten it; never reassigned in production.
+var diagTimeout = 10 * time.Second
 
 // maxDiagMessage bounds one diagnostic message so a server that reports a wall
 // of text cannot flood the tool result or the event payload.
@@ -38,17 +47,31 @@ func postEditDiagnostics(pull diagFunc) ext.PostToolFunc {
 		if path == "" || !supportedFile(path) {
 			return ext.PostToolDecision{}, nil
 		}
-		diags, err := pull(ctx, path)
+		// Own deadline, not the run's: the run context may have hours left.
+		pullCtx, cancel := context.WithTimeout(ctx, diagTimeout)
+		defer cancel()
+		diags, err := pull(pullCtx, path)
 		if err != nil {
-			// A language server that is down must never fail an edit that
-			// already succeeded: the write happened, diagnostics are a bonus.
+			// A server that is down, slow, or wedged must never fail an edit
+			// that already succeeded: the write happened, diagnostics are a
+			// bonus. Return the original result untouched.
+			slog.Debug("lsp: post-edit diagnostics skipped",
+				"tool", e.Name, "path", path, "err", err,
+				"timeout", pullCtx.Err() != nil)
 			return ext.PostToolDecision{}, nil
 		}
 		if len(diags) == 0 {
 			return ext.PostToolDecision{}, nil
 		}
 		count := len(diags)
-		shown := diags
+		// Sort before truncating so the cap can never hide an error behind ten
+		// hints. Stable: within a severity the server's order (and so file
+		// order) is preserved. Sorting here means every host inherits
+		// error-first truncation, not just the ones that re-sort.
+		shown := append([]mow.Diagnostic(nil), diags...)
+		sort.SliceStable(shown, func(i, j int) bool {
+			return mow.SeverityRank(shown[i].Severity) < mow.SeverityRank(shown[j].Severity)
+		})
 		if len(shown) > mow.MaxLSPDiagnostics {
 			shown = shown[:mow.MaxLSPDiagnostics]
 		}
@@ -71,7 +94,15 @@ func renderDiagnostics(path string, count int, diags []mow.Diagnostic) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n\nlsp diagnostics (%s): %d\n", path, count)
 	for _, d := range diags {
-		fmt.Fprintf(&b, "  %s:%d: %s: %s\n", path, d.Line, d.Severity, d.Message)
+		pos := fmt.Sprintf("%s:%d", path, d.Line)
+		if d.Column > 0 {
+			pos += fmt.Sprintf(":%d", d.Column)
+		}
+		src := ""
+		if d.Source != "" {
+			src = " (" + d.Source + ")"
+		}
+		fmt.Fprintf(&b, "  %s: %s: %s%s\n", pos, d.Severity, d.Message, src)
 	}
 	if count > len(diags) {
 		fmt.Fprintf(&b, "  … %d more\n", count-len(diags))

@@ -273,11 +273,13 @@ func parseDiagnostics(raw json.RawMessage) []mow.Diagnostic {
 	type item struct {
 		Range struct {
 			Start struct {
-				Line int `json:"line"`
+				Line      int `json:"line"`
+				Character int `json:"character"`
 			} `json:"start"`
 		} `json:"range"`
 		Severity int    `json:"severity"`
 		Message  string `json:"message"`
+		Source   string `json:"source"`
 	}
 	var rep struct {
 		Items []item `json:"items"`
@@ -298,28 +300,33 @@ func parseDiagnostics(raw json.RawMessage) []mow.Diagnostic {
 		if len(msg) > maxDiagMessage {
 			msg = msg[:maxDiagMessage] + "…"
 		}
+		// LSP positions are 0-based; the event contract is 1-based.
 		out = append(out, mow.Diagnostic{
 			Severity: severityName(it.Severity),
 			Message:  msg,
-			Line:     it.Range.Start.Line + 1, // LSP is 0-based, event contract is 1-based
+			Line:     it.Range.Start.Line + 1,
+			Column:   it.Range.Start.Character + 1,
+			Source:   strings.TrimSpace(it.Source),
 		})
 	}
 	return out
 }
 
-// severityName maps LSP DiagnosticSeverity to the frozen event vocabulary.
-func severityName(n int) string {
+// severityName maps the LSP DiagnosticSeverity enum to the event vocabulary.
+// The spec says an absent severity is client-decided; treat it as an error so
+// an unlabelled finding is never sorted below a hint and truncated away.
+func severityName(n int) mow.DiagnosticSeverity {
 	switch n {
 	case 1:
-		return "error"
+		return mow.SeverityError
 	case 2:
-		return "warning"
+		return mow.SeverityWarning
 	case 3:
-		return "information"
+		return mow.SeverityInformation
 	case 4:
-		return "hint"
+		return mow.SeverityHint
 	default:
-		return "error"
+		return mow.SeverityError
 	}
 }
 
