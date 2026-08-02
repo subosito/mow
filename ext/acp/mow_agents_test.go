@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -10,12 +11,13 @@ func TestExpandMowAgents(t *testing.T) {
 	specs, err := expandMowAgents(map[string]MowAgentSpec{
 		"peer-b": {Model: "gpt-5-mini"},
 		"peer-a": {
-			Model:      "gemini-2.5-flash",
-			AllowWrite: &falseV,
-			AllowShell: &falseV,
-			TimeoutSec: 120,
-			Effort:     "high",
-			ExtraArgs:  []string{"--stream"},
+			Model:        "gemini-2.5-flash",
+			AllowWrite:   &falseV,
+			AllowShell:   &falseV,
+			TimeoutSec:   120,
+			Effort:       "high",
+			SystemPrefix: "You are a reviewer.",
+			ExtraArgs:    []string{"--stream"},
 		},
 	})
 	if err != nil {
@@ -40,14 +42,19 @@ func TestExpandMowAgents(t *testing.T) {
 	if strings.Contains(joined, "--allow-write") || strings.Contains(joined, "--allow-shell") {
 		t.Fatalf("write/shell should be off: %v", peerA.Command)
 	}
-	if !strings.Contains(joined, "--effort high") || !strings.Contains(joined, "--stream") {
-		t.Fatalf("effort/extra: %v", peerA.Command)
+	wantCommand := []string{"mow", "acp", "--model", "gemini-2.5-flash", "--effort", "high", "--system-prefix", "You are a reviewer.", "--stream"}
+	if got := peerA.Command; !slices.Equal(got, wantCommand) {
+		t.Fatalf("mog command=%v want %v", got, wantCommand)
 	}
 	if peerA.TimeoutSec != 120 {
 		t.Fatalf("timeout=%d", peerA.TimeoutSec)
 	}
 
 	peerB := specs[1]
+	wantDefaultCommand := []string{"mow", "acp", "--model", "gpt-5-mini", "--allow-write", "--allow-shell"}
+	if got := peerB.Command; !slices.Equal(got, wantDefaultCommand) {
+		t.Fatalf("default command=%v want %v", got, wantDefaultCommand)
+	}
 	joined = strings.Join(peerB.Command, " ")
 	if !strings.Contains(joined, "--allow-write") || !strings.Contains(joined, "--allow-shell") {
 		t.Fatalf("defaults should enable write/shell: %v", peerB.Command)

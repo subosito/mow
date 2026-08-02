@@ -130,6 +130,9 @@ func New(opt Options) (*Engine, error) {
 	if b := strings.TrimSpace(opt.BaseURL); b != "" {
 		cfg.LLM.BaseURL = b
 	}
+	if len(opt.SystemPrefix) > 0 {
+		cfg.LLM.SystemPrefix = append([]string(nil), opt.SystemPrefix...)
+	}
 	if opt.AllowWrite {
 		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit")
 	}

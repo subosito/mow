@@ -12,14 +12,15 @@ import (
 
 // EngineFlags are common flags for any command that constructs a mow.Engine.
 type EngineFlags struct {
-	Config     string
-	Workspace  string
-	ExtraRoots []string // repeatable --extra-root
-	Model      string
-	Effort     string
-	BaseURL    string
-	AllowShell bool
-	AllowWrite bool
+	Config       string
+	Workspace    string
+	ExtraRoots   []string // repeatable --extra-root
+	Model        string
+	Effort       string
+	BaseURL      string
+	SystemPrefix []string // repeatable --system-prefix
+	AllowShell   bool
+	AllowWrite   bool
 	// MaxTurns is the parsed --max-turns value. Only applied when MaxTurnsSet
 	// (omit flag → config default; --max-turns 0 → unlimited).
 	MaxTurns    int
@@ -39,6 +40,7 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.Model, "model", "", "model id")
 	fs.StringVar(&f.Effort, "effort", "", "reasoning effort (catalog efforts when listed; else none|low|medium|high)")
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
+	fs.Var((*stringList)(&f.SystemPrefix), "system-prefix", "system prompt prefix (repeatable)")
 	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash")
 	fs.BoolVar(&f.AllowWrite, "allow-write", false, "enable write/edit")
 	fs.Var(&maxTurnsFlag{f: f}, "max-turns", "max agent turns per Prompt (0=unlimited)")
@@ -104,18 +106,19 @@ func (f *EngineFlags) ConfigPaths() []string {
 func (f *EngineFlags) Options() mow.Options {
 	paths := f.ConfigPaths()
 	opt := mow.Options{
-		ConfigPaths: paths,
-		Workspace:   f.Workspace,
-		ExtraRoots:  append([]string(nil), f.ExtraRoots...),
-		Model:       f.Model,
-		Effort:      f.Effort,
-		BaseURL:     f.BaseURL,
-		AllowWrite:  f.AllowWrite,
-		AllowShell:  f.AllowShell,
-		NoSession:   f.NoSession,
-		SessionID:   f.SessionID,
-		Continue:    f.Continue,
-		Stream:      f.Stream,
+		ConfigPaths:  paths,
+		Workspace:    f.Workspace,
+		ExtraRoots:   append([]string(nil), f.ExtraRoots...),
+		Model:        f.Model,
+		Effort:       f.Effort,
+		BaseURL:      f.BaseURL,
+		SystemPrefix: append([]string(nil), f.SystemPrefix...),
+		AllowWrite:   f.AllowWrite,
+		AllowShell:   f.AllowShell,
+		NoSession:    f.NoSession,
+		SessionID:    f.SessionID,
+		Continue:     f.Continue,
+		Stream:       f.Stream,
 	}
 	if f.MaxTurnsSet {
 		if f.MaxTurns == 0 {

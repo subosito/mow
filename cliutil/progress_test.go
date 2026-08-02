@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -85,7 +86,7 @@ func TestEngineFlagsPowerMapping(t *testing.T) {
 	var ef cliutil.EngineFlags
 	fs := cliutil.NewFlagSet("run")
 	ef.Bind(fs)
-	if err := fs.Parse([]string{"--allow-shell", "--allow-write", "--workspace", "/tmp/ws", "--model", "gpt-x", "--base-url", "http://x/v1", "--session", "abc", "--continue", "--stream", "--verbose", "--no-session"}); err != nil {
+	if err := fs.Parse([]string{"--allow-shell", "--allow-write", "--workspace", "/tmp/ws", "--model", "gpt-x", "--base-url", "http://x/v1", "--system-prefix", "reviewer", "--system-prefix", "security auditor", "--session", "abc", "--continue", "--stream", "--verbose", "--no-session"}); err != nil {
 		t.Fatal(err)
 	}
 	opt := ef.Options()
@@ -103,6 +104,9 @@ func TestEngineFlagsPowerMapping(t *testing.T) {
 	}
 	if opt.BaseURL != "http://x/v1" {
 		t.Errorf("BaseURL=%q", opt.BaseURL)
+	}
+	if got, want := opt.SystemPrefix, []string{"reviewer", "security auditor"}; !slices.Equal(got, want) {
+		t.Errorf("SystemPrefix=%q want %q", got, want)
 	}
 	if opt.SessionID != "abc" {
 		t.Errorf("SessionID=%q", opt.SessionID)

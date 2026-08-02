@@ -54,6 +54,9 @@ type Options struct {
 	Effort string
 	// BaseURL overrides config/env LLM base URL when non-empty.
 	BaseURL string
+	// SystemPrefix prepends optional identity text before the compiled system
+	// prompt. Each entry is a separate system segment.
+	SystemPrefix []string
 	// AllowWrite / AllowShell override config enable list when true.
 	AllowWrite bool
 	AllowShell bool

@@ -136,6 +136,7 @@ extensions:
     mow_agents:
       peer-agent:
         model: gpt-5-mini
+        system_prefix: "You are a reviewer. Focus on actionable findings."
   # other packs: job, mcp, lsp, …
 ```
 
@@ -169,6 +170,7 @@ that say “subagent”: same idea — a named helper you **delegate** work to.
 | `allow_shell` | `true` | Pass `--allow-shell` |
 | `timeout_sec` | `600` | Cap per delegated prompt (longer default than external agents) |
 | `effort` | *(omit)* | Pass `--effort <value>` to the peer |
+| `system_prefix` | *(omit)* | Prepend identity or role text to the peer system prompt |
 | `dir` | workspace | Peer working directory |
 | `extra_args` | — | Extra argv after the standard flags (advanced) |
 

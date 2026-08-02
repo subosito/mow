@@ -33,6 +33,8 @@ type MowAgentSpec struct {
 	TimeoutSec int `yaml:"timeout_sec" json:"timeout_sec,omitempty"`
 	// Effort sets peer reasoning intensity via --effort (mow CLI).
 	Effort string `yaml:"effort" json:"effort,omitempty"`
+	// SystemPrefix prepends optional identity or role text to the peer prompt.
+	SystemPrefix string `yaml:"system_prefix" json:"system_prefix,omitempty"`
 	// Dir is optional peer working directory (default: host workspace).
 	Dir string `yaml:"dir" json:"dir,omitempty"`
 	// ExtraArgs are appended after the standard mow acp flags (advanced).
@@ -87,6 +89,9 @@ func expandOneMowAgent(name string, s MowAgentSpec) (AgentSpec, error) {
 	}
 	if e := strings.TrimSpace(s.Effort); e != "" {
 		cmd = append(cmd, "--effort", e)
+	}
+	if prefix := strings.TrimSpace(s.SystemPrefix); prefix != "" {
+		cmd = append(cmd, "--system-prefix", prefix)
 	}
 	for _, a := range s.ExtraArgs {
 		a = strings.TrimSpace(a)
