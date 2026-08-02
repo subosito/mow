@@ -89,6 +89,45 @@ func (r *Runner) RunRaise(ctx context.Context, id string, maxStepsRaise int) (St
 	return r.runState(ctx, st)
 }
 
+// ResumeAnswer unblocks an escalated goal (StatusBlocked): the human answer
+// is appended to state, the question is cleared, and the run continues. The
+// answer lands in the goal's Summary prefix so the next step sees it.
+func (r *Runner) ResumeAnswer(ctx context.Context, id, answer string) (State, error) {
+	if r == nil || r.Engine == nil {
+		return State{}, fmt.Errorf("goal: nil engine")
+	}
+	id = strings.TrimSpace(id)
+	answer = strings.TrimSpace(answer)
+	if id == "" || answer == "" {
+		return State{}, fmt.Errorf("goal: resume --answer required")
+	}
+	st, err := r.store().Load(id)
+	if err != nil {
+		return State{}, err
+	}
+	if st.Status != StatusBlocked {
+		return State{}, fmt.Errorf("goal %s is %s (not blocked — nothing to answer)", id, st.Status)
+	}
+	// Durable record of the human decision.
+	st.Facts = append(st.Facts, Fact{
+		Claim:          "human decision: " + answer,
+		ProducedByStep: st.Step,
+	})
+	if st.Summary != "" {
+		st.Summary = st.Summary + "\n[h: " + answer + "]"
+	} else {
+		st.Summary = "[h: " + answer + "]"
+	}
+	st.Question = ""
+	st.Status = StatusRunning
+	if err := r.store().Save(st); err != nil {
+		return State{}, err
+	}
+	r.fire(Event{Kind: EventStep, State: st, Text: "escalation answered: " + answer})
+	r.store().AppendEvent(st.ID, LogEvent{Kind: "resume", Status: st.Status, Step: st.Step, Text: answer, Plan: planPtr(st.Plan)})
+	return r.runState(ctx, st)
+}
+
 // RunSpec creates (or resumes incomplete) then runs.
 // On resume, MaxSteps is the max of stored and spec.MaxSteps so CLI can raise the budget.
 func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {

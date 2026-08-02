@@ -69,6 +69,7 @@ Examples:
   mow goal new --id fix-ci --goal "Make CI green"
   mow goal run --id fix-ci --allow-write --allow-shell
   mow goal run --id fix-ci --max-steps 24
+  mow goal run --id fix-ci --answer "use option B"   # unblock an escalated goal
 
 State:  $MOW_HOME/goals/<id>.json
 Done:   model calls goal_report status=done summary="…"
@@ -106,6 +107,7 @@ func cmdRun(args []string) int {
 	id := fs.String("id", "", "existing goal id")
 	goalText := fs.String("goal", "", "one-shot goal text (creates/resumes id)")
 	maxSteps := fs.Int("max-steps", DefaultMaxSteps, "outer step budget (resume: raises stored max_steps if higher)")
+	answer := fs.String("answer", "", "human decision answering a blocked goal's escalation (resumes it)")
 	dir := fs.String("dir", "", "store dir (default $MOW_HOME/goals)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -132,13 +134,16 @@ func cmdRun(args []string) int {
 
 	var st State
 	switch {
+	case strings.TrimSpace(*answer) != "":
+		// Human gate: answer a blocked goal's escalation and resume the run.
+		st, err = r.ResumeAnswer(ctx, *id, *answer)
 	case strings.TrimSpace(*goalText) != "":
 		st, err = r.RunSpec(ctx, Spec{ID: *id, Goal: *goalText, MaxSteps: *maxSteps})
 	case strings.TrimSpace(*id) != "":
 		// --max-steps N raises the stored budget when N is larger (continue past 16/16).
 		st, err = r.RunRaise(ctx, *id, *maxSteps)
 	default:
-		fmt.Fprintln(os.Stderr, "mow goal run: need --id or --goal")
+		fmt.Fprintln(os.Stderr, "mow goal run: need --id, --goal, or --answer")
 		return 2
 	}
 	if err != nil && st.Status != StatusDone {

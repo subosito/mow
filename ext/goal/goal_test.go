@@ -407,3 +407,67 @@ func TestRunnerRouterEdges(t *testing.T) {
 		}
 	})
 }
+
+// ResumeAnswer unblocks an escalated goal: the human decision is recorded
+// as a durable fact, the question clears, and the run continues.
+func TestResumeAnswerUnblocks(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MOW_HOME", dir)
+	var steps atomic.Int32
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			steps.Add(1)
+			return mow.Message{Role: "assistant", Content: "continuing"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &goal.Store{Dir: dir + "/goals"}
+	r := &goal.Runner{
+		Engine: eng,
+		Store:  store,
+		Router: func(st goal.State, sr goal.StepResult) goal.StepOutcome {
+			// Escalate the first step only.
+			if st.Step == 1 {
+				return goal.OutcomeEscalate
+			}
+			return goal.OutcomeContinue
+		},
+	}
+	_, err = r.RunSpec(context.Background(), goal.Spec{ID: "esc", Goal: "g", MaxSteps: 5})
+	if err == nil || !strings.Contains(err.Error(), "blocked") {
+		t.Fatalf("expected blocked: %v", err)
+	}
+	blocked, _ := store.Load("esc")
+	if blocked.Status != goal.StatusBlocked || strings.TrimSpace(blocked.Question) == "" {
+		t.Fatalf("blocked=%+v", blocked)
+	}
+
+	// Answer it: run continues (the stub model never finishes, so it runs to
+	// the step budget and stops partial — the important asserts are the
+	// durable decision and the cleared question on the returned state).
+	st, err := r.ResumeAnswer(context.Background(), "esc", "use option B")
+	if err == nil {
+		t.Fatalf("expected budget-stop error after resume: %+v", st)
+	}
+	if st.Step < 2 {
+		t.Fatalf("resume did not continue: %+v", st)
+	}
+	if st.Status != goal.StatusPartial {
+		t.Fatalf("resumed run should stop partial at budget: %s", st.Status)
+	}
+	found := false
+	for _, f := range st.Facts {
+		if strings.Contains(f.Claim, "use option B") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("human decision not recorded in facts: %+v", st.Facts)
+	}
+	if strings.TrimSpace(st.Question) != "" {
+		t.Fatalf("question should clear after answer: %q", st.Question)
+	}
+}
