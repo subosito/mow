@@ -12,7 +12,37 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/subosito/mow"
 )
+
+func TestDelegateCwdAllowsEngineExtraRoot(t *testing.T) {
+	workspace := t.TempDir()
+	extra := t.TempDir()
+	eng, err := mow.New(mow.Options{
+		Workspace: workspace, ExtraRoots: []string{extra}, NoSession: true,
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "unused"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	tool := &delegateTool{
+		agents:    map[string]AgentSpec{"peer": {Name: "peer", Command: []string{"missing-peer"}, TimeoutSec: 1}},
+		workspace: workspace, peers: map[string]*peerSlot{},
+	}
+	ctx := mow.ContextWithEngine(context.Background(), eng)
+	_, err = tool.Exec(ctx, json.RawMessage(fmt.Sprintf(`{"agent":"peer","prompt":"hi","cwd":%q}`, extra)))
+	if err == nil {
+		t.Fatal("expected peer start failure")
+	}
+	if strings.Contains(err.Error(), "escapes path jail") {
+		t.Fatalf("configured extra root was rejected: %v", err)
+	}
+}
 
 func TestPeerIdleDuration(t *testing.T) {
 	if d := peerIdleDuration(0); d != 15*time.Minute {

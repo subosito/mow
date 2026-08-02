@@ -247,9 +247,18 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	} else if !filepath.IsAbs(dir) {
 		dir = filepath.Join(t.workspace, dir)
 	}
-	// Stay inside workspace when possible (symlink-resolving jail; a plain
-	// prefix check would let sibling dirs like /ws-evil pass for /ws).
-	if t.workspace != "" {
+	// Apply the running Engine's complete FS jail, not only the delegate
+	// registry's workspace. This is what makes --extra-root usable as an ACP
+	// cwd (for example, delegating from mow into an allowed sibling mowi repo).
+	// The fallback preserves registration-only tests/callers without an Engine
+	// in context. Relative cwd remains workspace-relative in both paths.
+	if eng := mow.EngineFromContext(ctx); eng != nil {
+		resolved, err := eng.ResolvePath(dir)
+		if err != nil {
+			return "", fmt.Errorf("acp_delegate: cwd %q escapes path jail: %w", dir, err)
+		}
+		dir = resolved
+	} else if t.workspace != "" {
 		resolved, err := resolveInWorkspace(t.workspace, dir)
 		if err != nil {
 			return "", fmt.Errorf("acp_delegate: cwd %q escapes workspace", dir)
