@@ -62,7 +62,7 @@ ext/
   acp/                 # pack: ACP + "acp" + acp_delegate
   goal/                # pack: outer-loop goals + "goal"
   job/                 # pack: interval jobs (`mow job`)
-  ops/                 # pack: continuous fleet ops (logs, restart, incidents, peer fixes)
+  ops/                 # pack: ops profiles (logs, restart, incidents, peer fixes)
   mcp/                 # pack: MCP → tools
   lsp/                 # pack: LSP hover/definition (gopls, …)
 cmd/mow/               # thin binary: run/tty + blank-import packs
