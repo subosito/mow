@@ -288,6 +288,27 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		} else {
 			st.Summary = pickSummary("", r.Engine, sr.Text)
 		}
+		// Evidence ledger: append this step's facts (dedupe by claim) so the
+		// next step sees structured facts, not conversational debris.
+		for _, f := range sr.Evidence {
+			claim := strings.TrimSpace(f.Claim)
+			if claim == "" {
+				continue
+			}
+			f.ProducedByStep = st.Step
+			f.Claim = claim
+			dup := false
+			for i := range st.Facts {
+				if st.Facts[i].Claim == claim {
+					st.Facts[i] = f
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				st.Facts = append(st.Facts, f)
+			}
+		}
 
 		switch sr.Outcome {
 		case OutcomeDone:
@@ -465,6 +486,10 @@ func stepPrompt(st State) string {
 		} else if st.Plan.AllDone() {
 			b.WriteString("\n\nAll items done — call goal_report status=done summary=…")
 		}
+	}
+	if facts := st.FactsText(); facts != "" {
+		b.WriteString("\n\nDurable evidence so far (use these; do not re-derive):\n")
+		b.WriteString(facts)
 	}
 	if s := strings.TrimSpace(st.Summary); s != "" {
 		b.WriteString("\n\nPrevious step result (truncated):\n")

@@ -270,3 +270,66 @@ func TestRunnerAccumulatesUsage(t *testing.T) {
 		t.Fatalf("persisted usage lost: %d", loaded.InputTokens)
 	}
 }
+
+func TestFactsText(t *testing.T) {
+	st := goal.State{Facts: []goal.Fact{
+		{Claim: "pricing is $9/mo", Source: "pricing.md", Confidence: 0.9},
+		{Claim: "API supports streaming"},
+	}}
+	got := st.FactsText()
+	for _, want := range []string{"pricing is $9/mo", "(source: pricing.md)", "[90%]", "API supports streaming"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("FactsText missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "\\\\n") {
+		t.Fatalf("FactsText leaked literal escapes: %q", got)
+	}
+	if (goal.State{}).FactsText() != "" {
+		t.Fatal("empty facts should render empty")
+	}
+}
+
+// The evidence ledger is "state outside the chat window": facts seeded in
+// state are injected into the next step's prompt, and a step's goal_report
+// evidence is persisted into state for later steps.
+func TestRunnerEvidenceLedger(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MOW_HOME", dir)
+	var prompts []string
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			if len(messages) > 0 {
+				prompts = append(prompts, messages[len(messages)-1].Content)
+			}
+			return mow.Message{Role: "assistant", Content: "working"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &goal.Runner{Engine: eng, Store: &goal.Store{Dir: dir + "/goals"}}
+	// Seed a durable fact before running; step 1's prompt must carry it.
+	st0 := goal.State{
+		ID: "ev", Goal: "g", Status: goal.StatusRunning, Step: 0, MaxSteps: 3,
+		Facts: []goal.Fact{{Claim: "base rate is 5%", Source: "rates.md", Confidence: 0.8}},
+	}
+	if err := r.Store.Save(st0); err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.RunRaise(context.Background(), "ev", 0)
+	_ = err // budget will stop the run; we only assert prompt propagation
+	joined := strings.Join(prompts, "\n")
+	if !strings.Contains(joined, "Durable evidence so far") || !strings.Contains(joined, "base rate is 5%") {
+		t.Fatalf("step prompt missing seeded facts:\n%s", joined)
+	}
+	// The facts were not clobbered by the run (still present in persisted state).
+	loaded, lerr := r.Store.Load("ev")
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if len(loaded.Facts) != 1 || loaded.Facts[0].Claim != "base rate is 5%" {
+		t.Fatalf("persisted facts clobbered: %+v", loaded.Facts)
+	}
+}

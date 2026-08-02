@@ -39,14 +39,16 @@ func (e *Executor) RunStep(ctx context.Context, st State) (StepResult, error) {
 		ExtraTools:   tools,
 	})
 
+	done, failed, cont, reason, summary, plan, reject, touched, evidence := sig.outcome()
+
 	out := StepResult{
 		Text:      res.Text,
 		SessionID: res.SessionID,
 		Usage:     res.Usage,
 		Plan:      st.Plan,
+		Evidence:  evidence,
 	}
 
-	done, failed, cont, reason, summary, plan, reject, touched := sig.outcome()
 	if touched || plan.HasItems() {
 		out.Plan = plan
 	}

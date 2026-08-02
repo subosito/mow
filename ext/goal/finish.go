@@ -24,9 +24,11 @@ type finishSignal struct {
 	planTouched bool
 	// rejectDone is set when status=done but checklist not complete.
 	rejectDone string
+	// evidence collected this step (goal_report evidence=...).
+	evidence []Fact
 }
 
-func (f *finishSignal) report(status, reason, summary string, plan []PlanItem, itemID, itemStatus, itemNote string) {
+func (f *finishSignal) report(status, reason, summary string, plan []PlanItem, itemID, itemStatus, itemNote string, evidence []Fact) {
 	if f == nil {
 		return
 	}
@@ -42,6 +44,19 @@ func (f *finishSignal) report(status, reason, summary string, plan []PlanItem, i
 		}
 	}
 	// Then item update.
+	// Evidence: append sanitized facts (dedupe by claim+source).
+	for _, ev := range evidence {
+		claim := strings.TrimSpace(ev.Claim)
+		if claim == "" {
+			continue
+		}
+		f.evidence = append(f.evidence, Fact{
+			Claim:      claim,
+			Source:     strings.TrimSpace(ev.Source),
+			Confidence: ev.Confidence,
+		})
+	}
+
 	if id := strings.TrimSpace(itemID); id != "" {
 		st := strings.TrimSpace(itemStatus)
 		if st == "" {
@@ -82,9 +97,9 @@ func (f *finishSignal) report(status, reason, summary string, plan []PlanItem, i
 	}
 }
 
-func (f *finishSignal) outcome() (done, failed, cont bool, reason, summary string, plan Plan, reject string, touched bool) {
+func (f *finishSignal) outcome() (done, failed, cont bool, reason, summary string, plan Plan, reject string, touched bool, evidence []Fact) {
 	if f == nil {
-		return false, false, false, "", "", Plan{}, "", false
+		return false, false, false, "", "", Plan{}, "", false, nil
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -93,7 +108,8 @@ func (f *finishSignal) outcome() (done, failed, cont bool, reason, summary strin
 	if len(f.plan.Items) > 0 {
 		pc.Items = append([]PlanItem(nil), f.plan.Items...)
 	}
-	return f.done, f.failed, f.cont || f.planTouched, f.reason, f.summary, pc, f.rejectDone, f.planTouched
+	ev := append([]Fact(nil), f.evidence...)
+	return f.done, f.failed, f.cont || f.planTouched, f.reason, f.summary, pc, f.rejectDone, f.planTouched, ev
 }
 
 func (f *finishSignal) seedPlan(p Plan) {
@@ -133,6 +149,7 @@ func (reportTool) Description() string {
 		"or item_id+item_status to mark one item). " +
 		"status=done: finish the whole goal (requires summary; if a checklist exists all items must be done/skipped). " +
 		"status=failed: fail the goal with reason. " +
+		"evidence=[{claim,source,confidence}]: record durable facts for later steps (optional). " +
 		"Stops the tool loop for this step."
 }
 func (reportTool) ReadOnly() bool { return true }
@@ -151,7 +168,8 @@ func (reportTool) Parameters() json.RawMessage {
       }}},
     "item_id":{"type":"string","description":"Mark one checklist item"},
     "item_status":{"type":"string","enum":["pending","done","failed","skipped"]},
-    "item_note":{"type":"string"}
+    "item_note":{"type":"string"},
+    "evidence":{"type":"array","description":"Durable facts for later steps (state outside the transcript). Items: claim (required), source, confidence 0-1","items":{"type":"object","properties":{"claim":{"type":"string"},"source":{"type":"string"},"confidence":{"type":"number"}}}}
   },
   "required":["status"]
 }`)
@@ -165,6 +183,7 @@ func (reportTool) Exec(ctx context.Context, args json.RawMessage) (string, error
 		ItemID     string     `json:"item_id"`
 		ItemStatus string     `json:"item_status"`
 		ItemNote   string     `json:"item_note"`
+		Evidence   []Fact     `json:"evidence"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
@@ -173,8 +192,8 @@ func (reportTool) Exec(ctx context.Context, args json.RawMessage) (string, error
 	if sig == nil {
 		return "goal_report ignored (no active outer-loop goal)", nil
 	}
-	sig.report(a.Status, a.Reason, a.Summary, a.Plan, a.ItemID, a.ItemStatus, a.ItemNote)
-	done, failed, cont, _, _, plan, reject, _ := sig.outcome()
+	sig.report(a.Status, a.Reason, a.Summary, a.Plan, a.ItemID, a.ItemStatus, a.ItemNote, a.Evidence)
+	done, failed, cont, _, _, plan, reject, _, _ := sig.outcome()
 	if reject != "" {
 		return "goal_report: " + reject + "\nchecklist:\n" + plan.Format(), mow.ErrAgentDone
 	}

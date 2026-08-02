@@ -34,4 +34,6 @@ type StepResult struct {
 	Usage     mow.Usage
 	// Plan is the checklist after this step (may be updated by goal_report).
 	Plan Plan
+	// Evidence is durable facts recorded this step (goal_report evidence=...).
+	Evidence []Fact
 }

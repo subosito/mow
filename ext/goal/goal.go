@@ -50,6 +50,41 @@ type Spec struct {
 	MaxSteps int
 }
 
+// Fact is one durable evidence item recorded by a goal step (goal_report
+// evidence=...). Facts are the "state outside the chat window": the next step
+// sees selected facts, not the whole transcript.
+type Fact struct {
+	ID     string `json:"id,omitempty"`
+	Claim  string `json:"claim"`
+	Source string `json:"source,omitempty"`
+	// Confidence 0-1; 0 = unset.
+	Confidence float64 `json:"confidence,omitempty"`
+	// ProducedByStep is the outer-loop step that recorded this fact.
+	ProducedByStep int `json:"produced_by_step,omitempty"`
+}
+
+// Facts renders the durable evidence lines (compact, newest last).
+func (st State) FactsText() string {
+	if len(st.Facts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, f := range st.Facts {
+		line := strings.TrimSpace(f.Claim)
+		if line == "" {
+			continue
+		}
+		if f.Source != "" {
+			line += " (source: " + strings.TrimSpace(f.Source) + ")"
+		}
+		if f.Confidence > 0 {
+			line += fmt.Sprintf(" [%.0f%%]", f.Confidence*100)
+		}
+		b.WriteString("- " + line + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // State is durable progress (JSON under $MOW_HOME/goals/<id>.json).
 type State struct {
 	ID        string `json:"id"`
@@ -60,6 +95,8 @@ type State struct {
 	SessionID string `json:"session_id,omitempty"`
 	LastReply string `json:"last_reply,omitempty"`
 	Summary   string `json:"summary,omitempty"`
+	// Facts is the durable evidence ledger (graph state outside the window).
+	Facts []Fact `json:"facts,omitempty"`
 	// Partial is a machine-readable summary when Status == StatusPartial:
 	// what is done, what is missing, and the best artifact so far.
 	Partial string `json:"partial,omitempty"`
@@ -270,7 +307,9 @@ func SystemAppend(st State) string {
 		b.WriteString("Or if the goal is trivial, goal_report status=done summary=… immediately.\n\n")
 	}
 	fmt.Fprintf(&b,
-		"Finish protocol:\n"+
+		"Evidence: record durable facts with goal_report evidence=[{claim,source,confidence}] — \n"+
+			"later steps see the evidence ledger, not the whole conversation.\n\n"+
+			"Finish protocol:\n"+
 			"- goal_report status=done summary=… (preferred over bare %s). Checklist must be complete if present.\n"+
 			"- goal_report status=failed reason=… (or %s <reason>).\n"+
 			"- goal_report status=continue for progress / plan / item updates.\n"+
