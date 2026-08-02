@@ -131,6 +131,45 @@ for turn in 1..max_turns:
 
 **Limits:** `max_turns`, bash timeout, max read bytes, **tool result cap**, **parallel tools**, soft history compaction (on by default).
 
+### Stall detection
+
+A run that keeps calling tools without learning anything new burns the whole
+turn budget for nothing. The loop watches for that directly.
+
+**What counts as evidence.** After each tool batch the loop records one key per
+result: the tool name, its normalized arguments, and a hash of the complete
+result text (already bounded by `policy.max_tool_result_chars`). A batch is
+**barren** when every key in it is one this run has produced before. Hashing the
+full result rather than a prefix matters — tool output routinely shares a long
+head (file banners, test preambles, identical grep context), and prefix keys
+made unrelated results collide.
+
+Two consequences worth knowing:
+
+- **A poll that returns changing output never stalls.** Same tool, same args,
+  different result = new evidence. Watching a file until it changes, or
+  re-running a test that now fails differently, is progress.
+- **Distinct calls that return the same string are still distinct evidence.**
+  Two greps that both find nothing are two facts, not one.
+
+**Three barren batches, then stop.** The run ends with `ErrStuck` →
+`StopStuck`, plus a `loop.stall` event carrying the reason. Three, not two:
+two identical batches are a plausible retry after a flaky command or a failed
+edit; three is a loop.
+
+This is a **backstop, not a knob** — it is a package-level constant with no
+config surface, on purpose. It exists to stop pathological spin, not to tune
+how persistent an agent is. A run that legitimately needs more work should get
+more turns (`--max-turns` / `policy.max_turns`), not a looser stall floor.
+
+Note that repeating the *same tool calls* is a separate, softer signal: the
+loop injects a nudge message after several identical batches but never stops
+for it. Only the evidence signal hard-stops.
+
+**Hosts:** surface `StopStuck` distinctly from `StopMaxTurns`. They mean
+opposite things — out of budget vs. out of ideas — and a user who sees "stuck"
+should be prompted to add information or change the task, not to raise a limit.
+
 ### Abort / cancel
 
 | Source | Behavior |
