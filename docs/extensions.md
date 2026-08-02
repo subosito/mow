@@ -196,6 +196,14 @@ State: `$MOW_HOME/goals/<id>.json` (`summary`, `plan`, `session_id`, tokens).
 Events: `$MOW_HOME/goals/<id>/events.jsonl`.  
 Embed: `goal.Runner{Engine, Store}.RunSpec(ctx, spec)`; optional `goal.Executor` for hosts.
 
+**Parallel nodes with a join (opt-in):** `Spec.ParallelMax = N` (>1) runs up to
+N independent *pending* checklist items as concurrent sub-steps, then joins
+(item statuses + evidence + summaries merged back into the parent state before
+the normal outcome handling). Because one `mow.Engine` serializes `Prompt`
+calls, this requires `Runner.EngineFactory func() (*mow.Engine, error)` — a
+fresh engine per sub-step, built like `goal.RunParallel`'s factory. Without a
+factory (or with `ParallelMax` 0/1) the runner is sequential, unchanged.
+
 **Checklist (recommended for multi-part goals):**
 
 1. `goal_report status=continue plan=[{id,title,status:pending},…]`

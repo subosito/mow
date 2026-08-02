@@ -50,6 +50,12 @@ type Spec struct {
 	Goal string
 	// MaxSteps caps Prompt iterations (default DefaultMaxSteps).
 	MaxSteps int
+	// ParallelMax opts into intra-goal parallelism: 0/1 = sequential (the
+	// default and unchanged behavior); N > 1 runs up to N independent pending
+	// plan items as concurrent sub-steps, each on its own Engine. Requires
+	// Runner.EngineFactory (one mow.Engine serializes Prompt calls); without
+	// a factory the runner stays sequential. Capped by MaxParallelWidth.
+	ParallelMax int
 }
 
 // Fact is one durable evidence item recorded by a goal step (goal_report
@@ -89,14 +95,16 @@ func (st State) FactsText() string {
 
 // State is durable progress (JSON under $MOW_HOME/goals/<id>.json).
 type State struct {
-	ID        string `json:"id"`
-	Goal      string `json:"goal"`
-	Status    Status `json:"status"`
-	Step      int    `json:"step"`
-	MaxSteps  int    `json:"max_steps"`
-	SessionID string `json:"session_id,omitempty"`
-	LastReply string `json:"last_reply,omitempty"`
-	Summary   string `json:"summary,omitempty"`
+	ID       string `json:"id"`
+	Goal     string `json:"goal"`
+	Status   Status `json:"status"`
+	Step     int    `json:"step"`
+	MaxSteps int    `json:"max_steps"`
+	// ParallelMax mirrors Spec.ParallelMax (0/1 = sequential).
+	ParallelMax int    `json:"parallel_max,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	LastReply   string `json:"last_reply,omitempty"`
+	Summary     string `json:"summary,omitempty"`
 	// Facts is the durable evidence ledger (graph state outside the window).
 	Facts []Fact `json:"facts,omitempty"`
 	// RetryCount counts consecutive retry_same steps (code-owned cap).
@@ -204,6 +212,12 @@ func NormalizeSpec(s Spec) (Spec, error) {
 	}
 	if s.MaxSteps > MaxMaxSteps {
 		s.MaxSteps = MaxMaxSteps
+	}
+	if s.ParallelMax < 0 {
+		s.ParallelMax = 0
+	}
+	if s.ParallelMax > MaxParallelWidth {
+		s.ParallelMax = MaxParallelWidth
 	}
 	return s, nil
 }

@@ -34,6 +34,13 @@ type Runner struct {
 	OnEvent func(Event)
 	// Exec optional; default builds Executor from Engine + Store.
 	Exec *Executor
+	// EngineFactory supplies a FRESH engine per concurrent sub-step when a
+	// goal opts into intra-goal parallelism (Spec.ParallelMax > 1). It is
+	// required for parallelism because mow.Engine serializes Prompt calls
+	// (promptMu): one engine cannot run two steps at once. Build it exactly
+	// like RunParallel's newEng (mow.New with the host's Options). Nil =
+	// the runner always runs sequentially, whatever ParallelMax says.
+	EngineFactory func() (*mow.Engine, error)
 	// Router is the code-owned edge: when non-nil and returns a non-zero
 	// outcome, it OVERRIDES the model-decided outcome for this step
 	// ("do not use an LLM to decide what ordinary code already knows").
@@ -65,6 +72,8 @@ func (r *Runner) Create(spec Spec) (State, error) {
 		Status:   StatusPending,
 		Step:     0,
 		MaxSteps: spec.MaxSteps,
+
+		ParallelMax: spec.ParallelMax,
 	}
 	if err := store.Save(st); err != nil {
 		return State{}, err
@@ -151,6 +160,8 @@ func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 		Status:   StatusPending,
 		Step:     0,
 		MaxSteps: spec.MaxSteps,
+
+		ParallelMax: spec.ParallelMax,
 	}
 	if prev, err := r.store().Load(spec.ID); err == nil {
 		if prev.Status == StatusRunning || prev.Status == StatusPending || prev.Status == StatusFailed {
@@ -158,6 +169,9 @@ func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 				prev.Goal = spec.Goal
 			}
 			prev = applyMaxStepsRaise(prev, spec.MaxSteps)
+			if spec.ParallelMax > 0 {
+				prev.ParallelMax = spec.ParallelMax
+			}
 			st = prev
 		}
 	}
@@ -268,7 +282,16 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			st.CurrentItem = ""
 		}
 
-		sr, err := exec.RunStep(ctx, st)
+		var (
+			sr  StepResult
+			err error
+		)
+		if width := r.parallelWidth(st); width > 1 {
+			r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d — %d items in parallel", st.Step+1, st.MaxSteps, width)})
+			sr, err = r.runParallelStep(ctx, exec, st, width)
+		} else {
+			sr, err = exec.RunStep(ctx, st)
+		}
 		st.Step++
 		st.InputTokens += sr.Usage.InputTokens
 		st.OutputTokens += sr.Usage.OutputTokens
