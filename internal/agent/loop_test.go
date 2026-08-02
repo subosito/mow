@@ -782,3 +782,22 @@ func TestRunInterruptedChatFailsWithoutSteer(t *testing.T) {
 		t.Fatal("expected cancellation error")
 	}
 }
+
+// A REAL provider failure (not a cancel) must NOT be treated as a mid-turn
+// steer interrupt just because a steer happens to be pending — otherwise
+// genuine errors get silently swallowed and the run looks successful.
+func TestRunRealChatErrorNotSwallowedBySteer(t *testing.T) {
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		return llm.Message{}, errors.New("upstream 500: model exploded")
+	}
+	_, err := agent.Run(context.Background(), chat, "ask", agent.Options{
+		MaxTurns: 3,
+		Steer:    func() []string { return []string{"course correct"} },
+	})
+	if err == nil {
+		t.Fatal("real chat error was swallowed by the steer path")
+	}
+	if !strings.Contains(err.Error(), "upstream 500") {
+		t.Fatalf("want the original error, got %v", err)
+	}
+}

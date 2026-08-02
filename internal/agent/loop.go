@@ -194,9 +194,11 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			// Mid-turn steer: Engine.Steer cancelled this LLM call to inject
 			// host guidance NOW. The OUTER ctx is still alive — drain the
 			// steer into messages and reissue on the same turn; nothing is
-			// lost and the run does not abort. A real cancel/error (outer ctx
-			// dead or no steer pending) still fails as before.
-			if ctx.Err() == nil && opt.Steer != nil {
+			// lost and the run does not abort. The error must ACTUALLY be a
+			// cancel: a real provider failure (network/HTTP/500) with a
+			// pending steer is not an interrupt and must fail as before —
+			// otherwise genuine errors get silently swallowed.
+			if ctx.Err() == nil && errors.Is(err, context.Canceled) && opt.Steer != nil {
 				var steers []string
 				for _, s := range opt.Steer() {
 					if strings.TrimSpace(s) != "" {
