@@ -205,7 +205,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 				}
 				if len(steers) > 0 {
 					for _, s := range steers {
-						messages = append(messages, llm.Message{Role: "user", Content: s})
+						messages = append(messages, llm.Message{Role: "user", Content: s, Synthetic: true})
 					}
 					continue
 				}
@@ -294,15 +294,19 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			}
 		}
 		// Soft hints only — after tool results so message order stays valid.
+		// Synthetic: these are host nudges, not the user's prompt — Rewind
+		// (edit/retry/↑) must skip them.
 		if sameToolFP >= sameToolWarnAfter {
 			messages = append(messages, llm.Message{
-				Role:    "user",
-				Content: sameToolWarnMessage(sameToolFP),
+				Role:      "user",
+				Content:   sameToolWarnMessage(sameToolFP),
+				Synthetic: true,
 			})
 		} else if exploreWarn {
 			messages = append(messages, llm.Message{
-				Role:    "user",
-				Content: exploreWarnMessage(thrash.exploreStreak),
+				Role:      "user",
+				Content:   exploreWarnMessage(thrash.exploreStreak),
+				Synthetic: true,
 			})
 		}
 		// Mid-turn steering: host-supplied guidance injected before the next
@@ -310,7 +314,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		if opt.Steer != nil {
 			for _, s := range opt.Steer() {
 				if s = strings.TrimSpace(s); s != "" {
-					messages = append(messages, llm.Message{Role: "user", Content: s})
+					messages = append(messages, llm.Message{Role: "user", Content: s, Synthetic: true})
 				}
 			}
 		}

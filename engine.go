@@ -691,10 +691,12 @@ func (e *Engine) Rewind() (lastUser string, ok bool) {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	// prior: trailing messages back through the last user prompt (tool results
-	// have role "tool", so scanning for "user" lands on the real prompt).
+	// prior: trailing messages back through the last REAL user prompt. Tool
+	// results have role "tool", and host-injected nudges (thrash/explore
+	// warnings, mid-turn steer) are marked Synthetic — skip both so edit/retry
+	// lands on the user's own prompt, never a warning or steer string.
 	i := len(e.prior) - 1
-	for i >= 0 && e.prior[i].Role != "user" {
+	for i >= 0 && (e.prior[i].Role != "user" || e.prior[i].Synthetic) {
 		i--
 	}
 	if i < 0 {

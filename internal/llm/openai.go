@@ -21,6 +21,11 @@ type Message struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
+	// Synthetic marks host-injected user messages (thrash/explore warnings,
+	// mid-turn steer) that never came from the user's prompt. They are real
+	// history for the model, but Engine.Rewind must skip them so edit/retry
+	// lands on the user's own prompt. Never sent on the wire.
+	Synthetic bool `json:"-"`
 	// StopReason is why the provider stopped generating (OpenAI finish_reason /
 	// Anthropic stop_reason). "max_tokens" or "length" means the reply was
 	// truncated at the token limit. Response-only; never sent on the wire.
