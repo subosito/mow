@@ -41,6 +41,12 @@ type Runner struct {
 	// like RunParallel's newEng (mow.New with the host's Options). Nil =
 	// the runner always runs sequentially, whatever ParallelMax says.
 	EngineFactory func() (*mow.Engine, error)
+	// WorktreeEngineFactory supplies an engine whose workspace is dir, for
+	// plan items marked Worker: WorkerWorktree. Build it like EngineFactory
+	// but with Options.Workspace = dir, so the sub-engine's tools and path
+	// jail operate inside the isolated checkout. Nil = worktree items run as
+	// ordinary steps in the goal workspace (with a note).
+	WorktreeEngineFactory func(dir string) (*mow.Engine, error)
 	// Router is the code-owned edge: when non-nil and returns a non-zero
 	// outcome, it OVERRIDES the model-decided outcome for this step
 	// ("do not use an LLM to decide what ordinary code already knows").
@@ -294,6 +300,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		if width := r.parallelWidth(st); width > 1 {
 			r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d — %d items in parallel", st.Step+1, st.MaxSteps, width)})
 			sr, err = r.runParallelStep(ctx, exec, st, width)
+		} else if item, ok := st.Plan.NextPending(); ok && isWorktreeItem(item) {
+			// Sequential worktree item: isolate, commit, merge back.
+			sr, err = r.runWorktreeItem(ctx, exec, st, item)
 		} else {
 			sr, err = exec.RunStep(ctx, st)
 		}

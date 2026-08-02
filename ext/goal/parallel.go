@@ -105,7 +105,14 @@ func (r *Runner) runParallelStep(ctx context.Context, exec *Executor, st State, 
 			// own finishSignal and stores it in its own derived context, so
 			// the signal is per-goroutine (never shared across sub-steps).
 			sub := &Executor{Engine: eng, StoreDir: exec.StoreDir}
-			res, err := sub.RunStep(runCtx, subState(st, item))
+			var res StepResult
+			if isWorktreeItem(item) {
+				// Worktree items bring their own engine (rooted in the
+				// checkout), so the factory engine above is unused here.
+				res, err = r.runWorktreeItem(runCtx, sub, st, item)
+			} else {
+				res, err = sub.RunStep(runCtx, subState(st, item))
+			}
 			out[i].Res, out[i].Err = res, err
 			if err != nil {
 				cancel() // fail fast: siblings stop at the next tool boundary
@@ -145,12 +152,14 @@ func joinParallel(st State, subs []parallelOutcome) StepResult {
 		merged.Plan.Items = append([]PlanItem(nil), st.Plan.Items...)
 	}
 	var (
-		lines    []string
-		texts    []string
-		failed   bool
-		reason   string
-		anyDone  bool
-		sessedID string
+		lines     []string
+		texts     []string
+		failed    bool
+		escalated bool
+		reason    string
+		question  string
+		anyDone   bool
+		sessedID  string
 	)
 	for _, s := range subs {
 		merged.Usage.InputTokens += s.Res.Usage.InputTokens
@@ -185,6 +194,18 @@ func joinParallel(st State, subs []parallelOutcome) StepResult {
 			if !applied {
 				setParentItem(&merged.Plan, s.Item.ID, ItemDone, "")
 			}
+		case OutcomeEscalate:
+			// A sub-step that needs a human (e.g. a worktree merge conflict)
+			// must not be flattened into "continue": the parent has to block.
+			// The item stays pending so resuming retries it after the human
+			// resolves the conflict.
+			escalated = true
+			if question == "" {
+				question = strings.TrimSpace(s.Res.Summary)
+				if question == "" {
+					question = "parallel item " + s.Item.ID + " escalated"
+				}
+			}
 		}
 		if s.Err != nil {
 			continue
@@ -204,6 +225,11 @@ func joinParallel(st State, subs []parallelOutcome) StepResult {
 	case failed:
 		merged.Outcome = OutcomeFailed
 		merged.Reason = reason
+	case escalated:
+		// Escalation outranks "continue": a human decision is pending.
+		// Failure still outranks escalation (a broken item is the bigger news).
+		merged.Outcome = OutcomeEscalate
+		merged.Summary = truncateRunes(strings.TrimSpace(question+"\n"+merged.Summary), 2000)
 	case anyDone && merged.Plan.AllDone():
 		merged.Outcome = OutcomeDone
 	default:

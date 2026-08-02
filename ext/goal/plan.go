@@ -22,6 +22,12 @@ type PlanItem struct {
 	Title  string         `json:"title"`
 	Status PlanItemStatus `json:"status"`
 	Note   string         `json:"note,omitempty"`
+	// Worker opts one item into an isolated execution mode. Empty (the
+	// default) runs the item as a normal step in the goal workspace;
+	// WorkerWorktree runs it in its own git worktree and merges the result
+	// back. Unknown values run as a normal step, so a typo degrades instead
+	// of failing the goal.
+	Worker string `json:"worker,omitempty"`
 }
 
 // Plan is an ordered checklist. Empty plan = legacy free-form goal (any done is OK).
@@ -156,6 +162,7 @@ func (p *Plan) ReplaceItems(items []PlanItem) error {
 			Title:  title,
 			Status: st,
 			Note:   strings.TrimSpace(it.Note),
+			Worker: strings.TrimSpace(it.Worker),
 		})
 	}
 	p.Items = out

@@ -206,6 +206,28 @@ calls, this requires `Runner.EngineFactory func() (*mow.Engine, error)` — a
 fresh engine per sub-step, built like `goal.RunParallel`'s factory. Without a
 factory (or with `ParallelMax` 0/1) the runner is sequential, unchanged.
 
+**Worktree workers (opt-in):** a plan item with `Worker: goal.WorkerWorktree`
+runs in its own `git worktree` on a `mow-wt-<goal>-<item>` branch, commits on
+success, and merges back into the goal workspace with `--no-ff` — human SWE
+primitives instead of asking concurrent agents politely not to collide. It
+requires `Runner.WorktreeEngineFactory func(dir string) (*mow.Engine, error)`
+(an engine whose `Workspace` is the checkout, so the sub-engine's tools and
+path jail operate inside it), and composes with `ParallelMax`: work happens in
+parallel, while the operations that touch the parent repo (worktree add/remove,
+merge) are serialized because git locks the parent index.
+
+Failure modes are deliberate:
+
+| Situation | Behavior |
+|-----------|----------|
+| Not a git repo / no factory / detached HEAD | Runs as an ordinary step, with a note on the event stream — missing git never fails a goal |
+| Step failed | Worktree discarded, not merged (a known-bad tree never reaches the base branch) |
+| No file changes | Success, no commit, no branch left behind |
+| **Merge conflict** | `OutcomeEscalate` → `StatusBlocked` + a question naming the branch and path; merge aborted so the parent stays clean, **worktree preserved** for the human. Conflicts are never resolved automatically |
+
+Merged steps attach a bounded `git diff --stat` summary to the step result, so
+the diff is reviewable before anyone looks at the branch.
+
 **Checklist (recommended for multi-part goals):**
 
 1. `goal_report status=continue plan=[{id,title,status:pending},…]`
