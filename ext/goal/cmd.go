@@ -260,6 +260,9 @@ func printState(st State, store *Store) {
 	if st.Plan.HasItems() {
 		fmt.Printf("plan:\n%s\n", st.Plan.Format())
 	}
+	if st.Status == StatusPartial && strings.TrimSpace(st.Partial) != "" {
+		fmt.Printf("partial: %s\n", st.Partial)
+	}
 	if st.Error != "" {
 		fmt.Printf("error: %s\n", st.Error)
 	}

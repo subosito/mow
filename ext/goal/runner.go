@@ -316,12 +316,44 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		}
 	}
 
-	st.Status = StatusFailed
+	// Budget exhausted: stop cleanly with a partial result, not a bare
+	// failure. The machine-readable line lets hosts show "done 4/6, missing
+	// pricing table, best artifact: draft-report.md" instead of an error.
+	st.Status = StatusPartial
 	st.Error = fmt.Sprintf("max steps %d exceeded", st.MaxSteps)
+	st.Partial = PartialSummaryFor(st)
 	_ = r.store().Save(st)
-	r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
-	r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error})
-	return st, fmt.Errorf("goal: %s", st.Error)
+	r.fire(Event{Kind: EventPartial, State: st, Text: st.Partial})
+	r.store().AppendEvent(st.ID, LogEvent{Kind: "partial", Status: st.Status, Step: st.Step, Text: st.Partial, Plan: planPtr(st.Plan)})
+	return st, fmt.Errorf("goal: %s (partial result saved)", st.Error)
+}
+
+// partialSummary builds the compact machine-readable partial line: done steps,
+// missing steps, and the best artifact (plan items finished or the last reply).
+func PartialSummaryFor(st State) string {
+	done, missing := 0, 0
+	for _, it := range st.Plan.Items {
+		if it.Status == "done" {
+			done++
+		} else {
+			missing++
+		}
+	}
+	best := strings.TrimSpace(st.LastReply)
+	if best == "" {
+		best = strings.TrimSpace(st.Summary)
+	}
+	if done == 0 && missing == 0 {
+		return fmt.Sprintf("stopped at step %d/%d after budget", st.Step, st.MaxSteps)
+	}
+	line := fmt.Sprintf("done %d/%d items, %d missing", done, done+missing, missing)
+	if best != "" {
+		if len(best) > 80 {
+			best = best[:80] + "…"
+		}
+		line += " — best: " + best
+	}
+	return line
 }
 
 func planPtr(p Plan) *Plan {

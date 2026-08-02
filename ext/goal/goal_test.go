@@ -147,8 +147,51 @@ func TestRunnerMaxSteps(t *testing.T) {
 	}
 	r := &goal.Runner{Engine: eng, Store: &goal.Store{Dir: dir + "/goals"}}
 	st, err := r.RunSpec(context.Background(), goal.Spec{ID: "m", Goal: "g", MaxSteps: 2})
-	if err == nil || st.Status != goal.StatusFailed || st.Step != 2 {
+	// Budget exhaustion is a clean partial stop, not a bare failure: the run
+	// reports what exists (StatusPartial + machine-readable Partial line).
+	if err == nil || st.Status != goal.StatusPartial || st.Step != 2 {
 		t.Fatalf("st=%+v err=%v", st, err)
+	}
+	if strings.TrimSpace(st.Partial) == "" {
+		t.Fatalf("partial summary missing: %+v", st)
+	}
+	if !strings.Contains(st.Error, "max steps") {
+		t.Fatalf("error should mention max steps for resume detection: %q", st.Error)
+	}
+}
+
+func TestPartialSummary(t *testing.T) {
+	cases := []struct {
+		name string
+		st   goal.State
+		want string
+	}{
+		{
+			name: "plan progress",
+			st: goal.State{
+				Step: 5, MaxSteps: 10,
+				Plan: goal.Plan{Items: []goal.PlanItem{
+					{ID: "a", Status: "done"},
+					{ID: "b", Status: "done"},
+					{ID: "c", Status: "pending"},
+				}},
+				LastReply: "draft at report.md",
+			},
+			want: "done 2/3 items, 1 missing",
+		},
+		{
+			name: "no plan items",
+			st:   goal.State{Step: 3, MaxSteps: 4},
+			want: "stopped at step 3/4 after budget",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := goal.PartialSummaryFor(tc.st)
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("PartialSummaryFor(%+v) = %q, want contains %q", tc.st, got, tc.want)
+			}
+		})
 	}
 }
 

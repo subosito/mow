@@ -22,6 +22,9 @@ const (
 	StatusRunning Status = "running"
 	StatusDone    Status = "done"
 	StatusFailed  Status = "failed"
+	// StatusPartial: budget exhausted with a usable result — the run stopped
+	// cleanly and State.Partial summarizes what exists vs what is missing.
+	StatusPartial Status = "partial"
 )
 
 // Step budget defaults. A step is one full Prompt (itself up to
@@ -57,7 +60,10 @@ type State struct {
 	SessionID string `json:"session_id,omitempty"`
 	LastReply string `json:"last_reply,omitempty"`
 	Summary   string `json:"summary,omitempty"`
-	Error     string `json:"error,omitempty"`
+	// Partial is a machine-readable summary when Status == StatusPartial:
+	// what is done, what is missing, and the best artifact so far.
+	Partial string `json:"partial,omitempty"`
+	Error   string `json:"error,omitempty"`
 	// Plan is an optional checklist. When set, status=done requires all items done/skipped.
 	Plan Plan `json:"plan,omitempty"`
 	// CurrentItem is the plan item id this step should focus (hint; empty = next pending).
@@ -73,10 +79,11 @@ type State struct {
 type EventKind string
 
 const (
-	EventStart EventKind = "start"
-	EventStep  EventKind = "step"
-	EventDone  EventKind = "done"
-	EventFail  EventKind = "fail"
+	EventStart   EventKind = "start"
+	EventStep    EventKind = "step"
+	EventDone    EventKind = "done"
+	EventFail    EventKind = "fail"
+	EventPartial EventKind = "partial"
 )
 
 // Event is a progress notification. Safe for concurrent subscribers.
