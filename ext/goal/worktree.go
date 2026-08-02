@@ -173,6 +173,45 @@ func (w *worktree) gitDir(ctx context.Context) string {
 	return strings.TrimSpace(out)
 }
 
+// WorktreeInfo is one mow-created worktree, for hosts that surface a
+// "leftover conflicted worktrees" list (see ListWorktrees).
+type WorktreeInfo struct {
+	Dir    string `json:"dir"`
+	Branch string `json:"branch"`
+	GoalID string `json:"goal_id,omitempty"`
+	ItemID string `json:"item_id,omitempty"`
+}
+
+// ListWorktrees returns mow-created worktrees still on disk under dir
+// (branches with the mow-wt- prefix, e.g. leftover merge conflicts kept for
+// human inspection). Empty when dir is not a git repo or nothing remains.
+func ListWorktrees(ctx context.Context, dir string) ([]WorktreeInfo, error) {
+	out, err := git(ctx, dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err // not a git repo or git missing
+	}
+	var res []WorktreeInfo
+	cur := WorktreeInfo{}
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			cur = WorktreeInfo{Dir: strings.TrimSpace(strings.TrimPrefix(line, "worktree "))}
+		case strings.HasPrefix(line, "branch "):
+			b := strings.TrimPrefix(line, "branch ")
+			b = strings.TrimPrefix(b, "refs/heads/")
+			if strings.HasPrefix(b, worktreeBranchPrefix) {
+				cur.Branch = b
+				rest := strings.TrimPrefix(b, worktreeBranchPrefix)
+				if i := strings.LastIndexByte(rest, '-'); i > 0 {
+					cur.GoalID, cur.ItemID = rest[:i], rest[i+1:]
+				}
+				res = append(res, cur)
+			}
+		}
+	}
+	return res, nil
+}
+
 // cleanup removes the worktree and its branch. Callers keep conflicted
 // worktrees on disk for human inspection instead of calling this.
 func (w *worktree) cleanup(ctx context.Context) {
