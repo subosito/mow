@@ -25,6 +25,8 @@ const (
 	// StatusPartial: budget exhausted with a usable result — the run stopped
 	// cleanly and State.Partial summarizes what exists vs what is missing.
 	StatusPartial Status = "partial"
+	// StatusBlocked: the goal paused for a human decision (escalate route).
+	StatusBlocked Status = "blocked"
 )
 
 // Step budget defaults. A step is one full Prompt (itself up to
@@ -97,6 +99,10 @@ type State struct {
 	Summary   string `json:"summary,omitempty"`
 	// Facts is the durable evidence ledger (graph state outside the window).
 	Facts []Fact `json:"facts,omitempty"`
+	// RetryCount counts consecutive retry_same steps (code-owned cap).
+	RetryCount int `json:"retry_count,omitempty"`
+	// Question is the durable human decision when Status == StatusBlocked.
+	Question string `json:"question,omitempty"`
 	// Partial is a machine-readable summary when Status == StatusPartial:
 	// what is done, what is missing, and the best artifact so far.
 	Partial string `json:"partial,omitempty"`
@@ -121,6 +127,8 @@ const (
 	EventDone    EventKind = "done"
 	EventFail    EventKind = "fail"
 	EventPartial EventKind = "partial"
+	// EventBlocked: the goal paused for a human decision (escalate).
+	EventBlocked EventKind = "blocked"
 )
 
 // Event is a progress notification. Safe for concurrent subscribers.

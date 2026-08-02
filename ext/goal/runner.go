@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,7 +34,16 @@ type Runner struct {
 	OnEvent func(Event)
 	// Exec optional; default builds Executor from Engine + Store.
 	Exec *Executor
+	// Router is the code-owned edge: when non-nil and returns a non-zero
+	// outcome, it OVERRIDES the model-decided outcome for this step
+	// ("do not use an LLM to decide what ordinary code already knows").
+	// A zero outcome lets the model's decision stand.
+	Router func(st State, sr StepResult) StepOutcome
 }
+
+// MaxStepRetries is the code-owned cap on consecutive retry_same steps; past
+// it the goal stops partial instead of looping forever.
+const MaxStepRetries = 3
 
 // Create normalizes Spec and persists a pending goal.
 func (r *Runner) Create(spec Spec) (State, error) {
@@ -310,7 +320,61 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			}
 		}
 
+		// Code-owned edge: a Router overrides the model-decided outcome.
+		if r.Router != nil {
+			if routed := r.Router(st, sr); routed != "" {
+				sr.Outcome = routed
+			}
+		}
+
 		switch sr.Outcome {
+		case OutcomeReroute:
+			// Change of approach: continue the outer loop; the next prompt
+			// surfaces the reroute marker so the model does not repeat the
+			// stuck pattern.
+			st.RetryCount = 0
+			st.Status = StatusRunning
+			_ = r.store().Save(st)
+			r.fire(Event{Kind: EventStep, State: st, Text: "step " + strconv.Itoa(st.Step) + " rerouted — change approach"})
+			r.store().AppendEvent(st.ID, LogEvent{Kind: "reroute", Status: st.Status, Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan), Outcome: string(OutcomeReroute)})
+			continue
+		case OutcomeRetrySame:
+			// Retry the same step with feedback, capped by code.
+			st.RetryCount++
+			st.Status = StatusRunning
+			if st.RetryCount > MaxStepRetries {
+				st.Status = StatusPartial
+				st.Error = fmt.Sprintf("retried %d times without progress", st.RetryCount-1)
+				st.Partial = PartialSummaryFor(st)
+				_ = r.store().Save(st)
+				r.fire(Event{Kind: EventPartial, State: st, Text: st.Partial})
+				r.store().AppendEvent(st.ID, LogEvent{Kind: "partial", Status: st.Status, Step: st.Step, Text: st.Partial, Plan: planPtr(st.Plan)})
+				return st, fmt.Errorf("goal: %s (partial result saved)", st.Error)
+			}
+			_ = r.store().Save(st)
+			r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d (retry %d/%d)", st.Step, st.MaxSteps, st.RetryCount, MaxStepRetries)})
+			r.store().AppendEvent(st.ID, LogEvent{Kind: "retry_same", Status: st.Status, Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan), Outcome: string(OutcomeRetrySame)})
+			continue
+		case OutcomeEscalate:
+			// Human gate: persist a durable question and stop blocked.
+			// Resume with mow goal resume --answer (milestone 4 wiring).
+			st.Status = StatusBlocked
+			if st.Question == "" {
+				st.Question = "A step escalated: " + strings.TrimSpace(st.Summary)
+			}
+			st.Error = "waiting for human decision"
+			_ = r.store().Save(st)
+			r.fire(Event{Kind: EventBlocked, State: st, Text: st.Question})
+			r.store().AppendEvent(st.ID, LogEvent{Kind: "blocked", Status: st.Status, Step: st.Step, Text: st.Question, Plan: planPtr(st.Plan), Outcome: string(OutcomeEscalate)})
+			return st, fmt.Errorf("goal blocked: %s (resume with --answer)", st.Question)
+		case OutcomePartialStop:
+			st.Status = StatusPartial
+			st.Error = "stopped partial by route"
+			st.Partial = PartialSummaryFor(st)
+			_ = r.store().Save(st)
+			r.fire(Event{Kind: EventPartial, State: st, Text: st.Partial})
+			r.store().AppendEvent(st.ID, LogEvent{Kind: "partial", Status: st.Status, Step: st.Step, Text: st.Partial, Plan: planPtr(st.Plan)})
+			return st, nil
 		case OutcomeDone:
 			st.Status = StatusDone
 			st.Error = ""

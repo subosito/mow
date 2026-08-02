@@ -333,3 +333,77 @@ func TestRunnerEvidenceLedger(t *testing.T) {
 		t.Fatalf("persisted facts clobbered: %+v", loaded.Facts)
 	}
 }
+
+// A code-owned Router edge overrides the model-decided outcome: the runner
+// stops partial when routed to partial_stop, and retry_same respects the
+// code-owned retry cap before giving up.
+func TestRunnerRouterEdges(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MOW_HOME", dir)
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "still going"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("partial_stop", func(t *testing.T) {
+		r := &goal.Runner{
+			Engine: eng,
+			Store:  &goal.Store{Dir: dir + "/goals"},
+			Router: func(st goal.State, sr goal.StepResult) goal.StepOutcome {
+				return goal.OutcomePartialStop
+			},
+		}
+		st, err := r.RunSpec(context.Background(), goal.Spec{ID: "r1", Goal: "g", MaxSteps: 4})
+		if err != nil {
+			t.Fatalf("partial stop should not error: %v", err)
+		}
+		if st.Status != goal.StatusPartial || st.Step != 1 {
+			t.Fatalf("st=%+v want partial at step 1", st)
+		}
+		if strings.TrimSpace(st.Partial) == "" {
+			t.Fatal("partial summary missing")
+		}
+	})
+	t.Run("retry_cap", func(t *testing.T) {
+		r := &goal.Runner{
+			Engine: eng,
+			Store:  &goal.Store{Dir: dir + "/goals"},
+			Router: func(st goal.State, sr goal.StepResult) goal.StepOutcome {
+				return goal.OutcomeRetrySame
+			},
+		}
+		st, err := r.RunSpec(context.Background(), goal.Spec{ID: "r2", Goal: "g", MaxSteps: 4})
+		if err == nil {
+			t.Fatal("retry cap should stop with an error")
+		}
+		if st.Status != goal.StatusPartial {
+			t.Fatalf("st.Status=%s want partial after retry cap", st.Status)
+		}
+		if st.RetryCount != goal.MaxStepRetries+1 {
+			t.Fatalf("retry count=%d want %d", st.RetryCount, goal.MaxStepRetries+1)
+		}
+	})
+	t.Run("escalate", func(t *testing.T) {
+		r := &goal.Runner{
+			Engine: eng,
+			Store:  &goal.Store{Dir: dir + "/goals"},
+			Router: func(st goal.State, sr goal.StepResult) goal.StepOutcome {
+				return goal.OutcomeEscalate
+			},
+		}
+		st, err := r.RunSpec(context.Background(), goal.Spec{ID: "r3", Goal: "g", MaxSteps: 4})
+		if err == nil || !strings.Contains(err.Error(), "blocked") {
+			t.Fatalf("escalate should block with error: %v", err)
+		}
+		if st.Status != goal.StatusBlocked {
+			t.Fatalf("st.Status=%s want blocked", st.Status)
+		}
+		if strings.TrimSpace(st.Question) == "" {
+			t.Fatal("blocked goal should carry a durable question")
+		}
+	})
+}
