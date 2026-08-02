@@ -629,26 +629,33 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	if e == nil {
 		return CompactReport{}, fmt.Errorf("engine: nil")
 	}
+	// The NEXT prompt's history is e.prior (the previous run's full message
+	// list), NOT e.transcript (UI user/assistant turns only). Compacting the
+	// wrong one made /compact a visual no-op on the wire — compact prior.
 	e.mu.Lock()
-	hist := append([]Message(nil), e.transcript...)
+	prior := append([]llm.Message(nil), e.prior...)
 	e.mu.Unlock()
-	if len(hist) == 0 {
+	if len(prior) == 0 {
 		return CompactReport{}, nil
 	}
 	if maxChars <= 0 {
 		maxChars = agent.DefaultMaxContextChars
 	}
-	msgs := make([]llm.Message, 0, len(hist))
-	for _, m := range hist {
-		msgs = append(msgs, toInternalMessage(m))
-	}
-	res := agent.CompactTiered(msgs, maxChars, "", agent.DefaultMaxToolResultChars)
+	res := agent.CompactTiered(prior, maxChars, "", agent.DefaultMaxToolResultChars)
 	if res.Messages == nil {
 		return CompactReport{}, fmt.Errorf("engine: compact failed (nil result)")
 	}
-	compacted := toPublicMessages(res.Messages)
 	e.mu.Lock()
-	e.transcript = compacted
+	e.prior = res.Messages
+	// Keep the UI transcript aligned with the compacted history (user/assistant
+	// roles only, mirroring how run end appends to it).
+	var t []Message
+	for _, m := range res.Messages {
+		if m.Role == "user" || m.Role == "assistant" {
+			t = append(t, toPublicMessage(m))
+		}
+	}
+	e.transcript = t
 	e.mu.Unlock()
 
 	rep := CompactReport{

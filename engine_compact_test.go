@@ -39,14 +39,20 @@ func TestEngineCompactShrinksTranscript(t *testing.T) {
 		}
 	})
 
-	// Build a history of several turns with heavy content.
-	for i := 0; i < 5; i++ {
-		if _, err := eng.Prompt(context.Background(), strings.Repeat("user turn ", 200)); err != nil {
+	// Build a long history of small turns (20 x 500 chars ≈ 10k of user
+	// content + ~10k system): older turns fall outside the pin window so the
+	// drop layer can trim them.
+	for i := 0; i < 20; i++ {
+		if _, err := eng.Prompt(context.Background(), strings.Repeat("x", 500)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	rep, err := eng.Compact(300)
+	// Budget must be realistic: e.prior includes the system prompt (~10k
+	// chars), which compaction never drops — a target below it is OverBudget
+	// and keeps everything by design. 12k fits system + one pinned user turn
+	// and drops the older 2k-char turns.
+	rep, err := eng.Compact(12000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +60,7 @@ func TestEngineCompactShrinksTranscript(t *testing.T) {
 		t.Fatalf("compact events=%d want 1", compactEvents)
 	}
 	if rep.MessagesAfter >= rep.MessagesBefore || rep.MessagesAfter <= 0 {
-		t.Fatalf("transcript did not shrink: %+v", rep)
+		t.Fatalf("history did not shrink: %+v", rep)
 	}
 	if saved <= 0 {
 		t.Fatalf("expected chars saved, got %d", saved)
@@ -62,6 +68,17 @@ func TestEngineCompactShrinksTranscript(t *testing.T) {
 	// Layer must be a known tier.
 	if rep.Layer != "snip" && rep.Layer != "drop" {
 		t.Fatalf("unexpected layer %q", rep.Layer)
+	}
+
+	// THE REAL IMPACT: the next prompt's history comes from e.prior, so a
+	// follow-up call must send fewer messages than the last seeding call.
+	lastSeed := sizes[len(sizes)-1]
+	if _, err := eng.Prompt(context.Background(), "after compact"); err != nil {
+		t.Fatal(err)
+	}
+	after := sizes[len(sizes)-1]
+	if after >= lastSeed {
+		t.Fatalf("follow-up prompt sent %d messages, want < %d (compaction had no wire impact)", after, lastSeed)
 	}
 }
 
