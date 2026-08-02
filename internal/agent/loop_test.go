@@ -728,3 +728,57 @@ func TestNoStallWhenResultsDiffer(t *testing.T) {
 		t.Fatalf("text=%q", res.Text)
 	}
 }
+
+// A mid-turn steer interrupts the in-flight LLM call (Engine.Steer cancels
+// it), but the OUTER ctx is still alive: the loop must drain the steer into
+// messages and reissue on the same turn instead of aborting the run.
+func TestRunReissuesOnMidTurnSteer(t *testing.T) {
+	var calls int
+	var lastContent []string
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		calls++
+		lastContent = append(lastContent, messages[len(messages)-1].Content)
+		if calls == 1 {
+			// Simulates the engine cancelling the run ctx on Steer().
+			return llm.Message{}, context.Canceled
+		}
+		return llm.Message{Role: "assistant", Content: "done now"}, nil
+	}
+	steered := false
+	opt := agent.Options{
+		MaxTurns: 5,
+		Steer: func() []string {
+			if steered {
+				return nil
+			}
+			steered = true
+			return []string{"course correct"}
+		},
+	}
+	res, err := agent.Run(context.Background(), chat, "original ask", opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls=%d want 2 (interrupted + reissued)", calls)
+	}
+	if res.Text != "done now" {
+		t.Fatalf("text=%q", res.Text)
+	}
+	// The reissued call's last message is the steer itself.
+	if len(lastContent) < 2 || lastContent[1] != "course correct" {
+		t.Fatalf("steer not injected before reissue: %v", lastContent)
+	}
+}
+
+// Without a pending steer, an interrupted/cancelled chat still fails as
+// before (no silent swallow of real cancellations).
+func TestRunInterruptedChatFailsWithoutSteer(t *testing.T) {
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		return llm.Message{}, context.Canceled
+	}
+	_, err := agent.Run(context.Background(), chat, "ask", agent.Options{MaxTurns: 3})
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+}

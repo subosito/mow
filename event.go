@@ -50,7 +50,10 @@ const (
 	// EventStall is emitted once when the loop stops early because consecutive
 	// tool batches added no new evidence. Text carries the reason; the run
 	// ends with StopStuck.
-	EventStall  EventType = "loop.stall"
+	EventStall EventType = "loop.stall"
+	// EventSteer: host injected guidance into a running turn; the in-flight
+	// LLM call was interrupted and will be reissued with the steer appended.
+	EventSteer  EventType = "loop.steer"
 	EventRunEnd EventType = "loop.run.end"
 
 	// harness.* — transitions that touch reality.

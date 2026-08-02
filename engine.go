@@ -32,6 +32,9 @@ import (
 type Engine struct {
 	// mu: short critical sections only — never hold across agent.Run / network.
 	mu sync.Mutex
+	// steerCancel cancels the in-flight run's LLM call so a mid-turn steer
+	// interrupts immediately (the loop reissues with the steer appended).
+	steerCancel context.CancelFunc
 	// promptMu: serialize Prompt without blocking Model()/Wire() readers.
 	promptMu sync.Mutex
 
@@ -579,7 +582,15 @@ func (e *Engine) Steer(text string) {
 	}
 	e.mu.Lock()
 	e.steer = append(e.steer, text)
+	cancel := e.steerCancel
 	e.mu.Unlock()
+	// Emit before cancelling so hosts reset their live stream first; then
+	// interrupt the in-flight LLM call — the loop reissues with the steer
+	// appended as a user message (no cancel/restart, no lost work).
+	e.Emit(Event{Type: EventSteer, Delta: text})
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // drainSteer pops all pending steer messages (called by the loop at each turn

@@ -195,6 +195,15 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	e.steer = nil
 	e.mu.Unlock()
 
+	// Mid-turn steer: the loop registers the current LLM call's cancel func
+	// here; Engine.Steer calls it to interrupt ONLY the in-flight call (the
+	// run ctx stays alive), and the loop reissues with the steer appended.
+	defer func() {
+		e.mu.Lock()
+		e.steerCancel = nil
+		e.mu.Unlock()
+	}()
+
 	res, err := agent.Run(ctx, chat, text, agent.Options{
 		System:             sys,
 		MaxTurns:           maxTurns,
@@ -207,6 +216,11 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		MaxParallelTools:   maxPar,
 		Workspace:          ws,
 		Steer:              e.drainSteer,
+		SetLLMCancel: func(cancel context.CancelFunc) {
+			e.mu.Lock()
+			e.steerCancel = cancel
+			e.mu.Unlock()
+		},
 		AllowTool: func(name string) error {
 			// Read-only prompts allow only known side-effect-free tools.
 			// Ext/MCP tools are denied unless they declared ReadOnly() —

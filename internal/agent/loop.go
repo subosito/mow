@@ -84,6 +84,10 @@ type Options struct {
 	// before the next LLM call). Any returned strings are appended as user
 	// messages, so a host can steer a running turn without cancelling it.
 	Steer func() []string
+	// SetLLMCancel, when set, registers the cancel func of the CURRENT LLM
+	// call so a host can interrupt it mid-call (Engine.Steer). The loop then
+	// drains Steer and reissues with the steer appended — the run survives.
+	SetLLMCancel func(cancel context.CancelFunc)
 
 	// thrash is set by Run for explore-loop / re-read guards (internal).
 	thrash *thrashState
@@ -178,8 +182,34 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			return Result{Messages: messages, Usage: usage}, err
 		}
 		sentChars := estChars(send)
-		msg, err := chat(ctx, send, specs)
+		// Per-call LLM ctx: a mid-turn steer cancels ONLY this call (via
+		// opt.SetLLMCancel), never the run — the outer ctx stays alive so the
+		// loop can reissue with the steer appended.
+		callCtx, callCancel := context.WithCancel(ctx)
+		if opt.SetLLMCancel != nil {
+			opt.SetLLMCancel(callCancel)
+		}
+		msg, err := chat(callCtx, send, specs)
 		if err != nil {
+			// Mid-turn steer: Engine.Steer cancelled this LLM call to inject
+			// host guidance NOW. The OUTER ctx is still alive — drain the
+			// steer into messages and reissue on the same turn; nothing is
+			// lost and the run does not abort. A real cancel/error (outer ctx
+			// dead or no steer pending) still fails as before.
+			if ctx.Err() == nil && opt.Steer != nil {
+				var steers []string
+				for _, s := range opt.Steer() {
+					if strings.TrimSpace(s) != "" {
+						steers = append(steers, s)
+					}
+				}
+				if len(steers) > 0 {
+					for _, s := range steers {
+						messages = append(messages, llm.Message{Role: "user", Content: s})
+					}
+					continue
+				}
+			}
 			return Result{Messages: messages, Usage: usage}, err
 		}
 		// Calibrate chars/token from what the provider actually billed for the
