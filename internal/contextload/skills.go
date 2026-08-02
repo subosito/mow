@@ -67,3 +67,41 @@ func findSkillFile(folder string) (string, bool) {
 	}
 	return "", false
 }
+
+// LoadSelectedSkills loads only skills whose folder name occurs in the first
+// user prompt (case-insensitive). Disabled selection loads all configured
+// skills. An unrelated prompt selects none; mandatory AGENTS instructions are
+// loaded separately and are never affected.
+func LoadSelectedSkills(dirs []string, prompt string, enabled bool) string {
+	if !enabled {
+		return LoadSkills(dirs)
+	}
+	prompt = strings.ToLower(prompt)
+	var parts []string
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(strings.TrimSpace(dir))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || !strings.Contains(prompt, strings.ToLower(e.Name())) {
+				continue
+			}
+			path, ok := findSkillFile(filepath.Join(dir, e.Name()))
+			if !ok || seen[path] {
+				continue
+			}
+			seen[path] = true
+			body, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			if text := strings.TrimSpace(string(body)); text != "" {
+				parts = append(parts, "## skill: "+e.Name()+"\n\n"+text)
+			}
+		}
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\n\n")
+}

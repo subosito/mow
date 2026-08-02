@@ -64,3 +64,27 @@ func TestLoadSkillsCaseInsensitiveSkillFile(t *testing.T) {
 		t.Errorf("case-insensitive SKILL.md not loaded: %q", out)
 	}
 }
+
+func TestLoadSelectedSkillsByPrompt(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"review": "review rules", "deploy": "deploy rules"} {
+		folder := filepath.Join(dir, name)
+		if err := os.MkdirAll(folder, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(folder, "SKILL.md"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := LoadSelectedSkills([]string{dir}, "Please REVIEW this patch", true)
+	if !strings.Contains(got, "review rules") || strings.Contains(got, "deploy rules") {
+		t.Fatalf("selected=%q", got)
+	}
+	if got := LoadSelectedSkills([]string{dir}, "unrelated task", true); got != "" {
+		t.Fatalf("unrelated=%q", got)
+	}
+	all := LoadSelectedSkills([]string{dir}, "unrelated task", false)
+	if !strings.Contains(all, "review rules") || !strings.Contains(all, "deploy rules") {
+		t.Fatalf("disabled=%q", all)
+	}
+}

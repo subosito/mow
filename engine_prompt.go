@@ -31,6 +31,12 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	defer e.promptMu.Unlock()
 
 	e.mu.Lock()
+	if !e.skillsLoaded {
+		if skills := contextload.LoadSelectedSkills(e.skillDirs, text, e.skillSelect); skills != "" {
+			e.sys = contextload.ComposeSystem(contextload.PathJailFacts(e.cfg.Workspace, e.pol.ExtraRoots), e.agents, skills, e.opt.SystemAppend)
+		}
+		e.skillsLoaded = true
+	}
 	sys := e.sys
 	sid := e.sid
 	ws := ""

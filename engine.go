@@ -35,19 +35,23 @@ type Engine struct {
 	// promptMu: serialize Prompt without blocking Model()/Wire() readers.
 	promptMu sync.Mutex
 
-	cfg        *config.File
-	pol        *policy.Policy
-	tools      []agent.Tool
-	chat       agent.ChatFn
-	client     *llm.Client  // nil when Options.Provider/Chat is injected
-	provider   Provider     // set when Options.Provider is used
-	logger     *slog.Logger // nil → slog.Default()
-	sys        string
-	opt        Options
-	sess       *session.Store
-	sid        string
-	prior      []llm.Message
-	transcript []Message // user/assistant only (session resume)
+	cfg          *config.File
+	pol          *policy.Policy
+	tools        []agent.Tool
+	chat         agent.ChatFn
+	client       *llm.Client  // nil when Options.Provider/Chat is injected
+	provider     Provider     // set when Options.Provider is used
+	logger       *slog.Logger // nil → slog.Default()
+	sys          string
+	agents       string
+	skillDirs    []string
+	skillSelect  bool
+	skillsLoaded bool
+	opt          Options
+	sess         *session.Store
+	sid          string
+	prior        []llm.Message
+	transcript   []Message // user/assistant only (session resume)
 	// lastCtxTokens is the most recent LLM call's input tokens ≈ current context
 	// size (for a context-window fullness indicator). 0 until the first call.
 	lastCtxTokens int
@@ -217,7 +221,14 @@ func New(opt Options) (*Engine, error) {
 		}
 	}
 	skillDirs = append([]string{config.SkillsDir()}, skillDirs...)
-	skills := contextload.LoadSkills(skillDirs)
+	selectSkills := true
+	if cfg.Skills.Selector != nil {
+		selectSkills = *cfg.Skills.Selector
+	}
+	skills := ""
+	if !selectSkills {
+		skills = contextload.LoadSkills(skillDirs)
+	}
 	// Concrete workspace + extra roots so the model does not refuse --extra-root
 	// paths as "restricted" (policy already allows them; instructions must match).
 	jailFacts := contextload.PathJailFacts(cfg.Workspace, pol.ExtraRoots)
@@ -226,17 +237,21 @@ func New(opt Options) (*Engine, error) {
 	loopHooks, life := mergeHooks(opt.Hooks)
 
 	e := &Engine{
-		cfg:         cfg,
-		pol:         pol,
-		sys:         sys,
-		opt:         opt,
-		noSess:      opt.NoSession,
-		hooks:       loopHooks,
-		life:        life,
-		onToken:     opt.OnToken,
-		onReasoning: opt.OnReasoning,
-		readOnlyExt: readOnlyExt,
-		logger:      opt.Logger,
+		cfg:          cfg,
+		pol:          pol,
+		sys:          sys,
+		agents:       agents,
+		skillDirs:    append([]string(nil), skillDirs...),
+		skillSelect:  selectSkills,
+		skillsLoaded: !selectSkills,
+		opt:          opt,
+		noSess:       opt.NoSession,
+		hooks:        loopHooks,
+		life:         life,
+		onToken:      opt.OnToken,
+		onReasoning:  opt.OnReasoning,
+		readOnlyExt:  readOnlyExt,
+		logger:       opt.Logger,
 	}
 	if opt.OnEvent != nil {
 		e.AddOnEvent(opt.OnEvent)

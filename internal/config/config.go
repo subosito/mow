@@ -143,6 +143,8 @@ type SessionConfig struct {
 // SkillsConfig lists directories of markdown skill files (*.md).
 type SkillsConfig struct {
 	Dirs []string `yaml:"dirs"`
+	// Selector defaults on. Set false to load every configured skill.
+	Selector *bool `yaml:"selector"`
 }
 
 // Load merges defaults, optional config paths, then environment.
@@ -434,6 +436,10 @@ func mergeOverlay(dst *File, overlay *File) {
 	}
 	if len(overlay.Skills.Dirs) > 0 {
 		dst.Skills.Dirs = append([]string(nil), overlay.Skills.Dirs...)
+	}
+	if overlay.Skills.Selector != nil {
+		v := *overlay.Skills.Selector
+		dst.Skills.Selector = &v
 	}
 	mergeExtensions(dst, overlay.Extensions)
 }
