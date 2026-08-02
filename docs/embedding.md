@@ -117,8 +117,11 @@ eng, _ := mow.New(mow.Options{
 ```
 
 Add more listeners any time with `eng.AddOnEvent(fn)`. Event types:
-`run.start`, `token`, `reasoning`, `tool.start`, `tool.end`, `turn`,
-`delegate.chunk`, `run.end`. Correlate across a process with `ev.RunID` (one
+`loop.run.start`, `loop.token`, `loop.reasoning`, `harness.tool.start`,
+`harness.tool.end`, `loop.turn`, `harness.delegate.chunk`, `loop.stall`,
+`harness.lsp.diagnostics`, `loop.run.end`. Types carry a layer prefix
+(`loop.*` lifecycle, `graph.*` orchestration, `harness.*` reality-touching);
+switch on the `Event*` constants, not string literals. Correlate across a process with `ev.RunID` (one
 per `Prompt`) and `ev.SessionID`.
 
 **Live token stream** (for a chat UI): set `Stream: true` plus `OnToken` (and
@@ -133,7 +136,7 @@ res, _ := eng.Prompt(ctx, "…")
 fmt.Printf("in=%d out=%d\n", res.Usage.InputTokens, res.Usage.OutputTokens)
 ```
 
-The same totals ride the `run.end` event (`InputTokens`/`OutputTokens`). Zero
+The same totals ride the `loop.run.end` event (`InputTokens`/`OutputTokens`). Zero
 means the provider reported none — not that nothing happened.
 
 ---
@@ -188,7 +191,7 @@ type Provider interface {
 
 Streaming, tool calls, and usage all keep working: emit content through
 `hooks.OnToken` (and thinking through `hooks.OnReasoning`) as you receive it,
-and set `Usage` on the returned `Message` so `RunResult.Usage` and `run.end`
+and set `Usage` on the returned `Message` so `RunResult.Usage` and `loop.run.end`
 stay accurate.
 
 ```go

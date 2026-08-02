@@ -483,8 +483,8 @@ Agent methods (Zed-oriented): `initialize`, `authenticate`, `logout`, `session/n
 **Why ACP for delegate (not a private RPC):** same wire for editors and peer agents; avoid inventing mow↔claude, mow↔codex one-offs. Core stays **one loop**; delegation is a tool with workspace jail + timeout.
 
 **Delegate v2:** peer process + ACP session are **reused** across `acp_delegate` calls (same agent + cwd) until idle TTL or death. While the peer runs, the parent Engine emits:
-- `delegate.chunk` — peer **answer** text (`agent_message_chunk`)
-- `delegate.progress` — peer **status** (tool_call / thought; not part of the tool result)
+- `harness.delegate.chunk` — peer **answer** text (`agent_message_chunk`)
+- `harness.delegate.progress` — peer **status** (tool_call / thought; not part of the tool result)
 
 CLI (`mow run --stream`) prints chunks on stderr and progress as `↳ agent: …`. `mow acp` forwards both to the editor as `session/update` (message + thought). Tool result still returns the full concatenated answer only.
 
@@ -498,7 +498,7 @@ mow loop ──acp_delegate──▶ peer ACP agent (other harness)
 ### RPC control plane (`ext/rpc`)
 
 **JSON-RPC 2.0** over line-delimited JSON on stdio. Methods: `prompt`, `cancel`, `status`, `session`, `version`, `ping`. Responses and notifications carry `"jsonrpc":"2.0"` and errors carry a standard `code` (-32601 method not found, -32600 invalid request, -32700 parse error, -32603 internal). Requests may include `"jsonrpc":"2.0"` but need not — minimal clients sending only `id`/`method`/`params` still work.  
-During `prompt`, server may write notifications `{"jsonrpc":"2.0","method":"event","params":{…Event}}` (`run.start`, `token`, `reasoning`, `tool.start`, `tool.end`, `turn`, `delegate.chunk`, `run.end`). Final response includes `run_id` and `stop_reason`.
+During `prompt`, server may write notifications `{"jsonrpc":"2.0","method":"event","params":{…Event}}` (`loop.run.start`, `loop.token`, `loop.reasoning`, `harness.tool.start`, `harness.tool.end`, `loop.turn`, `harness.delegate.chunk`, `loop.run.end`). Final response includes `run_id` and `stop_reason`.
 
 `tool.end` includes `duration_ms` (wall time for that tool). Tool batches may run up to `policy.max_parallel_tools` concurrent Exec calls (default 8); soft results append in call order. See [harness.md](harness.md) § Abort / cancel.
 ---

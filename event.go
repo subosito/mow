@@ -29,17 +29,64 @@ func EngineFromContext(ctx context.Context) *Engine {
 // EventType identifies a structured run lifecycle event for hosts/orchestrators.
 type EventType string
 
+// Event taxonomy. Every Type carries a layer prefix so hosts and incident
+// triage can answer "which layer failed?" without pattern-matching messages:
+//
+//	loop.*    — turn / token / run lifecycle: is another turn worth spending?
+//	graph.*   — orchestration (goal pack): which state runs next?
+//	harness.* — may this transition touch reality? tools, peers, diagnostics.
+//
+// The string values are the wire contract (rpc notifications, host parsers).
+// They gained layer prefixes when the taxonomy landed ("tool.start" →
+// "harness.tool.start"); switch on the constants, never on literals.
 const (
-	EventRunStart         EventType = "run.start"
-	EventToken            EventType = "token"     // answer content delta
-	EventReasoning        EventType = "reasoning" // reasoning delta (UI/host optional)
-	EventToolStart        EventType = "tool.start"
-	EventToolEnd          EventType = "tool.end"
-	EventTurn             EventType = "turn"              // assistant message after LLM step
-	EventDelegateChunk    EventType = "delegate.chunk"    // peer ACP answer text delta
-	EventDelegateProgress EventType = "delegate.progress" // peer tool/thought status (not final answer)
-	EventRunEnd           EventType = "run.end"
+	// loop.* — agent loop lifecycle.
+	EventRunStart  EventType = "loop.run.start"
+	EventToken     EventType = "loop.token"     // answer content delta
+	EventReasoning EventType = "loop.reasoning" // reasoning delta (UI/host optional)
+	EventTurn      EventType = "loop.turn"      // assistant message after LLM step
+	// EventStall is emitted once when the loop stops early because consecutive
+	// tool batches added no new evidence. Text carries the reason; the run
+	// ends with StopStuck.
+	EventStall  EventType = "loop.stall"
+	EventRunEnd EventType = "loop.run.end"
+
+	// harness.* — transitions that touch reality.
+	EventToolStart        EventType = "harness.tool.start"
+	EventToolEnd          EventType = "harness.tool.end"
+	EventDelegateChunk    EventType = "harness.delegate.chunk"    // peer ACP answer text delta
+	EventDelegateProgress EventType = "harness.delegate.progress" // peer tool/thought status (not final answer)
+	// EventLSPDiagnostics reports language-server findings for a file just
+	// written or edited. Emitted only when an LSP pack is configured and
+	// running (no config → no process → no event).
+	//
+	// Frozen payload shape (host contract — e.g. a TUI Problems panel):
+	//
+	//	{
+	//	  "type": "harness.lsp.diagnostics",
+	//	  "tool": "write",            // tool that produced the edit
+	//	  "path": "internal/x/y.go",  // workspace-relative when possible
+	//	  "count": 3,                 // total findings reported by the server
+	//	  "diagnostics": [            // bounded by MaxLSPDiagnostics
+	//	    {"severity": "error", "message": "undefined: foo", "line": 42}
+	//	  ]
+	//	}
+	//
+	// severity is one of error|warning|information|hint; line is 1-based.
+	// count may exceed len(diagnostics) when the list was truncated.
+	EventLSPDiagnostics EventType = "harness.lsp.diagnostics"
 )
+
+// MaxLSPDiagnostics bounds how many findings ride along a tool result and an
+// EventLSPDiagnostics payload.
+const MaxLSPDiagnostics = 10
+
+// Diagnostic is one language-server finding (see EventLSPDiagnostics).
+type Diagnostic struct {
+	Severity string `json:"severity"` // error|warning|information|hint
+	Message  string `json:"message"`
+	Line     int    `json:"line"` // 1-based
+}
 
 // Stop reasons for EventRunEnd / RunResult.StopReason.
 const (
@@ -85,6 +132,12 @@ type Event struct {
 	OutputTokens int `json:"output_tokens,omitempty"`
 	// Delegate
 	Agent string `json:"agent,omitempty"`
+
+	// LSP diagnostics (harness.lsp.diagnostics). Path is the edited file,
+	// Count the server total, Diagnostics bounded by MaxLSPDiagnostics.
+	Path        string       `json:"path,omitempty"`
+	Count       int          `json:"count,omitempty"`
+	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 }
 
 // EventFunc receives lifecycle events. Must not block long.

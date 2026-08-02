@@ -95,12 +95,16 @@ func TestRunWithFakeLLMToolThenText(t *testing.T) {
 }
 
 func TestMaxTurnsReturnsErrMaxTurns(t *testing.T) {
+	// Fresh tool result every batch so the stall detector stays quiet and the
+	// turn limit is the only thing that can end the run.
+	n := 0
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		n++
 		return llm.Message{
 			Role: "assistant",
 			ToolCalls: []llm.ToolCall{{
 				ID: "1", Type: "function",
-				Function: llm.FunctionCall{Name: "echo", Arguments: `{"message":"x"}`},
+				Function: llm.FunctionCall{Name: "echo", Arguments: fmt.Sprintf(`{"text":"x%d"}`, n)},
 			}},
 		}, nil
 	}
@@ -123,7 +127,7 @@ func TestMaxTurnsZeroIsUnlimited(t *testing.T) {
 		if n > 5 {
 			return llm.Message{Role: "assistant", Content: "done"}, nil
 		}
-		args := fmt.Sprintf(`{"message":"x%d"}`, n)
+		args := fmt.Sprintf(`{"text":"x%d"}`, n)
 		return llm.Message{
 			Role: "assistant",
 			ToolCalls: []llm.ToolCall{{
@@ -193,7 +197,9 @@ func TestErrDoneEndsLoopSuccessfully(t *testing.T) {
 	}
 }
 
-// Identical tools inject a soft warn but do not hard-stop when MaxTurns allows.
+// Identical tool calls inject a soft warn but do not hard-stop when the calls
+// still return new evidence (e.g. polling a changing file). The hard stop is
+// the evidence signal, not the fingerprint — see TestStallOnNoNewEvidence.
 func TestSameToolWarnDoesNotHardStop(t *testing.T) {
 	n := 0
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
@@ -205,13 +211,13 @@ func TestSameToolWarnDoesNotHardStop(t *testing.T) {
 			Role: "assistant",
 			ToolCalls: []llm.ToolCall{{
 				ID: "1", Type: "function",
-				Function: llm.FunctionCall{Name: "echo", Arguments: `{"text":"same"}`},
+				Function: llm.FunctionCall{Name: "tick", Arguments: `{"text":"same"}`},
 			}},
 		}, nil
 	}
 	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
 		MaxTurns: 20,
-		Tools:    []agent.Tool{echoTool{}},
+		Tools:    []agent.Tool{&tickTool{}},
 	})
 	if err != nil {
 		t.Fatalf("err=%v want nil (soft warn only)", err)
@@ -551,4 +557,73 @@ func (t *syncTool) Parameters() json.RawMessage {
 }
 func (t *syncTool) Exec(ctx context.Context, _ json.RawMessage) (string, error) {
 	return t.fn(ctx)
+}
+
+// tickTool returns a different result on every call: identical arguments, new
+// evidence each time.
+type tickTool struct{ n int }
+
+func (*tickTool) Name() string        { return "tick" }
+func (*tickTool) Description() string { return "tick" }
+func (*tickTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`)
+}
+func (t *tickTool) Exec(_ context.Context, _ json.RawMessage) (string, error) {
+	t.n++
+	return fmt.Sprintf("tick %d", t.n), nil
+}
+
+// Two consecutive tool batches whose results repeat what the run already saw
+// stop the loop with ErrStuck instead of burning the turn budget.
+func TestStallOnNoNewEvidence(t *testing.T) {
+	turns := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		turns++
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "echo", Arguments: `{"text":"same"}`},
+			}},
+		}, nil
+	}
+	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+		MaxTurns: 50,
+		Tools:    []agent.Tool{echoTool{}},
+	})
+	if err == nil || !errors.Is(err, agent.ErrStuck) {
+		t.Fatalf("err=%v want ErrStuck", err)
+	}
+	// First batch is new evidence, batches 2 and 3 are barren → stop at 3.
+	if turns > 4 {
+		t.Fatalf("stall detector burned %d turns", turns)
+	}
+}
+
+// Control: results that keep changing never trip the stall detector.
+func TestNoStallWhenResultsDiffer(t *testing.T) {
+	n := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		n++
+		if n > 6 {
+			return llm.Message{Role: "assistant", Content: "done"}, nil
+		}
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "tick", Arguments: `{"text":"same"}`},
+			}},
+		}, nil
+	}
+	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+		MaxTurns: 50,
+		Tools:    []agent.Tool{&tickTool{}},
+	})
+	if err != nil {
+		t.Fatalf("err=%v want nil", err)
+	}
+	if res.Text != "done" {
+		t.Fatalf("text=%q", res.Text)
+	}
 }

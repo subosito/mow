@@ -83,7 +83,7 @@ Integrators should not import `internal/*`. Custom tools use `ext.Tool` / `mow.T
 | In-process Go | `Engine.Prompt` + `Options.OnEvent` / `SetOnEvent` (`tool.end` has `duration_ms`) |
 | Scripts / local tools | `mow rpc` — `prompt`, `cancel`, `status`, `event` notifications |
 | Editors | `mow acp` |
-| Peer harnesses | tool `acp_delegate` (session reused; chunks as `delegate.chunk` events) |
+| Peer harnesses | tool `acp_delegate` (session reused; chunks as `harness.delegate.chunk` events) |
 | Outer multi-step | `ext/goal` / `mow goal` (not a second core loop) |
 
 Correlate logs and events with `run_id` (per Prompt) and `session_id`.

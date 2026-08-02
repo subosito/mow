@@ -64,7 +64,7 @@ Methods:
   ping     {"id":6,"method":"ping"}
 
 During prompt, unsolicited events may appear (no id):
-  {"method":"event","params":{"type":"token"|"tool.start"|"tool.end"|…}}
+  {"method":"event","params":{"type":"loop.token"|"harness.tool.start"|…}}
 
 tool.end includes duration_ms. Cancel/status stay responsive while a prompt runs.
 

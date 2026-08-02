@@ -22,8 +22,12 @@ var ErrMaxTurns = errors.New("agent: max turns exceeded")
 // recorded for the model/history; Run returns nil error.
 var ErrDone = errors.New("agent: done")
 
-// ErrStuck is retained for API compatibility; the loop no longer returns it
-// (soft thrash hints only). Prefer ctx cancel for long-running stop.
+// ErrStuck ends a run that stopped making progress: stallAfterBatches
+// consecutive tool batches produced no tool-result head the run had not
+// already seen. Maps to StopStuck.
+//
+// Repeating the same tool calls is only a soft hint (sameToolWarnAfter); the
+// hard stop is the evidence signal below. Prefer ctx cancel for a clean abort.
 var ErrStuck = errors.New("agent: stuck repeating tool calls")
 
 // ErrTruncated is returned when the provider cut the final assistant reply at
@@ -154,6 +158,8 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		sameToolFP int
 		thrash     = newThrashState(opt.Workspace)
 		calib      = newRatioCalibrator()
+		evidence   = newEvidenceSet()
+		barrenRuns int
 	)
 	opt.thrash = thrash
 
@@ -238,6 +244,23 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		if err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}
+		// Stall detection: a batch that produces no tool-result head we have
+		// not already seen adds no new evidence. Two such batches in a row and
+		// the loop is spinning — stop instead of burning the turn budget.
+		if evidence.note(toolMsgs) {
+			barrenRuns = 0
+		} else {
+			barrenRuns++
+			if barrenRuns >= stallAfterBatches {
+				return Result{
+						Text:       strings.TrimSpace(msg.Content),
+						Messages:   messages,
+						Usage:      usage,
+						StopReason: msg.StopReason,
+					}, fmt.Errorf("%w: %d consecutive tool batches produced no new evidence",
+						ErrStuck, barrenRuns)
+			}
+		}
 		// Soft hints only — after tool results so message order stays valid.
 		if sameToolFP >= sameToolWarnAfter {
 			messages = append(messages, llm.Message{
@@ -263,6 +286,49 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	return Result{Messages: messages, Usage: usage}, fmt.Errorf(
 		"%w: %d (raise --max-turns / policy.max_turns, or set 0 for unlimited; prompt again keeps history)",
 		ErrMaxTurns, maxTurns)
+}
+
+// stallAfterBatches is how many consecutive tool batches may add no new
+// evidence before the loop gives up with ErrStuck. Deliberately a package
+// default, not config: it is a backstop, not a tuning knob.
+const stallAfterBatches = 2
+
+// evidenceHeadBytes is how much of each tool result forms its novelty key.
+// Heads are cheap and stable: identical reads/greps collide, while a changed
+// file, a new error, or fresh output does not.
+const evidenceHeadBytes = 200
+
+// evidenceSet is the loop's novelty signal — a rolling set of tool-result
+// heads. The goal pack has a real evidence ledger; the plain loop does not, so
+// "new evidence" here means "a tool result head we have not seen this run".
+type evidenceSet struct {
+	seen map[string]struct{}
+}
+
+func newEvidenceSet() *evidenceSet {
+	return &evidenceSet{seen: map[string]struct{}{}}
+}
+
+// note records the heads of one tool batch and reports whether any was new.
+// Empty batches and empty results count as no new evidence.
+func (e *evidenceSet) note(msgs []llm.Message) bool {
+	fresh := false
+	for _, m := range msgs {
+		head := strings.TrimSpace(m.Content)
+		if head == "" {
+			continue
+		}
+		if len(head) > evidenceHeadBytes {
+			head = head[:evidenceHeadBytes]
+		}
+		// Key on content only: tool call ids are unique per call, so they
+		// would make every batch look novel.
+		if _, ok := e.seen[head]; !ok {
+			e.seen[head] = struct{}{}
+			fresh = true
+		}
+	}
+	return fresh
 }
 
 // toolCallFingerprint is a stable key for stall detection (name + args per call).

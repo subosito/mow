@@ -19,7 +19,7 @@
 //
 // While a prompt runs, unsolicited event notifications may be written (no id):
 //
-//	{"jsonrpc":"2.0","method":"event","params":{"type":"token","run_id":"…","delta":"…"}}
+//	{"jsonrpc":"2.0","method":"event","params":{"type":"loop.token","run_id":"…","delta":"…"}}
 //
 // Cancel/status are handled concurrently so a host can abort an in-flight prompt.
 //

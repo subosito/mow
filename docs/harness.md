@@ -383,7 +383,7 @@ See [extensions.md](extensions.md) for ACP, media, and pack decisions.
 Every LLM call's provider-reported token usage is parsed on both wires
 (streaming included — OpenAI via `stream_options.include_usage`, Anthropic via
 `message_start`/`message_delta`) and summed per run: `RunResult.Usage`, and
-`input_tokens`/`output_tokens` on the `run.end` event. Zero means the provider
+`input_tokens`/`output_tokens` on the `loop.run.end` event. Zero means the provider
 sent none.
 
 Models that emit chain-of-thought inline as `<think>…</think>` (and known

@@ -40,7 +40,7 @@ What the embed gives you beyond a one-liner:
 - **Per-engine tools** — `Options.Tools`; two engines in one process can run
   different toolsets.
 - **Events & tokens** — `Options.OnEvent` for the lifecycle stream;
-  `RunResult.Usage` / `run.end` for provider-reported token totals.
+  `RunResult.Usage` / `loop.run.end` for provider-reported token totals.
 - **Sessions** — `eng.Sessions()` lists resumable sessions;
   `Options.SessionID` / `Continue` resume one.
 

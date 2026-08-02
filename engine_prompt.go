@@ -252,6 +252,14 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	}
 
 	stop := stopReasonFrom(err)
+	// Stall is its own signal: the loop gave up because consecutive tool
+	// batches added no new evidence, not because the budget ran out.
+	if stop == StopStuck {
+		e.Emit(Event{
+			Type: EventStall, RunID: runID, SessionID: sid,
+			StopReason: stop, Text: errString(err),
+		})
+	}
 	usage := Usage{InputTokens: res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens}
 	out = RunResult{Text: res.Text, SessionID: sid, RunID: runID, StopReason: stop, Usage: usage}
 	e.Emit(Event{
