@@ -559,6 +559,18 @@ func (t *syncTool) Exec(ctx context.Context, _ json.RawMessage) (string, error) 
 	return t.fn(ctx)
 }
 
+// sameResultTool always returns the same string regardless of arguments.
+type sameResultTool struct{}
+
+func (sameResultTool) Name() string        { return "same" }
+func (sameResultTool) Description() string { return "constant result" }
+func (sameResultTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`)
+}
+func (sameResultTool) Exec(_ context.Context, _ json.RawMessage) (string, error) {
+	return "no matches", nil
+}
+
 // tickTool returns a different result on every call: identical arguments, new
 // evidence each time.
 type tickTool struct{ n int }
@@ -573,8 +585,8 @@ func (t *tickTool) Exec(_ context.Context, _ json.RawMessage) (string, error) {
 	return fmt.Sprintf("tick %d", t.n), nil
 }
 
-// Two consecutive tool batches whose results repeat what the run already saw
-// stop the loop with ErrStuck instead of burning the turn budget.
+// Re-running the identical call for the identical result stops the loop with
+// ErrStuck once stallBarrenBatches batches in a row are barren.
 func TestStallOnNoNewEvidence(t *testing.T) {
 	turns := 0
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
@@ -594,9 +606,98 @@ func TestStallOnNoNewEvidence(t *testing.T) {
 	if err == nil || !errors.Is(err, agent.ErrStuck) {
 		t.Fatalf("err=%v want ErrStuck", err)
 	}
-	// First batch is new evidence, batches 2 and 3 are barren → stop at 3.
-	if turns > 4 {
-		t.Fatalf("stall detector burned %d turns", turns)
+	// Batch 1 is new evidence; batches 2-4 are barren → stop on the 4th.
+	if turns != 4 {
+		t.Fatalf("stopped after %d turns, want 4 (1 novel + 3 barren)", turns)
+	}
+}
+
+// Two identical batches are a plausible retry, not a stall: the loop must
+// still be running after them.
+func TestTwoBarrenBatchesDoNotStall(t *testing.T) {
+	n := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		n++
+		if n > 3 {
+			return llm.Message{Role: "assistant", Content: "done"}, nil
+		}
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "echo", Arguments: `{"text":"same"}`},
+			}},
+		}, nil
+	}
+	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+		MaxTurns: 50,
+		Tools:    []agent.Tool{echoTool{}},
+	})
+	if err != nil {
+		t.Fatalf("err=%v want nil (two barren batches is a retry, not a stall)", err)
+	}
+	if res.Text != "done" {
+		t.Fatalf("text=%q", res.Text)
+	}
+}
+
+// Regression: results that share a long prefix are distinct evidence. Prefix
+// keys made file banners and grep context collide into false stalls.
+func TestNoStallOnSharedResultPrefix(t *testing.T) {
+	prefix := strings.Repeat("banner line\n", 60)
+	n := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		n++
+		if n > 6 {
+			return llm.Message{Role: "assistant", Content: "done"}, nil
+		}
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "echo", Arguments: fmt.Sprintf(`{"text":%q}`, prefix+fmt.Sprintf("tail %d", n))},
+			}},
+		}, nil
+	}
+	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+		MaxTurns: 50,
+		Tools:    []agent.Tool{echoTool{}},
+	})
+	if err != nil {
+		t.Fatalf("err=%v want nil (long shared prefix, distinct tails)", err)
+	}
+	if res.Text != "done" {
+		t.Fatalf("text=%q", res.Text)
+	}
+}
+
+// Distinct calls that happen to return the same string are still distinct
+// evidence (two empty greps, two "ok" runs) and must not stall.
+func TestNoStallWhenDifferentCallsShareResult(t *testing.T) {
+	n := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		n++
+		if n > 6 {
+			return llm.Message{Role: "assistant", Content: "done"}, nil
+		}
+		// Same empty result every time, but a different query each turn.
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "same", Arguments: fmt.Sprintf(`{"text":"query-%d"}`, n)},
+			}},
+		}, nil
+	}
+	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+		MaxTurns: 50,
+		Tools:    []agent.Tool{sameResultTool{}},
+	})
+	if err != nil {
+		t.Fatalf("err=%v want nil (distinct calls, shared result)", err)
+	}
+	if res.Text != "done" {
+		t.Fatalf("text=%q", res.Text)
 	}
 }
 

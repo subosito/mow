@@ -3,6 +3,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,9 +24,9 @@ var ErrMaxTurns = errors.New("agent: max turns exceeded")
 // recorded for the model/history; Run returns nil error.
 var ErrDone = errors.New("agent: done")
 
-// ErrStuck ends a run that stopped making progress: stallAfterBatches
-// consecutive tool batches produced no tool-result head the run had not
-// already seen. Maps to StopStuck.
+// ErrStuck ends a run that stopped making progress: stallBarrenBatches
+// consecutive tool batches re-ran calls this run had already made for results
+// it had already seen. Maps to StopStuck.
 //
 // Repeating the same tool calls is only a soft hint (sameToolWarnAfter); the
 // hard stop is the evidence signal below. Prefer ctx cancel for a clean abort.
@@ -244,14 +246,14 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		if err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}
-		// Stall detection: a batch that produces no tool-result head we have
-		// not already seen adds no new evidence. Two such batches in a row and
+		// Stall detection: a batch is barren when every (call, result) pair in
+		// it is one this run already produced. stallBarrenBatches in a row and
 		// the loop is spinning — stop instead of burning the turn budget.
-		if evidence.note(toolMsgs) {
+		if evidence.note(msg.ToolCalls, toolMsgs) {
 			barrenRuns = 0
 		} else {
 			barrenRuns++
-			if barrenRuns >= stallAfterBatches {
+			if barrenRuns >= stallBarrenBatches {
 				return Result{
 						Text:       strings.TrimSpace(msg.Content),
 						Messages:   messages,
@@ -288,19 +290,29 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		ErrMaxTurns, maxTurns)
 }
 
-// stallAfterBatches is how many consecutive tool batches may add no new
-// evidence before the loop gives up with ErrStuck. Deliberately a package
-// default, not config: it is a backstop, not a tuning knob.
-const stallAfterBatches = 2
+// stallBarrenBatches is how many consecutive barren tool batches end the run
+// with ErrStuck. Three, not two: two identical batches are a plausible retry
+// (a flaky command, a re-read after a failed edit), three is a loop. This is a
+// package-level backstop, not a tuning knob — a run that legitimately needs
+// more turns should raise max_turns, not loosen the stall floor.
+const stallBarrenBatches = 3
 
-// evidenceHeadBytes is how much of each tool result forms its novelty key.
-// Heads are cheap and stable: identical reads/greps collide, while a changed
-// file, a new error, or fresh output does not.
-const evidenceHeadBytes = 200
-
-// evidenceSet is the loop's novelty signal — a rolling set of tool-result
-// heads. The goal pack has a real evidence ledger; the plain loop does not, so
-// "new evidence" here means "a tool result head we have not seen this run".
+// evidenceSet is the loop's novelty signal. The goal pack has a real evidence
+// ledger; the plain loop does not, so "new evidence" here means "a (tool, args,
+// result) triple this run has not produced before".
+//
+// Keying on the call as well as the result is what keeps the signal honest:
+//   - the same tool+args returning changed output is progress (a poll watching
+//     a file, a test rerun that now fails differently) — novel, never stalls;
+//   - different tools that happen to return the same string (two empty greps,
+//     two "ok" runs) are still distinct evidence — novel;
+//   - only re-running the identical call for the identical result is barren.
+//
+// Results are hashed in full rather than by prefix: tool output routinely
+// shares a long head (file banners, "=== RUN" preambles, identical grep
+// context) and prefix keys made unrelated results collide into false stalls.
+// Content is already bounded upstream by policy.max_tool_result_chars, so the
+// hash cost is bounded too, and the digest keeps the set small for long runs.
 type evidenceSet struct {
 	seen map[string]struct{}
 }
@@ -309,22 +321,26 @@ func newEvidenceSet() *evidenceSet {
 	return &evidenceSet{seen: map[string]struct{}{}}
 }
 
-// note records the heads of one tool batch and reports whether any was new.
-// Empty batches and empty results count as no new evidence.
-func (e *evidenceSet) note(msgs []llm.Message) bool {
+// note records one batch's (call, result) evidence and reports whether any of
+// it was new. Empty batches and empty results count as no new evidence.
+func (e *evidenceSet) note(calls []llm.ToolCall, msgs []llm.Message) bool {
+	// Tool call ids are unique per call, so they can only identify which call
+	// a result belongs to — never form part of the novelty key.
+	callFP := make(map[string]string, len(calls))
+	for _, tc := range calls {
+		name := tc.Function.Name
+		callFP[tc.ID] = name + "=" + normalizeArgsFP(name, json.RawMessage(tc.Function.Arguments))
+	}
 	fresh := false
 	for _, m := range msgs {
-		head := strings.TrimSpace(m.Content)
-		if head == "" {
+		body := strings.TrimSpace(m.Content)
+		if body == "" {
 			continue
 		}
-		if len(head) > evidenceHeadBytes {
-			head = head[:evidenceHeadBytes]
-		}
-		// Key on content only: tool call ids are unique per call, so they
-		// would make every batch look novel.
-		if _, ok := e.seen[head]; !ok {
-			e.seen[head] = struct{}{}
+		sum := sha256.Sum256([]byte(body))
+		key := callFP[m.ToolCallID] + "\x00" + hex.EncodeToString(sum[:])
+		if _, ok := e.seen[key]; !ok {
+			e.seen[key] = struct{}{}
 			fresh = true
 		}
 	}
