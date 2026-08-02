@@ -156,6 +156,35 @@ func TestParallelStepRunsConcurrently(t *testing.T) {
 	}
 }
 
+func TestRunParallelClosesFactoryEngines(t *testing.T) {
+	t.Setenv("MOW_HOME", t.TempDir())
+	var opened, closed atomic.Int32
+	newEng := func() (*mow.Engine, error) {
+		opened.Add(1)
+		eng, err := mow.New(mow.Options{
+			Workspace: t.TempDir(), NoSession: true,
+			Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+				return reportCall("done", map[string]any{"status": "done", "summary": "ok"}), nil
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		eng.RegisterCleanup(func() { closed.Add(1) })
+		return eng, nil
+	}
+	_, err := goal.RunParallel(context.Background(), []goal.Spec{
+		{ID: "close-a", Goal: "a", MaxSteps: 1},
+		{ID: "close-b", Goal: "b", MaxSteps: 1},
+	}, newEng, &goal.Store{Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Load() != 2 || closed.Load() != opened.Load() {
+		t.Fatalf("opened=%d closed=%d", opened.Load(), closed.Load())
+	}
+}
+
 // (c) evidence from both parallel sub-steps lands in the joined State.Facts.
 func TestParallelEvidenceMerge(t *testing.T) {
 	dir, factory := newParallelEnv(t)

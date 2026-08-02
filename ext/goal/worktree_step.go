@@ -45,6 +45,7 @@ func (r *Runner) runWorktreeItem(ctx context.Context, exec *Executor, st State, 
 		wt.cleanup(ctx)
 		return StepResult{}, fmt.Errorf("goal: worktree engine for %q: %w", item.ID, err)
 	}
+	defer eng.Close()
 
 	r.fire(Event{Kind: EventStep, State: st,
 		Text: fmt.Sprintf("worktree %s → %s (branch %s)", item.ID, wt.Dir, wt.Branch)})

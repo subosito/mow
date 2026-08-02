@@ -101,6 +101,7 @@ func (r *Runner) runParallelStep(ctx context.Context, exec *Executor, st State, 
 				cancel()
 				return
 			}
+			defer eng.Close()
 			// Each sub-step gets its own Executor+Engine; RunStep builds its
 			// own finishSignal and stores it in its own derived context, so
 			// the signal is per-goroutine (never shared across sub-steps).

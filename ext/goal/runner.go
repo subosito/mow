@@ -225,6 +225,7 @@ func RunParallel(ctx context.Context, specs []Spec, newEng func() (*mow.Engine, 
 				out[i] = State{ID: specs[i].ID, Status: StatusFailed, Error: err.Error()}
 				return
 			}
+			defer eng.Close()
 			r := &Runner{Engine: eng, Store: store}
 			st, err := r.RunSpec(ctx, specs[i])
 			out[i] = st

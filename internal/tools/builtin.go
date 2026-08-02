@@ -372,6 +372,35 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	return formatEditDiff(rel, oldSnippet, a.NewString), nil
 }
 
+const maxBashOutputBytes = 100_000
+
+// cappedBuffer keeps command output bounded while the process is running.
+// Returning len(p) after dropping the tail preserves io.Writer semantics so
+// os/exec does not turn an output cap into a broken-pipe command failure.
+type cappedBuffer struct {
+	buf       bytes.Buffer
+	truncated bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := maxBashOutputBytes - b.buf.Len()
+	if remaining > 0 {
+		keep := p
+		if len(keep) > remaining {
+			keep = keep[:remaining]
+		}
+		_, _ = b.buf.Write(keep)
+	}
+	if n > remaining {
+		b.truncated = true
+	}
+	return n, nil
+}
+
+func (b *cappedBuffer) String() string  { return b.buf.String() }
+func (b *cappedBuffer) Truncated() bool { return b.truncated }
+
 type bashTool struct{ p *policy.Policy }
 
 func (t *bashTool) Name() string { return "bash" }
@@ -426,7 +455,7 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	cmd := exec.Command("bash", "-lc", a.Command)
 	cmd.Dir = t.p.Workspace
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	var buf bytes.Buffer
+	var buf cappedBuffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 
@@ -454,8 +483,8 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	}
 
 	out := buf.String()
-	if len(out) > 100_000 {
-		out = out[:100_000] + "\n…(truncated)"
+	if buf.Truncated() {
+		out += "\n…(truncated)"
 	}
 	if err != nil {
 		if cctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {

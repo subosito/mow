@@ -190,6 +190,12 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			opt.SetLLMCancel(callCancel)
 		}
 		msg, err := chat(callCtx, send, specs)
+		// The child context is only needed while chat is in flight. Release its
+		// parent registration on every path and stop exposing a stale cancel.
+		callCancel()
+		if opt.SetLLMCancel != nil {
+			opt.SetLLMCancel(nil)
+		}
 		if err != nil {
 			// Mid-turn steer: Engine.Steer cancelled this LLM call to inject
 			// host guidance NOW. The OUTER ctx is still alive — drain the
