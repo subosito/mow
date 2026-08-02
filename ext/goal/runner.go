@@ -39,6 +39,13 @@ type Runner struct {
 	// ("do not use an LLM to decide what ordinary code already knows").
 	// A zero outcome lets the model's decision stand.
 	Router func(st State, sr StepResult) StepOutcome
+	// Verify is the deterministic gate between steps (the reusable
+	// verification primitive): when non-nil, it checks the step's artifacts /
+	// evidence and returns concrete issues. Non-empty feedback forces the
+	// next iteration to retry_same with the feedback injected into the prompt
+	// (bounded by MaxStepRetries), so a step cannot pass an invalid result
+	// onward. Nil = no verification gate.
+	Verify func(st State, sr StepResult) []string
 }
 
 // MaxStepRetries is the code-owned cap on consecutive retry_same steps; past
@@ -331,6 +338,7 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 
 		turnBudgetSteps = 0
 		transientSteps = 0
+		st.VerifyNote = "" // verification passed (or no gate)
 		st.LastReply = sr.Text
 		if sr.Summary != "" {
 			st.Summary = sr.Summary
@@ -363,6 +371,15 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		if r.Router != nil {
 			if routed := r.Router(st, sr); routed != "" {
 				sr.Outcome = routed
+			}
+		}
+
+		// Verification gate: concrete issues force a retry_same with feedback
+		// (bounded by MaxStepRetries), so an invalid result cannot pass onward.
+		if r.Verify != nil && sr.Outcome != OutcomeEscalate {
+			if issues := r.Verify(st, sr); len(issues) > 0 {
+				st.VerifyNote = strings.Join(issues, "; ")
+				sr.Outcome = OutcomeRetrySame
 			}
 		}
 
@@ -593,6 +610,10 @@ func stepPrompt(st State) string {
 	if facts := st.FactsText(); facts != "" {
 		b.WriteString("\n\nDurable evidence so far (use these; do not re-derive):\n")
 		b.WriteString(facts)
+	}
+	if v := strings.TrimSpace(st.VerifyNote); v != "" {
+		b.WriteString("\n\nVerification feedback — fix these before proceeding:\n")
+		b.WriteString(v)
 	}
 	if s := strings.TrimSpace(st.Summary); s != "" {
 		b.WriteString("\n\nPrevious step result (truncated):\n")

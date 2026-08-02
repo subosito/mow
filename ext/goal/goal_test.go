@@ -471,3 +471,49 @@ func TestResumeAnswerUnblocks(t *testing.T) {
 		t.Fatalf("question should clear after answer: %q", st.Question)
 	}
 }
+
+// The Verify gate is the deterministic verification primitive: issues force
+// retry_same with feedback injected into the next prompt; a clean verify lets
+// the step pass; the retry cap still applies.
+func TestRunnerVerifyGate(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MOW_HOME", dir)
+	var prompts []string
+	var calls atomic.Int32
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			calls.Add(1)
+			if len(messages) > 0 {
+				prompts = append(prompts, messages[len(messages)-1].Content)
+			}
+			return mow.Message{Role: "assistant", Content: "draft"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &goal.Runner{
+		Engine: eng,
+		Store:  &goal.Store{Dir: dir + "/goals"},
+		Verify: func(st goal.State, sr goal.StepResult) []string {
+			// Never passes: every step fails verification.
+			return []string{"evidence missing source"}
+		},
+	}
+	st, err := r.RunSpec(context.Background(), goal.Spec{ID: "vf", Goal: "g", MaxSteps: 6})
+	if err == nil {
+		t.Fatal("verify gate that never passes should stop partial")
+	}
+	if st.Status != goal.StatusPartial {
+		t.Fatalf("status=%s want partial after retry cap", st.Status)
+	}
+	// The feedback was injected into the retry prompts.
+	joined := strings.Join(prompts, "\n")
+	if !strings.Contains(joined, "Verification feedback") || !strings.Contains(joined, "evidence missing source") {
+		t.Fatalf("verifier feedback missing from prompts:\n%s", joined)
+	}
+	if !strings.Contains(err.Error(), "retried") {
+		t.Fatalf("error should mention retry cap: %v", err)
+	}
+}

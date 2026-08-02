@@ -103,6 +103,8 @@ type State struct {
 	RetryCount int `json:"retry_count,omitempty"`
 	// Question is the durable human decision when Status == StatusBlocked.
 	Question string `json:"question,omitempty"`
+	// VerifyNote carries the verifier's feedback for the next retry step.
+	VerifyNote string `json:"verify_note,omitempty"`
 	// Partial is a machine-readable summary when Status == StatusPartial:
 	// what is done, what is missing, and the best artifact so far.
 	Partial string `json:"partial,omitempty"`
