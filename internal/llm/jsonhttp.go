@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,7 +71,10 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 		status, body, hdr, err := doJSONAttempt(hc, req, capPerAttempt)
 		if err != nil {
 			lastErr = err
-			if !retryableNetErr(err) {
+			if req.Context().Err() != nil {
+				return 0, nil, req.Context().Err()
+			}
+			if !retryableAttemptErr(capPerAttempt, err) {
 				return 0, nil, err
 			}
 			if serverRestarting(err) {
@@ -111,6 +115,22 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 		return 0, nil, lastErr
 	}
 	return 0, nil, fmt.Errorf("llm: request failed after %d attempts", maxHTTPAttempts)
+}
+
+// retryableAttemptErr distinguishes an internal per-attempt timeout from the
+// caller cancelling or exhausting the whole run. The former is an upstream
+// stall and should consume the normal jittered retry budget; the latter must
+// return immediately. net/http often wraps both as context deadline exceeded.
+func retryableAttemptErr(internalCap bool, err error) bool {
+	if err == nil {
+		return false
+	}
+	// Only the timeout introduced by doJSONAttempt is retryable here. A host's
+	// explicit http.Client.Timeout remains its requested whole-call bound.
+	if errors.Is(err, context.DeadlineExceeded) {
+		return internalCap
+	}
+	return retryableNetErr(err)
 }
 
 // doJSONAttempt runs one request and fully buffers the body so the connection
