@@ -70,6 +70,17 @@ type PreCompactDecision struct {
 // PreCompactFunc runs before Compact when MaxContextChars is set and history is over budget.
 type PreCompactFunc func(ctx context.Context, e PreCompactEvent) (PreCompactDecision, error)
 
+// AfterCompactEvent reports one automatic context projection compaction.
+// Layer is "snip" when reducing tool bodies was sufficient, or "drop" when
+// completed older turns were also replaced by anchors and a summary.
+type AfterCompactEvent struct {
+	Layer      string
+	CharsSaved int
+}
+
+// AfterCompactFunc runs after the projection has been compacted.
+type AfterCompactFunc func(ctx context.Context, e AfterCompactEvent)
+
 // AfterTurnEvent is emitted after each LLM assistant message is appended.
 type AfterTurnEvent struct {
 	AssistantText string
@@ -81,8 +92,9 @@ type AfterTurnFunc func(ctx context.Context, e AfterTurnEvent)
 
 // Hooks are optional lifecycle callbacks (UI, metrics, context optimizers).
 type Hooks struct {
-	PreTool    []PreToolFunc
-	PostTool   []PostToolFunc
-	PreCompact []PreCompactFunc
-	AfterTurn  []AfterTurnFunc
+	PreTool      []PreToolFunc
+	PostTool     []PostToolFunc
+	PreCompact   []PreCompactFunc
+	AfterCompact []AfterCompactFunc
+	AfterTurn    []AfterTurnFunc
 }

@@ -284,6 +284,7 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 	// Copy slices so we do not mutate engine state.
 	pre := append([]agent.PreToolFunc(nil), h.PreTool...)
 	post := append([]agent.PostToolFunc(nil), h.PostTool...)
+	compact := append([]agent.AfterCompactFunc(nil), h.AfterCompact...)
 	after := append([]agent.AfterTurnFunc(nil), h.AfterTurn...)
 	pre = append([]agent.PreToolFunc{func(ctx context.Context, ev agent.PreToolEvent) (agent.PreToolDecision, error) {
 		e.Emit(Event{
@@ -314,6 +315,9 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 		e.log().Debug("mow tool end", "run_id", runID, "tool", ev.Name, "denied", ev.Denied, "error", errStr, "duration_ms", durMs)
 		return agent.PostToolDecision{}, nil
 	}}, post...)
+	compact = append([]agent.AfterCompactFunc{func(ctx context.Context, ev agent.AfterCompactEvent) {
+		e.Emit(Event{Type: EventCompact, RunID: runID, SessionID: sid, Layer: ev.Layer, CharsSaved: ev.CharsSaved})
+	}}, compact...)
 	after = append([]agent.AfterTurnFunc{func(ctx context.Context, ev agent.AfterTurnEvent) {
 		e.Emit(Event{
 			Type: EventTurn, RunID: runID, SessionID: sid,
@@ -322,6 +326,7 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 	}}, after...)
 	h.PreTool = pre
 	h.PostTool = post
+	h.AfterCompact = compact
 	h.AfterTurn = after
 	return h
 }

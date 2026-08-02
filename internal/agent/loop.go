@@ -572,11 +572,8 @@ func toolResultLimit(opt Options) int {
 
 func applyCompact(ctx context.Context, messages []llm.Message, opt Options, calib *ratioCalibrator) ([]llm.Message, error) {
 	toolLim := toolResultLimit(opt)
-	// Always trim oversized tool bodies before the LLM call (cheap, high impact).
-	messages = trimAllToolResults(messages, toolLim, toolLim/2)
-
 	if opt.MaxContextChars <= 0 {
-		return messages, nil
+		return trimAllToolResults(messages, toolLim, toolLim/2), nil
 	}
 	// Estimate in "budget chars": raw chars rescaled by the calibrated
 	// chars/token ratio, so a code-heavy history (which tokenizes denser than
@@ -585,7 +582,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 	raw := estChars(messages)
 	est := budgetChars(raw, ratio)
 	if est <= opt.MaxContextChars {
-		return messages, nil
+		return trimAllToolResults(messages, toolLim, toolLim/2), nil
 	}
 	summary := ""
 	for _, h := range opt.Hooks.PreCompact {
@@ -608,7 +605,15 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 			summary = d.Summary
 		}
 	}
-	return CompactOpts(messages, compactTarget(opt.MaxContextChars, ratio), summary, toolLim), nil
+	result := CompactTiered(messages, compactTarget(opt.MaxContextChars, ratio), summary, toolLim)
+	if result.CharsSaved > 0 {
+		for _, h := range opt.Hooks.AfterCompact {
+			if h != nil {
+				h(ctx, AfterCompactEvent{Layer: result.Layer, CharsSaved: result.CharsSaved})
+			}
+		}
+	}
+	return result.Messages, nil
 }
 
 // runTool applies PreTool → Exec (or deny) → PostTool and returns the model-visible result.

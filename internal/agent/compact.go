@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -141,6 +142,77 @@ func compactTarget(maxChars int, ratio float64) int {
 		t = 1
 	}
 	return t
+}
+
+// CompactResult describes which cheap-first layer was required. The input is
+// never mutated; Messages is a projection for the next provider call only.
+type CompactResult struct {
+	Messages   []llm.Message
+	Layer      string // "snip" or "drop"
+	CharsSaved int
+}
+
+// CompactTiered first snips the longest tool results. Only when that cannot
+// reach maxChars does it replace complete older turn ranges with task anchors
+// and a summary. Raw session history is deliberately outside this function.
+func CompactTiered(messages []llm.Message, maxChars int, summary string, maxToolChars int) CompactResult {
+	before := estChars(messages)
+	if maxToolChars <= 0 {
+		maxToolChars = DefaultMaxToolResultChars
+	}
+	snipped := snipLongestToolResults(messages, maxChars, maxToolChars)
+	if maxChars <= 0 || estChars(snipped) <= maxChars {
+		return CompactResult{Messages: snipped, Layer: "snip", CharsSaved: max(0, before-estChars(snipped))}
+	}
+	out := CompactOpts(snipped, maxChars, summary, maxToolChars)
+	return CompactResult{Messages: out, Layer: "drop", CharsSaved: max(0, before-estChars(out))}
+}
+
+const minSnippedToolChars = 800
+const snipMarker = "\n…(snip)"
+
+// snipLongestToolResults makes a copy and reduces tool bodies longest-first.
+// It preserves every message and therefore cannot orphan a tool call/result.
+func snipLongestToolResults(messages []llm.Message, target, maxToolChars int) []llm.Message {
+	out := append([]llm.Message(nil), messages...)
+	type candidate struct{ index, size int }
+	var candidates []candidate
+	for i := range out {
+		if out[i].Role == "tool" && len(out[i].Content) > minSnippedToolChars {
+			candidates = append(candidates, candidate{i, len(out[i].Content)})
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].size > candidates[j].size })
+	need := estChars(out) - target
+	for _, c := range candidates {
+		limit := maxToolChars
+		if limit < minSnippedToolChars {
+			limit = minSnippedToolChars
+		}
+		// Enforce the normal per-result cap, then take only as much additional
+		// content as needed to reach the context target.
+		want := min(c.size, limit)
+		if need > 0 {
+			want = min(want, max(minSnippedToolChars, c.size-need-len(snipMarker)))
+		}
+		if want >= c.size {
+			continue
+		}
+		out[c.index].Content = snipToolResult(out[c.index].Content, want)
+		need -= c.size - len(out[c.index].Content)
+	}
+	return out
+}
+
+func snipToolResult(s string, maxChars int) string {
+	if maxChars <= 0 || len(s) <= maxChars {
+		return s
+	}
+	keep := maxChars - len(snipMarker)
+	if keep < 0 {
+		keep = 0
+	}
+	return s[:keep] + snipMarker
 }
 
 // CompactOpts reduces message history to roughly maxChars while keeping system

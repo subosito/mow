@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -280,5 +282,68 @@ func TestCompactSnippetLongInputBounded(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Fatalf("want ellipsis suffix, got %q", got)
+	}
+}
+
+func TestCompactTieredSnipSuffices(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "inspect"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "read", Arguments: `{}`}}}},
+		{Role: "tool", ToolCallID: "1", Name: "read", Content: strings.Repeat("x", 12_000)},
+		{Role: "user", Content: "continue"},
+	}
+	got := CompactTiered(msgs, 4_000, "", 24_000)
+	if got.Layer != "snip" || got.CharsSaved <= 0 {
+		t.Fatalf("result=%+v", got)
+	}
+	if len(got.Messages) != len(msgs) {
+		t.Fatalf("snip dropped messages: %d -> %d", len(msgs), len(got.Messages))
+	}
+	if !strings.Contains(got.Messages[3].Content, "…(snip)") {
+		t.Fatalf("missing snip marker: %q", got.Messages[3].Content)
+	}
+	if len(msgs[3].Content) != 12_000 {
+		t.Fatal("input mutated")
+	}
+}
+
+func TestCompactTieredEscalatesWithoutOrphans(t *testing.T) {
+	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "finish the task"}}
+	for i := 0; i < 35; i++ {
+		id := fmt.Sprintf("call-%d", i)
+		msgs = append(msgs,
+			llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: id, Type: "function", Function: llm.FunctionCall{Name: "read", Arguments: `{}`}}}},
+			llm.Message{Role: "tool", ToolCallID: id, Name: "read", Content: strings.Repeat("x", 900)},
+		)
+	}
+	got := CompactTiered(msgs, 3_000, "", 24_000)
+	if got.Layer != "drop" || got.CharsSaved <= 0 {
+		t.Fatalf("result layer=%q saved=%d", got.Layer, got.CharsSaved)
+	}
+	calls := map[string]bool{}
+	for _, m := range got.Messages {
+		if m.Role == "assistant" {
+			for _, tc := range m.ToolCalls {
+				calls[tc.ID] = true
+			}
+		}
+		if m.Role == "tool" && !calls[m.ToolCallID] {
+			t.Fatalf("orphan tool result %q", m.ToolCallID)
+		}
+	}
+}
+
+func TestApplyCompactReportsLayerAndSavings(t *testing.T) {
+	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "inspect"},
+		{Role: "tool", Name: "read", Content: strings.Repeat("z", 10_000)}}
+	var event AfterCompactEvent
+	opt := Options{MaxContextChars: 4_000, MaxToolResultChars: 24_000,
+		Hooks: Hooks{AfterCompact: []AfterCompactFunc{func(_ context.Context, e AfterCompactEvent) { event = e }}}}
+	if _, err := applyCompact(context.Background(), msgs, opt, newRatioCalibrator()); err != nil {
+		t.Fatal(err)
+	}
+	if event.Layer != "snip" || event.CharsSaved <= 0 {
+		t.Fatalf("event=%+v", event)
 	}
 }

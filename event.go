@@ -45,6 +45,8 @@ const (
 	EventToken     EventType = "loop.token"     // answer content delta
 	EventReasoning EventType = "loop.reasoning" // reasoning delta (UI/host optional)
 	EventTurn      EventType = "loop.turn"      // assistant message after LLM step
+	// EventCompact reports projection-only context reduction. Layer is snip or drop.
+	EventCompact EventType = "loop.compact"
 	// EventStall is emitted once when the loop stops early because consecutive
 	// tool batches added no new evidence. Text carries the reason; the run
 	// ends with StopStuck.
@@ -170,6 +172,10 @@ type Event struct {
 	OutputTokens int `json:"output_tokens,omitempty"`
 	// Delegate
 	Agent string `json:"agent,omitempty"`
+
+	// Context compaction (loop.compact).
+	Layer      string `json:"layer,omitempty"`
+	CharsSaved int    `json:"chars_saved,omitempty"`
 
 	// LSP diagnostics (harness.lsp.diagnostics). Path is the edited file,
 	// Count the server total, Diagnostics bounded by MaxLSPDiagnostics.
