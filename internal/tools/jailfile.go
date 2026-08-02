@@ -117,3 +117,17 @@ func VerifyFDInJail(p *policy.Policy, f *os.File) error {
 func verifyFDInJail(p *policy.Policy, f *os.File) error {
 	return VerifyFDInJail(p, f)
 }
+
+// workspaceRel renders a resolved path relative to the workspace for display:
+// in-workspace files show a clean relative path ("internal/tools/x.go"),
+// extra-root files show "../mowi/…". Falls back to the raw path when Rel
+// cannot produce a useful result.
+func workspaceRel(ws, abs string) string {
+	if ws == "" || abs == "" {
+		return abs
+	}
+	if rel, err := filepath.Rel(ws, abs); err == nil {
+		return rel
+	}
+	return abs
+}

@@ -288,3 +288,57 @@ func TestReadMissingFileSuggestsNearby(t *testing.T) {
 		t.Fatalf("expected directory fallback: %v", err)
 	}
 }
+
+// The diff path must be displayed relative to the WORKSPACE, never the raw
+// input: editing a workspace file passed as an absolute path (or "../mow/…"
+// when mow is an extra root of a sibling workspace) shows the clean relative
+// path — "sub/f.go", not "../mow/…" when the workspace IS mow.
+func TestEditDiffPathWorkspaceRelative(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(sub, "f.go")
+	if err := os.WriteFile(target, []byte("package main\n\nfunc A() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: root, AllowWrite: true}
+	reg := tools.Registry(p, []string{"edit"})
+
+	// Model passes the ABSOLUTE path — display must still be workspace-relative.
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(
+		`{"path":"`+target+`","old_string":"func A() {}","new_string":"func B() {}"}`,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "edited sub/f.go") {
+		t.Fatalf("want workspace-relative path, got %q", out)
+	}
+	if strings.Contains(out, root) {
+		t.Fatalf("diff leaked the absolute workspace path: %q", out)
+	}
+}
+
+// An extra-root file (sibling workspace) displays as "../sibling/…", which is
+// the correct relative form — not a bare basename.
+func TestEditDiffPathExtraRootRelative(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir() // sibling "workspace" outside root
+	if err := os.WriteFile(filepath.Join(other, "x.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: root, AllowWrite: true, ExtraRoots: []string{other}}
+	reg := tools.Registry(p, []string{"edit"})
+
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(
+		`{"path":"`+filepath.Join(other, "x.go")+`","old_string":"package x","new_string":"package y"}`,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "edited ../"+filepath.Base(other)+"/x.go") {
+		t.Fatalf("want extra-root relative path, got %q", out)
+	}
+}

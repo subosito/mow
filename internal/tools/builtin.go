@@ -274,7 +274,6 @@ func (t *writeTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 		return "", err
 	}
 	// Probe prior content via jailed open (missing file → create).
-	rel := a.Path
 	var old []byte
 	created := false
 	if _, b, err := readFileJailed(t.p, a.Path); err == nil {
@@ -289,9 +288,10 @@ func (t *writeTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 	if err != nil {
 		return "", err
 	}
-	if rel == "" {
-		rel = path
-	}
+	// Display the path relative to the WORKSPACE (not the raw input): a file
+	// inside the workspace shows "internal/tools/x.go", an extra-root file
+	// shows "../mowi/…" — never a wrong "../mow" when cwd is mow.
+	rel := workspaceRel(t.p.Workspace, path)
 	if created {
 		return formatCreateDiff(rel, a.Content), nil
 	}
@@ -328,10 +328,9 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if err != nil {
 		return "", err
 	}
-	rel := a.Path
-	if rel == "" {
-		rel = path
-	}
+	// Workspace-relative display (same rationale as write): in-workspace files
+	// never print "../mow", extra-root files print "../mowi/…".
+	rel := workspaceRel(t.p.Workspace, path)
 	s := string(data)
 	var oldSnippet string
 	if h := strings.TrimSpace(a.LineHash); h != "" {
