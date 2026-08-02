@@ -95,11 +95,13 @@ func (st State) FactsText() string {
 
 // State is durable progress (JSON under $MOW_HOME/goals/<id>.json).
 type State struct {
-	ID       string `json:"id"`
-	Goal     string `json:"goal"`
-	Status   Status `json:"status"`
-	Step     int    `json:"step"`
-	MaxSteps int    `json:"max_steps"`
+	ID   string `json:"id"`
+	Goal string `json:"goal"`
+	// Workspace keys optional cross-run evidence; empty preserves legacy states.
+	Workspace string `json:"workspace,omitempty"`
+	Status    Status `json:"status"`
+	Step      int    `json:"step"`
+	MaxSteps  int    `json:"max_steps"`
 	// ParallelMax mirrors Spec.ParallelMax (0/1 = sequential).
 	ParallelMax int    `json:"parallel_max,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`

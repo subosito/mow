@@ -145,3 +145,37 @@ func (s *Store) List() ([]State, error) {
 	})
 	return out, nil
 }
+
+// RecentFacts returns newest cross-run evidence for exactly workspace.
+// Legacy states without a workspace remain isolated. Claims are deduplicated
+// case-insensitively, keeping the newest occurrence, and the result is bounded.
+func (s *Store) RecentFacts(workspace string, limit int) ([]Fact, error) {
+	workspace = filepath.Clean(strings.TrimSpace(workspace))
+	if workspace == "." || workspace == "" || limit <= 0 {
+		return nil, nil
+	}
+	states, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	out := make([]Fact, 0, min(limit, len(states)))
+	for _, st := range states {
+		if filepath.Clean(st.Workspace) != workspace {
+			continue
+		}
+		for i := len(st.Facts) - 1; i >= 0; i-- {
+			f := st.Facts[i]
+			key := strings.ToLower(strings.TrimSpace(f.Claim))
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, f)
+			if len(out) >= limit {
+				return out, nil
+			}
+		}
+	}
+	return out, nil
+}

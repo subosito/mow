@@ -222,3 +222,40 @@ func TestListSessions(t *testing.T) {
 		t.Fatalf("missing dir: %v %v", empty, err)
 	}
 }
+
+func TestMarkdownDigestBoundedAndJSONLUnchanged(t *testing.T) {
+	s := &Store{Dir: t.TempDir(), ID: "digest"}
+	if err := s.Append(Event{Type: "user", Role: "user", Content: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(Event{Type: "assistant", Role: "assistant", Content: "world"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 12; i++ {
+		if err := s.Append(Event{Type: "user", Role: "user", Content: strings.Repeat("x", 10_000)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := os.ReadFile(s.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := MarkdownDigest(s.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "# Session digest") || !strings.Contains(got, "Turns: 14") ||
+		!strings.Contains(got, "## user\n\nhello") || !strings.Contains(got, "## assistant\n\nworld") {
+		t.Fatalf("digest missing shape: %.500s", got)
+	}
+	if len(got) > MaxMarkdownDigestBytes || !strings.Contains(got, "…(digest truncated)") {
+		t.Fatalf("digest len=%d truncated=%v", len(got), strings.Contains(got, "digest truncated"))
+	}
+	after, err := os.ReadFile(s.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("MarkdownDigest modified canonical JSONL")
+	}
+}

@@ -67,11 +67,12 @@ func (r *Runner) Create(spec Spec) (State, error) {
 	}
 	store := r.store()
 	st := State{
-		ID:       spec.ID,
-		Goal:     spec.Goal,
-		Status:   StatusPending,
-		Step:     0,
-		MaxSteps: spec.MaxSteps,
+		ID:        spec.ID,
+		Goal:      spec.Goal,
+		Workspace: r.workspace(),
+		Status:    StatusPending,
+		Step:      0,
+		MaxSteps:  spec.MaxSteps,
 
 		ParallelMax: spec.ParallelMax,
 	}
@@ -155,11 +156,12 @@ func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 		return State{}, err
 	}
 	st := State{
-		ID:       spec.ID,
-		Goal:     spec.Goal,
-		Status:   StatusPending,
-		Step:     0,
-		MaxSteps: spec.MaxSteps,
+		ID:        spec.ID,
+		Goal:      spec.Goal,
+		Workspace: r.workspace(),
+		Status:    StatusPending,
+		Step:      0,
+		MaxSteps:  spec.MaxSteps,
 
 		ParallelMax: spec.ParallelMax,
 	}
@@ -167,6 +169,9 @@ func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 		if prev.Status == StatusRunning || prev.Status == StatusPending || prev.Status == StatusFailed {
 			if strings.TrimSpace(prev.Goal) == "" {
 				prev.Goal = spec.Goal
+			}
+			if strings.TrimSpace(prev.Workspace) == "" {
+				prev.Workspace = r.workspace()
 			}
 			prev = applyMaxStepsRaise(prev, spec.MaxSteps)
 			if spec.ParallelMax > 0 {
@@ -656,4 +661,11 @@ func truncateRunes(s string, n int) string {
 	}
 	runes := []rune(s)
 	return string(runes[:n]) + "…"
+}
+
+func (r *Runner) workspace() string {
+	if r == nil || r.Engine == nil {
+		return ""
+	}
+	return r.Engine.Workspace()
 }
