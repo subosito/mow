@@ -303,7 +303,7 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	defer slot.client.SetOnChunk(nil)
 	defer slot.client.SetOnProgress(nil)
 
-	reply, stop, err := slot.client.Prompt(pctx, slot.sessionID, prompt)
+	reply, stop, usage, err := slot.client.Prompt(pctx, slot.sessionID, prompt)
 	t.peersMu.Lock()
 	slot.lastUsed = time.Now()
 	t.peersMu.Unlock()
@@ -321,6 +321,16 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 			return "", fmt.Errorf("acp_delegate: agent %q cancelled", spec.Name)
 		}
 		return "", err
+	}
+	// Surface the peer's provider-reported usage so hosts can show true spend
+	// including native mow peers (external agents may omit usage → zeros).
+	if eng := mow.EngineFromContext(ctx); eng != nil && (usage.InputTokens > 0 || usage.OutputTokens > 0) {
+		eng.Emit(mow.Event{
+			Type:         mow.EventDelegateUsage,
+			Agent:        agentName,
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+		})
 	}
 	if strings.TrimSpace(reply) == "" {
 		reply = "(peer returned no agent_message_chunk text; stopReason=" + stop + ")"

@@ -61,6 +61,10 @@ const (
 	EventToolEnd          EventType = "harness.tool.end"
 	EventDelegateChunk    EventType = "harness.delegate.chunk"    // peer ACP answer text delta
 	EventDelegateProgress EventType = "harness.delegate.progress" // peer tool/thought status (not final answer)
+	// EventDelegateUsage: provider-reported tokens for one completed delegated
+	// call (InputTokens/OutputTokens + Agent). Lets hosts show true spend
+	// including native mow peers.
+	EventDelegateUsage EventType = "harness.delegate.usage"
 	// EventLSPDiagnostics reports language-server findings for a file just
 	// written or edited. Emitted only when an LSP pack is configured and
 	// running (no config → no process → no event).

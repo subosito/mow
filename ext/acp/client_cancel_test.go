@@ -65,7 +65,7 @@ func TestPromptCancelSendsSessionCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := c.Prompt(ctx, "sess-1", "do a long thing")
+		_, _, _, err := c.Prompt(ctx, "sess-1", "do a long thing")
 		done <- err
 	}()
 	// Let the prompt request leave the client.

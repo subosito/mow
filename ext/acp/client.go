@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/subosito/mow/cliutil"
+	"github.com/subosito/mow/internal/llm"
 )
 
 // Client talks to a peer ACP agent (subprocess) as a *client*.
@@ -159,7 +160,7 @@ const cancelGrace = 2 * time.Second
 //
 // On context cancel/timeout, sends session/cancel so the peer stops work, then
 // waits briefly for a response before returning ctx.Err().
-func (c *Client) Prompt(ctx context.Context, sessionID, text string) (reply string, stopReason string, err error) {
+func (c *Client) Prompt(ctx context.Context, sessionID, text string) (reply string, stopReason string, usage llm.Usage, err error) {
 	c.textMu.Lock()
 	c.text.Reset()
 	c.textMu.Unlock()
@@ -174,16 +175,23 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) (reply stri
 		c.Cancel(sessionID)
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", llm.Usage{}, err
 	}
 	var out struct {
 		StopReason string `json:"stopReason"`
+		Usage      *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	_ = json.Unmarshal(res, &out)
+	if out.Usage != nil {
+		usage = llm.Usage{InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens}
+	}
 	c.textMu.Lock()
 	reply = c.text.String()
 	c.textMu.Unlock()
-	return reply, out.StopReason, nil
+	return reply, out.StopReason, usage, nil
 }
 
 // Cancel sends session/cancel for the session.

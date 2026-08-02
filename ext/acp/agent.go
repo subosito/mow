@@ -571,7 +571,13 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		}
 		a.write(response{
 			JSONRPC: "2.0", ID: req.ID,
-			Result: map[string]any{"stopReason": "end_turn"},
+			Result: map[string]any{
+				"stopReason": "end_turn",
+				"usage": map[string]int{
+					"input_tokens":  res.Usage.InputTokens,
+					"output_tokens": res.Usage.OutputTokens,
+				},
+			},
 		})
 	case "authenticate":
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})

@@ -19,7 +19,8 @@ func TestAgentRoundTrip(t *testing.T) {
 	eng, err := mow.New(mow.Options{
 		NoSession: true,
 		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
-			return mow.Message{Role: "assistant", Content: "hello-acp"}, nil
+			return mow.Message{Role: "assistant", Content: "hello-acp",
+				Usage: mow.Usage{InputTokens: 12, OutputTokens: 3}}, nil
 		},
 	})
 	if err != nil {
@@ -48,12 +49,15 @@ func TestAgentRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
-	stop, err := cl.prompt(ctx, sid, "hi")
+	stop, usage, err := cl.prompt(ctx, sid, "hi")
 	if err != nil {
 		t.Fatalf("prompt: %v", err)
 	}
 	if stop != "end_turn" {
 		t.Fatalf("stop=%q", stop)
+	}
+	if usage.InputTokens != 12 || usage.OutputTokens != 3 {
+		t.Fatalf("usage not carried through ACP response: %+v", usage)
 	}
 	// streaming may or may not deliver depending on chat path; content optional
 	cancel()
@@ -101,7 +105,7 @@ func TestSessionCancelDuringPrompt(t *testing.T) {
 	}
 	ch := make(chan res, 1)
 	go func() {
-		stop, err := cl.prompt(ctx, sid, "hang")
+		stop, _, err := cl.prompt(ctx, sid, "hang")
 		ch <- res{stop, err}
 	}()
 
@@ -340,19 +344,27 @@ func TestSessionNewAdvertisesModelConfig(t *testing.T) {
 	_ = aw.Close()
 }
 
-func (c *pipeClient) prompt(ctx context.Context, sid, text string) (string, error) {
+func (c *pipeClient) prompt(ctx context.Context, sid, text string) (string, mow.Usage, error) {
 	msg, err := c.call(ctx, "session/prompt", map[string]any{
 		"sessionId": sid,
 		"prompt":    []map[string]string{{"type": "text", "text": text}},
 	})
 	if err != nil {
-		return "", err
+		return "", mow.Usage{}, err
 	}
 	var res struct {
 		StopReason string `json:"stopReason"`
+		Usage      *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	_ = json.Unmarshal(msg["result"], &res)
-	return res.StopReason, nil
+	u := mow.Usage{}
+	if res.Usage != nil {
+		u = mow.Usage{InputTokens: res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens}
+	}
+	return res.StopReason, u, nil
 }
 
 // Regression: a nested acp_delegate answer (EventDelegateChunk) must NOT be
@@ -402,7 +414,7 @@ func TestAgentPromptDelegateChunkNotForwardedAsAgentText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
-	if _, err := cl.prompt(ctx, sid, "hi"); err != nil {
+	if _, _, err := cl.prompt(ctx, sid, "hi"); err != nil {
 		t.Fatalf("prompt: %v", err)
 	}
 
