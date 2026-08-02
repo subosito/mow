@@ -33,6 +33,37 @@ func TestLatestID(t *testing.T) {
 	}
 }
 
+func TestLoadModelReturnsLastRecordedModel(t *testing.T) {
+	s := &Store{Dir: t.TempDir(), ID: "models"}
+	if err := s.Append(Event{Type: "runtime", Model: "gpt-5-mini"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(Event{Type: "user", Role: "user", Content: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(Event{Type: "runtime", Model: "claude-sonnet-4"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadModel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "claude-sonnet-4" {
+		t.Fatalf("model=%q want claude-sonnet-4", got)
+	}
+}
+
+func TestLoadModelLegacySessionIsEmpty(t *testing.T) {
+	s := &Store{Dir: t.TempDir(), ID: "legacy"}
+	if err := s.Append(Event{Type: "user", Role: "user", Content: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadModel()
+	if err != nil || got != "" {
+		t.Fatalf("model=%q err=%v", got, err)
+	}
+}
+
 func TestLoadMessagesLastSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	s := &Store{Dir: dir, ID: "t1"}
@@ -93,6 +124,32 @@ func TestLoadMessagesLastSnapshot(t *testing.T) {
 	}
 	if turns[0].Role != "user" || turns[0].Content != "hi" || turns[3].Content != "ok" {
 		t.Fatalf("transcript: %+v", turns)
+	}
+}
+
+func TestAppendSnapshotRoundTripsAsOneEvent(t *testing.T) {
+	s := &Store{Dir: t.TempDir(), ID: "snapshot"}
+	want := []llm.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "hello"},
+	}
+	if err := s.AppendSnapshot(want); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(s.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Count(string(raw), "\n"); lines != 1 {
+		t.Fatalf("snapshot wrote %d JSONL events, want 1", lines)
+	}
+	got, err := s.LoadMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) || got[2].Content != "hello" {
+		t.Fatalf("snapshot=%+v", got)
 	}
 }
 

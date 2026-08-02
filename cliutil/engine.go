@@ -106,19 +106,20 @@ func (f *EngineFlags) ConfigPaths() []string {
 func (f *EngineFlags) Options() mow.Options {
 	paths := f.ConfigPaths()
 	opt := mow.Options{
-		ConfigPaths:  paths,
-		Workspace:    f.Workspace,
-		ExtraRoots:   append([]string(nil), f.ExtraRoots...),
-		Model:        f.Model,
-		Effort:       f.Effort,
-		BaseURL:      f.BaseURL,
-		SystemPrefix: append([]string(nil), f.SystemPrefix...),
-		AllowWrite:   f.AllowWrite,
-		AllowShell:   f.AllowShell,
-		NoSession:    f.NoSession,
-		SessionID:    f.SessionID,
-		Continue:     f.Continue,
-		Stream:       f.Stream,
+		ConfigPaths:   paths,
+		Workspace:     f.Workspace,
+		ExtraRoots:    append([]string(nil), f.ExtraRoots...),
+		Model:         f.Model,
+		ExplicitModel: strings.TrimSpace(f.Model) != "",
+		Effort:        f.Effort,
+		BaseURL:       f.BaseURL,
+		SystemPrefix:  append([]string(nil), f.SystemPrefix...),
+		AllowWrite:    f.AllowWrite,
+		AllowShell:    f.AllowShell,
+		NoSession:     f.NoSession,
+		SessionID:     f.SessionID,
+		Continue:      f.Continue,
+		Stream:        f.Stream,
 	}
 	if f.MaxTurnsSet {
 		if f.MaxTurns == 0 {

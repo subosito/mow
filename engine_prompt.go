@@ -154,6 +154,11 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	}
 
 	if sess != nil && !opt.Ephemeral {
+		// Persist the model at the turn boundary so resume follows the session's
+		// last-used model rather than whatever default is active next launch.
+		if aerr := sess.Append(session.Event{Type: "runtime", Model: model, Wire: e.Wire()}); aerr != nil {
+			e.log().Warn("mow: session model append failed (resume may use default)", "err", aerr)
+		}
 		if aerr := sess.Append(session.Event{Type: "user", Role: "user", Content: text}); aerr != nil {
 			e.log().Warn("mow: session append failed (resume history incomplete)", "err", aerr)
 		}
@@ -258,12 +263,11 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 			if res.Text != "" {
 				aerr = sess.Append(session.Event{Type: "assistant", Role: "assistant", Content: res.Text})
 			}
-			// Full message dump for agent resume (LoadMessages keeps only the last snapshot).
-			for _, m := range res.Messages {
-				mm := m
-				if perr := sess.Append(session.Event{Type: "message", Message: &mm}); perr != nil && aerr == nil {
-					aerr = perr
-				}
+			// One complete replay snapshot per turn. Legacy per-message snapshots
+			// remain readable, but rewriting every historical message here made
+			// session files and append syscalls grow quadratically.
+			if perr := sess.AppendSnapshot(res.Messages); perr != nil && aerr == nil {
+				aerr = perr
 			}
 			if aerr != nil {
 				e.log().Warn("mow: session append failed (resume history incomplete)", "err", aerr)

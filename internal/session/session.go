@@ -22,8 +22,15 @@ type Event struct {
 	TS      time.Time `json:"ts"`
 	Role    string    `json:"role,omitempty"`
 	Content string    `json:"content,omitempty"`
-	// Raw message for full fidelity when needed
+	// Model and Wire record the runtime selected for a persisted turn. They let
+	// --continue / --session restore the session instead of current defaults.
+	Model string `json:"model,omitempty"`
+	Wire  string `json:"wire,omitempty"`
+	// Raw message for legacy full-fidelity snapshots.
 	Message *llm.Message `json:"message,omitempty"`
+	// Messages is one complete replay snapshot. New writers use one snapshot
+	// event per turn; readers retain Message support for existing JSONL files.
+	Messages []llm.Message `json:"messages,omitempty"`
 }
 
 // Store appends events under Dir/ID.jsonl
@@ -94,6 +101,65 @@ func (s *Store) Append(ev Event) error {
 	return enc.Encode(ev)
 }
 
+// AppendSnapshot writes one complete replay snapshot as a single JSONL event.
+// Keeping one event per turn avoids the open/flock/write cycle per message and
+// remains append-only so older snapshots preserve rewind history on disk.
+func (s *Store) AppendSnapshot(messages []llm.Message) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	cp := append([]llm.Message(nil), messages...)
+	return s.Append(Event{Type: "snapshot", Messages: cp})
+}
+
+// Runtime is the last model/wire pair recorded for a session.
+type Runtime struct {
+	Model string
+	Wire  string
+}
+
+// LoadRuntime returns the last recorded runtime. Older session files have no
+// runtime events and return zero values. Model and wire are carried forward
+// independently so a later partial event cannot erase either field.
+func (s *Store) LoadRuntime() (Runtime, error) {
+	path, err := s.resolvedPath()
+	if err != nil {
+		return Runtime{}, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Runtime{}, nil
+		}
+		return Runtime{}, err
+	}
+	var last Runtime
+	for len(raw) > 0 {
+		line, rest, _ := bytes.Cut(raw, []byte{'\n'})
+		raw = rest
+		if len(line) == 0 {
+			continue
+		}
+		var ev Event
+		if json.Unmarshal(line, &ev) != nil {
+			continue
+		}
+		if v := strings.TrimSpace(ev.Model); v != "" {
+			last.Model = v
+		}
+		if v := strings.TrimSpace(ev.Wire); v != "" {
+			last.Wire = v
+		}
+	}
+	return last, nil
+}
+
+// LoadModel is retained for callers that only need the model.
+func (s *Store) LoadModel() (string, error) {
+	rt, err := s.LoadRuntime()
+	return rt.Model, err
+}
+
 // LoadMessages reconstructs agent prior history for session resume.
 //
 // Session files append (1) simple user/assistant turns for the UI and (2) full
@@ -125,6 +191,11 @@ func (s *Store) LoadMessages() ([]llm.Message, error) {
 		}
 		var ev Event
 		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if len(ev.Messages) > 0 {
+			snapshot = append(snapshot[:0], ev.Messages...)
+			hasSystem = snapshot[0].Role == "system"
 			continue
 		}
 		if ev.Message != nil {
@@ -209,7 +280,7 @@ func (s *Store) LoadTranscript() ([]llm.Message, error) {
 			continue
 		}
 		// Prefer explicit transcript events; skip full message dumps.
-		if ev.Message != nil {
+		if ev.Message != nil || len(ev.Messages) > 0 {
 			continue
 		}
 		if (ev.Role == "user" || ev.Role == "assistant") && strings.TrimSpace(ev.Content) != "" {

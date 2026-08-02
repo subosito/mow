@@ -300,6 +300,9 @@ func New(opt Options) (*Engine, error) {
 			}
 			return msg, err
 		}
+		if e.cfg != nil && strings.TrimSpace(opt.Model) != "" {
+			e.cfg.LLM.Model = strings.TrimSpace(opt.Model)
+		}
 		if key := cfg.ResolveAPIKey(); key != "" {
 			mediaClient = &llm.MediaClient{
 				BaseURL:      cfg.LLM.BaseURL,
@@ -313,7 +316,7 @@ func New(opt Options) (*Engine, error) {
 		if key == "" {
 			return nil, fmt.Errorf("api key required (OPENAI_API_KEY / MOW_API_KEY / ANTHROPIC_API_KEY, or llm.api_key in the config file under MOW_HOME)")
 		}
-		if strings.TrimSpace(cfg.LLM.Model) == "" {
+		if strings.TrimSpace(cfg.LLM.Model) == "" && !opt.Continue && strings.TrimSpace(opt.SessionID) == "" {
 			return nil, fmt.Errorf("model required (OPENAI_MODEL / MOW_MODEL / ANTHROPIC_MODEL or llm.model)")
 		}
 		headers := withActorHeaders(cfg.LLM.Headers, "mow")
@@ -352,10 +355,11 @@ func New(opt Options) (*Engine, error) {
 			e.onTokenMu.Lock()
 			hooks := llm.StreamHooks{OnContent: e.onToken, OnReasoning: e.onReasoning}
 			e.onTokenMu.Unlock()
-			// Snapshot by value: SetModel/SetWire mutate e.client under e.mu
-			// while a run may be in flight; the copy keeps this call race-free.
+			// Snapshot all mutable request/catalog state under e.mu. ListModels
+			// publishes refreshed catalogs under the same lock, so a running call
+			// never shares maps or slices with model switching/catalog refresh.
 			e.mu.Lock()
-			c := *e.client
+			c := cloneLLMClient(e.client)
 			e.mu.Unlock()
 			msg, err := c.ChatWithStream(ctx, messages, tools, hooks)
 			if err == nil && msg.Usage.InputTokens > 0 {
@@ -436,6 +440,32 @@ func New(opt Options) (*Engine, error) {
 				return nil, err
 			}
 			store := &session.Store{Dir: sessDir, ID: sid}
+			// Resume the model last used by this session. Model state is loaded
+			// after the client/catalog exists so effort and preferred wire remain
+			// synchronized through the normal SetModel path. Legacy sessions have
+			// no runtime event and keep the configured default.
+			runtime, rerr := store.LoadRuntime()
+			if rerr != nil {
+				return nil, fmt.Errorf("session runtime load: %w", rerr)
+			}
+			if runtime.Model != "" && !opt.ExplicitModel {
+				// Only --model / ExplicitModel wins over the session runtime. Config
+				// and env values are defaults and therefore yield on resume. Restore
+				// the recorded wire too: otherwise SetModel may infer a different wire
+				// from today's catalog/default than the session actually used.
+				if e.client != nil || e.provider != nil {
+					if err := e.SetModel(runtime.Model); err != nil {
+						return nil, fmt.Errorf("session model restore: %w", err)
+					}
+					if runtime.Wire != "" && e.client != nil {
+						if err := e.SetWire(runtime.Wire); err != nil {
+							return nil, fmt.Errorf("session wire restore: %w", err)
+						}
+					}
+				} else if e.cfg != nil {
+					e.cfg.LLM.Model = runtime.Model
+				}
+			}
 			prior, err := store.LoadMessages()
 			if err != nil {
 				return nil, fmt.Errorf("session load: %w", err)
@@ -482,6 +512,40 @@ func New(opt Options) (*Engine, error) {
 	}
 
 	return e, nil
+}
+
+// cloneLLMClient snapshots mutable client state for one request/catalog call.
+// Callers hold Engine.mu while cloning; maps and slices need deep copies because
+// a shallow struct copy would still race with ListModels or SetModel.
+func cloneLLMClient(src *llm.Client) llm.Client {
+	if src == nil {
+		return llm.Client{}
+	}
+	dst := *src
+	dst.ExtraHeaders = cloneStringMap(src.ExtraHeaders)
+	dst.SystemPrefix = append([]string(nil), src.SystemPrefix...)
+	dst.SystemPrefixModels = append([]string(nil), src.SystemPrefixModels...)
+	dst.CatalogIDs = append([]string(nil), src.CatalogIDs...)
+	if src.CatalogModels != nil {
+		dst.CatalogModels = make(map[string]llm.ModelInfo, len(src.CatalogModels))
+		for id, info := range src.CatalogModels {
+			info.Wires = append([]string(nil), info.Wires...)
+			info.Efforts = append([]string(nil), info.Efforts...)
+			dst.CatalogModels[id] = info
+		}
+	}
+	return dst
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
 
 // Extension decodes extensions.<name> from loaded config into dst.
@@ -634,12 +698,28 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	// wrong one made /compact a visual no-op on the wire — compact prior.
 	e.mu.Lock()
 	prior := append([]llm.Message(nil), e.prior...)
+	if maxChars <= 0 {
+		configured := 0
+		ratio := agent.DefaultCompactRatio
+		if e.cfg != nil {
+			configured = e.cfg.Policy.MaxContextChars
+			if e.cfg.Policy.CompactRatio > 0 {
+				ratio = e.cfg.Policy.CompactRatio
+			}
+		}
+		if e.opt.MaxContextChars > 0 {
+			configured = e.opt.MaxContextChars
+		}
+		maxChars = resolveMaxContextChars(configured, e.limitsLocked().ContextWindow, ratio)
+		if maxChars <= 0 {
+			// Manual compaction is an explicit request even when automatic
+			// compaction was disabled with max_context_chars: -1.
+			maxChars = agent.DefaultMaxContextChars
+		}
+	}
 	e.mu.Unlock()
 	if len(prior) == 0 {
 		return CompactReport{}, nil
-	}
-	if maxChars <= 0 {
-		maxChars = agent.DefaultMaxContextChars
 	}
 	res := agent.CompactTiered(prior, maxChars, "", agent.DefaultMaxToolResultChars)
 	if res.Messages == nil {

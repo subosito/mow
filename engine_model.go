@@ -214,8 +214,10 @@ func (e *Engine) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	e.mu.Lock()
 	client := e.client
 	current := ""
+	var catalogClient llm.Client
 	if client != nil {
 		current = client.Model
+		catalogClient = cloneLLMClient(client)
 	} else if e.cfg != nil {
 		current = e.cfg.LLM.Model
 	}
@@ -231,10 +233,18 @@ func (e *Engine) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		}
 		return []ModelInfo{}, nil
 	}
-	infos, err := client.ListModels(ctx)
+	infos, err := catalogClient.ListModels(ctx)
 	if err != nil {
 		return nil, err
 	}
+	// Publish the refreshed immutable catalog under the same lock used by
+	// request snapshots and model setters. The network call stayed lock-free.
+	e.mu.Lock()
+	if e.client == client {
+		e.client.SetCatalogIDs(catalogClient.CatalogIDs)
+		e.client.SetCatalogModels(infos)
+	}
+	e.mu.Unlock()
 	out := make([]ModelInfo, 0, len(infos))
 	for _, m := range infos {
 		item := ModelInfo{

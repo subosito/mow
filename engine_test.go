@@ -320,3 +320,81 @@ llm:
 		t.Fatalf("rules still required: %q", sawSys[:min(200, len(sawSys))])
 	}
 }
+
+func TestResumeModelUsesSessionModelOverConfigDefault(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	// Create a dummy session file with a recorded model runtime event
+	eng1, err := mow.New(mow.Options{
+		Workspace: ws,
+		Model:     "resumed-model",
+		SessionID: "sess-model",
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng1.Prompt(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	eng1.Close()
+
+	// Non-explicit opt.Model (simulates default model loaded from config)
+	eng2, err := mow.New(mow.Options{
+		Workspace: ws,
+		Model:     "default-config-model",
+		SessionID: "sess-model",
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng2.Close()
+	if got := eng2.Model(); got != "resumed-model" {
+		t.Fatalf("Model() = %q, want resumed-model (config default should yield to session model)", got)
+	}
+}
+
+func TestResumeModelExplicitOverrideWins(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	eng1, err := mow.New(mow.Options{
+		Workspace: ws,
+		Model:     "resumed-model",
+		SessionID: "sess-override",
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng1.Prompt(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	eng1.Close()
+
+	// ExplicitModel = true (simulates explicit CLI --model)
+	eng2, err := mow.New(mow.Options{
+		Workspace:     ws,
+		Model:         "explicit-cli-model",
+		ExplicitModel: true,
+		SessionID:     "sess-override",
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng2.Close()
+	if got := eng2.Model(); got != "explicit-cli-model" {
+		t.Fatalf("Model() = %q, want explicit-cli-model (--model override must win)", got)
+	}
+}

@@ -49,6 +49,10 @@ type Options struct {
 	ExtraRoots []string
 	// Model overrides config/env model when non-empty.
 	Model string
+	// ExplicitModel marks Model as a explicit user/CLI override (e.g. --model).
+	// When resuming a session, an explicit model wins over the session's stored
+	// model, whereas a default/config-provided Model yields to the session.
+	ExplicitModel bool
 	// Effort overrides config/env reasoning effort when non-empty
 	// (none|low|medium|high). Empty leaves config.
 	Effort string
