@@ -316,7 +316,11 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 		return agent.PostToolDecision{}, nil
 	}}, post...)
 	compact = append([]agent.AfterCompactFunc{func(ctx context.Context, ev agent.AfterCompactEvent) {
-		e.Emit(Event{Type: EventCompact, RunID: runID, SessionID: sid, Layer: ev.Layer, CharsSaved: ev.CharsSaved})
+		e.Emit(Event{
+			Type: EventCompact, RunID: runID, SessionID: sid, Layer: CompactLayer(ev.Layer),
+			CharsBefore: ev.CharsBefore, CharsAfter: ev.CharsAfter, CharsSaved: ev.CharsSaved,
+			MessagesBefore: ev.MessagesBefore, MessagesAfter: ev.MessagesAfter, OverBudget: ev.OverBudget,
+		})
 	}}, compact...)
 	after = append([]agent.AfterTurnFunc{func(ctx context.Context, ev agent.AfterTurnEvent) {
 		e.Emit(Event{

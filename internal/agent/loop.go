@@ -606,10 +606,14 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 		}
 	}
 	result := CompactTiered(messages, compactTarget(opt.MaxContextChars, ratio), summary, toolLim)
-	if result.CharsSaved > 0 {
+	if result.CharsSaved > 0 || result.OverBudget {
 		for _, h := range opt.Hooks.AfterCompact {
 			if h != nil {
-				h(ctx, AfterCompactEvent{Layer: result.Layer, CharsSaved: result.CharsSaved})
+				h(ctx, AfterCompactEvent{
+					Layer: result.Layer, CharsBefore: result.CharsBefore, CharsAfter: result.CharsAfter,
+					CharsSaved: result.CharsSaved, MessagesBefore: result.MessagesBefore,
+					MessagesAfter: result.MessagesAfter, OverBudget: result.OverBudget,
+				})
 			}
 		}
 	}

@@ -146,26 +146,42 @@ func compactTarget(maxChars int, ratio float64) int {
 
 // CompactResult describes which cheap-first layer was required. The input is
 // never mutated; Messages is a projection for the next provider call only.
+// Projections share ToolCalls slices with live history; layers treat them read-only.
 type CompactResult struct {
-	Messages   []llm.Message
-	Layer      string // "snip" or "drop"
-	CharsSaved int
+	Messages       []llm.Message
+	Layer          string // "snip" or "drop"
+	CharsBefore    int
+	CharsAfter     int
+	MessagesBefore int
+	MessagesAfter  int
+	OverBudget     bool
+	CharsSaved     int
 }
 
 // CompactTiered first snips the longest tool results. Only when that cannot
 // reach maxChars does it replace complete older turn ranges with task anchors
 // and a summary. Raw session history is deliberately outside this function.
 func CompactTiered(messages []llm.Message, maxChars int, summary string, maxToolChars int) CompactResult {
-	before := estChars(messages)
 	if maxToolChars <= 0 {
 		maxToolChars = DefaultMaxToolResultChars
 	}
 	snipped := snipLongestToolResults(messages, maxChars, maxToolChars)
 	if maxChars <= 0 || estChars(snipped) <= maxChars {
-		return CompactResult{Messages: snipped, Layer: "snip", CharsSaved: max(0, before-estChars(snipped))}
+		return compactResult(messages, snipped, "snip", maxChars)
 	}
 	out := CompactOpts(snipped, maxChars, summary, maxToolChars)
-	return CompactResult{Messages: out, Layer: "drop", CharsSaved: max(0, before-estChars(out))}
+	return compactResult(messages, out, "drop", maxChars)
+}
+
+func compactResult(before, after []llm.Message, layer string, target int) CompactResult {
+	beforeChars, afterChars := estChars(before), estChars(after)
+	return CompactResult{
+		Messages: after, Layer: layer,
+		CharsBefore: beforeChars, CharsAfter: afterChars,
+		MessagesBefore: len(before), MessagesAfter: len(after),
+		OverBudget: target > 0 && afterChars > target,
+		CharsSaved: max(0, beforeChars-afterChars),
+	}
 }
 
 const minSnippedToolChars = 800
@@ -189,12 +205,16 @@ func snipLongestToolResults(messages []llm.Message, target, maxToolChars int) []
 		if limit < minSnippedToolChars {
 			limit = minSnippedToolChars
 		}
-		// Enforce the normal per-result cap, then take only as much additional
-		// content as needed to reach the context target.
-		want := min(c.size, limit)
-		if need > 0 {
-			want = min(want, max(minSnippedToolChars, c.size-need-len(snipMarker)))
+		// Keep as much context as possible while satisfying either constraint:
+		// the normal per-result policy cap or this pass's remaining reduction.
+		// Taking the larger target avoids gutting a result to the policy cap
+		// when only a small context-budget reduction is needed.
+		policyWant := 0
+		if c.size > limit {
+			policyWant = limit
 		}
+		needWant := max(minSnippedToolChars, c.size-max(0, need))
+		want := max(policyWant, needWant)
 		if want >= c.size {
 			continue
 		}

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -68,3 +69,17 @@ func min(a, b int) int {
 }
 
 var _ = fmt.Sprintf // keep fmt import stable
+
+func BenchmarkApplyCompactUnderBudget(b *testing.B) {
+	msgs := []llm.Message{{Role: "system", Content: "sys"},
+		{Role: "user", Content: strings.Repeat("question ", 100)},
+		{Role: "assistant", Content: strings.Repeat("answer ", 100)}}
+	opt := Options{MaxContextChars: 100_000}
+	calib := newRatioCalibrator()
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := applyCompact(context.Background(), msgs, opt, calib); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

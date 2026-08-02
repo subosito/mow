@@ -72,10 +72,16 @@ type PreCompactFunc func(ctx context.Context, e PreCompactEvent) (PreCompactDeci
 
 // AfterCompactEvent reports one automatic context projection compaction.
 // Layer is "snip" when reducing tool bodies was sufficient, or "drop" when
-// completed older turns were also replaced by anchors and a summary.
+// completed older turns were also replaced by anchors and a summary. OverBudget
+// is true when all layers ran but the projection still exceeds its target.
 type AfterCompactEvent struct {
-	Layer      string
-	CharsSaved int
+	Layer          string
+	CharsBefore    int
+	CharsAfter     int
+	CharsSaved     int
+	MessagesBefore int
+	MessagesAfter  int
+	OverBudget     bool
 }
 
 // AfterCompactFunc runs after the projection has been compacted.

@@ -347,3 +347,28 @@ func TestApplyCompactReportsLayerAndSavings(t *testing.T) {
 		t.Fatalf("event=%+v", event)
 	}
 }
+
+func TestCompactTieredSmallOveragePreservesToolContext(t *testing.T) {
+	tool := strings.Repeat("x", 24_000)
+	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "inspect"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "read", Arguments: `{}`}}}},
+		{Role: "tool", ToolCallID: "1", Name: "read", Content: tool}}
+	before := estChars(msgs)
+	need := 2_000
+	got := CompactTiered(msgs, before-need, "", DefaultMaxToolResultChars)
+	if got.Layer != "snip" || got.CharsSaved < need {
+		t.Fatalf("result=%+v", got)
+	}
+	if n := len(got.Messages[3].Content); n < 20_000 || n <= minSnippedToolChars {
+		t.Fatalf("small overage gutted tool result to %d bytes", n)
+	}
+}
+
+func TestCompactTieredReportsOverBudget(t *testing.T) {
+	msgs := []llm.Message{{Role: "system", Content: strings.Repeat("s", 8_000)},
+		{Role: "user", Content: strings.Repeat("p", 20_000)}}
+	got := CompactTiered(msgs, 100, "", DefaultMaxToolResultChars)
+	if !got.OverBudget || got.CharsAfter <= 100 {
+		t.Fatalf("result=%+v", got)
+	}
+}

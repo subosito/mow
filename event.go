@@ -45,7 +45,7 @@ const (
 	EventToken     EventType = "loop.token"     // answer content delta
 	EventReasoning EventType = "loop.reasoning" // reasoning delta (UI/host optional)
 	EventTurn      EventType = "loop.turn"      // assistant message after LLM step
-	// EventCompact reports projection-only context reduction. Layer is snip or drop.
+	// EventCompact reports projection-only context reduction. See CompactLayer.
 	EventCompact EventType = "loop.compact"
 	// EventStall is emitted once when the loop stops early because consecutive
 	// tool batches added no new evidence. Text carries the reason; the run
@@ -84,6 +84,14 @@ const (
 	// renders only the head still sees the errors. count may exceed
 	// len(diagnostics) when the list was truncated.
 	EventLSPDiagnostics EventType = "harness.lsp.diagnostics"
+)
+
+// CompactLayer identifies the most expensive projection layer used.
+type CompactLayer string
+
+const (
+	CompactLayerSnip CompactLayer = "snip"
+	CompactLayerDrop CompactLayer = "drop"
 )
 
 // MaxLSPDiagnostics bounds how many findings ride along a tool result and an
@@ -173,9 +181,15 @@ type Event struct {
 	// Delegate
 	Agent string `json:"agent,omitempty"`
 
-	// Context compaction (loop.compact).
-	Layer      string `json:"layer,omitempty"`
-	CharsSaved int    `json:"chars_saved,omitempty"`
+	// Context compaction (loop.compact). Counts are raw characters/messages;
+	// OverBudget means all layers ran but the projection still exceeds target.
+	Layer          CompactLayer `json:"layer,omitempty"`
+	CharsBefore    int          `json:"chars_before,omitempty"`
+	CharsAfter     int          `json:"chars_after,omitempty"`
+	CharsSaved     int          `json:"chars_saved,omitempty"`
+	MessagesBefore int          `json:"messages_before,omitempty"`
+	MessagesAfter  int          `json:"messages_after,omitempty"`
+	OverBudget     bool         `json:"over_budget,omitempty"`
 
 	// LSP diagnostics (harness.lsp.diagnostics). Path is the edited file,
 	// Count the server total, Diagnostics bounded by MaxLSPDiagnostics.
