@@ -66,6 +66,7 @@ func registerAll(configPaths ...string) error {
 	}
 	ext.RegisterTool(&hoverTool{c: rc})
 	ext.RegisterTool(&defTool{c: rc})
+	ext.RegisterPostTool(postEditDiagnostics(rc.diagnostics))
 	cmd := strings.TrimSpace(c.Command)
 	fmt.Fprintf(os.Stderr, "lsp: registered hover + definition via %q\n", cmd)
 	return nil
@@ -110,6 +111,34 @@ func (r *reconnecting) definition(ctx context.Context, path string, line, col in
 	return r.withRetry(ctx, func(c *client) (string, error) {
 		return c.definition(ctx, path, line, col)
 	})
+}
+
+func (r *reconnecting) diagnostics(ctx context.Context, path string) ([]mow.Diagnostic, error) {
+	if err := r.ensure(ctx); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	c := r.c
+	r.mu.Unlock()
+	if c == nil {
+		return nil, fmt.Errorf("lsp: no client")
+	}
+	out, err := c.diagnostics(ctx, path)
+	if err != nil {
+		// One reconnect, same policy as withRetry.
+		r.reset()
+		if err := r.ensure(ctx); err != nil {
+			return nil, err
+		}
+		r.mu.Lock()
+		c = r.c
+		r.mu.Unlock()
+		if c == nil {
+			return nil, fmt.Errorf("lsp: no client")
+		}
+		return c.diagnostics(ctx, path)
+	}
+	return out, nil
 }
 
 func (r *reconnecting) withRetry(ctx context.Context, fn func(*client) (string, error)) (string, error) {
@@ -216,6 +245,82 @@ func (c *client) definition(ctx context.Context, path string, line, col int) (st
 		return "", err
 	}
 	return string(raw), nil
+}
+
+// diagnostics pulls textDocument/diagnostic (LSP 3.17) for one file. Push
+// notifications are not usable here: call() skips server notifications, so a
+// pull request is the reliable way to get findings for a file we just wrote.
+func (c *client) diagnostics(ctx context.Context, path string) ([]mow.Diagnostic, error) {
+	abs, err := absPath(c.root, path)
+	if err != nil {
+		return nil, err
+	}
+	_ = c.didOpen(abs)
+	raw, err := c.call(ctx, "textDocument/diagnostic", map[string]any{
+		"textDocument": map[string]any{"uri": pathToURI(abs)},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return parseDiagnostics(raw), nil
+}
+
+// parseDiagnostics reads a DocumentDiagnosticReport (or a bare item array).
+func parseDiagnostics(raw json.RawMessage) []mow.Diagnostic {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	type item struct {
+		Range struct {
+			Start struct {
+				Line int `json:"line"`
+			} `json:"start"`
+		} `json:"range"`
+		Severity int    `json:"severity"`
+		Message  string `json:"message"`
+	}
+	var rep struct {
+		Items []item `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &rep); err != nil || rep.Items == nil {
+		var bare []item
+		if err := json.Unmarshal(raw, &bare); err != nil {
+			return nil
+		}
+		rep.Items = bare
+	}
+	out := make([]mow.Diagnostic, 0, len(rep.Items))
+	for _, it := range rep.Items {
+		msg := strings.TrimSpace(it.Message)
+		if msg == "" {
+			continue
+		}
+		if len(msg) > maxDiagMessage {
+			msg = msg[:maxDiagMessage] + "…"
+		}
+		out = append(out, mow.Diagnostic{
+			Severity: severityName(it.Severity),
+			Message:  msg,
+			Line:     it.Range.Start.Line + 1, // LSP is 0-based, event contract is 1-based
+		})
+	}
+	return out
+}
+
+// severityName maps LSP DiagnosticSeverity to the frozen event vocabulary.
+func severityName(n int) string {
+	switch n {
+	case 1:
+		return "error"
+	case 2:
+		return "warning"
+	case 3:
+		return "information"
+	case 4:
+		return "hint"
+	default:
+		return "error"
+	}
 }
 
 func (c *client) didOpen(abs string) error {

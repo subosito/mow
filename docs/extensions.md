@@ -376,6 +376,13 @@ accepted.
   - HTTP: `url:` Streamable HTTP POST (JSON or SSE body); optional `headers`
   - HTTP auth: `bearer`, `oauth2_client_credentials`, `oauth2_device_code` (RFC 8628), or `oauth2_auth_code` (loopback browser callback; `MOW_MCP_AUTH_CODE` for tests). 401 clears cache and retries once.
 - LSP tools: `lsp_hover`, `lsp_definition` (reconnect once)
+- LSP post-edit diagnostics: when the pack is configured, a PostTool hook pulls
+  `textDocument/diagnostic` after a successful `write`/`edit` on a source file,
+  appends the findings to the tool result the model sees, and emits
+  `harness.lsp.diagnostics`. Diagnostics for the edit come back *with* the edit,
+  so the model does not spend a turn running tests to learn it broke the build.
+  Bounded by `mow.MaxLSPDiagnostics`; a server that is down or silent never
+  fails an edit that already succeeded. No config → no process → no event.
 
 ```yaml
 extensions:
