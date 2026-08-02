@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -172,5 +173,101 @@ func TestRetryDelayHonorsRetryAfter(t *testing.T) {
 	res.Header.Set("Retry-After", "600")
 	if got := retryDelay(1, res); got != 30*time.Second {
 		t.Fatalf("Retry-After not capped: %v", got)
+	}
+}
+
+// ---- connection-refused survival (upstream restart) ----
+
+// refusedRoundTripper always fails with ECONNREFUSED (server down/restarting).
+type refusedRoundTripper struct{ n int }
+
+func (r *refusedRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	r.n++
+	return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+}
+
+// flakyRoundTripper fails with a generic retryable net error.
+type flakyRoundTripper struct {
+	n   int
+	err error
+}
+
+func (r *flakyRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	r.n++
+	return nil, r.err
+}
+
+func shrinkRefusedBudget(t *testing.T) {
+	t.Helper()
+	oldN, oldD := maxConnRefusedAttempts, connRefusedBaseDelay
+	maxConnRefusedAttempts = 3
+	connRefusedBaseDelay = time.Millisecond
+	t.Cleanup(func() {
+		maxConnRefusedAttempts, connRefusedBaseDelay = oldN, oldD
+	})
+}
+
+func TestDoWithRetrySurvivesConnectionRefused(t *testing.T) {
+	shrinkRefusedBudget(t)
+	rt := &refusedRoundTripper{}
+	hc := &http.Client{Transport: rt}
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil)
+	_, err := doWithRetry(hc, req, maxHTTPAttempts)
+	if err == nil {
+		t.Fatal("expected connection-refused error")
+	}
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		t.Fatalf("expected ECONNREFUSED, got %v", err)
+	}
+	// The refused budget extends past the generic burst (3) — a pure-refused
+	// stream burns the refused budget + 1 final failing attempt.
+	if got := rt.n; got != maxConnRefusedAttempts+1 || got <= maxHTTPAttempts {
+		t.Fatalf("connection refused retry window = %d attempts, want %d (generic was %d)", got, maxConnRefusedAttempts+1, maxHTTPAttempts)
+	}
+}
+
+func TestDoJSONSurvivesConnectionRefused(t *testing.T) {
+	shrinkRefusedBudget(t)
+	rt := &refusedRoundTripper{}
+	c := &Client{HTTP: &http.Client{Transport: rt}}
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil)
+	_, _, err := c.doJSON(req)
+	if err == nil {
+		t.Fatal("expected connection-refused error")
+	}
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		t.Fatalf("expected ECONNREFUSED, got %v", err)
+	}
+	if got := rt.n; got != maxConnRefusedAttempts+1 || got <= maxHTTPAttempts {
+		t.Fatalf("doJSON refused retry window = %d attempts, want %d", got, maxConnRefusedAttempts+1)
+	}
+}
+
+func TestDoWithRetryGenericBurstUnchanged(t *testing.T) {
+	rt := &flakyRoundTripper{err: &net.OpError{Op: "dial", Net: "tcp", Err: io.EOF}}
+	hc := &http.Client{Transport: rt}
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil)
+	_, err := doWithRetry(hc, req, maxHTTPAttempts)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if rt.n != maxHTTPAttempts {
+		t.Fatalf("generic burst = %d attempts, want %d (unchanged)", rt.n, maxHTTPAttempts)
+	}
+}
+
+func TestServerRestartingAndRefusedDelay(t *testing.T) {
+	ref := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	if !serverRestarting(ref) {
+		t.Fatal("ECONNREFUSED must classify as server restarting")
+	}
+	if serverRestarting(io.EOF) || serverRestarting(nil) {
+		t.Fatal("non-refused errors must not classify as restarting")
+	}
+	// Delay grows 1x, 2x, 4x, then caps at 4x.
+	base := connRefusedBaseDelay
+	if retryDelayRefused(1) < base || retryDelayRefused(2) < 2*base ||
+		retryDelayRefused(3) < 3*base || retryDelayRefused(10) < 3*base {
+		t.Fatal("refused delay must grow then cap")
 	}
 }

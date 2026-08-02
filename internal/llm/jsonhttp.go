@@ -41,8 +41,13 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 		lastStatus int
 		lastBody   []byte
 		wait       time.Duration
+		refused    int
 	)
-	for attempt := 1; attempt <= maxHTTPAttempts; attempt++ {
+	// Connection-refused (upstream down/restarting) gets a much longer window
+	// than the generic burst, mirroring doWithRetry: a gateway bounce can take
+	// tens of seconds and a run must survive it. Generic transients keep the
+	// short maxHTTPAttempts budget.
+	for attempt := 1; ; attempt++ {
 		if err := req.Context().Err(); err != nil {
 			return 0, nil, err
 		}
@@ -62,7 +67,18 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 		status, body, hdr, err := doJSONAttempt(hc, req, capPerAttempt)
 		if err != nil {
 			lastErr = err
-			if !retryableNetErr(err) || attempt == maxHTTPAttempts {
+			if !retryableNetErr(err) {
+				return 0, nil, err
+			}
+			if serverRestarting(err) {
+				refused++
+				if refused > maxConnRefusedAttempts {
+					return 0, nil, err
+				}
+				wait = retryDelayRefused(refused)
+				continue
+			}
+			if attempt == maxHTTPAttempts {
 				return 0, nil, err
 			}
 			wait = retryDelay(attempt, nil)

@@ -14,11 +14,47 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
 // maxHTTPAttempts for transient failures (429 / 5xx / some network errors).
 const maxHTTPAttempts = 3
+
+// maxConnRefusedAttempts is the extra budget for connection-refused errors
+// (upstream down/restarting): a gateway bounce can take tens of seconds, and a
+// run must survive it instead of dying at the ~1.4s generic burst. Once the
+// budget is spent the original error is returned (a permanently-dead server
+// should not stall the caller forever). Vars so tests can shrink them.
+var maxConnRefusedAttempts = 12
+
+// connRefusedBaseDelay is the base backoff for connection-refused retries
+// (doubles twice then caps); tests shrink it.
+var connRefusedBaseDelay = time.Second
+
+// serverRestarting reports whether err is a connection refusal — the peer
+// accepted the TCP handshake or nothing is listening (server down/restarting).
+// These deserve a much longer retry window than generic transients.
+func serverRestarting(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// retryDelayRefused grows the backoff for connection-refused retries:
+// 1s, 2s, 4s, then 4s cap, so the full budget spans ~40s of restart window
+// with light jitter to avoid synchronized reconnect storms.
+func retryDelayRefused(n int) time.Duration {
+	if n <= 0 {
+		n = 1
+	}
+	d := connRefusedBaseDelay * time.Duration(1<<min(n-1, 2)) // 1x, 2x, 4x, 4x…
+	if j := time.Duration(rand.Int64N(int64(d / 4))); j > 0 {
+		d += j
+	}
+	return d
+}
 
 // doHTTP runs req with retries. req must be replayable (GetBody set when Body non-nil).
 //
@@ -68,9 +104,9 @@ func doWithRetry(hc *http.Client, req *http.Request, attempts int) (*http.Respon
 	if attempts < 1 {
 		attempts = 1
 	}
-	var last error
 	var wait time.Duration
-	for i := 0; i < attempts; i++ {
+	refused := 0
+	for i := 0; ; i++ {
 		if err := req.Context().Err(); err != nil {
 			return nil, err
 		}
@@ -92,8 +128,21 @@ func doWithRetry(hc *http.Client, req *http.Request, attempts int) (*http.Respon
 		}
 		res, err := hc.Do(req)
 		if err != nil {
-			last = err
-			if !retryableNetErr(err) || i == attempts-1 {
+			if !retryableNetErr(err) {
+				return nil, err
+			}
+			// Connection refused = upstream down/restarting: survive the bounce
+			// with a much longer window than generic transients (the generic
+			// burst is ~1.4s; a gateway restart can take tens of seconds).
+			if serverRestarting(err) {
+				refused++
+				if refused > maxConnRefusedAttempts {
+					return nil, err
+				}
+				wait = retryDelayRefused(refused)
+				continue
+			}
+			if i == attempts-1 {
 				return nil, err
 			}
 			wait = retryDelay(i+1, nil)
@@ -103,15 +152,10 @@ func doWithRetry(hc *http.Client, req *http.Request, attempts int) (*http.Respon
 			wait = retryDelay(i+1, res)
 			_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 1<<20))
 			res.Body.Close()
-			last = fmt.Errorf("llm: HTTP %d", res.StatusCode)
 			continue
 		}
 		return res, nil
 	}
-	if last != nil {
-		return nil, last
-	}
-	return nil, fmt.Errorf("llm: request failed after %d attempts", attempts)
 }
 
 func rewindRequest(req *http.Request) error {
