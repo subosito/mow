@@ -505,8 +505,20 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		unsub := a.eng.AddOnEvent(func(ev mow.Event) {
 			switch ev.Type {
 			case mow.EventDelegateChunk:
-				// Peer answer text — visible as normal agent stream.
-				writeAgentText(ev.Delta)
+				// A nested delegate's answer is NOT this agent's reply: the
+				// host dedupes EventDelegateChunk text against the final
+				// Prompt result, so forwarding it as agent_message_chunk would
+				// commit the nested answer twice (once chunked, once in the
+				// full reply) — corrupting markdown rendering on the host.
+				// Show it as collapsible thought progress instead.
+				agent := strings.TrimSpace(ev.Agent)
+				line := strings.TrimSpace(ev.Delta)
+				if line != "" {
+					if agent != "" {
+						line = "[" + agent + "] " + line
+					}
+					writeThought(line + "\n")
+				}
 			case mow.EventDelegateProgress:
 				// Nested peer tool/thought. Prefer thought_chunk so clients can
 				// collapse it; include agent label for multi-peer clarity.

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -129,11 +130,12 @@ func TestSessionCancelDuringPrompt(t *testing.T) {
 }
 
 type pipeClient struct {
-	in      io.Reader
-	out     io.Writer
-	next    int
-	pending map[string]chan map[string]json.RawMessage
-	mu      sync.Mutex
+	in       io.Reader
+	out      io.Writer
+	next     int
+	pending  map[string]chan map[string]json.RawMessage
+	mu       sync.Mutex
+	onNotify func(method string, params json.RawMessage)
 }
 
 func newPipeClient(in io.Reader, out io.Writer) *pipeClient {
@@ -151,8 +153,13 @@ func (c *pipeClient) readLoop() {
 		if json.Unmarshal(sc.Bytes(), &msg) != nil {
 			continue
 		}
-		if _, ok := msg["method"]; ok {
+		if raw, ok := msg["method"]; ok {
 			if _, hasID := msg["id"]; !hasID {
+				if fn := c.onNotify; fn != nil {
+					var method string
+					_ = json.Unmarshal(raw, &method)
+					fn(method, msg["params"])
+				}
 				continue // notification
 			}
 		}
@@ -346,4 +353,64 @@ func (c *pipeClient) prompt(ctx context.Context, sid, text string) (string, erro
 	}
 	_ = json.Unmarshal(msg["result"], &res)
 	return res.StopReason, nil
+}
+
+// Regression: a nested acp_delegate answer (EventDelegateChunk) must NOT be
+// forwarded as agent_message_chunk — the host accumulates chunk text as the
+// peer reply and the tool result already carries the full answer, so
+// forwarding committed nested answers twice and corrupted host-side markdown.
+// It may surface as thought progress only.
+func TestAgentPromptDelegateChunkNotForwardedAsAgentText(t *testing.T) {
+	var eng *mow.Engine
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			// Mid-prompt: a nested delegate streams its answer.
+			eng.Emit(mow.Event{Type: mow.EventDelegateChunk, Agent: "nested", Delta: "## nested answer"})
+			return mow.Message{Role: "assistant", Content: "outer reply"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	go func() {
+		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
+		_ = cw.Close()
+	}()
+	cl := newPipeClient(cr, aw)
+	// Capture every session/update notification.
+	var mu sync.Mutex
+	var updates []string
+	cl.onNotify = func(method string, params json.RawMessage) {
+		if method == "session/update" {
+			mu.Lock()
+			updates = append(updates, string(params))
+			mu.Unlock()
+		}
+	}
+	go cl.readLoop()
+
+	if err := cl.callOK(ctx, "initialize", map[string]any{"protocolVersion": 1}); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	sid, err := cl.sessionNew(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("session/new: %v", err)
+	}
+	if _, err := cl.prompt(ctx, sid, "hi"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, u := range updates {
+		if strings.Contains(u, "agent_message_chunk") && strings.Contains(u, "nested answer") {
+			t.Fatalf("delegate chunk forwarded as agent_message_chunk: %s", u)
+		}
+	}
 }

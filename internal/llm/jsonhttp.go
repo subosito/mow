@@ -47,7 +47,10 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 	// than the generic burst, mirroring doWithRetry: a gateway bounce can take
 	// tens of seconds and a run must survive it. Generic transients keep the
 	// short maxHTTPAttempts budget.
-	for attempt := 1; ; attempt++ {
+	// Bound the loop so the retry tail below stays reachable: the conn-refused
+	// window is the only path that may exceed maxHTTPAttempts, and it is
+	// capped separately by maxConnRefusedAttempts.
+	for attempt := 1; attempt <= maxHTTPAttempts+maxConnRefusedAttempts; attempt++ {
 		if err := req.Context().Err(); err != nil {
 			return 0, nil, err
 		}
