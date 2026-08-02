@@ -606,6 +606,71 @@ func (e *Engine) drainSteer() []string {
 	return out
 }
 
+// CompactReport summarizes a manual compaction (Engine.Compact).
+type CompactReport struct {
+	// Layer is the compaction layer used ("snip" or "drop").
+	Layer string `json:"layer,omitempty"`
+	// CharsSaved is the raw character reduction (before − after).
+	CharsSaved int `json:"chars_saved,omitempty"`
+	// MessagesBefore/After are the transcript sizes around the compaction.
+	MessagesBefore int `json:"messages_before,omitempty"`
+	MessagesAfter  int `json:"messages_after,omitempty"`
+	// OverBudget is true when even drop+summarize could not reach the target.
+	OverBudget bool `json:"over_budget,omitempty"`
+}
+
+// Compact manually compacts the engine's stored transcript (the context the
+// next Prompt resumes with) using the same tiered machinery as the loop's
+// automatic compaction: snip bulky tool results first, then drop+summarize
+// old turns with task anchors. Raw session JSONL is never touched — this only
+// rewrites the in-memory projection. maxChars <= 0 uses the default budget.
+// Emits a loop.compact event. No-op (empty report) when there is no history.
+func (e *Engine) Compact(maxChars int) (CompactReport, error) {
+	if e == nil {
+		return CompactReport{}, fmt.Errorf("engine: nil")
+	}
+	e.mu.Lock()
+	hist := append([]Message(nil), e.transcript...)
+	e.mu.Unlock()
+	if len(hist) == 0 {
+		return CompactReport{}, nil
+	}
+	if maxChars <= 0 {
+		maxChars = agent.DefaultMaxContextChars
+	}
+	msgs := make([]llm.Message, 0, len(hist))
+	for _, m := range hist {
+		msgs = append(msgs, toInternalMessage(m))
+	}
+	res := agent.CompactTiered(msgs, maxChars, "", agent.DefaultMaxToolResultChars)
+	if res.Messages == nil {
+		return CompactReport{}, fmt.Errorf("engine: compact failed (nil result)")
+	}
+	compacted := toPublicMessages(res.Messages)
+	e.mu.Lock()
+	e.transcript = compacted
+	e.mu.Unlock()
+
+	rep := CompactReport{
+		Layer:          string(res.Layer),
+		CharsSaved:     res.CharsSaved,
+		MessagesBefore: res.MessagesBefore,
+		MessagesAfter:  res.MessagesAfter,
+		OverBudget:     res.OverBudget,
+	}
+	e.Emit(Event{
+		Type:           EventCompact,
+		Layer:          CompactLayer(res.Layer),
+		CharsBefore:    res.CharsBefore,
+		CharsAfter:     res.CharsAfter,
+		CharsSaved:     res.CharsSaved,
+		MessagesBefore: res.MessagesBefore,
+		MessagesAfter:  res.MessagesAfter,
+		OverBudget:     res.OverBudget,
+	})
+	return rep, nil
+}
+
 // Rewind drops the most recent user↔assistant exchange from the live context
 // (in-memory history + transcript) and returns that user prompt. Use it to
 // implement retry/edit: after Rewind, re-Prompt the returned text (or an edited
