@@ -317,13 +317,14 @@ func TestExtraRootSpecROSuffixInExtraRoots(t *testing.T) {
 }
 
 
+
 func TestOTELConfigFromUserFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(config.EnvHome, dir)
 	t.Setenv("MOW_OTEL_ENDPOINT", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	path := filepath.Join(dir, "config.yaml")
-	body := "otel:\n  endpoint: http://127.0.0.1:4318\n  service_name: mow-test\n  sample_ratio: 0.25\n"
+	body := "otel:\n  endpoint: http://127.0.0.1:4318\n  service_name: mow-test\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -340,11 +341,7 @@ func TestOTELConfigFromUserFile(t *testing.T) {
 	if f.OTEL.ServiceName != "mow-test" {
 		t.Fatalf("service=%q", f.OTEL.ServiceName)
 	}
-	if f.OTEL.SampleRatio != 0.25 {
-		t.Fatalf("ratio=%v", f.OTEL.SampleRatio)
-	}
 }
-
 
 func TestOTELStrippedFromProjectConfig(t *testing.T) {
 	home := t.TempDir()
@@ -371,7 +368,6 @@ func TestOTELStrippedFromProjectConfig(t *testing.T) {
 		t.Fatalf("project must not set otel.endpoint, got %q", f.OTEL.Endpoint)
 	}
 }
-
 
 func TestOTELEnvOverride(t *testing.T) {
 	t.Setenv(config.EnvHome, t.TempDir())

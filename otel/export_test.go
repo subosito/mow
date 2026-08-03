@@ -59,7 +59,6 @@ func TestStartExportHTTPSmoke(t *testing.T) {
 	exp, err := StartExport(context.Background(), ExportConfig{
 		Endpoint:    srv.URL,
 		ServiceName: "mow-test",
-		SampleRatio: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -97,10 +96,9 @@ func TestExportConfigFromMap(t *testing.T) {
 		"endpoint":     " http://127.0.0.1:4318 ",
 		"protocol":     "http",
 		"service_name": "svc",
-		"sample_ratio": 0.5,
 		"headers":      map[string]any{"a": "b"},
 	})
-	if cfg.Endpoint != "http://127.0.0.1:4318" || cfg.ServiceName != "svc" || cfg.SampleRatio != 0.5 || cfg.Headers["a"] != "b" {
+	if cfg.Endpoint != "http://127.0.0.1:4318" || cfg.ServiceName != "svc" || cfg.Headers["a"] != "b" {
 		t.Fatalf("%+v", cfg)
 	}
 	if !strings.HasPrefix(cfg.Endpoint, "http") {

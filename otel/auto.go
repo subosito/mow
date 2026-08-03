@@ -55,9 +55,6 @@ func exportConfigFromMap(raw map[string]any) ExportConfig {
 		Protocol:    strVal(raw["protocol"]),
 		ServiceName: strVal(raw["service_name"]),
 	}
-	if v, ok := raw["sample_ratio"].(float64); ok {
-		cfg.SampleRatio = v
-	}
 	if h, ok := raw["headers"].(map[string]string); ok {
 		cfg.Headers = h
 	} else if h, ok := raw["headers"].(map[string]any); ok {

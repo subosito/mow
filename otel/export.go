@@ -26,7 +26,6 @@ import (
 //	  endpoint: http://127.0.0.1:4318   # empty = off
 //	  protocol: http                    # http (default) | grpc (reserved)
 //	  service_name: mow
-//	  sample_ratio: 1.0                 # 0 with endpoint set → 1.0
 //	  headers:
 //	    authorization: Bearer …
 type ExportConfig struct {
@@ -34,8 +33,6 @@ type ExportConfig struct {
 	Protocol    string // "http" (default) or "grpc"
 	ServiceName string
 	Headers     map[string]string
-	// SampleRatio in (0,1]; 0 means 1.0 when Endpoint is set.
-	SampleRatio float64
 }
 
 // Export is a live OTLP pipeline: Adapter + providers. Call Shutdown when the
@@ -73,13 +70,6 @@ func StartExport(ctx context.Context, cfg ExportConfig) (*Export, error) {
 	svc := strings.TrimSpace(cfg.ServiceName)
 	if svc == "" {
 		svc = "mow"
-	}
-	ratio := cfg.SampleRatio
-	if ratio <= 0 {
-		ratio = 1
-	}
-	if ratio > 1 {
-		ratio = 1
 	}
 
 	// Schemaless merge avoids Default() vs pinned semconv SchemaURL conflicts
@@ -126,7 +116,7 @@ func StartExport(ctx context.Context, cfg ExportConfig) (*Export, error) {
 			sdktrace.WithBatchTimeout(2*time.Second),
 		),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(ratio))),
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
 	)
 	mp := sdkmetric.NewMeterProvider(
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(mexp,

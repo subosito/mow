@@ -326,7 +326,6 @@ otel:
   endpoint: http://127.0.0.1:4318   # empty = disabled
   protocol: http                    # http default; grpc reserved
   service_name: mow
-  sample_ratio: 1.0                 # 0 with endpoint set → 1.0
   # headers:
   #   authorization: Bearer …
 ```

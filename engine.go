@@ -550,7 +550,6 @@ func otelCfgMap(cfg *config.File) map[string]any {
 		"endpoint":     cfg.OTEL.Endpoint,
 		"protocol":     cfg.OTEL.Protocol,
 		"service_name": cfg.OTEL.ServiceName,
-		"sample_ratio": cfg.OTEL.SampleRatio,
 	}
 	if len(cfg.OTEL.Headers) > 0 {
 		m["headers"] = cfg.OTEL.Headers

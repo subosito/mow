@@ -7,7 +7,6 @@ import "sync"
 // SetOTELAuto from init when imported (stock CLI blank-imports it).
 //
 // cfg is a loose map of otel.* keys (endpoint, protocol, service_name,
-// headers, sample_ratio). Empty/missing endpoint must no-op.
 // Returning an error fails Engine construction.
 type OTELAutoFunc func(eng *Engine, cfg map[string]any) error
 

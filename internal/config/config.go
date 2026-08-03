@@ -41,9 +41,7 @@ type OTELConfig struct {
 	ServiceName string `yaml:"service_name"`
 	// Headers are extra exporter headers (e.g. authorization).
 	Headers map[string]string `yaml:"headers"`
-	// SampleRatio is the head trace sample rate in [0,1]. Zero with a set
 	// endpoint means 1.0 (sample all). Use a small fraction in busy fleets.
-	SampleRatio float64 `yaml:"sample_ratio"`
 }
 
 type LLMConfig struct {
@@ -492,10 +490,6 @@ func mergeOTEL(dst *OTELConfig, o OTELConfig) {
 			dst.Headers[k] = v
 		}
 	}
-	// SampleRatio: only apply when explicitly set (>0). 0 in overlay means absent.
-	if o.SampleRatio > 0 {
-		dst.SampleRatio = o.SampleRatio
-	}
 }
 
 func mergeExtensions(dst *File, overlay map[string]yaml.Node) {
@@ -804,9 +798,6 @@ func (f *File) normalize() error {
 		}
 		if f.OTEL.ServiceName == "" {
 			f.OTEL.ServiceName = "mow"
-		}
-		if f.OTEL.SampleRatio < 0 || f.OTEL.SampleRatio > 1 {
-			return fmt.Errorf("otel.sample_ratio %v: want 0..1", f.OTEL.SampleRatio)
 		}
 	} else {
 		f.OTEL = OTELConfig{} // keep disabled clean
