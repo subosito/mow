@@ -17,8 +17,8 @@ func TestCompact(t *testing.T) {
 		msgs = append(msgs, llm.Message{Role: "assistant", Content: strings.Repeat("y", 100)})
 	}
 	out := CompactOpts(msgs, 2000, "", DefaultMaxToolResultChars)
-	if estChars(out) >= estChars(msgs) {
-		t.Fatalf("expected smaller: in=%d out=%d", estChars(msgs), estChars(out))
+	if EstChars(out) >= EstChars(msgs) {
+		t.Fatalf("expected smaller: in=%d out=%d", EstChars(msgs), EstChars(out))
 	}
 	if out[0].Role != "system" {
 		t.Fatalf("want system first, got %s", out[0].Role)
@@ -75,8 +75,8 @@ func TestCompactDropsMiddle(t *testing.T) {
 	}
 	// Tiny budget forces drop.
 	out := CompactOpts(msgs, 3_000, "SUMMARY_HERE", 2_000)
-	if estChars(out) > 8_000 {
-		t.Fatalf("still too large: %d", estChars(out))
+	if EstChars(out) > 8_000 {
+		t.Fatalf("still too large: %d", EstChars(out))
 	}
 	found := false
 	for _, m := range out {
@@ -308,6 +308,28 @@ func TestCompactTieredSnipSuffices(t *testing.T) {
 	}
 }
 
+// Policy tool cap applies even when total history is already under the context
+// target — otherwise oversized tool bodies survive "under budget" snips forever.
+func TestCompactTieredAppliesPolicyCapUnderBudget(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "inspect"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "read", Arguments: `{}`}}}},
+		{Role: "tool", ToolCallID: "1", Name: "read", Content: strings.Repeat("z", 80_000)},
+	}
+	// Target well above EstChars so need <= 0; policy must still cap the tool.
+	got := CompactTiered(msgs, 500_000, "", 5_000)
+	if got.Layer != "snip" {
+		t.Fatalf("layer=%q want snip", got.Layer)
+	}
+	if n := len(got.Messages[3].Content); n > 6_000 {
+		t.Fatalf("policy cap not applied under budget: tool len=%d", n)
+	}
+	if !strings.Contains(got.Messages[3].Content, "…(snip)") {
+		t.Fatalf("missing snip marker under budget: %q", got.Messages[3].Content[:min(40, len(got.Messages[3].Content))])
+	}
+}
+
 func TestCompactTieredEscalatesWithoutOrphans(t *testing.T) {
 	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "finish the task"}}
 	for i := 0; i < 35; i++ {
@@ -353,7 +375,7 @@ func TestCompactTieredSmallOveragePreservesToolContext(t *testing.T) {
 	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "inspect"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "read", Arguments: `{}`}}}},
 		{Role: "tool", ToolCallID: "1", Name: "read", Content: tool}}
-	before := estChars(msgs)
+	before := EstChars(msgs)
 	need := 2_000
 	got := CompactTiered(msgs, before-need, "", DefaultMaxToolResultChars)
 	if got.Layer != "snip" || got.CharsSaved < need {

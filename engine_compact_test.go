@@ -101,3 +101,70 @@ func TestEngineCompactEmptyNoop(t *testing.T) {
 		t.Fatalf("empty compact should be a no-op: %+v", rep)
 	}
 }
+
+// Compact(0) is what hosts call for /compact. It must free headroom even when
+// history is still under the soft ceiling (default 100k or a large scaled
+// window). A high floor that sat above cur made this a pure no-op.
+func TestEngineCompactZeroFreesHeadroom(t *testing.T) {
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok",
+				Usage: mow.Usage{InputTokens: 20_000, OutputTokens: 5}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 40; i++ {
+		prompt := "please fix bug number " + strings.Repeat("x", 200)
+		if _, err := eng.Prompt(context.Background(), prompt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := len(eng.Messages())
+	rep, err := eng.Compact(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := len(eng.Messages())
+	if rep.CharsSaved <= 0 {
+		t.Fatalf("Compact(0) saved nothing: %+v msgs %d→%d", rep, before, after)
+	}
+	if after >= before {
+		t.Fatalf("message count did not shrink: %d→%d (rep=%+v)", before, after, rep)
+	}
+}
+
+// Large MaxContextChars (as when gateway context_window scales the soft budget
+// to millions of chars) must not prevent /compact from dropping old turns.
+func TestEngineCompactZeroWithLargeSoftBudget(t *testing.T) {
+	eng, err := mow.New(mow.Options{
+		NoSession:       true,
+		MaxContextChars: 3_200_000,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok",
+				Usage: mow.Usage{InputTokens: 5_000, OutputTokens: 5}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 30; i++ {
+		if _, err := eng.Prompt(context.Background(), "work on feature "+strings.Repeat("y", 400)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := len(eng.Messages())
+	rep, err := eng.Compact(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := len(eng.Messages())
+	if rep.CharsSaved <= 0 {
+		t.Fatalf("Compact(0) with large soft budget saved nothing: %+v", rep)
+	}
+	if after >= before {
+		t.Fatalf("message count did not shrink under large budget: %d→%d", before, after)
+	}
+}

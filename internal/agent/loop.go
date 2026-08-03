@@ -181,7 +181,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		if err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}
-		sentChars := estChars(send)
+		sentChars := EstChars(send)
 		// Per-call LLM ctx: a mid-turn steer cancels ONLY this call (via
 		// opt.SetLLMCancel), never the run — the outer ctx stays alive so the
 		// loop can reissue with the steer appended.
@@ -621,7 +621,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 	// chars/token ratio, so a code-heavy history (which tokenizes denser than
 	// the 4 chars/token heuristic) compacts before it blows the real window.
 	ratio := calib.Ratio()
-	raw := estChars(messages)
+	raw := EstChars(messages)
 	est := budgetChars(raw, ratio)
 	if est <= opt.MaxContextChars {
 		return trimAllToolResults(messages, toolLim, toolLim/2), nil
@@ -647,7 +647,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 			summary = d.Summary
 		}
 	}
-	result := CompactTiered(messages, compactTarget(opt.MaxContextChars, ratio), summary, toolLim)
+	result := CompactTiered(messages, CompactTarget(opt.MaxContextChars, ratio), summary, toolLim)
 	if result.CharsSaved > 0 || result.OverBudget {
 		for _, h := range opt.Hooks.AfterCompact {
 			if h != nil {

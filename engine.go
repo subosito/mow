@@ -718,30 +718,80 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	// wrong one made /compact a visual no-op on the wire — compact prior.
 	e.mu.Lock()
 	prior := append([]llm.Message(nil), e.prior...)
-	if maxChars <= 0 {
-		configured := 0
-		ratio := agent.DefaultCompactRatio
-		if e.cfg != nil {
-			configured = e.cfg.Policy.MaxContextChars
-			if e.cfg.Policy.CompactRatio > 0 {
-				ratio = e.cfg.Policy.CompactRatio
-			}
+	configured := 0
+	compactRatio := agent.DefaultCompactRatio
+	toolLim := agent.DefaultMaxToolResultChars
+	if e.cfg != nil {
+		configured = e.cfg.Policy.MaxContextChars
+		if e.cfg.Policy.CompactRatio > 0 {
+			compactRatio = e.cfg.Policy.CompactRatio
 		}
-		if e.opt.MaxContextChars > 0 {
-			configured = e.opt.MaxContextChars
+		if e.cfg.Policy.MaxToolResultChars > 0 {
+			toolLim = e.cfg.Policy.MaxToolResultChars
 		}
-		maxChars = resolveMaxContextChars(configured, e.limitsLocked().ContextWindow, ratio)
-		if maxChars <= 0 {
-			// Manual compaction is an explicit request even when automatic
-			// compaction was disabled with max_context_chars: -1.
-			maxChars = agent.DefaultMaxContextChars
+	}
+	if e.opt.MaxContextChars > 0 {
+		configured = e.opt.MaxContextChars
+	}
+	if e.opt.MaxToolResultChars > 0 {
+		toolLim = e.opt.MaxToolResultChars
+	}
+	window := e.limitsLocked().ContextWindow
+	// Prefer last observed chars/token when available so manual compact matches
+	// the loop's calibrated density (code-heavy history tokenizes denser).
+	charsPerToken := 0.0
+	if e.lastCtxTokens > 0 {
+		if raw := agent.EstChars(prior); raw > 0 {
+			charsPerToken = float64(raw) / float64(e.lastCtxTokens)
 		}
 	}
 	e.mu.Unlock()
 	if len(prior) == 0 {
 		return CompactReport{}, nil
 	}
-	res := agent.CompactTiered(prior, maxChars, "", agent.DefaultMaxToolResultChars)
+
+	auto := maxChars <= 0
+	if auto {
+		maxChars = resolveMaxContextChars(configured, window, compactRatio)
+		if maxChars <= 0 {
+			// Manual compaction is an explicit request even when automatic
+			// compaction was disabled with max_context_chars: -1.
+			maxChars = agent.DefaultMaxContextChars
+		}
+	}
+	// CompactTiered takes a *raw* char target. The loop converts the configured
+	// budget through CompactTarget so density calibration matches applyCompact.
+	cpt := charsPerToken
+	if cpt <= 0 {
+		cpt = 4 // same default as agent.defaultCharsPerToken
+	}
+	targetRaw := agent.CompactTarget(maxChars, cpt)
+	cur := agent.EstChars(prior)
+	if auto && cur > 1 {
+		// /compact must free real headroom even when history is still under the
+		// soft ceiling (common with large gateway context_window scaling). Aim
+		// for ~half the current projection. Never raise the target to or above
+		// cur — a previous floor of ~50k made Compact(0) a no-op on typical
+		// multi-turn sessions.
+		half := cur / 2
+		const minKeep = 8_000
+		if half < minKeep && cur > minKeep {
+			half = minKeep
+		}
+		if half >= cur {
+			half = cur * 3 / 4
+		}
+		if half < 1 {
+			half = 1
+		}
+		if half < targetRaw {
+			targetRaw = half
+		}
+	}
+	if targetRaw < 1 {
+		targetRaw = 1
+	}
+	res := agent.CompactTiered(prior, targetRaw, "", toolLim)
 	if res.Messages == nil {
 		return CompactReport{}, fmt.Errorf("engine: compact failed (nil result)")
 	}

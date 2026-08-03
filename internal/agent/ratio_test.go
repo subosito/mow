@@ -108,13 +108,13 @@ func TestBudgetCharsAndCompactTarget(t *testing.T) {
 		t.Fatalf("budgetChars(0)=%d", got)
 	}
 	// compactTarget is the inverse: budget 1000 at 2 chars/token → trim to 500 raw.
-	if got := compactTarget(1_000, 2); got != 500 {
+	if got := CompactTarget(1_000, 2); got != 500 {
 		t.Fatalf("compactTarget=%d want 500", got)
 	}
-	if got := compactTarget(0, 2); got != 0 {
-		t.Fatalf("compactTarget(0)=%d", got)
+	if got := CompactTarget(0, 2); got != 0 {
+		t.Fatalf("CompactTarget(0)=%d", got)
 	}
-	if got := compactTarget(1_000, 0); got != 1_000 {
+	if got := CompactTarget(1_000, 0); got != 1_000 {
 		t.Fatalf("compactTarget zero ratio=%d want 1000", got)
 	}
 }
@@ -132,7 +132,7 @@ func TestApplyCompactUsesCalibratedRatio(t *testing.T) {
 			llm.Message{Role: "tool", Name: "read", Content: strings.Repeat("x", 500)},
 		)
 	}
-	raw := estChars(msgs)
+	raw := EstChars(msgs)
 	// Budget sits just above raw size: the fixed heuristic never compacts.
 	opt := Options{MaxContextChars: raw + 1_000, MaxToolResultChars: 100_000}
 
@@ -158,8 +158,8 @@ func TestApplyCompactUsesCalibratedRatio(t *testing.T) {
 	if len(out2) >= len(msgs) {
 		t.Fatalf("calibrated ratio did not compact: %d → %d", len(msgs), len(out2))
 	}
-	if estChars(out2) >= raw {
-		t.Fatalf("compacted history not smaller: %d >= %d", estChars(out2), raw)
+	if EstChars(out2) >= raw {
+		t.Fatalf("compacted history not smaller: %d >= %d", EstChars(out2), raw)
 	}
 }
 
@@ -192,7 +192,7 @@ func TestApplyCompactHookSeesRatio(t *testing.T) {
 	if math.Abs(gotRatio-2.0) > 0.05 {
 		t.Fatalf("hook ratio=%v want ~2", gotRatio)
 	}
-	if want := budgetChars(estChars(msgs), gotRatio); gotEst != want {
+	if want := budgetChars(EstChars(msgs), gotRatio); gotEst != want {
 		t.Fatalf("hook est=%d want %d", gotEst, want)
 	}
 	if gotMax != 1_000 {

@@ -127,10 +127,10 @@ func budgetChars(chars int, ratio float64) int {
 	return int(float64(chars) * defaultCharsPerToken / clampRatio(ratio))
 }
 
-// compactTarget converts the configured char budget into the raw char budget
-// CompactOpts should trim to, given the calibrated ratio (inverse of
+// CompactTarget converts the configured char budget into the raw char budget
+// CompactTiered should trim to, given the calibrated ratio (inverse of
 // budgetChars, so compaction stops exactly at the scaled limit).
-func compactTarget(maxChars int, ratio float64) int {
+func CompactTarget(maxChars int, ratio float64) int {
 	if maxChars <= 0 {
 		return maxChars
 	}
@@ -166,7 +166,7 @@ func CompactTiered(messages []llm.Message, maxChars int, summary string, maxTool
 		maxToolChars = DefaultMaxToolResultChars
 	}
 	snipped := snipLongestToolResults(messages, maxChars, maxToolChars)
-	if maxChars <= 0 || estChars(snipped) <= maxChars {
+	if maxChars <= 0 || EstChars(snipped) <= maxChars {
 		return compactResult(messages, snipped, "snip", maxChars)
 	}
 	out := CompactOpts(snipped, maxChars, summary, maxToolChars)
@@ -174,7 +174,7 @@ func CompactTiered(messages []llm.Message, maxChars int, summary string, maxTool
 }
 
 func compactResult(before, after []llm.Message, layer string, target int) CompactResult {
-	beforeChars, afterChars := estChars(before), estChars(after)
+	beforeChars, afterChars := EstChars(before), EstChars(after)
 	return CompactResult{
 		Messages: after, Layer: layer,
 		CharsBefore: beforeChars, CharsAfter: afterChars,
@@ -199,22 +199,28 @@ func snipLongestToolResults(messages []llm.Message, target, maxToolChars int) []
 		}
 	}
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].size > candidates[j].size })
-	need := estChars(out) - target
+	need := EstChars(out) - target
 	for _, c := range candidates {
 		limit := maxToolChars
 		if limit < minSnippedToolChars {
 			limit = minSnippedToolChars
 		}
-		// Keep as much context as possible while satisfying either constraint:
-		// the normal per-result policy cap or this pass's remaining reduction.
-		// Taking the larger target avoids gutting a result to the policy cap
-		// when only a small context-budget reduction is needed.
-		policyWant := 0
+		// Always enforce the per-result policy cap on oversized tools (even when
+		// the total is already under the context target). Then, only if we still
+		// need more room, snip further — but never below minSnippedToolChars.
+		// Taking the *larger* of (policy cap, need-driven size) when both apply
+		// would refuse to snip below the policy cap when need is large; instead
+		// policy is the ceiling and need can only go lower.
+		want := c.size
 		if c.size > limit {
-			policyWant = limit
+			want = limit
 		}
-		needWant := max(minSnippedToolChars, c.size-max(0, need))
-		want := max(policyWant, needWant)
+		if need > 0 {
+			needCap := max(minSnippedToolChars, c.size-need)
+			if needCap < want {
+				want = needCap
+			}
+		}
 		if want >= c.size {
 			continue
 		}
@@ -245,7 +251,7 @@ func snipToolResult(s string, maxChars int) string {
 //  2. If still over: keep system + pinned user intents + stub + last keepLast.
 //  3. Further trim tools if needed.
 func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolChars int) []llm.Message {
-	if maxChars <= 0 || estChars(messages) <= maxChars {
+	if maxChars <= 0 || EstChars(messages) <= maxChars {
 		return trimAllToolResults(messages, maxToolChars, maxToolChars/2)
 	}
 	if maxToolChars <= 0 {
@@ -256,7 +262,7 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 	}
 
 	msgs := trimAllToolResults(messages, maxToolChars, maxToolChars/2)
-	if estChars(msgs) <= maxChars {
+	if EstChars(msgs) <= maxChars {
 		return msgs
 	}
 
@@ -273,38 +279,69 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 	if len(rest) <= keepLast {
 		return trimAllToolResults(msgs, maxToolChars/2, maxToolChars/4)
 	}
-	dropped := rest[:len(rest)-keepLast]
-	kept := rest[len(rest)-keepLast:]
-	kept = alignKeepAtUser(kept)
 
-	// Pin user intents from the full conversation (not only dropped) so a
-	// trailing "hi" or thrash window cannot erase the real task.
-	pins := collectUserPins(rest, kept, maxChars)
+	// Shrink the kept window until under budget (or keepLast is minimal). A
+	// fixed keepLast left large non-tool histories OverBudget with no further
+	// reduction — manual /compact and auto drop then looked like no-ops.
+	var out []llm.Message
+	for {
+		if keepLast < 2 {
+			keepLast = 2
+		}
+		if keepLast >= len(rest) {
+			keepLast = len(rest) - 1
+		}
+		if keepLast < 1 {
+			return trimAllToolResults(msgs, maxToolChars/2, maxToolChars/4)
+		}
+		dropped := rest[:len(rest)-keepLast]
+		kept := rest[len(rest)-keepLast:]
+		kept = alignKeepAtUser(kept)
 
-	stub := strings.TrimSpace(summary)
-	if stub == "" {
-		stub = defaultCompactStub(dropped, kept, pins)
-	}
+		// Pin user intents from the full conversation (not only dropped) so a
+		// trailing "hi" or thrash window cannot erase the real task.
+		pins := collectUserPins(rest, kept, maxChars)
 
-	out := append([]llm.Message{}, system...)
-	if len(pins) > 0 {
-		out = append(out, llm.Message{
-			Role:    "user",
-			Content: formatTaskAnchor(pins),
-		})
-	}
-	out = append(out, llm.Message{Role: "user", Content: stub})
-	out = append(out, kept...)
+		stub := strings.TrimSpace(summary)
+		if stub == "" {
+			stub = defaultCompactStub(dropped, kept, pins)
+		}
 
-	if estChars(out) > maxChars {
-		out = trimAllToolResults(out, maxToolChars/3, 800)
-	}
-	if estChars(out) > maxChars {
-		out = trimAllToolResults(out, 800, 400)
-	}
-	// Last resort: shrink pin/stub bodies (never drop the anchor entirely).
-	if estChars(out) > maxChars {
-		out = shrinkAnchors(out, maxChars)
+		out = append([]llm.Message{}, system...)
+		if len(pins) > 0 {
+			out = append(out, llm.Message{
+				Role:    "user",
+				Content: formatTaskAnchor(pins),
+			})
+		}
+		out = append(out, llm.Message{Role: "user", Content: stub})
+		out = append(out, kept...)
+
+		if EstChars(out) > maxChars {
+			out = trimAllToolResults(out, maxToolChars/3, 800)
+		}
+		if EstChars(out) > maxChars {
+			out = trimAllToolResults(out, 800, 400)
+		}
+		// Last resort: shrink pin/stub bodies (never drop the anchor entirely).
+		if EstChars(out) > maxChars {
+			out = shrinkAnchors(out, maxChars)
+		}
+		if EstChars(out) <= maxChars || keepLast <= 2 {
+			break
+		}
+		// Drop more of the recent window and rebuild.
+		next := keepLast / 2
+		if next >= keepLast {
+			next = keepLast - 2
+		}
+		if next < 2 {
+			next = 2
+		}
+		if next >= keepLast {
+			break
+		}
+		keepLast = next
 	}
 	return out
 }
@@ -504,7 +541,7 @@ func shrinkAnchors(msgs []llm.Message, maxChars int) []llm.Message {
 			out[i].Content = compactSnippet(out[i].Content, 1_200)
 		}
 	}
-	if estChars(out) > maxChars {
+	if EstChars(out) > maxChars {
 		// Drop oldest non-system, non-anchor tool-heavy kept? leave as-is — better over budget than empty task.
 	}
 	return out
@@ -640,7 +677,8 @@ func lastIndexByte(s string, c byte) int {
 	return -1
 }
 
-func estChars(msgs []llm.Message) int {
+// EstChars is the raw character estimate used by compaction budgets.
+func EstChars(msgs []llm.Message) int {
 	n := 0
 	for _, m := range msgs {
 		n += len(m.Content) + len(m.Role) + 8
