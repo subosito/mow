@@ -3,16 +3,17 @@
 // and metrics, so a host can wire any OTel exporter (OTLP, Jaeger, stdout, …)
 // without mow core depending on an OTel SDK.
 //
-// Core mow never imports this package. Hosts opt in explicitly:
+// Core mow never imports this package. Two ways to enable:
 //
-//	import "github.com/subosito/mow/otel"
+//  1. Config/env (stock CLI blank-imports this package): set otel.endpoint
+//     (or MOW_OTEL_ENDPOINT). Engine.New auto-wires OTLP/HTTP via StartExport.
+//  2. Embed with a custom provider:
 //
 //	adapter, err := otel.New(otel.Options{Tracer: tp.Tracer("mow"), Meter: mp.Meter("mow")})
 //	eng.AddOnEvent(adapter.OnEvent)
 //
-// The adapter depends only on the go.opentelemetry.io/otel API modules
-// (trace + metric + attribute + codes), not on any SDK. Pass a real
-// Tracer/Meter from your exporter provider; tests may pass recording fakes.
+// Empty endpoint keeps telemetry off (default). Pass your own Tracer/Meter for
+// Datadog/Honeycomb/etc.; or use StartExport for the built-in OTLP/HTTP path.
 //
 // Event → telemetry mapping:
 //

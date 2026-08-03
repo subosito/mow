@@ -1,0 +1,81 @@
+package otel
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/subosito/mow"
+)
+
+func init() {
+	// Stock CLI and any host that blank-imports this package get config-driven
+	// OTLP for free. Empty otel.endpoint → hook no-ops (default).
+	mow.SetOTELAuto(autoWire)
+}
+
+// autoWire is the mow.OTELAutoFunc registered from init.
+func autoWire(eng *mow.Engine, raw map[string]any) error {
+	if eng == nil {
+		return nil
+	}
+	cfg := exportConfigFromMap(raw)
+	if strings.TrimSpace(cfg.Endpoint) == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	exp, err := StartExport(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("otel auto-wire: %w", err)
+	}
+	if exp == nil || exp.Adapter == nil {
+		return nil
+	}
+	eng.AddOnEvent(exp.Adapter.OnEvent)
+	eng.RegisterCleanup(func() {
+		cctx, ccancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer ccancel()
+		if err := exp.Shutdown(cctx); err != nil {
+			slog.Default().Warn("otel shutdown", "err", err)
+		}
+	})
+	return nil
+}
+
+// exportConfigFromMap decodes the engine-facing loose map (from config.OTEL).
+func exportConfigFromMap(raw map[string]any) ExportConfig {
+	if raw == nil {
+		return ExportConfig{}
+	}
+	cfg := ExportConfig{
+		Endpoint:    strVal(raw["endpoint"]),
+		Protocol:    strVal(raw["protocol"]),
+		ServiceName: strVal(raw["service_name"]),
+	}
+	if v, ok := raw["sample_ratio"].(float64); ok {
+		cfg.SampleRatio = v
+	}
+	if h, ok := raw["headers"].(map[string]string); ok {
+		cfg.Headers = h
+	} else if h, ok := raw["headers"].(map[string]any); ok {
+		cfg.Headers = map[string]string{}
+		for k, v := range h {
+			cfg.Headers[k] = fmt.Sprint(v)
+		}
+	}
+	return cfg
+}
+
+func strVal(v any) string {
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case nil:
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprint(x))
+	}
+}

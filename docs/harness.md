@@ -465,3 +465,9 @@ MCP tool results are external server text. The MCP pack marks every `mcp_*`
 tool with `Untrusted() bool` so the agent loop frames results in
 `<untrusted-output>` the same way as `bash` and `acp_delegate`.
 
+## OpenTelemetry export
+
+Optional. **Default off** (empty `otel.endpoint`). When set in `$MOW_HOME/config.yaml`
+or `MOW_OTEL_ENDPOINT`, the stock CLI exports spans/metrics via OTLP/HTTP to that
+collector. See [embedding.md](embedding.md) § OpenTelemetry.
+

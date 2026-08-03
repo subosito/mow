@@ -311,12 +311,45 @@ per-turn; a TUI wires it to Esc.
 
 ## 10. OpenTelemetry (optional)
 
-The core bus stays `OnEvent`. For OTLP/Jaeger/Datadog, use the optional
-`github.com/subosito/mow/otel` adapter (not linked unless you import it):
+**Default: off.** No exporter runs until you set an endpoint.
+
+### Config / CLI (out of the box)
+
+Stock `mow` blank-imports `github.com/subosito/mow/otel`. When user config
+(or env) sets an OTLP endpoint, `Engine.New` auto-wires the adapter and an
+OTLP/HTTP exporter; `Engine.Close` flushes. Project `.mow/config` cannot set
+this (host/user only).
+
+```yaml
+# $MOW_HOME/config.yaml
+otel:
+  endpoint: http://127.0.0.1:4318   # empty = disabled
+  protocol: http                    # http default; grpc reserved
+  service_name: mow
+  sample_ratio: 1.0                 # 0 with endpoint set → 1.0
+  # headers:
+  #   authorization: Bearer …
+```
+
+Env (wins over file): `MOW_OTEL_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`,
+`MOW_OTEL_PROTOCOL`, `MOW_OTEL_SERVICE_NAME` / `OTEL_SERVICE_NAME`.
+
+### Embed
+
+Same auto-wire if the host imports `_ "github.com/subosito/mow/otel"` (or the
+stock binary). Or attach a custom pipeline:
 
 ```go
 import mowotel "github.com/subosito/mow/otel"
 
+// Config-driven:
+exp, err := mowotel.StartExport(ctx, mowotel.ExportConfig{
+    Endpoint: "http://127.0.0.1:4318",
+})
+eng.AddOnEvent(exp.Adapter.OnEvent)
+eng.RegisterCleanup(func() { _ = exp.Shutdown(context.Background()) })
+
+// Or bring your own Tracer/Meter (Datadog, Honeycomb, …):
 adapter, err := mowotel.New(mowotel.Options{
     Tracer: tp.Tracer("mow"),
     Meter:  mp.Meter("mow"),
@@ -326,8 +359,7 @@ eng.AddOnEvent(adapter.OnEvent)
 
 Mapping: `loop.run.*` → `mow.run` span + token counters; `harness.tool.*` →
 `mow.tool.<name>` child spans + duration histogram; `graph.goal.*` → `mow.goal`
-span with step events. Provide your own TracerProvider/MeterProvider/exporter;
-the adapter depends only on the OTel API (+ test SDK in tests).
+span with step events.
 
 ## 11. Eval / replay fixtures
 

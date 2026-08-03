@@ -531,7 +531,31 @@ func New(opt Options) (*Engine, error) {
 		}
 	}
 
+	// Optional OTLP export when otel.endpoint is set and the otel package
+	// registered an auto-wire hook (stock CLI blank-imports it). Empty
+	// endpoint → no-op; core stays free of the OTLP SDK import.
+	if err := runOTELAuto(e, otelCfgMap(e.cfg)); err != nil {
+		return nil, err
+	}
+
 	return e, nil
+}
+
+// otelCfgMap projects config.OTEL into the loose map the auto-wire hook reads.
+func otelCfgMap(cfg *config.File) map[string]any {
+	if cfg == nil || strings.TrimSpace(cfg.OTEL.Endpoint) == "" {
+		return nil
+	}
+	m := map[string]any{
+		"endpoint":     cfg.OTEL.Endpoint,
+		"protocol":     cfg.OTEL.Protocol,
+		"service_name": cfg.OTEL.ServiceName,
+		"sample_ratio": cfg.OTEL.SampleRatio,
+	}
+	if len(cfg.OTEL.Headers) > 0 {
+		m["headers"] = cfg.OTEL.Headers
+	}
+	return m
 }
 
 // cloneLLMClient snapshots mutable client state for one request/catalog call.

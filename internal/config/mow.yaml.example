@@ -10,6 +10,17 @@
 
 workspace: .
 
+# Optional OpenTelemetry (OTLP). Empty endpoint = disabled (default).
+# Host/user config only — not honored from project .mow/config.
+# Env: MOW_OTEL_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT
+# otel:
+#   endpoint: http://127.0.0.1:4318   # OTLP/HTTP collector
+#   protocol: http                    # http (default); grpc reserved
+#   service_name: mow
+#   sample_ratio: 1.0                 # 0 with endpoint set → 1.0
+#   # headers:
+#   #   authorization: Bearer …
+
 llm:
   # Client wire. Default: openai-chat-completions when unset.
   # Omit wire to auto-align from GET /v1/models for the active model
