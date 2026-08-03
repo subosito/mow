@@ -308,3 +308,24 @@ per-turn; a TUI wires it to Esc.
 - [architecture.md](architecture.md) — public vs internal, endpoint model
 - [harness.md](harness.md) — loop, config, sessions, policy knobs
 - [extensions.md](extensions.md) — packs, hooks table, ACP, media, cmdhook
+
+## 10. OpenTelemetry (optional)
+
+The core bus stays `OnEvent`. For OTLP/Jaeger/Datadog, use the optional
+`github.com/subosito/mow/otel` adapter (not linked unless you import it):
+
+```go
+import mowotel "github.com/subosito/mow/otel"
+
+adapter, err := mowotel.New(mowotel.Options{
+    Tracer: tp.Tracer("mow"),
+    Meter:  mp.Meter("mow"),
+})
+eng.AddOnEvent(adapter.OnEvent)
+```
+
+Mapping: `loop.run.*` → `mow.run` span + token counters; `harness.tool.*` →
+`mow.tool.<name>` child spans + duration histogram; `graph.goal.*` → `mow.goal`
+span with step events. Provide your own TracerProvider/MeterProvider/exporter;
+the adapter depends only on the OTel API (+ test SDK in tests).
+

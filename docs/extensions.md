@@ -695,4 +695,17 @@ access. Link the pack only for plugins you trust.
 
 - [architecture.md](architecture.md)  
 - [harness.md](harness.md)  
-- [agentclientprotocol.com](https://agentclientprotocol.com) — ACP  
+- [agentclientprotocol.com](https://agentclientprotocol.com) — ACP
+
+### Goal hard budgets
+
+`goal.Spec` accepts optional hard ceilings beyond `MaxSteps`:
+
+| Field | Effect |
+|-------|--------|
+| `MaxInputTokens` | Stop `partial` when cumulative provider input tokens reach N |
+| `MaxDuration` | Stop `partial` when wall-clock since run start exceeds D |
+
+Checked between steps (after usage is applied). Resume may raise ceilings the
+same way `--max-steps` raises the step budget. Soft turn budgets are unchanged.
+

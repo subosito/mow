@@ -429,3 +429,33 @@ Models that emit chain-of-thought inline as `<think>…</think>` (and known
 dialects) are normalized by the loop: committed history, session files, and
 `Result.Text` are always tag-free. UIs needing live-stream extraction use
 `mow.ExtractThinking` / `mow.StripThinking`.
+
+## Untrusted output framing
+
+External tool bodies (`bash`, `acp_delegate`, MCP server tools that opt in) are
+wrapped before they enter model history:
+
+```text
+<untrusted-output source="bash" nonce="…">
+…tool stdout…
+</untrusted-output>
+```
+
+The per-engine nonce is also mentioned in the system prompt so the model treats
+framed text as data, not instructions. A forged closing tag inside the body is
+neutralized. Workspace file reads are **not** framed (they are already under
+the path jail / trust boundary).
+
+## Context archive and `context_search`
+
+When history is compacted (automatic soft compact or `Engine.Compact`), mow
+writes a plain-text archive under the session dir:
+
+```text
+\$MOW_HOME/sessions/<project>/<session-id>.archive/0001-….md
+```
+
+Sessions enable a read-only `context_search` tool (pattern only — no path arg)
+so the agent can recover details dropped from the live window. No embeddings
+or vector DB; fixed-string scan over a bounded set of newest archive files.
+

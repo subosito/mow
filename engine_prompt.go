@@ -33,7 +33,12 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	e.mu.Lock()
 	if !e.skillsLoaded {
 		if skills := contextload.LoadSelectedSkills(e.skillDirs, text, e.skillSelect); skills != "" {
-			e.sys = contextload.ComposeSystem(contextload.PathJailFacts(e.cfg.Workspace, e.pol.ExtraRoots), e.agents, skills, e.opt.SystemAppend)
+			ro := e.pol.ExtraRootsReadOnly
+			e.sys = contextload.ComposeSystem(
+				contextload.PathJailFacts(e.cfg.Workspace, e.pol.ExtraRoots, ro),
+				agent.FramingFacts(e.untrustedNonce),
+				e.agents, skills, e.opt.SystemAppend,
+			)
 		}
 		e.skillsLoaded = true
 	}
@@ -220,6 +225,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		MaxToolResultChars: maxToolRes,
 		MaxParallelTools:   maxPar,
 		Workspace:          ws,
+		UntrustedNonce:     e.untrustedNonce,
 		Steer:              e.drainSteer,
 		SetLLMCancel: func(cancel context.CancelFunc) {
 			e.mu.Lock()
@@ -354,6 +360,17 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 	}}, after...)
 	h.PreTool = pre
 	h.PostTool = post
+	// Archive pre-compact history so context_search can recover dropped turns.
+	preC := append([]agent.PreCompactFunc(nil), h.PreCompact...)
+	preC = append(preC, func(ctx context.Context, ev agent.PreCompactEvent) (agent.PreCompactDecision, error) {
+		if e.sess != nil && len(ev.Messages) > 0 {
+			if _, err := e.sess.ArchiveCompact(ev.Messages, "auto", 0); err != nil {
+				e.log().Warn("context archive", "err", err)
+			}
+		}
+		return agent.PreCompactDecision{}, nil
+	})
+	h.PreCompact = preC
 	h.AfterCompact = compact
 	h.AfterTurn = after
 	return h

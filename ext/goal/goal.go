@@ -56,6 +56,12 @@ type Spec struct {
 	// Runner.EngineFactory (one mow.Engine serializes Prompt calls); without
 	// a factory the runner stays sequential. Capped by MaxParallelWidth.
 	ParallelMax int
+	// MaxInputTokens, when > 0, stops the goal as partial once cumulative
+	// provider-reported input tokens reach this ceiling.
+	MaxInputTokens int
+	// MaxDuration, when > 0, is a hard wall-clock budget for the whole run
+	// (checked between steps). Zero keeps step-only budgeting.
+	MaxDuration time.Duration
 }
 
 // Fact is one durable evidence item recorded by a goal step (goal_report
@@ -128,6 +134,12 @@ type State struct {
 	// the provider reports no usage).
 	InputTokens  int `json:"input_tokens,omitempty"`
 	OutputTokens int `json:"output_tokens,omitempty"`
+	// MaxInputTokens mirrors Spec.MaxInputTokens (0 = no token ceiling).
+	MaxInputTokens int `json:"max_input_tokens,omitempty"`
+	// MaxDurationMs is Spec.MaxDuration as milliseconds for durable JSON (0 = none).
+	MaxDurationMs int64 `json:"max_duration_ms,omitempty"`
+	// StartedAt is when the current run entered running (wall-clock budget).
+	StartedAt time.Time `json:"started_at,omitempty"`
 }
 
 // NodeStatus is the frozen host contract for one goal-plan node. Hosts should
@@ -288,6 +300,12 @@ func NormalizeSpec(s Spec) (Spec, error) {
 	}
 	if s.ParallelMax > MaxParallelWidth {
 		s.ParallelMax = MaxParallelWidth
+	}
+	if s.MaxInputTokens < 0 {
+		s.MaxInputTokens = 0
+	}
+	if s.MaxDuration < 0 {
+		s.MaxDuration = 0
 	}
 	return s, nil
 }

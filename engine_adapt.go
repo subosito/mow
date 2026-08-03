@@ -28,6 +28,24 @@ func (a toolAdapter) Exec(ctx context.Context, args json.RawMessage) (string, er
 	return a.t.Exec(ctx, args)
 }
 
+// Untrusted forwards optional Untrusted() from ext tools (acp, mcp, …).
+func (a toolAdapter) Untrusted() bool {
+	type u interface{ Untrusted() bool }
+	if x, ok := a.t.(u); ok {
+		return x.Untrusted()
+	}
+	return false
+}
+
+// ReadOnly forwards optional ReadOnly() so engine-scoped adapters match packs.
+func (a toolAdapter) ReadOnly() bool {
+	type r interface{ ReadOnly() bool }
+	if x, ok := a.t.(r); ok {
+		return x.ReadOnly()
+	}
+	return false
+}
+
 func adaptChat(fn ChatFunc) agent.ChatFn {
 	if fn == nil {
 		return nil

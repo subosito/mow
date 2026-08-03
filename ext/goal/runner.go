@@ -73,14 +73,15 @@ func (r *Runner) Create(spec Spec) (State, error) {
 	}
 	store := r.store()
 	st := State{
-		ID:        spec.ID,
-		Goal:      spec.Goal,
-		Workspace: r.workspace(),
-		Status:    StatusPending,
-		Step:      0,
-		MaxSteps:  spec.MaxSteps,
-
-		ParallelMax: spec.ParallelMax,
+		ID:             spec.ID,
+		Goal:           spec.Goal,
+		Workspace:      r.workspace(),
+		Status:         StatusPending,
+		Step:           0,
+		MaxSteps:       spec.MaxSteps,
+		ParallelMax:    spec.ParallelMax,
+		MaxInputTokens: spec.MaxInputTokens,
+		MaxDurationMs:  spec.MaxDuration.Milliseconds(),
 	}
 	if err := store.Save(st); err != nil {
 		return State{}, err
@@ -162,14 +163,15 @@ func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 		return State{}, err
 	}
 	st := State{
-		ID:        spec.ID,
-		Goal:      spec.Goal,
-		Workspace: r.workspace(),
-		Status:    StatusPending,
-		Step:      0,
-		MaxSteps:  spec.MaxSteps,
-
-		ParallelMax: spec.ParallelMax,
+		ID:             spec.ID,
+		Goal:           spec.Goal,
+		Workspace:      r.workspace(),
+		Status:         StatusPending,
+		Step:           0,
+		MaxSteps:       spec.MaxSteps,
+		ParallelMax:    spec.ParallelMax,
+		MaxInputTokens: spec.MaxInputTokens,
+		MaxDurationMs:  spec.MaxDuration.Milliseconds(),
 	}
 	if prev, err := r.store().Load(spec.ID); err == nil {
 		if prev.Status == StatusRunning || prev.Status == StatusPending || prev.Status == StatusFailed {
@@ -182,6 +184,12 @@ func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 			prev = applyMaxStepsRaise(prev, spec.MaxSteps)
 			if spec.ParallelMax > 0 {
 				prev.ParallelMax = spec.ParallelMax
+			}
+			if spec.MaxInputTokens > prev.MaxInputTokens {
+				prev.MaxInputTokens = spec.MaxInputTokens
+			}
+			if ms := spec.MaxDuration.Milliseconds(); ms > prev.MaxDurationMs {
+				prev.MaxDurationMs = ms
 			}
 			st = prev
 		}
@@ -264,6 +272,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 	}
 	st.Status = StatusRunning
 	st.Error = ""
+	if st.StartedAt.IsZero() {
+		st.StartedAt = time.Now().UTC()
+	}
 	if st.SessionID == "" && r.Engine != nil {
 		st.SessionID = r.Engine.SessionID()
 	}
@@ -310,6 +321,19 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		st.Step++
 		st.InputTokens += sr.Usage.InputTokens
 		st.OutputTokens += sr.Usage.OutputTokens
+		if hit, why := hardBudgetExceeded(st); hit {
+			st.LastReply = sr.Text
+			if st.Summary == "" {
+				st.Summary = strings.TrimSpace(sr.Text)
+			}
+			st.Status = StatusPartial
+			st.Partial = why
+			st.Error = why
+			_ = r.store().Save(st)
+			r.fire(Event{Kind: EventPartial, State: st, Text: why})
+			r.store().AppendEvent(st.ID, LogEvent{Kind: "budget", Status: st.Status, Step: st.Step, Text: why, Plan: planPtr(st.Plan)})
+			return st, nil
+		}
 		if st.SessionID == "" {
 			st.SessionID = sr.SessionID
 		}
@@ -720,4 +744,18 @@ func (r *Runner) workspace() string {
 		return ""
 	}
 	return r.Engine.Workspace()
+}
+
+// hardBudgetExceeded reports whether token or wall-clock ceilings were hit.
+func hardBudgetExceeded(st State) (bool, string) {
+	if st.MaxInputTokens > 0 && st.InputTokens >= st.MaxInputTokens {
+		return true, fmt.Sprintf("input token budget exceeded (%d/%d)", st.InputTokens, st.MaxInputTokens)
+	}
+	if st.MaxDurationMs > 0 && !st.StartedAt.IsZero() {
+		elapsed := time.Since(st.StartedAt)
+		if elapsed >= time.Duration(st.MaxDurationMs)*time.Millisecond {
+			return true, fmt.Sprintf("wall-clock budget exceeded (%s/%s)", elapsed.Round(time.Millisecond), time.Duration(st.MaxDurationMs)*time.Millisecond)
+		}
+	}
+	return false, ""
 }

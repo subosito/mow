@@ -88,6 +88,10 @@ type Options struct {
 	// call so a host can interrupt it mid-call (Engine.Steer). The loop then
 	// drains Steer and reissues with the steer appended — the run survives.
 	SetLLMCancel func(cancel context.CancelFunc)
+	// UntrustedNonce, when set, frames external tool output (tools implementing
+	// UntrustedSource) in <untrusted-output nonce=…> before history. Empty
+	// still frames named external tools without the forgery guard.
+	UntrustedNonce string
 
 	// thrash is set by Run for explore-loop / re-read guards (internal).
 	thrash *thrashState
@@ -592,6 +596,7 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 		return toolSlot{hard: err}
 	}
 	out = TruncateToolResult(out, toolResultLimit(opt))
+	out = frameUntrustedResult(tool, name, out, opt.UntrustedNonce)
 	out = opt.thrash.annotateRepeat(name, args, out)
 	return toolSlot{
 		ok:   true,
@@ -603,6 +608,23 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 			Content:    out,
 		},
 	}
+}
+
+
+// frameUntrustedResult wraps external tool bodies when the tool opts in via
+// UntrustedSource (or is a known external builtin name).
+func frameUntrustedResult(tool Tool, name, out, nonce string) string {
+	if out == "" {
+		return out
+	}
+	if u, ok := tool.(UntrustedSource); ok && u.Untrusted() {
+		return WrapUntrusted(nonce, name, out)
+	}
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "bash", "acp_delegate":
+		return WrapUntrusted(nonce, name, out)
+	}
+	return out
 }
 
 func toolResultLimit(opt Options) int {

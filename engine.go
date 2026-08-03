@@ -2,6 +2,8 @@ package mow
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -72,7 +74,8 @@ type Engine struct {
 	life     lifeHooks
 	// readOnlyExt marks ext tools that declared ReadOnly() true; only these
 	// (plus builtin read tools) run under PromptOpts.ReadOnly.
-	readOnlyExt map[string]bool
+	readOnlyExt     map[string]bool
+	untrustedNonce  string
 
 	onTokenMu   sync.Mutex
 	onToken     func(string)
@@ -413,6 +416,11 @@ func New(opt Options) (*Engine, error) {
 		}
 	}
 	e.tools = final
+	// Per-engine nonce for untrusted-output framing (bash/MCP/delegate).
+	nb := make([]byte, 8)
+	if _, err := rand.Read(nb); err == nil {
+		e.untrustedNonce = hex.EncodeToString(nb)
+	}
 
 	if !opt.NoSession {
 		proj := projectHash(cfg.Workspace)
@@ -483,6 +491,14 @@ func New(opt Options) (*Engine, error) {
 		}
 		e.sid = sid
 		e.sess = &session.Store{Dir: sessDir, ID: sid}
+		// context_search recovers text dropped by compaction (session archive).
+		if ct := tools.NewContextSearch(e.sess.Dir); ct != nil {
+			e.tools = append(e.tools, ct)
+			if e.readOnlyExt == nil {
+				e.readOnlyExt = map[string]bool{}
+			}
+			e.readOnlyExt["context_search"] = true
+		}
 		if mediaClient != nil && sid != "" {
 			if mediaClient.ExtraHeaders == nil {
 				mediaClient.ExtraHeaders = map[string]string{}
@@ -808,6 +824,15 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	res := agent.CompactTiered(prior, targetRaw, "", toolLim)
 	if res.Messages == nil {
 		return CompactReport{}, fmt.Errorf("engine: compact failed (nil result)")
+	}
+	// Best-effort archive of pre-compact history for context_search.
+	e.mu.Lock()
+	sess := e.sess
+	e.mu.Unlock()
+	if sess != nil && (res.CharsSaved > 0 || res.Layer == "drop") {
+		if _, aerr := sess.ArchiveCompact(prior, res.Layer, res.CharsSaved); aerr != nil {
+			e.log().Warn("context archive", "err", aerr)
+		}
 	}
 	e.mu.Lock()
 	e.prior = res.Messages

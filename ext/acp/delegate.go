@@ -177,6 +177,7 @@ type delegateTool struct {
 }
 
 func (t *delegateTool) Name() string { return "acp_delegate" }
+func (t *delegateTool) Untrusted() bool { return true }
 func (t *delegateTool) Description() string {
 	names := make([]string, 0, len(t.agents))
 	for n := range t.agents {
@@ -344,7 +345,50 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	if strings.TrimSpace(reply) == "" {
 		reply = "(peer returned no agent_message_chunk text; stopReason=" + stop + ")"
 	}
-	return fmt.Sprintf("agent: %s\nstop: %s\n\n%s", spec.Name, stop, reply), nil
+	return formatDelegateResult(spec.Name, stop, reply), nil
+}
+
+// defaultDelegateSummaryChars caps the parent-visible peer body. Full reply is
+// still streamed to the host via harness.delegate.chunk; the tool result keeps
+// a compact summary so a deep peer dive does not bloat parent context.
+const defaultDelegateSummaryChars = 4000
+
+func formatDelegateResult(agentName, stop, reply string) string {
+	body := strings.TrimRight(reply, " \t\r\n")
+	runess := []rune(body)
+	if len(runess) > defaultDelegateSummaryChars {
+		body = string(runess[:defaultDelegateSummaryChars]) + "\n…(peer reply summarized for parent context; full stream was emitted live)"
+	}
+	if sum := extractPeerSummary(reply); sum != "" {
+		return fmt.Sprintf("agent: %s\nstop: %s\n\n## Peer summary\n%s", agentName, stop, sum)
+	}
+	return fmt.Sprintf("agent: %s\nstop: %s\n\n%s", agentName, stop, body)
+}
+
+func extractPeerSummary(reply string) string {
+	lines := strings.Split(reply, "\n")
+	start := -1
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		low := strings.ToLower(trim)
+		if strings.HasPrefix(low, "## summary") || low == "summary:" || strings.HasPrefix(low, "summary:") {
+			start = i
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, line := range lines[start:] {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	out := strings.TrimSpace(b.String())
+	runess := []rune(out)
+	if len(runess) > defaultDelegateSummaryChars {
+		out = string(runess[:defaultDelegateSummaryChars]) + "\n…(truncated)"
+	}
+	return out
 }
 
 func (t *delegateTool) getOrStart(ctx context.Context, spec AgentSpec, dir string) (*peerSlot, error) {
