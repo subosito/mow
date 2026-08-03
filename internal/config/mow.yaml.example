@@ -80,7 +80,8 @@ policy:
   compact_ratio: 0.8              # of gateway context_window when auto-scaling (1M → ~800k tok-eq history)
   max_tool_result_chars: 24000    # cap each tool result in model history (default)
   max_parallel_tools: 8           # concurrent tools per assistant batch; 1 = sequential
-  # extra_roots:                  # more FS trees for read/write/edit/glob/grep
+  # extra_roots:  # PATH or PATH:ro (read-only)
+  # - /abs/shared:ro                  # more FS trees for read/write/edit/glob/grep
   #   - /path/to/sibling-repo     # user/host config only (not project .mow/config)
   # CLI: --extra-root PATH (repeatable)
 

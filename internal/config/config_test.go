@@ -120,6 +120,43 @@ func TestExtraRootsNormalizedAndRootRejected(t *testing.T) {
 	}
 }
 
+func TestExtraRootsReadOnlyNormalizedAndRootRejected(t *testing.T) {
+	t.Setenv(config.EnvHome, t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "k")
+	t.Setenv("OPENAI_MODEL", "m")
+	t.Setenv("MOW_API_KEY", "")
+	t.Setenv("MOW_MODEL", "")
+	dir := t.TempDir()
+	extra := t.TempDir()
+	rel, err := filepath.Rel(mustGetwd(t), extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "c.yaml")
+	yaml := "policy:\n  extra_roots_read_only:\n    - " + rel + "\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Policy.ExtraRootsReadOnly) != 1 {
+		t.Fatalf("extra_roots_read_only=%v", f.Policy.ExtraRootsReadOnly)
+	}
+	want, _ := filepath.Abs(extra)
+	if f.Policy.ExtraRootsReadOnly[0] != filepath.Clean(want) {
+		t.Fatalf("extra_roots_read_only[0]=%q want abs of %q", f.Policy.ExtraRootsReadOnly[0], extra)
+	}
+	bad := filepath.Join(dir, "bad_ro.yaml")
+	if err := os.WriteFile(bad, []byte("policy:\n  extra_roots_read_only: [/]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(bad); err == nil {
+		t.Fatal("extra_roots_read_only: [/] must be rejected")
+	}
+}
+
 func mustGetwd(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -243,5 +280,38 @@ func TestMergeHashlineDefaultOff(t *testing.T) {
 	}
 	if f.Tools.Hashline {
 		t.Fatal("hashline should default to off")
+	}
+}
+
+func TestExtraRootSpecROSuffixInExtraRoots(t *testing.T) {
+	t.Setenv(config.EnvHome, t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "k")
+	t.Setenv("OPENAI_MODEL", "m")
+	t.Setenv("MOW_API_KEY", "")
+	t.Setenv("MOW_MODEL", "")
+	dir := t.TempDir()
+	ro := t.TempDir()
+	rel, err := filepath.Rel(mustGetwd(t), ro)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "c.yaml")
+	yaml := "policy:\n  extra_roots:\n    - " + rel + ":ro\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Policy.ExtraRoots) != 0 {
+		t.Fatalf("rw roots=%v want empty", f.Policy.ExtraRoots)
+	}
+	if len(f.Policy.ExtraRootsReadOnly) != 1 {
+		t.Fatalf("ro roots=%v", f.Policy.ExtraRootsReadOnly)
+	}
+	want, _ := filepath.Abs(ro)
+	if f.Policy.ExtraRootsReadOnly[0] != filepath.Clean(want) {
+		t.Fatalf("got %q want %q", f.Policy.ExtraRootsReadOnly[0], want)
 	}
 }

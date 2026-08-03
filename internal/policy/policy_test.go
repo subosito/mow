@@ -8,6 +8,70 @@ import (
 	"github.com/subosito/mow/internal/policy"
 )
 
+func TestPolicyExtraRootsReadOnly(t *testing.T) {
+	ws := t.TempDir()
+	rw := t.TempDir()
+	ro := t.TempDir()
+
+	_ = os.WriteFile(filepath.Join(ws, "ws.txt"), []byte("ws"), 0o644)
+	_ = os.WriteFile(filepath.Join(rw, "rw.txt"), []byte("rw"), 0o644)
+	_ = os.WriteFile(filepath.Join(ro, "ro.txt"), []byte("ro"), 0o644)
+
+	pol := &policy.Policy{
+		Workspace:          ws,
+		ExtraRoots:         []string{rw},
+		ExtraRootsReadOnly: []string{ro},
+		AllowWrite:         true,
+	}
+
+	// Read operations allowed across all roots.
+	if _, err := pol.ResolvePathFor("ws.txt", false); err != nil {
+		t.Fatalf("read ws: %v", err)
+	}
+	if _, err := pol.ResolvePathFor(filepath.Join(rw, "rw.txt"), false); err != nil {
+		t.Fatalf("read rw: %v", err)
+	}
+	if _, err := pol.ResolvePathFor(filepath.Join(ro, "ro.txt"), false); err != nil {
+		t.Fatalf("read ro: %v", err)
+	}
+
+	// Write operations allowed in workspace and RW extra root, denied in RO extra root.
+	if _, err := pol.ResolvePathFor("ws.txt", true); err != nil {
+		t.Fatalf("write ws: %v", err)
+	}
+	if _, err := pol.ResolvePathFor(filepath.Join(rw, "rw.txt"), true); err != nil {
+		t.Fatalf("write rw: %v", err)
+	}
+	if _, err := pol.ResolvePathFor(filepath.Join(ro, "ro.txt"), true); err == nil {
+		t.Fatal("expected write deny under read-only extra root")
+	}
+}
+
+// TestPolicyNestedRootsMostSpecificWins verifies most-specific root matching logic.
+func TestPolicyNestedRootsMostSpecificWins(t *testing.T) {
+	parent := t.TempDir()
+	child := filepath.Join(parent, "writable_sub")
+	_ = os.MkdirAll(child, 0o755)
+
+	_ = os.WriteFile(filepath.Join(parent, "ro.txt"), []byte("ro"), 0o644)
+	_ = os.WriteFile(filepath.Join(child, "rw.txt"), []byte("rw"), 0o644)
+
+	// Outer directory is read-only, nested sub-directory is read-write.
+	pol := &policy.Policy{
+		Workspace:          t.TempDir(),
+		ExtraRoots:         []string{child},
+		ExtraRootsReadOnly: []string{parent},
+		AllowWrite:         true,
+	}
+
+	if _, err := pol.ResolvePathFor(filepath.Join(parent, "ro.txt"), true); err == nil {
+		t.Fatal("expected write deny in outer RO parent")
+	}
+	if _, err := pol.ResolvePathFor(filepath.Join(child, "rw.txt"), true); err != nil {
+		t.Fatalf("expected write allow in nested RW child: %v", err)
+	}
+}
+
 func TestResolvePathJail(t *testing.T) {
 	root := t.TempDir()
 	p := &policy.Policy{Workspace: root}

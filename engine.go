@@ -118,6 +118,9 @@ func New(opt Options) (*Engine, error) {
 	if len(opt.ExtraRoots) > 0 {
 		cfg.Policy.ExtraRoots = append(append([]string(nil), cfg.Policy.ExtraRoots...), opt.ExtraRoots...)
 	}
+	if len(opt.ExtraRootsReadOnly) > 0 {
+		cfg.Policy.ExtraRootsReadOnly = append(append([]string(nil), cfg.Policy.ExtraRootsReadOnly...), opt.ExtraRootsReadOnly...)
+	}
 	if m := strings.TrimSpace(opt.Model); m != "" {
 		cfg.LLM.Model = m
 	}
@@ -154,14 +157,15 @@ func New(opt Options) (*Engine, error) {
 	}
 
 	pol := &policy.Policy{
-		Workspace:         cfg.Workspace,
-		ExtraRoots:        append([]string(nil), cfg.Policy.ExtraRoots...),
-		AllowWrite:        cfg.ToolEnabled("write") || cfg.ToolEnabled("edit"),
-		AllowShell:        cfg.ToolEnabled("bash"),
-		MaxReadBytes:      cfg.Policy.MaxReadBytes,
-		BashTimeoutSec:    cfg.Policy.BashTimeoutSec,
-		MaxBashTimeoutSec: cfg.Policy.MaxBashTimeoutSec,
-		Hashline:          cfg.Tools.Hashline,
+		Workspace:          cfg.Workspace,
+		ExtraRoots:         append([]string(nil), cfg.Policy.ExtraRoots...),
+		ExtraRootsReadOnly: append([]string(nil), cfg.Policy.ExtraRootsReadOnly...),
+		AllowWrite:         cfg.ToolEnabled("write") || cfg.ToolEnabled("edit"),
+		AllowShell:         cfg.ToolEnabled("bash"),
+		MaxReadBytes:       cfg.Policy.MaxReadBytes,
+		BashTimeoutSec:     cfg.Policy.BashTimeoutSec,
+		MaxBashTimeoutSec:  cfg.Policy.MaxBashTimeoutSec,
+		Hashline:           cfg.Tools.Hashline,
 	}
 
 	enabled := cfg.Tools.Enable
@@ -234,7 +238,7 @@ func New(opt Options) (*Engine, error) {
 	}
 	// Concrete workspace + extra roots so the model does not refuse --extra-root
 	// paths as "restricted" (policy already allows them; instructions must match).
-	jailFacts := contextload.PathJailFacts(cfg.Workspace, pol.ExtraRoots)
+	jailFacts := contextload.PathJailFacts(cfg.Workspace, pol.ExtraRoots, pol.ExtraRootsReadOnly)
 	sys := contextload.ComposeSystem(jailFacts, agents, skills, opt.SystemAppend)
 
 	loopHooks, life := mergeHooks(opt.Hooks)
@@ -573,6 +577,14 @@ func (e *Engine) ExtraRoots() []string {
 	return append([]string(nil), e.pol.ExtraRoots...)
 }
 
+// ExtraRootsReadOnly returns additional read-only FS jail roots (copy).
+func (e *Engine) ExtraRootsReadOnly() []string {
+	if e == nil || e.pol == nil || len(e.pol.ExtraRootsReadOnly) == 0 {
+		return nil
+	}
+	return append([]string(nil), e.pol.ExtraRootsReadOnly...)
+}
+
 // ResolvePath applies the same path jail as FS tools: under Workspace or any
 // ExtraRoot (symlink-safe). Relative paths join Workspace.
 func (e *Engine) ResolvePath(rel string) (string, error) {
@@ -580,6 +592,14 @@ func (e *Engine) ResolvePath(rel string) (string, error) {
 		return "", fmt.Errorf("mow: nil engine")
 	}
 	return e.pol.ResolvePath(rel)
+}
+
+// ResolvePathFor applies the path jail for read or write context.
+func (e *Engine) ResolvePathFor(rel string, write bool) (string, error) {
+	if e == nil || e.pol == nil {
+		return "", fmt.Errorf("mow: nil engine")
+	}
+	return e.pol.ResolvePathFor(rel, write)
 }
 
 // SessionID returns the active session id, if any.

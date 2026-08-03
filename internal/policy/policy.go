@@ -8,16 +8,25 @@ import (
 	"strings"
 )
 
+// JailRoot is one absolute directory tree permitted by the path jail.
+type JailRoot struct {
+	Path     string
+	ReadOnly bool
+}
+
 // Policy is the runtime security policy for tool execution.
 type Policy struct {
 	Workspace string
 	// ExtraRoots are additional absolute directory trees FS tools may touch
 	// (same symlink rules as Workspace). Set only from user/host config or CLI
 	// — never from project .mow/config.
-	ExtraRoots   []string
-	AllowWrite   bool
-	AllowShell   bool
-	MaxReadBytes int
+	ExtraRoots []string
+	// ExtraRootsReadOnly are additional absolute directory trees FS tools may
+	// read from, but write/edit operations are denied even when AllowWrite is true.
+	ExtraRootsReadOnly []string
+	AllowWrite         bool
+	AllowShell         bool
+	MaxReadBytes       int
 	// BashTimeoutSec caps each bash tool Exec (default 300). Soft-returns on timeout.
 	BashTimeoutSec int
 	// MaxBashTimeoutSec bounds a per-call timeout_sec request (default 900).
@@ -63,6 +72,12 @@ func (p *Policy) AllowTool(name string) error {
 // ResolvePath joins rel to workspace (when relative) and ensures the result
 // stays inside the workspace or an ExtraRoot. Returns absolute cleaned path.
 func (p *Policy) ResolvePath(rel string) (string, error) {
+	return p.ResolvePathFor(rel, false)
+}
+
+// ResolvePathFor checks path jail boundaries for relative or absolute paths.
+// When write is true, paths matching a read-only root are rejected.
+func (p *Policy) ResolvePathFor(rel string, write bool) (string, error) {
 	if p == nil || p.Workspace == "" {
 		return "", fmt.Errorf("workspace not set")
 	}
@@ -73,7 +88,7 @@ func (p *Policy) ResolvePath(rel string) (string, error) {
 	if len(roots) == 0 {
 		return "", fmt.Errorf("workspace not set")
 	}
-	primary := roots[0]
+	primary := roots[0].Path
 
 	candidate := rel
 	if !filepath.IsAbs(candidate) {
@@ -92,33 +107,51 @@ func (p *Policy) ResolvePath(rel string) (string, error) {
 	candidate = resolved
 
 	sep := string(filepath.Separator)
-	for _, root := range roots {
-		r := root
+	var matchedRoot *JailRoot
+	var longestLen int
+
+	for i := range roots {
+		r := roots[i].Path
 		if resolvedRoot, err := filepath.EvalSymlinks(r); err == nil {
 			r = filepath.Clean(resolvedRoot)
 		}
 		// Re-check after symlink resolution: a root that resolves to "/" would
 		// otherwise match every absolute path via a broken or overly broad prefix.
 		if r == string(filepath.Separator) {
-			return "", fmt.Errorf("%s resolves to filesystem root (not allowed as path jail root)", root)
+			return "", fmt.Errorf("%s resolves to filesystem root (not allowed as path jail root)", roots[i].Path)
 		}
 		if candidate == r || strings.HasPrefix(candidate, r+sep) {
-			return candidate, nil
+			// Longest-prefix / most-specific root match wins.
+			if len(r) > longestLen {
+				longestLen = len(r)
+				matchedRoot = &roots[i]
+			} else if len(r) == longestLen && roots[i].ReadOnly {
+				// Equal path lengths: read-only deny wins over read-write.
+				matchedRoot = &roots[i]
+			}
 		}
+	}
+
+	if matchedRoot != nil {
+		if write && matchedRoot.ReadOnly {
+			return "", fmt.Errorf("path %q resolves under read-only root %q", rel, matchedRoot.Path)
+		}
+		return candidate, nil
 	}
 	return "", fmt.Errorf("path %q escapes workspace (and extra roots)", rel)
 }
 
-// jailRoots returns cleaned absolute roots: workspace first, then ExtraRoots.
+// jailRoots returns cleaned absolute roots: workspace first, then ExtraRoots and ExtraRootsReadOnly.
 // The filesystem root ("/") is never a jail root: granting it disables the
 // jail, and the prefix check (`root+sep`) becomes "//" which matches nothing.
-func (p *Policy) jailRoots() ([]string, error) {
+func (p *Policy) jailRoots() ([]JailRoot, error) {
 	if p == nil {
 		return nil, fmt.Errorf("nil policy")
 	}
-	var out []string
-	seen := map[string]bool{}
-	add := func(raw string, label string) error {
+	var out []JailRoot
+	seen := map[string]int{}
+
+	add := func(raw string, label string, ro bool) error {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			return nil
@@ -131,18 +164,27 @@ func (p *Policy) jailRoots() ([]string, error) {
 		if abs == string(filepath.Separator) {
 			return fmt.Errorf("%s: filesystem root is not allowed as a path jail root", label)
 		}
-		if seen[abs] {
+		if idx, ok := seen[abs]; ok {
+			if ro {
+				out[idx].ReadOnly = true // Read-only restriction wins on duplicate
+			}
 			return nil
 		}
-		seen[abs] = true
-		out = append(out, abs)
+		seen[abs] = len(out)
+		out = append(out, JailRoot{Path: abs, ReadOnly: ro})
 		return nil
 	}
-	if err := add(p.Workspace, "workspace"); err != nil {
+
+	if err := add(p.Workspace, "workspace", false); err != nil {
 		return nil, err
 	}
 	for _, r := range p.ExtraRoots {
-		if err := add(r, "extra_roots"); err != nil {
+		if err := add(r, "extra_roots", false); err != nil {
+			return nil, err
+		}
+	}
+	for _, r := range p.ExtraRootsReadOnly {
+		if err := add(r, "extra_roots_read_only", true); err != nil {
 			return nil, err
 		}
 	}

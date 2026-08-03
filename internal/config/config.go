@@ -133,7 +133,8 @@ type PolicyConfig struct {
 	// still follow allow-write). Absolute or relative (resolved at load).
 	// User/host config and CLI only — stripped from project .mow/config.
 	// CLI: repeatable --extra-root PATH.
-	ExtraRoots []string `yaml:"extra_roots"`
+	ExtraRoots         []string `yaml:"extra_roots"`
+	ExtraRootsReadOnly []string `yaml:"extra_roots_read_only"`
 }
 
 type SessionConfig struct {
@@ -268,6 +269,7 @@ func mergeProjectFile(dst *File, path string) error {
 	overlay.Session.Dir = ""
 	// Extra FS roots expand the jail — host/CLI only (not project-controlled).
 	overlay.Policy.ExtraRoots = nil
+	overlay.Policy.ExtraRootsReadOnly = nil
 
 	// tools.enable: project may only *add* safe tools; never replace the
 	// host list (which would drop user-granted power tools or sneak in
@@ -427,6 +429,9 @@ func mergeOverlay(dst *File, overlay *File) {
 	}
 	if len(overlay.Policy.ExtraRoots) > 0 {
 		dst.Policy.ExtraRoots = mergeStringList(dst.Policy.ExtraRoots, overlay.Policy.ExtraRoots)
+	}
+	if len(overlay.Policy.ExtraRootsReadOnly) > 0 {
+		dst.Policy.ExtraRootsReadOnly = mergeStringList(dst.Policy.ExtraRootsReadOnly, overlay.Policy.ExtraRootsReadOnly)
 	}
 	if overlay.Policy.MaxParallelTools > 0 {
 		dst.Policy.MaxParallelTools = overlay.Policy.MaxParallelTools
@@ -671,20 +676,56 @@ func (f *File) normalize() error {
 	// re-point a relative entry. Reject the filesystem root — it would either
 	// disable the jail entirely or fail the prefix check (`/` + sep → `//`).
 	if len(f.Policy.ExtraRoots) > 0 {
+		var roots, roRoots []string
+		seenRW, seenRO := map[string]bool{}, map[string]bool{}
+		for _, r := range f.Policy.ExtraRoots {
+			r = strings.TrimSpace(r)
+			if r == "" {
+				continue
+			}
+			path, readOnly := splitExtraRootSpec(r)
+			abs, err := filepath.Abs(path)
+			if err != nil {
+				return fmt.Errorf("policy.extra_roots %q: %w", r, err)
+			}
+			abs = filepath.Clean(abs)
+			if abs == string(filepath.Separator) {
+				return fmt.Errorf("policy.extra_roots: filesystem root %q is not allowed as a path jail root", r)
+			}
+			if readOnly {
+				if seenRO[abs] {
+					continue
+				}
+				seenRO[abs] = true
+				roRoots = append(roRoots, abs)
+				continue
+			}
+			if seenRW[abs] {
+				continue
+			}
+			seenRW[abs] = true
+			roots = append(roots, abs)
+		}
+		f.Policy.ExtraRoots = roots
+		if len(roRoots) > 0 {
+			f.Policy.ExtraRootsReadOnly = mergeStringList(f.Policy.ExtraRootsReadOnly, roRoots)
+		}
+	}
+	if len(f.Policy.ExtraRootsReadOnly) > 0 {
 		var roots []string
 		seen := map[string]bool{}
-		for _, r := range f.Policy.ExtraRoots {
+		for _, r := range f.Policy.ExtraRootsReadOnly {
 			r = strings.TrimSpace(r)
 			if r == "" {
 				continue
 			}
 			abs, err := filepath.Abs(r)
 			if err != nil {
-				return fmt.Errorf("policy.extra_roots %q: %w", r, err)
+				return fmt.Errorf("policy.extra_roots_read_only %q: %w", r, err)
 			}
 			abs = filepath.Clean(abs)
 			if abs == string(filepath.Separator) {
-				return fmt.Errorf("policy.extra_roots: filesystem root %q is not allowed", r)
+				return fmt.Errorf("policy.extra_roots_read_only: filesystem root %q is not allowed as a path jail root", r)
 			}
 			if seen[abs] {
 				continue
@@ -692,7 +733,7 @@ func (f *File) normalize() error {
 			seen[abs] = true
 			roots = append(roots, abs)
 		}
-		f.Policy.ExtraRoots = roots
+		f.Policy.ExtraRootsReadOnly = roots
 	}
 	return nil
 }
@@ -717,4 +758,19 @@ func (f *File) ToolEnabled(name string) bool {
 		}
 	}
 	return false
+}
+
+// splitExtraRootSpec parses policy.extra_roots entries.
+// "PATH:ro" is read-only; "PATH" / "PATH:rw" are read-write.
+func splitExtraRootSpec(raw string) (path string, readOnly bool) {
+	raw = strings.TrimSpace(raw)
+	lower := strings.ToLower(raw)
+	switch {
+	case strings.HasSuffix(lower, ":ro"):
+		return strings.TrimSpace(raw[:len(raw)-3]), true
+	case strings.HasSuffix(lower, ":rw"):
+		return strings.TrimSpace(raw[:len(raw)-3]), false
+	default:
+		return raw, false
+	}
 }

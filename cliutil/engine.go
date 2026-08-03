@@ -36,7 +36,7 @@ type EngineFlags struct {
 func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.Config, "config", "", "optional config yaml")
 	fs.StringVar(&f.Workspace, "workspace", "", "workspace root")
-	fs.Var((*stringList)(&f.ExtraRoots), "extra-root", "extra FS root for path jail (repeatable)")
+	fs.Var((*stringList)(&f.ExtraRoots), "extra-root", "extra FS root for path jail (repeatable; PATH or PATH:ro for read-only)")
 	fs.StringVar(&f.Model, "model", "", "model id")
 	fs.StringVar(&f.Effort, "effort", "", "reasoning effort (catalog efforts when listed; else none|low|medium|high)")
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
@@ -105,21 +105,23 @@ func (f *EngineFlags) ConfigPaths() []string {
 // setup happens here.
 func (f *EngineFlags) Options() mow.Options {
 	paths := f.ConfigPaths()
+	rw, ro := splitRootSpecs(f.ExtraRoots)
 	opt := mow.Options{
-		ConfigPaths:   paths,
-		Workspace:     f.Workspace,
-		ExtraRoots:    append([]string(nil), f.ExtraRoots...),
-		Model:         f.Model,
-		ExplicitModel: strings.TrimSpace(f.Model) != "",
-		Effort:        f.Effort,
-		BaseURL:       f.BaseURL,
-		SystemPrefix:  append([]string(nil), f.SystemPrefix...),
-		AllowWrite:    f.AllowWrite,
-		AllowShell:    f.AllowShell,
-		NoSession:     f.NoSession,
-		SessionID:     f.SessionID,
-		Continue:      f.Continue,
-		Stream:        f.Stream,
+		ConfigPaths:        paths,
+		Workspace:          f.Workspace,
+		ExtraRoots:         rw,
+		ExtraRootsReadOnly: ro,
+		Model:              f.Model,
+		ExplicitModel:      strings.TrimSpace(f.Model) != "",
+		Effort:             f.Effort,
+		BaseURL:            f.BaseURL,
+		SystemPrefix:       append([]string(nil), f.SystemPrefix...),
+		AllowWrite:         f.AllowWrite,
+		AllowShell:         f.AllowShell,
+		NoSession:          f.NoSession,
+		SessionID:          f.SessionID,
+		Continue:           f.Continue,
+		Stream:             f.Stream,
 	}
 	if f.MaxTurnsSet {
 		if f.MaxTurns == 0 {
@@ -135,4 +137,44 @@ func (f *EngineFlags) Options() mow.Options {
 // NewEngine runs BeforeNew hooks and constructs an Engine.
 func (f *EngineFlags) NewEngine() (*mow.Engine, error) {
 	return mow.New(f.Options())
+}
+
+// splitRootSpecs parses --extra-root values. A trailing ":ro" (case-insensitive)
+// marks the root read-only; ":rw" is accepted and treated as read-write.
+// Bare paths are read-write (same as historical --extra-root).
+func splitRootSpecs(specs []string) (rw, ro []string) {
+	for _, raw := range specs {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		path, readOnly := parseRootSpec(raw)
+		if path == "" {
+			continue
+		}
+		if readOnly {
+			ro = append(ro, path)
+		} else {
+			rw = append(rw, path)
+		}
+	}
+	return rw, ro
+}
+
+func parseRootSpec(raw string) (path string, readOnly bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	// Windows drive letters (C:\...) must not be treated as a mode suffix.
+	// Mode is only ":ro" / ":rw" at the end of the string.
+	lower := strings.ToLower(raw)
+	switch {
+	case strings.HasSuffix(lower, ":ro"):
+		return strings.TrimSpace(raw[:len(raw)-3]), true
+	case strings.HasSuffix(lower, ":rw"):
+		return strings.TrimSpace(raw[:len(raw)-3]), false
+	default:
+		return raw, false
+	}
 }

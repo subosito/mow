@@ -44,9 +44,14 @@ type Options struct {
 	Workspace string
 	// ExtraRoots appends directory trees to the FS path jail (in addition to
 	// Workspace). Relative paths resolve against the process cwd at New.
-	// Same as policy.extra_roots / repeatable --extra-root. Not settable from
+	// Same as policy.extra_roots / repeatable --extra-root. CLI/config may use
+	// PATH:ro for read-only roots (see ExtraRootsReadOnly). Not settable from
 	// project .mow/config.
 	ExtraRoots []string
+	// ExtraRootsReadOnly appends read-only FS jail roots. Prefer CLI/config
+	// "PATH:ro" on ExtraRoots/--extra-root; this field is for programmatic hosts.
+	// Write/edit is denied under these roots even when AllowWrite is true.
+	ExtraRootsReadOnly []string
 	// Model overrides config/env model when non-empty.
 	Model string
 	// ExplicitModel marks Model as a explicit user/CLI override (e.g. --model).

@@ -68,9 +68,13 @@ func ComposeSystem(parts ...string) string {
 // PathJailFacts is a short system segment listing the workspace and any extra
 // FS roots so the model uses absolute paths under extra roots instead of
 // refusing them as "restricted".
-func PathJailFacts(workspace string, extraRoots []string) string {
+func PathJailFacts(workspace string, extraRoots []string, extraRootsReadOnly ...[]string) string {
 	ws := strings.TrimSpace(workspace)
-	if ws == "" && len(extraRoots) == 0 {
+	var roRoots []string
+	if len(extraRootsReadOnly) > 0 {
+		roRoots = extraRootsReadOnly[0]
+	}
+	if ws == "" && len(extraRoots) == 0 && len(roRoots) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -80,19 +84,33 @@ func PathJailFacts(workspace string, extraRoots []string) string {
 		b.WriteString(ws)
 		b.WriteByte('\n')
 	}
-	if len(extraRoots) == 0 {
+	if len(extraRoots) == 0 && len(roRoots) == 0 {
 		b.WriteString("- No extra roots; absolute paths must stay under the workspace.")
 		return b.String()
 	}
-	b.WriteString("- Extra roots (use absolute paths under these — they are allowed):\n")
-	for _, r := range extraRoots {
-		r = strings.TrimSpace(r)
-		if r == "" {
-			continue
+	if len(extraRoots) > 0 {
+		b.WriteString("- Extra roots (use absolute paths under these — read and write allowed):\n")
+		for _, r := range extraRoots {
+			r = strings.TrimSpace(r)
+			if r == "" {
+				continue
+			}
+			b.WriteString("  - ")
+			b.WriteString(r)
+			b.WriteByte('\n')
 		}
-		b.WriteString("  - ")
-		b.WriteString(r)
-		b.WriteByte('\n')
+	}
+	if len(roRoots) > 0 {
+		b.WriteString("- Read-only extra roots (use absolute paths — read allowed, write/edit denied):\n")
+		for _, r := range roRoots {
+			r = strings.TrimSpace(r)
+			if r == "" {
+				continue
+			}
+			b.WriteString("  - ")
+			b.WriteString(r)
+			b.WriteByte('\n')
+		}
 	}
 	return strings.TrimSpace(b.String())
 }

@@ -20,23 +20,30 @@ func openJailed(p *policy.Policy, rel string, flag int, perm os.FileMode) (*os.F
 	if p == nil {
 		return nil, "", fmt.Errorf("workspace not set")
 	}
-	path, err := p.ResolvePath(rel)
+	write := flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND) != 0
+	path, err := p.ResolvePathFor(rel, write)
 	if err != nil {
 		return nil, "", err
 	}
 	if afterResolveHook != nil {
 		afterResolveHook(path)
 	}
-	return OpenJailedPath(p, path, flag, perm)
+	return OpenJailedPathFor(p, path, flag, perm, write)
 }
 
 // OpenJailedPath opens an already-resolved absolute path and verifies the fd.
 func OpenJailedPath(p *policy.Policy, path string, flag int, perm os.FileMode) (*os.File, string, error) {
+	write := flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND) != 0
+	return OpenJailedPathFor(p, path, flag, perm, write)
+}
+
+// OpenJailedPathFor opens an already-resolved absolute path and verifies the fd with write context.
+func OpenJailedPathFor(p *policy.Policy, path string, flag int, perm os.FileMode, write bool) (*os.File, string, error) {
 	f, err := os.OpenFile(path, flag, perm)
 	if err != nil {
 		return nil, path, err
 	}
-	if err := VerifyFDInJail(p, f); err != nil {
+	if err := VerifyFDInJailFor(p, f, write); err != nil {
 		actual, _ := fdPath(f)
 		_ = f.Close()
 		// If create/trunc landed outside the jail, remove the stray file.
@@ -71,7 +78,7 @@ func WriteFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode
 	if p == nil {
 		return "", fmt.Errorf("workspace not set")
 	}
-	path, err = p.ResolvePath(rel)
+	path, err = p.ResolvePathFor(rel, true)
 	if err != nil {
 		return "", err
 	}
@@ -81,7 +88,7 @@ func WriteFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return path, err
 	}
-	f, path, err := OpenJailedPath(p, path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	f, path, err := OpenJailedPathFor(p, path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm, true)
 	if err != nil {
 		return path, err
 	}
@@ -101,6 +108,11 @@ func writeFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode
 // Uses the platform fd→path mapping (see jailfile_*.go); fails closed if the
 // path cannot be determined.
 func VerifyFDInJail(p *policy.Policy, f *os.File) error {
+	return VerifyFDInJailFor(p, f, false)
+}
+
+// VerifyFDInJailFor verifies opened fd stays inside the path jail for read or write.
+func VerifyFDInJailFor(p *policy.Policy, f *os.File, write bool) error {
 	if f == nil {
 		return fmt.Errorf("path jail: nil file")
 	}
@@ -108,8 +120,8 @@ func VerifyFDInJail(p *policy.Policy, f *os.File) error {
 	if err != nil {
 		return fmt.Errorf("path jail: cannot verify open path: %w", err)
 	}
-	if _, err := p.ResolvePath(actual); err != nil {
-		return fmt.Errorf("path %q escapes workspace after open", actual)
+	if _, err := p.ResolvePathFor(actual, write); err != nil {
+		return fmt.Errorf("path %q escapes workspace after open: %w", actual, err)
 	}
 	return nil
 }
