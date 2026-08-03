@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -221,6 +222,22 @@ func (p Profile) service(name string) (Service, bool) {
 	return Service{}, false
 }
 
+// actionNames returns the declared action names, sorted for stable output.
+func actionNames(actions map[string][]string) []string {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(actions))
+	for k, argv := range actions {
+		if len(argv) == 0 {
+			continue
+		}
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func lookupAction(actions map[string][]string, key string) []string {
 	v, _ := actions[key]
 	return v
@@ -257,7 +274,7 @@ func (p Profile) actionArgv(service, action string) ([]string, error) {
 func (p Profile) systemAppend() string {
 	var b strings.Builder
 	b.WriteString("Active ops profile: " + p.Name + ". ")
-	b.WriteString("Tools: ops_services, ops_logs, ops_action, ops_incident (pass ops=\"" + p.Name + "\" or set MOW_OPS). ")
+	b.WriteString("Tools: ops_services, ops_logs, ops_action, ops_incident, ops_health, ops_log_pattern, ops_runbook (pass ops=\"" + p.Name + "\" or set MOW_OPS). ")
 	if len(p.Services) > 0 {
 		b.WriteString("Services: ")
 		for i, s := range p.Services {
@@ -268,14 +285,10 @@ func (p Profile) systemAppend() string {
 			if s.ACP != "" {
 				b.WriteString(" [acp:" + s.ACP + "]")
 			}
-			acts := []string{}
-			if len(lookupAction(s.Actions, "restart")) > 0 {
-				acts = append(acts, "restart")
-			}
-			if len(lookupAction(s.Actions, "status")) > 0 {
-				acts = append(acts, "status")
-			}
-			if len(acts) > 0 {
+			// List every declared action, not just restart/status: the
+			// actions map is operator-defined, and an action the model is
+			// never told about may as well not exist.
+			if acts := actionNames(s.Actions); len(acts) > 0 {
 				b.WriteString(" {" + strings.Join(acts, ",") + "}")
 			}
 		}
@@ -292,6 +305,14 @@ func (p Profile) systemAppend() string {
 		b.WriteString(". ")
 	}
 	b.WriteString("Role: continuous monitor + remediate (not log-classify only). ")
+	// Advertise runbook names so the model knows guidance exists without
+	// having to probe for it; the bodies stay out of the tick until pulled.
+	if names, err := listRunbooks(p.runbooksDir()); err == nil && len(names) > 0 {
+		if len(names) > maxRunbookList {
+			names = names[:maxRunbookList]
+		}
+		b.WriteString("Runbooks (ops_runbook get name=…): " + strings.Join(names, ", ") + ". ")
+	}
 	b.WriteString("Prefer ops_logs for evidence; ops_action only for allowlisted restart/status; ")
 	b.WriteString("ops_incident for durable work items (open/update/close with stable signatures); ")
 	b.WriteString("acp_delegate to a service's acp peer when code or config in that repo can fix the issue. ")
