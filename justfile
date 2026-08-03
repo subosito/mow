@@ -14,6 +14,25 @@ test:
 test-race:
     go test -race ./...
 
+# Closest local approximation of a CI run: no developer credentials and an
+# empty MOW_HOME. CI has no API key, so tests that build an Engine fail there
+# while passing on a box where ~/.mow supplies one. Run this before pushing.
+verify-ci:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    env -u MOW_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+        -u MOW_MODEL -u OPENAI_MODEL -u ANTHROPIC_MODEL \
+        MOW_HOME="$tmp/.mow" HOME="$tmp" \
+        go vet ./...
+    env -u MOW_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+        -u MOW_MODEL -u OPENAI_MODEL -u ANTHROPIC_MODEL \
+        MOW_HOME="$tmp/.mow" HOME="$tmp" \
+        go test -race -count=1 ./...
+    go build -o bin/mow ./cmd/mow
+    echo "→ verify-ci ok"
+
 vet:
     go vet ./...
 

@@ -15,6 +15,7 @@ Requires **Go 1.26.4+** (pinned in `go.mod`). Prefer `devenv shell` (sets
 
 ```bash
 devenv shell -- just verify    # vet + go test -race + build  — gate before commit
+devenv shell -- just verify-ci # same, but with no credentials and an empty MOW_HOME
 devenv shell -- just build     # → bin/mow
 devenv shell -- just test      # fast inner loop (no race detector)
 ```
@@ -23,6 +24,12 @@ devenv shell -- just test      # fast inner loop (no race detector)
 verify means a green CI. Run it **after changes and before commit** — the race
 detector is part of the gate because CI runs `-race`, and unsynchronized test
 helpers pass plain `go test`. If you add a CI step, add it to `verify` too.
+
+**Before pushing, run `just verify-ci`.** CI has no API key and no `~/.mow`;
+a developer box has both, so tests that build an Engine can pass locally and
+fail on CI. `verify-ci` runs the suite with credentials unset and a throwaway
+`MOW_HOME`. Packs whose tests construct an Engine need a `TestMain` that pins
+`MOW_HOME`, `MOW_API_KEY`, and `MOW_MODEL` (see `ext/job`, `ext/lsp`).
 
 No separate lint step. Format with `gofmt`. Do not invent Make/npm scripts.
 
