@@ -326,7 +326,17 @@ func TestExportShutdown(t *testing.T) {
 
 	t.Run("idempotent", func(t *testing.T) {
 		t.Parallel()
-		exp, err := StartExport(context.Background(), ExportConfig{Endpoint: "http://127.0.0.1:4318"})
+		// Point at a local collector we control so Shutdown's final flush has
+		// somewhere to land. A hard-coded 127.0.0.1:4318 passes only on a box
+		// that happens to run a collector, and fails in CI with "connection
+		// refused" — this subtest is about shutting down twice safely, not
+		// about delivering spans.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		exp, err := StartExport(context.Background(), ExportConfig{Endpoint: srv.URL})
 		if err != nil {
 			t.Fatal(err)
 		}

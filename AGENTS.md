@@ -31,6 +31,11 @@ fail on CI. `verify-ci` runs the suite with credentials unset and a throwaway
 `MOW_HOME`. Packs whose tests construct an Engine need a `TestMain` that pins
 `MOW_HOME`, `MOW_API_KEY`, and `MOW_MODEL` (see `ext/job`, `ext/lsp`).
 
+**A test may not assume anything is listening on a port.** CI runs no
+collector, database, or peer; a hard-coded `127.0.0.1:PORT` passes only on a
+box that happens to run that service. Start an `httptest.NewServer` and use
+its URL. `verify-ci` does not sandbox the network, so this one is on review.
+
 No separate lint step. Format with `gofmt`. Do not invent Make/npm scripts.
 
 ## Request flow (spine)

@@ -17,6 +17,11 @@ test-race:
 # Closest local approximation of a CI run: no developer credentials and an
 # empty MOW_HOME. CI has no API key, so tests that build an Engine fail there
 # while passing on a box where ~/.mow supplies one. Run this before pushing.
+#
+# Note this does NOT isolate the network: a test that dials a service you
+# happen to run locally (e.g. an OTLP collector on :4318) still passes here
+# and fails on CI. Tests must stand up their own httptest server instead of
+# assuming a listener.
 verify-ci:
     #!/usr/bin/env bash
     set -euo pipefail
