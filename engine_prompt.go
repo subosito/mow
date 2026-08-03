@@ -346,6 +346,15 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 		return agent.PostToolDecision{}, nil
 	}}, post...)
 	compact = append([]agent.AfterCompactFunc{func(ctx context.Context, ev agent.AfterCompactEvent) {
+		// Keep ContextTokens() in step with the compacted projection so hosts
+		// (header ctx%) do not wait for the next LLM usage report.
+		e.mu.Lock()
+		cpt := 0.0
+		if e.lastCtxTokens > 0 && ev.CharsBefore > 0 {
+			cpt = float64(ev.CharsBefore) / float64(e.lastCtxTokens)
+		}
+		e.lastCtxTokens = estimateCtxTokens(ev.CharsAfter, cpt)
+		e.mu.Unlock()
 		e.Emit(Event{
 			Type: EventCompact, RunID: runID, SessionID: sid, Layer: CompactLayer(ev.Layer),
 			CharsBefore: ev.CharsBefore, CharsAfter: ev.CharsAfter, CharsSaved: ev.CharsSaved,

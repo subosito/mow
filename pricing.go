@@ -72,7 +72,9 @@ func (e *Engine) limitsLocked() ModelLimits {
 
 // ContextTokens is the most recent LLM call's input tokens — an estimate of how
 // full the context is right now. 0 before the first call or under a custom
-// Provider that reports no usage.
+// Provider that reports no usage. Updated on compaction (manual or automatic)
+// so hosts can refresh a context-window indicator without waiting for the next
+// provider round-trip.
 func (e *Engine) ContextTokens() int {
 	if e == nil {
 		return 0
@@ -80,4 +82,21 @@ func (e *Engine) ContextTokens() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.lastCtxTokens
+}
+
+// estimateCtxTokens converts a raw history char count into an approximate token
+// count using the calibrated chars/token density (defaults to 4).
+func estimateCtxTokens(charsAfter int, charsPerToken float64) int {
+	if charsAfter <= 0 {
+		return 0
+	}
+	cpt := charsPerToken
+	if cpt <= 0 {
+		cpt = 4 // same default as agent.defaultCharsPerToken
+	}
+	tok := int(float64(charsAfter)/cpt + 0.5)
+	if tok < 1 {
+		tok = 1
+	}
+	return tok
 }

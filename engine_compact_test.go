@@ -82,6 +82,52 @@ func TestEngineCompactShrinksTranscript(t *testing.T) {
 	}
 }
 
+// Compact must refresh ContextTokens so hosts (header ctx%) update immediately
+// instead of waiting for the next LLM round-trip.
+func TestEngineCompactRefreshesContextTokens(t *testing.T) {
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			// Report input tokens proportional to message bulk so lastCtxTokens is set.
+			inTok := 0
+			for _, m := range messages {
+				inTok += len(m.Content)/4 + 1
+			}
+			if inTok < 100 {
+				inTok = 100
+			}
+			return mow.Message{Role: "assistant", Content: "ok",
+				Usage: mow.Usage{InputTokens: inTok, OutputTokens: 5}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		if _, err := eng.Prompt(context.Background(), strings.Repeat("x", 500)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := eng.ContextTokens()
+	if before <= 0 {
+		t.Fatalf("ContextTokens before compact = %d, want > 0", before)
+	}
+	rep, err := eng.Compact(12000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.CharsSaved <= 0 {
+		t.Fatalf("expected savings so ContextTokens can drop: %+v", rep)
+	}
+	after := eng.ContextTokens()
+	if after <= 0 {
+		t.Fatalf("ContextTokens after compact = %d, want > 0", after)
+	}
+	if after >= before {
+		t.Fatalf("ContextTokens did not drop after compact: before=%d after=%d rep=%+v", before, after, rep)
+	}
+}
+
 // Compact on an empty transcript is a no-op, not an error.
 func TestEngineCompactEmptyNoop(t *testing.T) {
 	eng, err := mow.New(mow.Options{

@@ -868,6 +868,10 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 		}
 	}
 	e.transcript = t
+	// Refresh the context-fullness estimate immediately. Hosts (e.g. mowi
+	// header ctx%) read ContextTokens(), which otherwise stays at the pre-
+	// compact LLM usage until the next provider call.
+	e.lastCtxTokens = estimateCtxTokens(res.CharsAfter, charsPerToken)
 	e.mu.Unlock()
 
 	rep := CompactReport{
