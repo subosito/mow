@@ -779,12 +779,31 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 		toolLim = e.opt.MaxToolResultChars
 	}
 	window := e.limitsLocked().ContextWindow
-	// Prefer last observed chars/token when available so manual compact matches
-	// the loop's calibrated density (code-heavy history tokenizes denser).
+	// Calibrate chars/token from the last observed request so manual compact
+	// matches the loop's density (code-heavy history tokenizes denser).
+	//
+	// lastCtxTokens is the provider's InputTokens: history *plus* the system
+	// prompt, tool schemas, and the last user message. Dividing history chars
+	// by that total inflates chars/token, which then under-estimates the
+	// post-compact size — the header drops to near-zero and appears to
+	// "rebound" on the next real measurement. Model the fixed overhead
+	// explicitly instead, and add it back after converting history.
 	charsPerToken := 0.0
+	overheadTokens := 0
 	if e.lastCtxTokens > 0 {
 		if raw := agent.EstChars(prior); raw > 0 {
-			charsPerToken = float64(raw) / float64(e.lastCtxTokens)
+			// Assume the default density for the non-history part, so the
+			// remainder is attributable to history.
+			histTokens := int(float64(raw)/agent.DefaultCharsPerToken + 0.5)
+			if over := e.lastCtxTokens - histTokens; over > 0 {
+				overheadTokens = over
+			}
+			// Density from history alone, never from the padded total.
+			if histTokens > 0 && overheadTokens > 0 {
+				charsPerToken = float64(raw) / float64(e.lastCtxTokens-overheadTokens)
+			} else {
+				charsPerToken = float64(raw) / float64(e.lastCtxTokens)
+			}
 		}
 	}
 	e.mu.Unlock()
@@ -871,7 +890,11 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	// Refresh the context-fullness estimate immediately. Hosts (e.g. mowi
 	// header ctx%) read ContextTokens(), which otherwise stays at the pre-
 	// compact LLM usage until the next provider call.
-	e.lastCtxTokens = estimateCtxTokens(res.CharsAfter, charsPerToken)
+	//
+	// Add back the fixed per-request overhead (system prompt, tool schemas):
+	// compaction cannot remove it, so omitting it reports a context far
+	// emptier than the next real request will measure.
+	e.lastCtxTokens = estimateCtxTokens(res.CharsAfter, charsPerToken) + overheadTokens
 	e.mu.Unlock()
 
 	rep := CompactReport{

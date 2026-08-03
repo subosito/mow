@@ -707,3 +707,8 @@ func EstChars(msgs []llm.Message) int {
 	}
 	return n
 }
+
+// DefaultCharsPerToken is the classic ~4 chars/token heuristic, exported so
+// callers outside the loop (Engine.Compact) can convert chars to tokens with
+// the same baseline density the calibrator starts from.
+const DefaultCharsPerToken = defaultCharsPerToken
