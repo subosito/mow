@@ -709,3 +709,33 @@ access. Link the pack only for plugins you trust.
 Checked between steps (after usage is applied). Resume may raise ceilings the
 same way `--max-steps` raises the step budget. Soft turn budgets are unchanged.
 
+## Eval / replay (`eval` + `ext/eval`)
+
+Lightweight fixture runner for behavioral checks when changing models or
+prompts. **Not** a vector DB or heavy graph engine.
+
+Library: `github.com/subosito/mow/eval`
+
+```go
+rep, err := eval.Run(ctx, eval.Case{
+    Name:   "lists-go",
+    Prompt: "List Go files",
+    Script: []mow.Message{
+        {Role: "assistant", ToolCalls: []mow.ToolCall{/* glob */}},
+        {Role: "assistant", Content: "found main.go"},
+    },
+    Expect: eval.Expect{Tools: []string{"glob"}, Contains: []string{".go"}},
+}, eval.Options{Workspace: dir})
+```
+
+CLI (stock binary links `ext/eval`):
+
+```text
+mow eval run path/to/suite.json
+mow eval run suite.json --json
+```
+
+Fixture JSON may be one case, a list of cases, or `{"name","cases":[…]}`.
+Cases with a `script` are fully offline; cases without a script use the
+configured live model (`llm.*` / env) via `cliutil.EngineFlags`.
+

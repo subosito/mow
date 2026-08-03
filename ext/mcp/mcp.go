@@ -403,6 +403,11 @@ type mcpTool struct {
 // that declare it run in read-only prompts.
 func (t *mcpTool) ReadOnly() bool { return t.readOnly }
 
+// Untrusted marks MCP tool output as external content so the agent loop
+// frames it in <untrusted-output> (prompt-injection boundary). Server text is
+// never treated as harness/user instructions.
+func (t *mcpTool) Untrusted() bool { return true }
+
 func (t *mcpTool) Name() string {
 	return "mcp_" + t.prefix + "_" + sanitize(t.name)
 }

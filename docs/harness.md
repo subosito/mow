@@ -459,3 +459,9 @@ Sessions enable a read-only `context_search` tool (pattern only — no path arg)
 so the agent can recover details dropped from the live window. No embeddings
 or vector DB; fixed-string scan over a bounded set of newest archive files.
 
+### MCP as untrusted output
+
+MCP tool results are external server text. The MCP pack marks every `mcp_*`
+tool with `Untrusted() bool` so the agent loop frames results in
+`<untrusted-output>` the same way as `bash` and `acp_delegate`.
+

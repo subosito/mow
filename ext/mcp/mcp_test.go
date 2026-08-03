@@ -40,3 +40,10 @@ func TestConfigMapDecodesFromJSON(t *testing.T) {
 		t.Fatalf("standard json not parsed: %+v", got)
 	}
 }
+
+func TestMCPToolUntrusted(t *testing.T) {
+	var tool mcpTool
+	if !tool.Untrusted() {
+		t.Fatal("mcp tools must frame output as untrusted")
+	}
+}

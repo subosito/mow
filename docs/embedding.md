@@ -329,3 +329,20 @@ Mapping: `loop.run.*` → `mow.run` span + token counters; `harness.tool.*` →
 span with step events. Provide your own TracerProvider/MeterProvider/exporter;
 the adapter depends only on the OTel API (+ test SDK in tests).
 
+## 11. Eval / replay fixtures
+
+For deterministic regression checks (model upgrades, system prompt tweaks)
+import `github.com/subosito/mow/eval` and drive scripted assistant turns:
+
+```go
+import "github.com/subosito/mow/eval"
+
+sr := eval.RunFixture(ctx, fix, eval.Options{
+    Workspace: dir,
+    // or Provider / Chat / Base for live eval
+})
+if !sr.OK { /* fail CI */ }
+```
+
+See [extensions.md](extensions.md) § Eval / replay and `mow eval run`.
+
