@@ -621,6 +621,48 @@ func pickSummary(reportSummary string, eng *mow.Engine, finalText string) string
 
 func (r *Runner) fire(e Event) {
 	emit(e, r.OnEvent)
+	if r == nil || r.Engine == nil {
+		return
+	}
+	var eventType mow.EventType
+	switch e.Kind {
+	case EventStart:
+		eventType = mow.EventGoalStart
+	case EventStep:
+		eventType = mow.EventGoalStep
+	case EventDone:
+		eventType = mow.EventGoalDone
+	case EventFail:
+		eventType = mow.EventGoalFail
+	case EventPartial:
+		eventType = mow.EventGoalPartial
+	case EventBlocked:
+		eventType = mow.EventGoalBlocked
+	default:
+		return
+	}
+	var nodes []mow.GoalNode
+	for _, item := range e.State.Plan.Items {
+		nodes = append(nodes, mow.GoalNode{
+			ID:     item.ID,
+			Title:  item.Title,
+			Status: string(item.Status),
+		})
+	}
+	r.Engine.Emit(mow.Event{
+		Type:       eventType,
+		SessionID:  e.State.SessionID,
+		Text:       e.Text,
+		StopReason: e.State.Error,
+		Goal: &mow.GoalEvent{
+			ID:       e.State.ID,
+			Status:   string(e.State.Status),
+			Step:     e.State.Step,
+			MaxSteps: e.State.MaxSteps,
+			Summary:  e.State.Summary,
+			Nodes:    nodes,
+		},
+	})
 }
 
 func stepPrompt(st State) string {

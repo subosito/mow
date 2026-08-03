@@ -56,7 +56,13 @@ const (
 	EventSteer  EventType = "loop.steer"
 	EventRunEnd EventType = "loop.run.end"
 
-	// harness.* — transitions that touch reality.
+	// graph.* — orchestration (ext/goal pack): state transitions and node progress.
+	EventGoalStart   EventType = "graph.goal.start"
+	EventGoalStep    EventType = "graph.goal.step"
+	EventGoalDone    EventType = "graph.goal.done"
+	EventGoalFail    EventType = "graph.goal.fail"
+	EventGoalPartial EventType = "graph.goal.partial"
+	EventGoalBlocked EventType = "graph.goal.blocked"
 	EventToolStart        EventType = "harness.tool.start"
 	EventToolEnd          EventType = "harness.tool.end"
 	EventDelegateChunk    EventType = "harness.delegate.chunk"    // peer ACP answer text delta
@@ -155,6 +161,23 @@ const (
 	StopError     = "error"
 )
 
+// GoalNode is one checklist node projection for GoalEvent.
+type GoalNode struct {
+	ID     string `json:"id"`
+	Title  string `json:"title,omitempty"`
+	Status string `json:"status"`
+}
+
+// GoalEvent is the goal orchestration payload projection for Event.
+type GoalEvent struct {
+	ID       string     `json:"id"`
+	Status   string     `json:"status"`
+	Step     int        `json:"step,omitempty"`
+	MaxSteps int        `json:"max_steps,omitempty"`
+	Summary  string     `json:"summary,omitempty"`
+	Nodes    []GoalNode `json:"nodes,omitempty"`
+}
+
 // Event is one structured notification during Engine.Prompt.
 // JSON field names are stable for rpc notifications and host parsers.
 type Event struct {
@@ -197,6 +220,27 @@ type Event struct {
 	MessagesBefore int          `json:"messages_before,omitempty"`
 	MessagesAfter  int          `json:"messages_after,omitempty"`
 	OverBudget     bool         `json:"over_budget,omitempty"`
+
+	// Goal Event Payload (graph.goal.*)
+	//
+	// Frozen payload shape (host contract for goal state/progress):
+	//
+	//	{
+	//	  "type": "graph.goal.step",
+	//	  "run_id": "run-...",
+	//	  "session_id": "2026...",
+	//	  "goal": {
+	//	    "id": "fix-bugs",
+	//	    "status": "running",
+	//	    "step": 2,
+	//	    "max_steps": 10,
+	//	    "summary": "step summary...",
+	//	    "nodes": [
+	//	      {"id": "a", "title": "analyze", "status": "done"}
+	//	    ]
+	//	  }
+	//	}
+	Goal *GoalEvent `json:"goal,omitempty"`
 
 	// LSP diagnostics (harness.lsp.diagnostics). Path is the edited file,
 	// Count the server total, Diagnostics bounded by MaxLSPDiagnostics.
