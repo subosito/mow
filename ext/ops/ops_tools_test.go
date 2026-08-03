@@ -228,9 +228,9 @@ func TestServiceLookupCaseInsensitive(t *testing.T) {
 
 func TestActionArgvErrors(t *testing.T) {
 	p := Profile{Services: []Service{
-		{Name: "g", Actions: ServiceActions{Restart: []string{"go", "version"}}},
+		{Name: "g", Actions: ServiceActions{"restart": {"go", "version"}}},
 		{Name: "no-acts"},
-		{Name: "empty", Actions: ServiceActions{Status: []string{"echo", ""}}},
+		{Name: "empty", Actions: ServiceActions{"status": {"echo", ""}}},
 	}}
 	if _, err := p.actionArgv("g", "bogus"); err == nil {
 		t.Fatal("bogus action should error")
@@ -253,7 +253,7 @@ func TestActionArgvErrors(t *testing.T) {
 	}
 	// returned slice must not alias the source (defensive copy)
 	argv[0] = "MUTATED"
-	if p.Services[0].Actions.Restart[0] == "MUTATED" {
+	if p.Services[0].Actions["restart"][0] == "MUTATED" {
 		t.Fatal("actionArgv must return a copy, not the source slice")
 	}
 }
@@ -358,10 +358,8 @@ func TestLogsToolExec(t *testing.T) {
 		t.Fatalf("grep out=%s", out)
 	}
 
-	// max_lines cap (note: the tool struct binds the Go field name MaxLines;
-	// the documented snake_case key max_lines currently does not bind — a
-	// latent mismatch. Assert via the binding that works.)
-	out, _ = logsTool{}.Exec(ctx, mustJSON(t, map[string]any{"ops": "fleet", "service": "gw", "MaxLines": 1}))
+	// max_lines cap (snake_case key per the tool schema)
+	out, _ = logsTool{}.Exec(ctx, mustJSON(t, map[string]any{"ops": "fleet", "service": "gw", "max_lines": 1}))
 	if !strings.Contains(out, "line-NEW") || strings.Contains(out, "line-OLD") {
 		t.Fatalf("max_lines out=%s", out)
 	}
@@ -721,6 +719,46 @@ func TestWriteIncidentRoundtrip(t *testing.T) {
 	}
 	if len(got.Actions) != 1 || got.Actions[0] != "note one" {
 		t.Fatalf("actions=%v", got.Actions)
+	}
+}
+
+// Incident ids come from the model via ops_incident (which is not gated behind
+// --allow-write), so traversal ids must be rejected before touching the FS.
+func TestIncidentIDTraversalRejected(t *testing.T) {
+	bad := []string{
+		"../escape",
+		"../../etc/passwd",
+		"sub/dir",
+		`..\windows`,
+		"has space",
+		"dots.dots",
+		"",
+		"   ",
+		strings.Repeat("a", 129),
+	}
+	for _, id := range bad {
+		if err := validateIncidentID(id); err == nil {
+			t.Errorf("validateIncidentID(%q) = nil, want error", id)
+		}
+	}
+	for _, id := range []string{"inc-1", "20240101T010101-sig_500", "ABC123"} {
+		if err := validateIncidentID(id); err != nil {
+			t.Errorf("validateIncidentID(%q) = %v, want nil", id, err)
+		}
+	}
+}
+
+func TestReadWriteIncidentRejectTraversal(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(filepath.Dir(dir), "pwned")
+	if err := writeIncident(dir, Incident{ID: "../pwned", Status: "open"}); err == nil {
+		t.Fatal("writeIncident accepted a traversal id")
+	}
+	if _, err := os.Stat(outside + ".json"); !os.IsNotExist(err) {
+		t.Fatalf("file escaped the incidents dir: %v", err)
+	}
+	if _, err := readIncident(dir, "../../etc/passwd"); err == nil {
+		t.Fatal("readIncident accepted a traversal id")
 	}
 }
 

@@ -205,10 +205,10 @@ func cmdShow(opsFlag string, args []string) int {
 	fmt.Printf("services: %d\n", len(p.Services))
 	for _, s := range p.Services {
 		fmt.Printf("  - %s", s.Name)
-		if len(s.Actions.Restart) > 0 {
+		if len(lookupAction(s.Actions, "restart")) > 0 {
 			fmt.Printf("  [restart]")
 		}
-		if len(s.Actions.Status) > 0 {
+		if len(lookupAction(s.Actions, "status")) > 0 {
 			fmt.Printf("  [status]")
 		}
 		if s.ACP != "" {
@@ -250,7 +250,7 @@ func cmdCheck(opsFlag string, args []string) int {
 		if len(s.Logs) == 0 {
 			fmt.Fprintf(os.Stderr, "warn: service %q has no logs\n", s.Name)
 		}
-		if len(s.Actions.Status) == 0 && len(s.Actions.Restart) == 0 {
+		if len(lookupAction(s.Actions, "status")) == 0 && len(lookupAction(s.Actions, "restart")) == 0 {
 			fmt.Fprintf(os.Stderr, "warn: service %q has no actions\n", s.Name)
 		}
 		for _, path := range s.Logs {
@@ -302,10 +302,10 @@ func cmdServices(opsFlag string, args []string) int {
 		if s.ACP != "" {
 			fmt.Printf("  acp=%s", s.ACP)
 		}
-		if len(s.Actions.Restart) > 0 {
+		if len(lookupAction(s.Actions, "restart")) > 0 {
 			fmt.Printf("  restart")
 		}
-		if len(s.Actions.Status) > 0 {
+		if len(lookupAction(s.Actions, "status")) > 0 {
 			fmt.Printf("  status")
 		}
 		if len(s.Logs) > 0 {
@@ -376,7 +376,7 @@ func cmdStatus(opsFlag string, args []string) int {
 	}
 	code := 0
 	for _, s := range p.Services {
-		if len(s.Actions.Status) == 0 {
+		if len(lookupAction(s.Actions, "status")) == 0 {
 			fmt.Printf("%s (no actions.status)\n", s.Name)
 			continue
 		}

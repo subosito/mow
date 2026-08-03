@@ -117,8 +117,10 @@ func (servicesTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 	rows := make([]row, 0, len(p.Services))
 	for _, s := range p.Services {
 		rows = append(rows, row{
-			Name: s.Name, Logs: s.Logs, Restart: s.Actions.Restart, Status: s.Actions.Status,
-			ACP: s.ACP, Note: s.Notes,
+			Name: s.Name, Logs: s.Logs,
+			Restart: lookupAction(s.Actions, "restart"),
+			Status:  lookupAction(s.Actions, "status"),
+			ACP:     s.ACP, Note: s.Notes,
 		})
 	}
 	raw, _ := json.MarshalIndent(map[string]any{"ops": p.Name, "services": rows}, "", "  ")
@@ -142,7 +144,7 @@ func (logsTool) Exec(ctx context.Context, args json.RawMessage) (string, error) 
 	}
 	var a struct {
 		Ops, Service, Source, Grep string
-		MaxLines                   int
+		MaxLines                   int `json:"max_lines"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
@@ -440,7 +442,7 @@ func findOpenBySignature(dir, sig string) *Incident {
 		return nil
 	}
 	for _, e := range ents {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
 		inc, err := readIncident(dir, strings.TrimSuffix(e.Name(), ".json"))
@@ -454,7 +456,31 @@ func findOpenBySignature(dir, sig string) *Incident {
 	return nil
 }
 
+// validateIncidentID keeps model-supplied ids inside the incidents dir: a
+// single path segment of [a-z0-9-_] only. ops_incident is reachable without
+// --allow-write, so an unvalidated id would be an arbitrary-file read/write.
+func validateIncidentID(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("incident id required")
+	}
+	if len(id) > 128 {
+		return fmt.Errorf("incident id too long")
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return fmt.Errorf("invalid incident id %q (want [A-Za-z0-9-_])", id)
+		}
+	}
+	return nil
+}
+
 func readIncident(dir, id string) (*Incident, error) {
+	if err := validateIncidentID(id); err != nil {
+		return nil, err
+	}
 	raw, err := os.ReadFile(filepath.Join(dir, id+".json"))
 	if err != nil {
 		return nil, err
@@ -467,6 +493,9 @@ func readIncident(dir, id string) (*Incident, error) {
 }
 
 func writeIncident(dir string, inc Incident) error {
+	if err := validateIncidentID(inc.ID); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -474,7 +503,22 @@ func writeIncident(dir string, inc Incident) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, inc.ID+".json"), append(raw, '\n'), 0o644)
+	// Atomic write: temp file in same dir, then rename
+	tmp, err := os.CreateTemp(dir, ".inc-*.json")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, filepath.Join(dir, inc.ID+".json"))
 }
 
 func sanitizeID(sig string) string {

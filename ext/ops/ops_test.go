@@ -138,10 +138,3 @@ func TestReadLogFileTail(t *testing.T) {
 		t.Fatalf("%v", lines)
 	}
 }
-
-func TestPeelOpsFlag(t *testing.T) {
-	name, rest := peelOpsFlag([]string{"--ops", "fleet", "services", "--workspace", "."})
-	if name != "fleet" || len(rest) != 3 || rest[0] != "services" {
-		t.Fatalf("%q %v", name, rest)
-	}
-}

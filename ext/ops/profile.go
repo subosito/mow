@@ -62,16 +62,20 @@ type ProfileACP struct {
 }
 
 // ServiceActions are allowlisted argv lists (no shell). Only these may run.
-type ServiceActions struct {
-	Restart []string `yaml:"restart"`
-	Status  []string `yaml:"status"`
-}
+// Keys are action names (restart, status, …); values are argv arrays. The map
+// keeps the on-disk YAML shape unchanged while allowing operators to declare
+// additional actions.
+type ServiceActions map[string][]string
 
 // Service is one observed process/stack.
 type Service struct {
 	Name    string         `yaml:"name"`
 	Logs    []string       `yaml:"logs"`
 	Actions ServiceActions `yaml:"actions"`
+	// Health is an optional declared HTTP health probe (ops_health).
+	Health *HealthCheck `yaml:"health"`
+	// Patterns are declared log regexes with thresholds (ops_log_pattern).
+	Patterns []LogPattern `yaml:"patterns"`
 	// ACP is the peer name from profile acp.agents for code work (optional).
 	ACP   string `yaml:"acp"`
 	Notes string `yaml:"notes"`
@@ -217,6 +221,11 @@ func (p Profile) service(name string) (Service, bool) {
 	return Service{}, false
 }
 
+func lookupAction(actions map[string][]string, key string) []string {
+	v, _ := actions[key]
+	return v
+}
+
 func (p Profile) actionArgv(service, action string) ([]string, error) {
 	svc, ok := p.service(service)
 	if !ok {
@@ -226,9 +235,9 @@ func (p Profile) actionArgv(service, action string) ([]string, error) {
 	var argv []string
 	switch action {
 	case "restart":
-		argv = svc.Actions.Restart
+		argv = lookupAction(svc.Actions, "restart")
 	case "status":
-		argv = svc.Actions.Status
+		argv = lookupAction(svc.Actions, "status")
 	default:
 		return nil, fmt.Errorf("action %q not supported (want restart|status)", action)
 	}
@@ -260,10 +269,10 @@ func (p Profile) systemAppend() string {
 				b.WriteString(" [acp:" + s.ACP + "]")
 			}
 			acts := []string{}
-			if len(s.Actions.Restart) > 0 {
+			if len(lookupAction(s.Actions, "restart")) > 0 {
 				acts = append(acts, "restart")
 			}
-			if len(s.Actions.Status) > 0 {
+			if len(lookupAction(s.Actions, "status")) > 0 {
 				acts = append(acts, "status")
 			}
 			if len(acts) > 0 {
