@@ -77,6 +77,12 @@ type Service struct {
 	Health *HealthCheck `yaml:"health"`
 	// Patterns are declared log regexes with thresholds (ops_log_pattern).
 	Patterns []LogPattern `yaml:"patterns"`
+	// DependsOn names services this one needs. Declared in one direction
+	// only: a reverse `depended_by` would be redundant state that drifts
+	// the moment the two disagree, and the reverse edge is derivable.
+	// Surfaced in the tick prompt for blast radius, not as a tool — the
+	// model can reason about one line of text without a graph API.
+	DependsOn []string `yaml:"depends_on"`
 	// ACP is the peer name from profile acp.agents for code work (optional).
 	ACP   string `yaml:"acp"`
 	Notes string `yaml:"notes"`
@@ -222,6 +228,37 @@ func (p Profile) service(name string) (Service, bool) {
 	return Service{}, false
 }
 
+// hasDeps reports whether any service declares a dependency this profile
+// actually knows about.
+func (p Profile) hasDeps() bool {
+	for _, s := range p.Services {
+		if len(knownDeps(p, s)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// knownDeps returns a service's declared dependencies, keeping only names
+// that exist in this profile. A typo'd or external dependency would other-
+// wise read to the model as a service it can act on, and it cannot.
+func knownDeps(p Profile, s Service) []string {
+	if len(s.DependsOn) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(s.DependsOn))
+	for _, d := range s.DependsOn {
+		d = strings.TrimSpace(d)
+		if d == "" || strings.EqualFold(d, s.Name) {
+			continue
+		}
+		if _, ok := p.service(d); ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // actionNames returns the declared action names, sorted for stable output.
 func actionNames(actions map[string][]string) []string {
 	if len(actions) == 0 {
@@ -291,6 +328,9 @@ func (p Profile) systemAppend() string {
 			if acts := actionNames(s.Actions); len(acts) > 0 {
 				b.WriteString(" {" + strings.Join(acts, ",") + "}")
 			}
+			if deps := knownDeps(p, s); len(deps) > 0 {
+				b.WriteString(" [needs:" + strings.Join(deps, ",") + "]")
+			}
 		}
 		b.WriteString(". ")
 	}
@@ -317,6 +357,13 @@ func (p Profile) systemAppend() string {
 	b.WriteString("ops_incident for durable work items (open/update/close with stable signatures); ")
 	b.WriteString("acp_delegate to a service's acp peer when code or config in that repo can fix the issue. ")
 	b.WriteString("Open incidents only for problems that need attention; close when fixed or stale.")
+	// Dependencies only pay off if they change behavior, so say what to do
+	// with them: correlate rather than ticket each downstream symptom.
+	if p.hasDeps() {
+		b.WriteString(" [needs:…] marks declared dependencies: when a service and something it needs both look broken, ")
+		b.WriteString("treat the dependency as the likely cause — fix it first and record the downstream symptoms on that one incident ")
+		b.WriteString("instead of opening a separate incident per affected service.")
+	}
 	if p.Prompt != "" {
 		b.WriteString("\n\n")
 		b.WriteString(p.Prompt)
