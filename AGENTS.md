@@ -14,10 +14,15 @@ Requires **Go 1.26.4+** (pinned in `go.mod`). Prefer `devenv shell` (sets
 `GOTOOLCHAIN=local` from devenv.lock).
 
 ```bash
-devenv shell -- just verify    # go test ./... + go vet  — gate before commit
+devenv shell -- just verify    # vet + go test -race + build  — gate before commit
 devenv shell -- just build     # → bin/mow
-devenv shell -- go test -race ./...
+devenv shell -- just test      # fast inner loop (no race detector)
 ```
+
+`just verify` mirrors `.github/workflows/ci.yml` step for step, so a green
+verify means a green CI. Run it **after changes and before commit** — the race
+detector is part of the gate because CI runs `-race`, and unsynchronized test
+helpers pass plain `go test`. If you add a CI step, add it to `verify` too.
 
 No separate lint step. Format with `gofmt`. Do not invent Make/npm scripts.
 

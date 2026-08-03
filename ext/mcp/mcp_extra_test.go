@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -374,7 +375,17 @@ func TestAuthCodeFlow(t *testing.T) {
 		}))
 		defer tokenSrv.Close()
 
-		var authURLCaptured string
+		// authURLFn fires on the apply goroutine below while this goroutine
+		// polls for the value, so the capture needs its own lock.
+		var (
+			authURLMu       sync.Mutex
+			authURLCaptured string
+		)
+		capturedAuthURL := func() string {
+			authURLMu.Lock()
+			defer authURLMu.Unlock()
+			return authURLCaptured
+		}
 		ts := newTokenSource(AuthConfig{
 			Type:         "oauth2_auth_code",
 			AuthorizeURL: "https://example.com/auth",
@@ -382,6 +393,8 @@ func TestAuthCodeFlow(t *testing.T) {
 			ClientID:     "client-pkce",
 		})
 		ts.authURLFn = func(u string) {
+			authURLMu.Lock()
+			defer authURLMu.Unlock()
 			authURLCaptured = u
 		}
 
@@ -395,18 +408,19 @@ func TestAuthCodeFlow(t *testing.T) {
 		}()
 
 		// Wait for authURL captured
+		var authURL string
 		for i := 0; i < 50; i++ {
-			if authURLCaptured != "" {
+			if authURL = capturedAuthURL(); authURL != "" {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		if authURLCaptured == "" {
+		if authURL == "" {
 			t.Fatal("authURL was not generated")
 		}
 
 		// Simulated browser redirect callback:
-		parsedURL, _ := http.NewRequest(http.MethodGet, authURLCaptured, nil)
+		parsedURL, _ := http.NewRequest(http.MethodGet, authURL, nil)
 		redirectURI := parsedURL.URL.Query().Get("redirect_uri")
 		state := parsedURL.URL.Query().Get("state")
 
