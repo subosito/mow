@@ -347,6 +347,9 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 }
 
 func keepLastForBudget(maxChars int) int {
+	// Tighter windows for smaller targets so aggressive manual /compact
+	// (≈20% of non-system body) can actually land near the budget instead of
+	// retaining a large fixed recent tail.
 	switch {
 	case maxChars >= 1_500_000:
 		return 64
@@ -354,8 +357,14 @@ func keepLastForBudget(maxChars int) int {
 		return 40
 	case maxChars >= 200_000:
 		return 28
+	case maxChars >= 50_000:
+		return 16
+	case maxChars >= 20_000:
+		return 10
+	case maxChars >= 8_000:
+		return 6
 	default:
-		return 20
+		return 4
 	}
 }
 
@@ -424,8 +433,14 @@ func pinBudget(maxChars int) (maxPins, snipLen int) {
 		return 16, 1_200
 	case maxChars >= 500_000:
 		return 12, 900
-	default:
+	case maxChars >= 50_000:
 		return 8, 600
+	case maxChars >= 20_000:
+		return 4, 300
+	case maxChars >= 8_000:
+		return 2, 200
+	default:
+		return 2, 120
 	}
 }
 
@@ -533,16 +548,20 @@ func toolsUsed(msgs []llm.Message) []string {
 
 func shrinkAnchors(msgs []llm.Message, maxChars int) []llm.Message {
 	out := append([]llm.Message(nil), msgs...)
-	for i := range out {
-		if out[i].Role != "user" {
-			continue
+	// Progressive snip of anchor/stub bodies so aggressive /compact targets
+	// can land near system+short anchors instead of stalling over budget.
+	for _, lim := range []int{1_200, 400, 160} {
+		for i := range out {
+			if out[i].Role != "user" {
+				continue
+			}
+			if strings.Contains(out[i].Content, "[task anchors") || strings.Contains(out[i].Content, "[context compacted") {
+				out[i].Content = compactSnippet(out[i].Content, lim)
+			}
 		}
-		if strings.Contains(out[i].Content, "[task anchors") || strings.Contains(out[i].Content, "[context compacted") {
-			out[i].Content = compactSnippet(out[i].Content, 1_200)
+		if EstChars(out) <= maxChars {
+			return out
 		}
-	}
-	if EstChars(out) > maxChars {
-		// Drop oldest non-system, non-anchor tool-heavy kept? leave as-is — better over budget than empty task.
 	}
 	return out
 }

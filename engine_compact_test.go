@@ -105,6 +105,7 @@ func TestEngineCompactEmptyNoop(t *testing.T) {
 // Compact(0) is what hosts call for /compact. It must free headroom even when
 // history is still under the soft ceiling (default 100k or a large scaled
 // window). A high floor that sat above cur made this a pure no-op.
+// Target is ~20% of non-system body (not ~50% of total).
 func TestEngineCompactZeroFreesHeadroom(t *testing.T) {
 	eng, err := mow.New(mow.Options{
 		NoSession: true,
@@ -133,6 +134,15 @@ func TestEngineCompactZeroFreesHeadroom(t *testing.T) {
 	}
 	if after >= before {
 		t.Fatalf("message count did not shrink: %d→%d (rep=%+v)", before, after, rep)
+	}
+	// Aggressive /compact keeps ~15% of non-system body; the system prompt is
+	// never dropped, so total remaining% can look high on short fixtures.
+	// Assert the recent tail collapses hard (40 turns → a handful of msgs).
+	if after > before/5 {
+		t.Fatalf("message count not aggressive enough: %d→%d (rep=%+v)", before, after, rep)
+	}
+	if rep.Layer != "drop" {
+		t.Fatalf("want drop layer for multi-turn /compact, got %q", rep.Layer)
 	}
 }
 

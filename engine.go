@@ -694,6 +694,9 @@ func (e *Engine) drainSteer() []string {
 type CompactReport struct {
 	// Layer is the compaction layer used ("snip" or "drop").
 	Layer string `json:"layer,omitempty"`
+	// CharsBefore/After are raw character estimates around the compaction.
+	CharsBefore int `json:"chars_before,omitempty"`
+	CharsAfter  int `json:"chars_after,omitempty"`
 	// CharsSaved is the raw character reduction (before − after).
 	CharsSaved int `json:"chars_saved,omitempty"`
 	// MessagesBefore/After are the transcript sizes around the compaction.
@@ -769,23 +772,34 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	cur := agent.EstChars(prior)
 	if auto && cur > 1 {
 		// /compact must free real headroom even when history is still under the
-		// soft ceiling (common with large gateway context_window scaling). Aim
-		// for ~half the current projection. Never raise the target to or above
-		// cur — a previous floor of ~50k made Compact(0) a no-op on typical
-		// multi-turn sessions.
-		half := cur / 2
-		const minKeep = 8_000
-		if half < minKeep && cur > minKeep {
-			half = minKeep
+		// soft ceiling (common with large gateway context_window scaling).
+		// Keep ~20% of *non-system* history plus the system prompt (never
+		// dropped). 20% of body is the sweet spot: far more room than the old
+		// ~50% target, without the task-loss risk of 10%. Body-only measuring
+		// avoids a target below the irreducible system size.
+		sysChars := 0
+		if len(prior) > 0 && prior[0].Role == "system" {
+			sysChars = agent.EstChars(prior[:1])
 		}
-		if half >= cur {
-			half = cur * 3 / 4
+		body := cur - sysChars
+		if body < 0 {
+			body = 0
 		}
-		if half < 1 {
-			half = 1
+		const keepBodyPct = 20 // of non-system history
+		keepBody := body * keepBodyPct / 100
+		const minBody = 2_000
+		if keepBody < minBody && body > minBody {
+			keepBody = minBody
 		}
-		if half < targetRaw {
-			targetRaw = half
+		keep := sysChars + keepBody
+		if keep >= cur && body > 0 {
+			keep = sysChars + body*keepBodyPct/100
+		}
+		if keep < 1 {
+			keep = 1
+		}
+		if keep < targetRaw {
+			targetRaw = keep
 		}
 	}
 	if targetRaw < 1 {
@@ -810,6 +824,8 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 
 	rep := CompactReport{
 		Layer:          string(res.Layer),
+		CharsBefore:    res.CharsBefore,
+		CharsAfter:     res.CharsAfter,
 		CharsSaved:     res.CharsSaved,
 		MessagesBefore: res.MessagesBefore,
 		MessagesAfter:  res.MessagesAfter,
