@@ -296,6 +296,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		Type: EventRunEnd, RunID: runID, SessionID: sid,
 		Text: res.Text, StopReason: stop, Error: errString(err),
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+		ProviderToolCalls: res.Usage.ServerSideToolCalls,
 	})
 	e.log().Debug("mow run end", "run_id", runID, "session_id", sid, "stop_reason", stop, "err", err)
 

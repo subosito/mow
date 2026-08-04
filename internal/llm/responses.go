@@ -23,26 +23,36 @@ type responsesReq struct {
 	MaxOutputTokens int   `json:"max_output_tokens,omitempty"`
 }
 
+// responsesContentPart is one content part inside a message output item.
+type responsesContentPart struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+// responsesOutputItem is one output item in a Responses object.
+type responsesOutputItem struct {
+	Type      string `json:"type"`
+	Role      string `json:"role,omitempty"`
+	Status    string `json:"status,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+	// function_call may also use id as item id; call_id is what we replay.
+	ID      string                 `json:"id,omitempty"`
+	Content []responsesContentPart `json:"content,omitempty"`
+}
+
 // responsesAPIResponse is the non-stream Responses object we care about.
 type responsesAPIResponse struct {
-	Status string `json:"status"`
-	Output []struct {
-		Type      string `json:"type"`
-		Role      string `json:"role,omitempty"`
-		Status    string `json:"status,omitempty"`
-		CallID    string `json:"call_id,omitempty"`
-		Name      string `json:"name,omitempty"`
-		Arguments string `json:"arguments,omitempty"`
-		// function_call may also use id as item id; call_id is what we replay.
-		ID      string `json:"id,omitempty"`
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text,omitempty"`
-		} `json:"content,omitempty"`
-	} `json:"output"`
-	Usage *struct {
+	Status string                `json:"status"`
+	Output []responsesOutputItem `json:"output"`
+	Usage  *struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
+		// Server-side tool accounting (web_search and friends) — present when
+		// the model executed declared native tools itself.
+		NumSourcesUsed         int `json:"num_sources_used"`
+		NumServerSideToolCalls int `json:"num_server_side_tool_calls"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -126,6 +136,13 @@ func toResponsesInput(messages []Message) (instructions string, input []map[stri
 	return instructions, input
 }
 
+// isProviderToolCallItem reports whether a Responses output item type is a
+// provider-executed tool call (web_search_call, code_interpreter_call, …).
+// function_call is excluded: that is a model-requested call mow executes.
+func isProviderToolCallItem(typ string) bool {
+	return typ != "function_call" && strings.HasSuffix(typ, "_call")
+}
+
 // toResponsesTools flattens OpenAI chat ToolSpec into Responses function tools.
 // strict:false matches non-strict agent schemas (chat-completions default).
 func toResponsesTools(tools []ToolSpec) []map[string]any {
@@ -203,13 +220,27 @@ func messageFromResponses(parsed responsesAPIResponse) Message {
 			})
 		case "reasoning":
 			// UI-only in stream path; non-stream we ignore (no history leak).
+		default:
+			if isProviderToolCallItem(item.Type) {
+				// Provider-executed tool call (web_search_call,
+				// code_interpreter_call, …): already run server-side. Record
+				// for observability only — never put these in msg.ToolCalls,
+				// the agent loop would try to execute tools it does not have.
+				msg.ProviderCalls = append(msg.ProviderCalls, ProviderCall{
+					Type:   item.Type,
+					ID:     item.ID,
+					Status: item.Status,
+				})
+			}
 		}
 	}
 	msg.Content = strings.Join(textParts, "")
 	if parsed.Usage != nil {
 		msg.Usage = Usage{
-			InputTokens:  parsed.Usage.InputTokens,
-			OutputTokens: parsed.Usage.OutputTokens,
+			InputTokens:         parsed.Usage.InputTokens,
+			OutputTokens:        parsed.Usage.OutputTokens,
+			SourcesUsed:         parsed.Usage.NumSourcesUsed,
+			ServerSideToolCalls: parsed.Usage.NumServerSideToolCalls,
 		}
 	}
 	// Map status to a chat-like stop reason for Truncated() and logs.
@@ -461,9 +492,31 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 				CallID    string `json:"call_id"`
 				Name      string `json:"name"`
 				Arguments string `json:"arguments"`
+				Status    string `json:"status"`
 			} `json:"item"`
 		}
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			return nil
+		}
+		if isProviderToolCallItem(ev.Item.Type) {
+			// Provider-executed call: record on added, refresh status on
+			// done. Never a ToolCall — mow does not execute these.
+			if ev.Item.ID != "" {
+				for i := range msg.ProviderCalls {
+					if msg.ProviderCalls[i].ID == ev.Item.ID {
+						if typ == "response.output_item.done" && ev.Item.Status != "" {
+							msg.ProviderCalls[i].Status = ev.Item.Status
+						}
+						return nil
+					}
+				}
+			} else if typ == "response.output_item.done" {
+				return nil // id-less duplicate of the added event
+			}
+			msg.ProviderCalls = append(msg.ProviderCalls, ProviderCall{
+				Type: ev.Item.Type,
+				ID:   ev.Item.ID,
+			})
 			return nil
 		}
 		if ev.Item.Type != "function_call" {
@@ -566,6 +619,9 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 				a.args.WriteString(tc.Function.Arguments)
 				toolsByIdx[i] = a
 			}
+		}
+		if len(msg.ProviderCalls) == 0 && len(full.ProviderCalls) > 0 {
+			msg.ProviderCalls = full.ProviderCalls
 		}
 
 	case "response.incomplete":

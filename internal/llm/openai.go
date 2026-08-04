@@ -33,6 +33,12 @@ type Message struct {
 	// Usage is provider-reported token counts for the call that produced this
 	// message (zero when the provider sent none). Response-only.
 	Usage Usage `json:"-"`
+	// ProviderCalls records provider-executed tool calls (web_search_call,
+	// code_interpreter_call, …) observed in this response. The provider ran
+	// them server-side; they must never appear in ToolCalls, or the agent
+	// loop would try to execute tools it does not have. Reporting only —
+	// response-only, never sent on the wire, never replayed.
+	ProviderCalls []ProviderCall `json:"-"`
 }
 
 // openAIMessage is the chat/completions wire shape. Content is always a JSON
@@ -83,6 +89,14 @@ func toOpenAIMessages(in []Message) []openAIMessage {
 type Usage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+	// SourcesUsed counts provider-side sources cited by server-executed tools
+	// (e.g. Responses web_search num_sources_used). Zero when the provider
+	// sent none.
+	SourcesUsed int `json:"sources_used,omitempty"`
+	// ServerSideToolCalls counts calls the provider executed server-side
+	// (Responses num_server_side_tool_calls). Zero when the provider sent
+	// none.
+	ServerSideToolCalls int `json:"server_side_tool_calls,omitempty"`
 }
 
 // Zero reports whether no counts were recorded (provider sent no usage).
@@ -91,8 +105,10 @@ func (u Usage) Zero() bool { return u.InputTokens == 0 && u.OutputTokens == 0 }
 // Add returns the element-wise sum (accumulating usage across loop turns).
 func (u Usage) Add(o Usage) Usage {
 	return Usage{
-		InputTokens:  u.InputTokens + o.InputTokens,
-		OutputTokens: u.OutputTokens + o.OutputTokens,
+		InputTokens:         u.InputTokens + o.InputTokens,
+		OutputTokens:        u.OutputTokens + o.OutputTokens,
+		SourcesUsed:         u.SourcesUsed + o.SourcesUsed,
+		ServerSideToolCalls: u.ServerSideToolCalls + o.ServerSideToolCalls,
 	}
 }
 
@@ -116,6 +132,19 @@ type ToolCall struct {
 type FunctionCall struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+// ProviderCall is one provider-executed tool call observed in a response
+// (web_search_call, code_interpreter_call, …). The provider ran it
+// server-side; this is observability metadata, not something mow executes.
+type ProviderCall struct {
+	// Type is the output item type as sent by the provider ("web_search_call").
+	Type string `json:"type"`
+	// ID is the provider item id when present (for log correlation).
+	ID string `json:"id,omitempty"`
+	// Status is the provider-reported call status when present
+	// ("completed", "in_progress", "failed", …).
+	Status string `json:"status,omitempty"`
 }
 
 // ToolSpec is exposed to the model as a function tool.

@@ -57,12 +57,12 @@ const (
 	EventRunEnd EventType = "loop.run.end"
 
 	// graph.* — orchestration (ext/goal pack): state transitions and node progress.
-	EventGoalStart   EventType = "graph.goal.start"
-	EventGoalStep    EventType = "graph.goal.step"
-	EventGoalDone    EventType = "graph.goal.done"
-	EventGoalFail    EventType = "graph.goal.fail"
-	EventGoalPartial EventType = "graph.goal.partial"
-	EventGoalBlocked EventType = "graph.goal.blocked"
+	EventGoalStart        EventType = "graph.goal.start"
+	EventGoalStep         EventType = "graph.goal.step"
+	EventGoalDone         EventType = "graph.goal.done"
+	EventGoalFail         EventType = "graph.goal.fail"
+	EventGoalPartial      EventType = "graph.goal.partial"
+	EventGoalBlocked      EventType = "graph.goal.blocked"
 	EventToolStart        EventType = "harness.tool.start"
 	EventToolEnd          EventType = "harness.tool.end"
 	EventDelegateChunk    EventType = "harness.delegate.chunk"    // peer ACP answer text delta
@@ -208,6 +208,11 @@ type Event struct {
 	// when the provider sent no usage).
 	InputTokens  int `json:"input_tokens,omitempty"`
 	OutputTokens int `json:"output_tokens,omitempty"`
+	// ProviderToolCalls counts tools the provider executed server-side for
+	// this run (native_tools, e.g. web_search). They never enter the tool
+	// loop, so they raise no tool.start/tool.end — without this a host has no
+	// way to show work the provider did and billed for.
+	ProviderToolCalls int `json:"provider_tool_calls,omitempty"`
 	// Delegate
 	Agent string `json:"agent,omitempty"`
 
