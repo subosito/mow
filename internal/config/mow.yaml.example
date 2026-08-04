@@ -46,7 +46,12 @@ llm:
   #                         …20260318, …). Newer adds controls; older is the
   #                         safe default, since a gateway or model that does
   #                         not know a version rejects the request outright.
-  #   chat-completions    - no server-tool channel; declaring one does nothing
+  #   chat-completions    - no server-tool channel. A declaration here is
+  #                         SILENTLY IGNORED: no error, no search, just an
+  #                         answer from training data that reads as current.
+  #                         Verified: gpt-5.x on this wire returns stale facts
+  #                         while grok-4.5 on responses searches and cites.
+  #                         OpenAI's own web_search is Responses-only.
   #
   # Declaring a tool the model cannot run makes it emit a call nothing answers,
   # which leaks into the reply as stray tokens. Omit unless verified.

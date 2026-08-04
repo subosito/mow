@@ -3,9 +3,11 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Effort levels (canonical). Empty = provider / gateway default.
@@ -282,6 +284,13 @@ func (c *Client) finalizeChatBody(raw []byte) ([]byte, error) {
 		return raw, nil
 	}
 	if needTools {
+		// chat-completions has no server-tool channel: the provider drops the
+		// declaration without an error, so the model answers from training
+		// data as if it had searched. Silent staleness is worse than a loud
+		// failure — say so once rather than let it look like it worked.
+		if NormalizeWire(c.Wire) == WireOpenAIChat {
+			c.warnNativeToolsUnsupported()
+		}
 		m["tools"] = mergeNativeTools(m["tools"], c.NativeTools)
 	}
 	if plan.Model != "" {
@@ -429,4 +438,29 @@ func mergeNativeTools(existing any, native []map[string]any) []any {
 		out = append(out, nt)
 	}
 	return out
+}
+
+// nativeToolWarned dedupes the unsupported-wire warning by model. The guard
+// lives here rather than on Client because Client is copied by value (the
+// engine clones it per model switch), which rules out any embedded sync type.
+var nativeToolWarned sync.Map // model -> struct{}
+
+// warnNativeToolsUnsupported logs once per model that native tools were
+// configured on a wire that cannot carry them, so a long agent loop does not
+// repeat it on every call.
+func (c *Client) warnNativeToolsUnsupported() {
+	if _, dup := nativeToolWarned.LoadOrStore(c.Model, struct{}{}); dup {
+		return
+	}
+	types := make([]string, 0, len(c.NativeTools))
+	for _, t := range c.NativeTools {
+		if s, _ := t["type"].(string); s != "" {
+			types = append(types, s)
+		}
+	}
+	slog.Warn("llm: native_tools ignored on this wire",
+		"wire", WireOpenAIChat,
+		"model", c.Model,
+		"tools", strings.Join(types, ","),
+		"detail", "chat-completions has no server-tool channel; the provider drops the declaration and the model answers from training data. Use openai-responses or anthropic-messages.")
 }
