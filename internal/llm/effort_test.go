@@ -44,8 +44,7 @@ func TestStripEffortTiers(t *testing.T) {
 
 func TestResolveEffortNeverRewritesModelTier(t *testing.T) {
 	// Effort is body-only; model stays lean even if catalog has legacy tiers.
-	catalog := []string{"gemini-2.5-flash-low", "gemini-2.5-flash-medium"}
-	plan := ResolveEffort("gemini-2.5-flash", WireOpenAIChat, "high", catalog)
+	plan := ResolveEffort("gemini-2.5-flash", WireOpenAIChat, "high", nil)
 	if plan.Model != "gemini-2.5-flash" {
 		t.Fatalf("model rewritten: %q", plan.Model)
 	}

@@ -194,8 +194,6 @@ type Client struct {
 	// catalog-advertised values). Empty = provider/gateway default.
 	// Applied via body fields; gateways may map effort to upstream model tiers.
 	Effort string
-	// CatalogIDs are known model ids (e.g. from ListModels) for tier pick/fallback.
-	CatalogIDs []string
 	// CatalogModels is the lean model catalog from ListModels (id → efforts metadata).
 	// When the active model has Efforts set, SetEffort / ResolveEffort use that list
 	// instead of the static none|low|medium|high set.

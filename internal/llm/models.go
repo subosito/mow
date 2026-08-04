@@ -147,12 +147,6 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	// Raw ids (with AG tiers) for ResolveEffort; picker sees lean bases.
-	ids := make([]string, len(out))
-	for i, m := range out {
-		ids[i] = m.ID
-	}
-	c.SetCatalogIDs(ids)
 	collapsed := CollapseEffortTiersInCatalog(out)
 	c.SetCatalogModels(collapsed)
 	return collapsed, nil

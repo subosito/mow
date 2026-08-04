@@ -248,7 +248,6 @@ func (e *Engine) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	// request snapshots and model setters. The network call stayed lock-free.
 	e.mu.Lock()
 	if e.client == client {
-		e.client.SetCatalogIDs(catalogClient.CatalogIDs)
 		e.client.SetCatalogModels(infos)
 	}
 	e.mu.Unlock()

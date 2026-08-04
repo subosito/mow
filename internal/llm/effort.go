@@ -83,12 +83,6 @@ func ParseEffortTiers(model string) (base, effort string, ok bool) {
 	return m[1], strings.ToLower(m[2]), true
 }
 
-// HasEffortTiers reports whether the model id ends with a legacy effort suffix.
-func HasEffortTiers(model string) bool {
-	_, _, ok := ParseEffortTiers(model)
-	return ok
-}
-
 // CollapseEffortTiersInCatalog returns a lean catalog for pickers: ids with
 // legacy -low|medium|high suffixes collapse to the base name once.
 // Wire / Efforts metadata is preserved from the first entry that has them.
@@ -185,13 +179,7 @@ func NormalizeConfiguredModel(model, effort string) (base, eff string) {
 // reasoning_effort — including Gemini/Cloud Code — so the gateway can rewrite
 // the upstream model. Legacy thinking_budget injection only applies when the
 // catalog does not advertise efforts and the model looks like Gemini.
-func ResolveEffort(model, wire, effort string, catalog []string) EffortPlan {
-	return ResolveEffortFor(model, wire, effort, catalog, nil)
-}
-
-// ResolveEffortFor is ResolveEffort with an optional model-specific efforts list.
-func ResolveEffortFor(model, wire, effort string, catalog []string, modelEfforts []string) EffortPlan {
-	_ = catalog // reserved for future catalog-driven body maps
+func ResolveEffort(model, wire, effort string, modelEfforts []string) EffortPlan {
 	plan := EffortPlan{Model: StripEffortTiers(model)}
 	eff, err := NormalizeEffortFor(effort, modelEfforts)
 	if err != nil || eff == "" {
@@ -219,9 +207,9 @@ func ResolveEffortFor(model, wire, effort string, catalog []string, modelEfforts
 
 func looksGeminiFamily(model string) bool {
 	m := strings.ToLower(model)
-	// Gemini product ids and common gateway-prefixed forms (e.g. vendor/gemini-…).
-	return strings.HasPrefix(m, "ag/") ||
-		strings.Contains(m, "gemini") ||
+	// Public Gemini product ids and common vendor-prefixed forms (e.g.
+	// vendor/gemini-…). Do not match private gateway catalog prefixes here.
+	return strings.Contains(m, "gemini") ||
 		strings.HasPrefix(m, "models/gemini")
 }
 
@@ -291,7 +279,7 @@ func (c *Client) requestModel() string {
 	if c == nil {
 		return ""
 	}
-	return ResolveEffortFor(c.Model, c.Wire, c.Effort, c.CatalogIDs, c.modelEfforts()).Model
+	return ResolveEffort(c.Model, c.Wire, c.Effort, c.modelEfforts()).Model
 }
 
 // finalizeChatBody injects effort body fields and ensures lean model id.
@@ -299,7 +287,7 @@ func (c *Client) finalizeChatBody(raw []byte) ([]byte, error) {
 	if c == nil || len(raw) == 0 {
 		return raw, nil
 	}
-	plan := ResolveEffortFor(c.Model, c.Wire, c.Effort, c.CatalogIDs, c.modelEfforts())
+	plan := ResolveEffort(c.Model, c.Wire, c.Effort, c.modelEfforts())
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return raw, err
@@ -336,14 +324,6 @@ func (c *Client) finalizeChatBody(raw []byte) ([]byte, error) {
 		return raw, err
 	}
 	return out, nil
-}
-
-// SetCatalogIDs stores model ids from ListModels (lean after collapse).
-func (c *Client) SetCatalogIDs(ids []string) {
-	if c == nil {
-		return
-	}
-	c.CatalogIDs = append([]string(nil), ids...)
 }
 
 // SetCatalogModels stores lean ModelInfo entries (with efforts) from ListModels.

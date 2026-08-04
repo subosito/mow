@@ -631,7 +631,6 @@ func cloneLLMClient(src *llm.Client) llm.Client {
 	dst.ExtraHeaders = cloneStringMap(src.ExtraHeaders)
 	dst.SystemPrefix = append([]string(nil), src.SystemPrefix...)
 	dst.SystemPrefixModels = append([]string(nil), src.SystemPrefixModels...)
-	dst.CatalogIDs = append([]string(nil), src.CatalogIDs...)
 	if src.CatalogModels != nil {
 		dst.CatalogModels = make(map[string]llm.ModelInfo, len(src.CatalogModels))
 		for id, info := range src.CatalogModels {
