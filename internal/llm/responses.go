@@ -243,6 +243,12 @@ func messageFromResponses(parsed responsesAPIResponse) Message {
 			ServerSideToolCalls: parsed.Usage.NumServerSideToolCalls,
 		}
 	}
+	// Streaming envelopes may omit the server-side counter even when the
+	// provider ran tools, so fall back to what we actually observed. Otherwise
+	// a streamed run reports zero provider calls while citing search results.
+	if msg.Usage.ServerSideToolCalls == 0 && len(msg.ProviderCalls) > 0 {
+		msg.Usage.ServerSideToolCalls = len(msg.ProviderCalls)
+	}
 	// Map status to a chat-like stop reason for Truncated() and logs.
 	switch {
 	case parsed.IncompleteDetails != nil && parsed.IncompleteDetails.Reason != "":
