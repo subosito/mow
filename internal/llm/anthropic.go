@@ -84,6 +84,10 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 			OutputTokens             int `json:"output_tokens"`
 			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			// ServerToolUse counts tools Anthropic ran itself (native_tools).
+			ServerToolUse *struct {
+				WebSearchRequests int `json:"web_search_requests"`
+			} `json:"server_tool_use,omitempty"`
 		} `json:"usage"`
 		Error *struct {
 			Message string `json:"message"`
@@ -102,6 +106,11 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 		InputTokens:  parsed.Usage.InputTokens + parsed.Usage.CacheCreationInputTokens + parsed.Usage.CacheReadInputTokens,
 		OutputTokens: parsed.Usage.OutputTokens,
 	}
+	if st := parsed.Usage.ServerToolUse; st != nil {
+		// Anthropic reports server-side work as a request count rather than a
+		// call list, so this is the only signal that a native tool ran.
+		msg.Usage.ServerSideToolCalls = st.WebSearchRequests
+	}
 	var textParts []string
 	for _, b := range parsed.Content {
 		switch b.Type {
@@ -116,6 +125,16 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 					Name:      b.Name,
 					Arguments: string(args),
 				},
+			})
+		case "server_tool_use", "web_search_tool_result":
+			// Anthropic ran this itself (native_tools). It must never join
+			// ToolCalls: the name is Anthropic's server tool, not one the
+			// agent has, so the loop would fail trying to execute it — and
+			// replaying a result for it would corrupt the next request.
+			// Record for reporting only, like the Responses *_call items.
+			msg.ProviderCalls = append(msg.ProviderCalls, ProviderCall{
+				Type: b.Type,
+				ID:   b.ID,
 			})
 		}
 	}
