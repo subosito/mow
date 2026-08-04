@@ -159,7 +159,11 @@ type ModelInfo struct {
 	Wires         []string
 	Efforts       []string // catalog-advertised; empty = use static none|low|medium|high
 	DefaultEffort string
-	// Facet is a gateway capability token ("chat", "search", "image", …).
+	// Facet is a gateway capability token ("chat", "search", "search_x",
+	// "image", …). A gateway may publish one model id per facet (e.g.
+	// "<model>", "<model>:search"), so provider-executed search is reached
+	// by selecting that id — not by a client-side web tool. Non-chat facets
+	// are filtered out of the agent loop by IsChatModel.
 	// Empty when the catalog omits it. Chat UIs use FilterChatModels (facet
 	// chat or empty only — never by parsing ":" in the model id).
 	Facet string

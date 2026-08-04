@@ -53,4 +53,14 @@ func TestIsChatModel(t *testing.T) {
 	if !mow.IsChatModel(mow.ModelInfo{ID: "x", Wire: "openai-response", Facet: "chat"}) {
 		t.Fatal("openai-response alias is a known chat wire")
 	}
+	// Search facets are provider-executed search endpoints published as their
+	// own model ids ("<model>:search"). They share a chat wire, so only the
+	// facet distinguishes them — picking one for the agent loop would send a
+	// tool-calling conversation to a search endpoint.
+	for _, facet := range []string{"search", "search_x"} {
+		m := mow.ModelInfo{ID: "grok:" + facet, Wire: "openai-responses", Facet: facet}
+		if mow.IsChatModel(m) {
+			t.Fatalf("%q facet must not be offered as a chat model", facet)
+		}
+	}
 }
