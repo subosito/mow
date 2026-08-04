@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -228,4 +229,43 @@ func newRunID() string {
 		return fmt.Sprintf("run-%d", time.Now().UnixNano())
 	}
 	return "run-" + hex.EncodeToString(b[:])
+}
+
+// Steer injects guidance into a running turn: the text is appended as a user
+// message at the next turn boundary (after the current tool batch), so the model
+// course-corrects without a cancel/restart. No-op-safe when idle — the message
+// is delivered if a run consumes it before finishing, else dropped at the next
+// run start. Safe to call from any goroutine.
+func (e *Engine) Steer(text string) {
+	if e == nil {
+		return
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	e.mu.Lock()
+	e.steer = append(e.steer, text)
+	cancel := e.steerCancel
+	e.mu.Unlock()
+	// Emit before cancelling so hosts reset their live stream first; then
+	// interrupt the in-flight LLM call — the loop reissues with the steer
+	// appended as a user message (no cancel/restart, no lost work).
+	e.Emit(Event{Type: EventSteer, Delta: text})
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// drainSteer pops all pending steer messages (called by the loop at each turn
+// boundary).
+func (e *Engine) drainSteer() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.steer) == 0 {
+		return nil
+	}
+	out := e.steer
+	e.steer = nil
+	return out
 }
