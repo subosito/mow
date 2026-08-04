@@ -347,12 +347,51 @@ Workspace, power tools, stream, media models → **yaml** and/or **CLI flags** (
 
 **Extra FS roots** (optional): paths outside the primary workspace that FS tools may still touch (same symlink jail rules).
 
+> **Terminology.** One jail has exactly one **workspace** — the *main root*:
+> the default cwd for `bash`, where relative tool paths resolve, and where
+> the session lives. It comes from the first match of: `--workspace` flag
+> (set name or path) → `workspace:` in config yaml → `"."` (the cwd at
+> startup). Everything else the FS tools may reach is an **extra root**
+> (`--extra-root`, `policy.extra_roots`, or a workspace set's
+> `extra_roots`). Workspace and extra roots are all *jail roots*; the
+> workspace is simply the one relative paths anchor to.
+
 | Source | How |
 |--------|-----|
 | CLI | `--extra-root /path` (repeatable for multiple roots) |
+| CLI | `--workspace NAME` — a named set in `$MOW_HOME/workspaces.yaml` (hybrid: name or path) |
 | User config | `policy.extra_roots: [/path, …]` in `$MOW_HOME/config.yaml` or `--config` |
-| Embed | `Options.ExtraRoots` |
+| Embed | `Options.ExtraRoots` / `Options.Workspace` (set name) |
 | Project `.mow/config` | **Not allowed** (stripped like credentials / power tools) |
+
+**Workspace sets** group one workspace with its extra roots so a fixed
+multi-directory layout is one flag instead of repeated `--extra-root`. Sets
+are named in `$MOW_HOME/workspaces.yaml`:
+
+```yaml
+# $MOW_HOME/workspaces.yaml
+workspaces:
+  monorepo:
+    root: ~/code/app          # the workspace's main root
+    extra_roots:
+      - ~/code/shared         # read-write
+      - ~/code/vendor:ro      # read-only
+```
+
+`--workspace` is hybrid: it is first looked up as a set name there, and
+treated as a plain directory path otherwise. So the same flag covers both:
+
+```
+mow tty --workspace monorepo          # set name → workspace + roots
+mow run --workspace /tmp/ci-checkout  # plain path (CI one-shots)
+```
+
+Within a set, the workspace resolves against the cwd, relative roots resolve
+against the workspace, and `:ro` / `:rw` suffixes work like `--extra-root`.
+A matched set name wins over an existing directory of the same name; a
+non-path that matches no set errors with the defined names. Explicit
+`--extra-root` flags still append on top of the set's roots. Sets live under
+`$MOW_HOME` (never inside a workspace), so project config cannot grant roots.
 
 Relative tool paths resolve against the primary `--workspace`. **Absolute** paths are
 allowed under the workspace or an extra root. The system prompt lists configured

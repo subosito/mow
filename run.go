@@ -40,7 +40,10 @@ type Options struct {
 	// Set a discarding handler to silence, or your own to capture structured
 	// logs without touching the process-global default.
 	Logger *slog.Logger
-	// Workspace overrides config/env workspace when non-empty.
+	// Workspace overrides config/env workspace when non-empty. Hybrid: a set
+	// name from $MOW_HOME/workspaces.yaml (root + extra_roots) or a plain
+	// directory path. A matched set name wins over an existing directory of
+	// the same name.
 	Workspace string
 	// ExtraRoots appends directory trees to the FS path jail (in addition to
 	// Workspace). Relative paths resolve against the process cwd at New.

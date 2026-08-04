@@ -752,7 +752,7 @@ func (f *File) normalize() error {
 			if r == "" {
 				continue
 			}
-			path, readOnly := splitExtraRootSpec(r)
+			path, readOnly := SplitExtraRootSpec(r)
 			abs, err := filepath.Abs(path)
 			if err != nil {
 				return fmt.Errorf("policy.extra_roots %q: %w", r, err)
@@ -846,9 +846,9 @@ func (f *File) ToolEnabled(name string) bool {
 	return false
 }
 
-// splitExtraRootSpec parses policy.extra_roots entries.
+// SplitExtraRootSpec parses policy.extra_roots entries.
 // "PATH:ro" is read-only; "PATH" / "PATH:rw" are read-write.
-func splitExtraRootSpec(raw string) (path string, readOnly bool) {
+func SplitExtraRootSpec(raw string) (path string, readOnly bool) {
 	raw = strings.TrimSpace(raw)
 	lower := strings.ToLower(raw)
 	switch {

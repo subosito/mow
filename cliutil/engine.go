@@ -35,7 +35,7 @@ type EngineFlags struct {
 // Bind registers flags on fs.
 func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.Config, "config", "", "optional config yaml")
-	fs.StringVar(&f.Workspace, "workspace", "", "workspace root")
+	fs.StringVar(&f.Workspace, "workspace", "", "workspace root: a set name from $MOW_HOME/workspaces.yaml or a directory path")
 	fs.Var((*stringList)(&f.ExtraRoots), "extra-root", "extra FS root for path jail (repeatable; PATH or PATH:ro for read-only)")
 	fs.StringVar(&f.Model, "model", "", "model id")
 	fs.StringVar(&f.Effort, "effort", "", "reasoning effort (catalog efforts when listed; else none|low|medium|high)")

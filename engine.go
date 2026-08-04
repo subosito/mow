@@ -115,8 +115,47 @@ func New(opt Options) (*Engine, error) {
 		return nil, err
 	}
 	// Explicit Options overrides (do not mutate process env).
+	// --workspace / Options.Workspace is hybrid: first it is looked up as a
+	// named set in $MOW_HOME/workspaces.yaml (root + extra_roots); otherwise
+	// it is treated as a plain directory path. A matched set wins, and its
+	// extra_roots are prepended to policy.extra_roots — explicit --extra-root
+	// flags still append on top.
 	if w := strings.TrimSpace(opt.Workspace); w != "" {
-		cfg.Workspace = w
+		set, found, werr := config.LookupWorkspaceSet(w)
+		if werr != nil {
+			return nil, werr
+		}
+		if found {
+			ws, roots, rerr := set.ResolveWorkspaceSet()
+			if rerr != nil {
+				return nil, rerr
+			}
+			var rw, ro []string
+			for _, r := range roots {
+				path, readOnly := config.SplitExtraRootSpec(r)
+				if path == "" {
+					continue
+				}
+				if readOnly {
+					ro = append(ro, path)
+				} else {
+					rw = append(rw, path)
+				}
+			}
+			cfg.Workspace = ws
+			cfg.Policy.ExtraRoots = append(rw, cfg.Policy.ExtraRoots...)
+			cfg.Policy.ExtraRootsReadOnly = append(ro, cfg.Policy.ExtraRootsReadOnly...)
+		} else {
+			// Not a set name. If it is also not a usable directory and sets
+			// are defined, this is likely a set-name typo — list them instead
+			// of silently jail-rooting a bogus path.
+			if fi, serr := os.Stat(w); serr != nil || !fi.IsDir() {
+				if names := config.WorkspaceSetNames(); len(names) > 0 {
+					return nil, fmt.Errorf("workspace %q is not a directory and no workspace set has that name (defined sets: %s)", w, strings.Join(names, ", "))
+				}
+			}
+			cfg.Workspace = w
+		}
 	}
 	if len(opt.ExtraRoots) > 0 {
 		cfg.Policy.ExtraRoots = append(append([]string(nil), cfg.Policy.ExtraRoots...), opt.ExtraRoots...)
