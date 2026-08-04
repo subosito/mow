@@ -42,7 +42,10 @@ llm:
   #   openai-responses    - {type: web_search}      (OpenAI, xAI)
   #                       - {type: x_search}        (xAI only)
   #   anthropic-messages  - {type: web_search_20250305, name: web_search}
-  #                         (versioned; check current vendor docs)
+  #                         Anthropic versions this type by date (…20260209,
+  #                         …20260318, …). Newer adds controls; older is the
+  #                         safe default, since a gateway or model that does
+  #                         not know a version rejects the request outright.
   #   chat-completions    - no server-tool channel; declaring one does nothing
   #
   # Declaring a tool the model cannot run makes it emit a call nothing answers,
