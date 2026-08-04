@@ -170,6 +170,15 @@ func applyAnthropicSSE(data, event string, msg *Message, toolsByIdx map[int]*ant
 		if ev.ContentBlock.Type == "tool_use" {
 			toolsByIdx[ev.Index] = &anthToolAcc{id: ev.ContentBlock.ID, name: ev.ContentBlock.Name}
 		}
+		if ev.ContentBlock.Type == "server_tool_use" || ev.ContentBlock.Type == "web_search_tool_result" {
+			// Anthropic ran this itself (native_tools). Record it for
+			// reporting only — never as a tool_use, since the agent has no
+			// such tool and the loop would fail trying to execute it.
+			msg.ProviderCalls = append(msg.ProviderCalls, ProviderCall{
+				Type: ev.ContentBlock.Type,
+				ID:   ev.ContentBlock.ID,
+			})
+		}
 	case "content_block_delta":
 		var ev struct {
 			Index int `json:"index"`
@@ -244,6 +253,12 @@ func applyAnthropicSSE(data, event string, msg *Message, toolsByIdx map[int]*ant
 		}
 		if ev.Usage.OutputTokens > 0 {
 			msg.Usage.OutputTokens = ev.Usage.OutputTokens
+		}
+		// The streamed message_delta carries no server_tool_use counter, so
+		// report what the blocks showed. Without this a streamed run says zero
+		// provider calls next to an answer built from search results.
+		if msg.Usage.ServerSideToolCalls == 0 && len(msg.ProviderCalls) > 0 {
+			msg.Usage.ServerSideToolCalls = len(msg.ProviderCalls)
 		}
 	}
 	return nil
