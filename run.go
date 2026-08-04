@@ -61,6 +61,11 @@ type Options struct {
 	// Effort overrides config/env reasoning effort when non-empty
 	// (none|low|medium|high). Empty leaves config.
 	Effort string
+	// ExplicitEffort marks Effort as an explicit user/CLI override (e.g.
+	// --effort). When resuming a session, an explicit effort wins over the
+	// session's stored effort, whereas a default/config-provided Effort yields
+	// to the session.
+	ExplicitEffort bool
 	// BaseURL overrides config/env LLM base URL when non-empty.
 	BaseURL string
 	// SystemPrefix prepends optional identity text before the compiled system

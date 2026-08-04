@@ -479,6 +479,27 @@ func New(opt Options) (*Engine, error) {
 					e.cfg.LLM.Model = runtime.Model
 				}
 			}
+			if runtime.Effort != "" && !opt.ExplicitEffort && !opt.ExplicitModel {
+				// Restore the effort last used by this session with the same
+				// precedence as the model: only --effort wins over it. Skipped
+				// when the model is explicit — the caller pinned a model whose
+				// catalog efforts may not include the session's stored tier,
+				// and SetModel already synced effort for that model.
+				e.mu.Lock()
+				var allowed []string
+				if e.client != nil {
+					allowed = e.client.EffortsForModel(e.client.Model)
+				}
+				if norm, nerr := llm.NormalizeEffortFor(runtime.Effort, allowed); nerr == nil {
+					if e.client != nil {
+						e.client.Effort = norm
+					}
+					if e.cfg != nil {
+						e.cfg.LLM.Effort = norm
+					}
+				}
+				e.mu.Unlock()
+			}
 			prior, err := store.LoadMessages()
 			if err != nil {
 				return nil, fmt.Errorf("session load: %w", err)

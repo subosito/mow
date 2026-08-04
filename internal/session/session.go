@@ -26,6 +26,9 @@ type Event struct {
 	// --continue / --session restore the session instead of current defaults.
 	Model string `json:"model,omitempty"`
 	Wire  string `json:"wire,omitempty"`
+	// Effort records the reasoning effort active for the turn so resume can
+	// restore it (empty when no effort was ever set).
+	Effort string `json:"effort,omitempty"`
 	// Raw message for legacy full-fidelity snapshots.
 	Message *llm.Message `json:"message,omitempty"`
 	// Messages is one complete replay snapshot. New writers use one snapshot
@@ -112,10 +115,11 @@ func (s *Store) AppendSnapshot(messages []llm.Message) error {
 	return s.Append(Event{Type: "snapshot", Messages: cp})
 }
 
-// Runtime is the last model/wire pair recorded for a session.
+// Runtime is the last model/wire/effort set recorded for a session.
 type Runtime struct {
-	Model string
-	Wire  string
+	Model  string
+	Wire   string
+	Effort string
 }
 
 // LoadRuntime returns the last recorded runtime. Older session files have no
@@ -149,6 +153,9 @@ func (s *Store) LoadRuntime() (Runtime, error) {
 		}
 		if v := strings.TrimSpace(ev.Wire); v != "" {
 			last.Wire = v
+		}
+		if v := strings.TrimSpace(ev.Effort); v != "" {
+			last.Effort = v
 		}
 	}
 	return last, nil
@@ -426,3 +433,4 @@ func LatestID(dir string) (string, error) {
 	}
 	return best, nil
 }
+

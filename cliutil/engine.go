@@ -114,6 +114,7 @@ func (f *EngineFlags) Options() mow.Options {
 		Model:              f.Model,
 		ExplicitModel:      strings.TrimSpace(f.Model) != "",
 		Effort:             f.Effort,
+		ExplicitEffort:     strings.TrimSpace(f.Effort) != "",
 		BaseURL:            f.BaseURL,
 		SystemPrefix:       append([]string(nil), f.SystemPrefix...),
 		AllowWrite:         f.AllowWrite,

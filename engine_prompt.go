@@ -161,7 +161,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	if sess != nil && !opt.Ephemeral {
 		// Persist the model at the turn boundary so resume follows the session's
 		// last-used model rather than whatever default is active next launch.
-		if aerr := sess.Append(session.Event{Type: "runtime", Model: model, Wire: e.Wire()}); aerr != nil {
+		if aerr := sess.Append(session.Event{Type: "runtime", Model: model, Wire: e.Wire(), Effort: e.Effort()}); aerr != nil {
 			e.log().Warn("mow: session model append failed (resume may use default)", "err", aerr)
 		}
 		if aerr := sess.Append(session.Event{Type: "user", Role: "user", Content: text}); aerr != nil {
