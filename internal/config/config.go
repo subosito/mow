@@ -65,6 +65,15 @@ type LLMConfig struct {
 	// system/tools/history). Nil = enabled (pure win for repeated prefixes);
 	// set false for gateways that reject cache_control fields.
 	PromptCache *bool `yaml:"prompt_cache"`
+	// NativeTools are provider-executed tools declared in the request, given
+	// as wire-shaped entries (e.g. [{type: web_search}]). The provider runs
+	// them: no local network call, no path jail, no tool.start/tool.end event.
+	//
+	// Support is per model, not per wire. Declaring one a model cannot run
+	// makes it emit a call nothing answers, which leaks into the reply as
+	// stray tokens — set this only for models known to support it. Empty
+	// (the default) declares nothing.
+	NativeTools []map[string]any `yaml:"native_tools"`
 	// SystemPrefix is optional text segments prepended before the compiled
 	// system prompt (mow harness + AGENTS.md / skills). Each list item is a
 	// separate segment (not one joined string). Use for product identity /
@@ -284,6 +293,10 @@ func mergeProjectFile(dst *File, path string) error {
 	// Media side-lanes share the chat key; project must not point them.
 	overlay.LLM.Generate = GenerateConfig{}
 	overlay.LLM.Understand = UnderstandConfig{}
+	// Native tools make the provider fetch/search on the request's behalf and
+	// bill it. That is a capability decision for the host/user, not something
+	// a cloned workspace may switch on.
+	overlay.LLM.NativeTools = nil
 	overlay.Session.Dir = ""
 	// OTEL exporter endpoint/headers are host/user only (not project).
 	overlay.OTEL = OTELConfig{}
@@ -564,6 +577,12 @@ func mergeLLM(dst *LLMConfig, o LLMConfig) {
 		for k, v := range o.Headers {
 			dst.Headers[k] = v
 		}
+	}
+	if len(o.NativeTools) > 0 {
+		// Replace, not append: a later layer saying "these tools" must be able
+		// to narrow an earlier list, and appending would make an inherited
+		// tool impossible to drop.
+		dst.NativeTools = o.NativeTools
 	}
 	if s := strings.TrimSpace(o.Generate.Image); s != "" {
 		dst.Generate.Image = s

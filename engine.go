@@ -338,6 +338,7 @@ func New(opt Options) (*Engine, error) {
 			Stream:       cfg.LLM.Stream || opt.Stream,
 			// Prompt caching on by default (nil); explicit false disables it.
 			PromptCache:        cfg.LLM.PromptCache == nil || *cfg.LLM.PromptCache,
+			NativeTools:        cfg.LLM.NativeTools,
 			SystemPrefix:       append([]string(nil), cfg.LLM.SystemPrefix...),
 			SystemPrefixModels: append([]string(nil), cfg.LLM.SystemPrefixModels...),
 		}

@@ -171,6 +171,16 @@ type Client struct {
 	// When the active model has Efforts set, SetEffort / ResolveEffort use that list
 	// instead of the static none|low|medium|high set.
 	CatalogModels map[string]ModelInfo
+	// NativeTools are provider-executed tool declarations merged into the
+	// request "tools" array (e.g. {"type":"web_search"}). The provider runs
+	// these itself: mow never opens a socket for them, they are not policy
+	// jailed, and they do not appear as tool.start/tool.end events. Empty
+	// (the default) sends nothing.
+	//
+	// Capability is per model, not per wire — declaring a tool a model cannot
+	// execute makes it emit a call nothing answers, which leaks into the reply
+	// as stray tokens. Configure only for models known to support it.
+	NativeTools []map[string]any
 }
 
 // ChatRequest is the outbound chat body (subset).

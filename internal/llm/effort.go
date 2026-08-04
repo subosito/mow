@@ -277,8 +277,12 @@ func (c *Client) finalizeChatBody(raw []byte) ([]byte, error) {
 	cur, _ := m["model"].(string)
 	needModel := plan.Model != "" && plan.Model != cur
 	needBody := plan.ReasoningEffort != "" || plan.ThinkingBudget != nil
-	if !needModel && !needBody {
+	needTools := len(c.NativeTools) > 0
+	if !needModel && !needBody && !needTools {
 		return raw, nil
+	}
+	if needTools {
+		m["tools"] = mergeNativeTools(m["tools"], c.NativeTools)
 	}
 	if plan.Model != "" {
 		m["model"] = plan.Model
@@ -392,4 +396,37 @@ func (c *Client) SyncEffortToModel(model string) {
 		}
 	}
 	c.Effort = strings.ToLower(strings.TrimSpace(c.DefaultEffortForModel(model)))
+}
+
+// mergeNativeTools appends provider-executed tool declarations to whatever the
+// wire already built, skipping ones already present by "type". Local function
+// tools and native tools share one array on every wire, so this must add to
+// the existing value rather than replace it — overwriting would silently drop
+// the agent's own tools and strand the loop.
+func mergeNativeTools(existing any, native []map[string]any) []any {
+	var out []any
+	seen := map[string]bool{}
+	if cur, ok := existing.([]any); ok {
+		out = append(out, cur...)
+		for _, it := range cur {
+			if mm, ok := it.(map[string]any); ok {
+				if t, _ := mm["type"].(string); t != "" {
+					seen[t] = true
+				}
+			}
+		}
+	}
+	for _, nt := range native {
+		if len(nt) == 0 {
+			continue
+		}
+		if t, _ := nt["type"].(string); t != "" {
+			if seen[t] {
+				continue
+			}
+			seen[t] = true
+		}
+		out = append(out, nt)
+	}
+	return out
 }

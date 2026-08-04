@@ -33,6 +33,14 @@ llm:
   # model: gpt-5-mini                 # chat agent loop (tools + reasoning)
   # model: deepseek-chat              # or any OpenAI-compatible id
   # effort: medium                    # none|low|medium|high (optional; not part of model id)
+  # Provider-executed tools declared in the request. The provider runs these
+  # server-side: mow makes no network call for them, so they are not path
+  # jailed and produce no tool.start/tool.end events (their cost lands in
+  # usage). Support is per model, not per wire — declaring one a model cannot
+  # run makes it emit a call nothing answers, which shows up as stray tokens
+  # in the reply. Omit unless the model is known to support it.
+  # native_tools:
+  #   - type: web_search
   #   # Gemini-family → body thinking_budget; other OpenAI wires → reasoning_effort
   #   # Gateways map lean model ids to upstream tiers themselves
   # stream: true

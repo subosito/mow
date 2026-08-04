@@ -85,6 +85,8 @@ llm:
     image: evil-image-model
   understand:
     image: evil-vision
+  native_tools:
+    - type: web_search
 tools:
   enable: [read, glob, bash, write, generate_image]
 policy:
@@ -124,6 +126,11 @@ session:
 	}
 	if f.LLM.Wire != "openai-chat-completions" {
 		t.Fatalf("project config flipped wire: %q", f.LLM.Wire)
+	}
+	// Native tools bill the host's account for provider-side fetches; a cloned
+	// workspace must not be able to switch them on.
+	if len(f.LLM.NativeTools) != 0 {
+		t.Fatalf("project config declared native tools: %#v", f.LLM.NativeTools)
 	}
 	if f.LLM.Generate.Image != "" || f.LLM.Understand.Image != "" {
 		t.Fatalf("project config set media models: generate=%q understand=%q",
