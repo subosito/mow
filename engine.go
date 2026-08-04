@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/subosito/mow/ext"
@@ -1046,67 +1045,4 @@ func (e *Engine) AllowWrite() bool {
 // AllowShell reports whether bash is enabled.
 func (e *Engine) AllowShell() bool {
 	return e != nil && e.pol != nil && e.pol.AllowShell
-}
-
-// AddPreTool appends a PreTool hook (deny / rewrite args / additional context).
-// The returned unsubscribe detaches the hook (safe to call once, effective for
-// in-flight runs too) — hosts like TUIs must detach on shutdown or a later
-// headless Prompt would stall in an approval hook nobody answers.
-func (e *Engine) AddPreTool(fn PreToolFunc) (unsubscribe func()) {
-	if e == nil || fn == nil {
-		return func() {}
-	}
-	h := adaptPreTool(fn)
-	var off atomic.Bool
-	wrapped := func(ctx context.Context, ev agent.PreToolEvent) (agent.PreToolDecision, error) {
-		if off.Load() {
-			return agent.PreToolDecision{}, nil
-		}
-		return h(ctx, ev)
-	}
-	e.mu.Lock()
-	e.hooks.PreTool = append(e.hooks.PreTool, wrapped)
-	e.mu.Unlock()
-	return func() { off.Store(true) }
-}
-
-// AddAfterTurn appends a hook that fires after each LLM turn inside a Prompt
-// (HasToolCalls reports whether a tool batch follows). UIs use it to commit
-// intermediate assistant text at turn boundaries instead of losing it when
-// the run ends. The returned unsubscribe detaches the hook.
-func (e *Engine) AddAfterTurn(fn AfterTurnFunc) (unsubscribe func()) {
-	if e == nil || fn == nil {
-		return func() {}
-	}
-	var off atomic.Bool
-	wrapped := func(ctx context.Context, ev agent.AfterTurnEvent) {
-		if off.Load() {
-			return
-		}
-		fn(ctx, AfterTurnEvent{AssistantText: ev.AssistantText, HasToolCalls: ev.HasToolCalls})
-	}
-	e.mu.Lock()
-	e.hooks.AfterTurn = append(e.hooks.AfterTurn, wrapped)
-	e.mu.Unlock()
-	return func() { off.Store(true) }
-}
-
-// AddPostTool appends a PostTool hook (rewrite tool result shown to the model).
-// The returned unsubscribe detaches the hook (safe to call once).
-func (e *Engine) AddPostTool(fn PostToolFunc) (unsubscribe func()) {
-	if e == nil || fn == nil {
-		return func() {}
-	}
-	h := adaptPostTool(fn)
-	var off atomic.Bool
-	wrapped := func(ctx context.Context, ev agent.PostToolEvent) (agent.PostToolDecision, error) {
-		if off.Load() {
-			return agent.PostToolDecision{}, nil
-		}
-		return h(ctx, ev)
-	}
-	e.mu.Lock()
-	e.hooks.PostTool = append(e.hooks.PostTool, wrapped)
-	e.mu.Unlock()
-	return func() { off.Store(true) }
 }
