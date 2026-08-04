@@ -33,10 +33,15 @@ llm:
   # model: gpt-5-mini                 # chat agent loop (tools + reasoning)
   # model: deepseek-chat              # or any OpenAI-compatible id
   # effort: medium                    # none|low|medium|high (optional; not part of model id)
-  # Provider-executed tools declared in the request. The provider runs these
-  # server-side: mow makes no network call for them, so they are not path
-  # jailed and produce no tool.start/tool.end events (their cost lands in
-  # usage, and run.end reports provider_tool_calls).
+  # Provider-executed tools declared in the request. USUALLY LEAVE UNSET: when
+  # the gateway publishes native_tools per model on GET /v1/models, mow uses
+  # that automatically, so capability lives in one place instead of being
+  # repeated in every client config. Set this only to override — to disable a
+  # published tool, or to declare one a plain provider does not advertise.
+  #
+  # The provider runs these server-side: mow makes no network call for them, so
+  # they are not path jailed and produce no tool.start/tool.end events (their
+  # cost lands in usage, and run.end reports provider_tool_calls).
   #
   # Support is per model AND per wire — the entry shape differs by provider:
   #   openai-responses    - {type: web_search}      (OpenAI, xAI)

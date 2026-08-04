@@ -43,6 +43,14 @@ type ModelInfo struct {
 	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
 	// Pricing is gateway-published token pricing (USD per 1M tokens when set).
 	Pricing ModelPricing `json:"pricing,omitempty"`
+	// NativeTools are provider-executed tools this model can run, as wire-shaped
+	// declarations the client merges into the request (e.g. [{"type":"web_search"}]).
+	//
+	// Capability belongs to the model, so publishing it here lets one gateway
+	// answer for every client instead of each config repeating the same list —
+	// and a client cannot declare a tool the model does not have. Empty on plain
+	// provider catalogs; local llm.native_tools still overrides.
+	NativeTools []map[string]any `json:"native_tools,omitempty"`
 }
 
 // ModelPricing is the optional pricing object on GET /v1/models entries.
@@ -132,6 +140,9 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		}
 		if len(m.Efforts) > 0 {
 			info.Efforts = append([]string(nil), m.Efforts...)
+		}
+		if len(m.NativeTools) > 0 {
+			info.NativeTools = append([]map[string]any(nil), m.NativeTools...)
 		}
 		out = append(out, info)
 	}

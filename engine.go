@@ -577,6 +577,7 @@ func cloneLLMClient(src *llm.Client) llm.Client {
 		for id, info := range src.CatalogModels {
 			info.Wires = append([]string(nil), info.Wires...)
 			info.Efforts = append([]string(nil), info.Efforts...)
+			info.NativeTools = append([]map[string]any(nil), info.NativeTools...)
 			dst.CatalogModels[id] = info
 		}
 	}
