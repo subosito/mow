@@ -25,10 +25,16 @@ type ModelInfo struct {
 	Efforts []string `json:"efforts,omitempty"`
 	// DefaultEffort is the gateway default when effort is omitted.
 	DefaultEffort string `json:"default_effort,omitempty"`
-	// Facet is a gateway capability token ("chat", "search", "search_x",
-	// "image", "embed", "speech_gen", …). A gateway may expose one model id
-	// per facet (e.g. "<model>", "<model>:search") so provider-executed
-	// search is selected by model id rather than by a client-side tool.
+	// Facet is a gateway capability token ("chat", "image", "embed",
+	// "speech_gen", …) for models that need a different wire or endpoint.
+	//
+	// Provider-executed search is NOT one of these: it is a tool on a normal
+	// chat model, enabled by declaring it in the request (e.g. Responses
+	// tools: [{"type":"web_search"}]). A gateway that publishes a separate
+	// "<model>:search" id adds nothing — the bare id with the tool declared
+	// behaves the same, and the split id without it makes the model emit a
+	// tool call nothing executes. Prefer the bare model plus a declared tool.
+	//
 	// Empty on plain OpenAI catalogs. Do not infer from ":" in the model id.
 	Facet string `json:"facet,omitempty"`
 	// ContextWindow is max context tokens when the gateway publishes it (0 = unknown).
