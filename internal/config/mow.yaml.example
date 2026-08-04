@@ -36,9 +36,17 @@ llm:
   # Provider-executed tools declared in the request. The provider runs these
   # server-side: mow makes no network call for them, so they are not path
   # jailed and produce no tool.start/tool.end events (their cost lands in
-  # usage). Support is per model, not per wire — declaring one a model cannot
-  # run makes it emit a call nothing answers, which shows up as stray tokens
-  # in the reply. Omit unless the model is known to support it.
+  # usage, and run.end reports provider_tool_calls).
+  #
+  # Support is per model AND per wire — the entry shape differs by provider:
+  #   openai-responses    - {type: web_search}      (OpenAI, xAI)
+  #                       - {type: x_search}        (xAI only)
+  #   anthropic-messages  - {type: web_search_20250305, name: web_search}
+  #                         (versioned; check current vendor docs)
+  #   chat-completions    - no server-tool channel; declaring one does nothing
+  #
+  # Declaring a tool the model cannot run makes it emit a call nothing answers,
+  # which leaks into the reply as stray tokens. Omit unless verified.
   # native_tools:
   #   - type: web_search
   #   # Gemini-family → body thinking_budget; other OpenAI wires → reasoning_effort
