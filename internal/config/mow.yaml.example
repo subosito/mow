@@ -78,6 +78,12 @@ llm:
   # system_prefix_models:
   #   - "family-*"
   # (Only $MOW_HOME/config.yaml / --config; not project .mow/config.)
+  #
+  # Some subscription-OAuth routes gate on the first system segment and answer
+  # HTTP 429 rate_limit_error when it is missing — the request looks unthrottled
+  # otherwise, so it reads as a quota problem rather than a shape problem. If a
+  # provider documents such a preamble, put it here as its own first segment;
+  # folding it into another segment does not satisfy the check.
 
   # Side-lane model ids (same base_url/key as chat). Chat stays on `model` above.
   # Use whatever ids your provider/gateway exposes. Chat stays on `model` above.
