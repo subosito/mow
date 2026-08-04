@@ -9,6 +9,7 @@ import (
 
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/internal/agent"
+	"github.com/subosito/mow/internal/config"
 	"github.com/subosito/mow/internal/llm"
 )
 
@@ -355,4 +356,54 @@ func appendUnique(list []string, names ...string) []string {
 func projectHash(workspace string) string {
 	sum := sha256.Sum256([]byte(workspace))
 	return hex.EncodeToString(sum[:8])
+}
+
+// otelCfgMap projects config.OTEL into the loose map the auto-wire hook reads.
+func otelCfgMap(cfg *config.File) map[string]any {
+	if cfg == nil || strings.TrimSpace(cfg.OTEL.Endpoint) == "" {
+		return nil
+	}
+	m := map[string]any{
+		"endpoint":     cfg.OTEL.Endpoint,
+		"protocol":     cfg.OTEL.Protocol,
+		"service_name": cfg.OTEL.ServiceName,
+	}
+	if len(cfg.OTEL.Headers) > 0 {
+		m["headers"] = cfg.OTEL.Headers
+	}
+	return m
+}
+
+// cloneLLMClient snapshots mutable client state for one request/catalog call.
+// Callers hold Engine.mu while cloning; maps and slices need deep copies because
+// a shallow struct copy would still race with ListModels or SetModel.
+func cloneLLMClient(src *llm.Client) llm.Client {
+	if src == nil {
+		return llm.Client{}
+	}
+	dst := *src
+	dst.ExtraHeaders = cloneStringMap(src.ExtraHeaders)
+	dst.SystemPrefix = append([]string(nil), src.SystemPrefix...)
+	dst.SystemPrefixModels = append([]string(nil), src.SystemPrefixModels...)
+	if src.CatalogModels != nil {
+		dst.CatalogModels = make(map[string]llm.ModelInfo, len(src.CatalogModels))
+		for id, info := range src.CatalogModels {
+			info.Wires = append([]string(nil), info.Wires...)
+			info.Efforts = append([]string(nil), info.Efforts...)
+			info.NativeTools = append([]map[string]any(nil), info.NativeTools...)
+			dst.CatalogModels[id] = info
+		}
+	}
+	return dst
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
