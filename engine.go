@@ -121,7 +121,7 @@ func New(opt Options) (*Engine, error) {
 	// extra_roots are prepended to policy.extra_roots — explicit --extra-root
 	// flags still append on top.
 	if w := strings.TrimSpace(opt.Workspace); w != "" {
-		set, found, werr := config.LookupWorkspaceSet(w)
+		set, names, found, werr := config.LookupWorkspaceSet(w)
 		if werr != nil {
 			return nil, werr
 		}
@@ -150,7 +150,7 @@ func New(opt Options) (*Engine, error) {
 			// are defined, this is likely a set-name typo — list them instead
 			// of silently jail-rooting a bogus path.
 			if fi, serr := os.Stat(w); serr != nil || !fi.IsDir() {
-				if names := config.WorkspaceSetNames(); len(names) > 0 {
+				if len(names) > 0 {
 					return nil, fmt.Errorf("workspace %q is not a directory and no workspace set has that name (defined sets: %s)", w, strings.Join(names, ", "))
 				}
 			}

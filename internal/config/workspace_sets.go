@@ -49,45 +49,40 @@ func LoadWorkspaceSets() (map[string]WorkspaceSet, error) {
 	return f.Workspaces, nil
 }
 
-// LookupWorkspaceSet returns the named set when defined. found=false for a
-// missing file or undefined name (callers fall back to treating the argument
-// as a directory path); err is only read/parse failure.
-func LookupWorkspaceSet(name string) (WorkspaceSet, bool, error) {
+// LookupWorkspaceSet resolves a workspace set name in one read of
+// WorkspaceSetsPath. found=false for a missing file or undefined name (the
+// caller falls back to treating the argument as a directory path); names is
+// the sorted defined-set list so a typo error can list candidates without a
+// second read. err is only a read/parse failure.
+func LookupWorkspaceSet(name string) (set WorkspaceSet, names []string, found bool, err error) {
 	name = strings.TrimSpace(name)
-	if name == "" {
-		return WorkspaceSet{}, false, nil
-	}
 	sets, err := LoadWorkspaceSets()
 	if err != nil {
-		return WorkspaceSet{}, false, err
+		return WorkspaceSet{}, nil, false, err
 	}
-	set, ok := sets[name]
-	return set, ok, nil
-}
-
-// WorkspaceSetNames returns sorted defined set names (for error messages).
-func WorkspaceSetNames() []string {
-	sets, err := LoadWorkspaceSets()
-	if err != nil {
-		return nil
-	}
-	names := make([]string, 0, len(sets))
+	names = make([]string, 0, len(sets))
 	for k := range sets {
 		names = append(names, k)
 	}
 	sort.Strings(names)
-	return names
+	if name == "" {
+		return WorkspaceSet{}, names, false, nil
+	}
+	set, found = sets[name]
+	return set, names, found, nil
 }
 
-// LoadWorkspaceSet reads one named set. Errors name the file and the defined
-// sets so typos are fixable without re-reading docs.
+// LoadWorkspaceSet reads one named set, or errors naming the file and the
+// defined sets so typos are fixable without re-reading docs. Callers that
+// also need the candidate list for a "not found" branch should use
+// LookupWorkspaceSet to avoid a second read.
 func LoadWorkspaceSet(name string) (WorkspaceSet, error) {
-	set, found, err := LookupWorkspaceSet(name)
+	set, names, found, err := LookupWorkspaceSet(name)
 	if err != nil {
 		return WorkspaceSet{}, err
 	}
 	if !found {
-		return WorkspaceSet{}, fmt.Errorf("workspace set %q not defined in %s (have: %s)", name, WorkspaceSetsPath(), strings.Join(WorkspaceSetNames(), ", "))
+		return WorkspaceSet{}, fmt.Errorf("workspace set %q not defined in %s (have: %s)", name, WorkspaceSetsPath(), strings.Join(names, ", "))
 	}
 	return set, nil
 }
