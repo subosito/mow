@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
 
@@ -304,7 +305,7 @@ func CompactOpts(messages []llm.Message, maxChars int, summary string, maxToolCh
 
 		stub := strings.TrimSpace(summary)
 		if stub == "" {
-			stub = defaultCompactStub(dropped, kept, pins)
+			stub = defaultCompactStub(dropped, kept, pins, ArchiveAvailable())
 		}
 
 		out = append([]llm.Message{}, system...)
@@ -467,9 +468,25 @@ func formatTaskAnchor(pins []string) string {
 	return strings.TrimSpace(b.String())
 }
 
+// archiveAvailable reports whether compaction has a searchable session archive
+// behind it. The engine sets this when it wires context_search; without it the
+// compact stub must not promise recoverable history.
+var archiveAvailable atomic.Bool
+
+// SetArchiveAvailable records whether dropped turns are archived and searchable
+// via context_search. Hosts embedding the Engine do not call this directly —
+// mow.New sets it when a session archive and context_search are in play.
+func SetArchiveAvailable(v bool) { archiveAvailable.Store(v) }
+
+// ArchiveAvailable reports the flag set by SetArchiveAvailable.
+func ArchiveAvailable() bool { return archiveAvailable.Load() }
+
 // defaultCompactStub builds a short note when no PreCompact summary is supplied.
 // It records what was dropped and which tools ran so work is not silently erased.
-func defaultCompactStub(dropped, kept []llm.Message, pins []string) string {
+// archived reports whether those turns went to a searchable session archive; the
+// stub only advertises context_search when they did, so a sessionless run never
+// points the model at a tool it does not have.
+func defaultCompactStub(dropped, kept []llm.Message, pins []string, archived bool) string {
 	var nUser, nAsst, nTool int
 	for _, m := range dropped {
 		switch m.Role {
@@ -494,6 +511,9 @@ func defaultCompactStub(dropped, kept []llm.Message, pins []string) string {
 	}
 	b.WriteString("Continue the same task using the task anchors above (if any) and the live turns below.\n")
 	b.WriteString("Do not ask the user to restate the task unless anchors and live context are empty or contradictory.\n")
+	if archived {
+		b.WriteString("The dropped turns are archived, not lost: use context_search (fixed-string match, newest first) to recover details you need.\n")
+	}
 	if len(pins) == 0 {
 		// Fallback: snag something from dropped users (may include trivial).
 		var users []string

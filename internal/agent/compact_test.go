@@ -394,3 +394,43 @@ func TestCompactTieredReportsOverBudget(t *testing.T) {
 		t.Fatalf("result=%+v", got)
 	}
 }
+
+// The compact stub must point the model at context_search when dropped turns
+// are archived — the recovery tool is useless if the one message that reports
+// the loss never mentions it. It must stay silent when there is no archive, so
+// a sessionless run is not told to call a tool it does not have.
+func TestCompactStubAdvertisesContextSearch(t *testing.T) {
+	dropped := []llm.Message{
+		{Role: "user", Content: "original task: wire the parser"},
+		{Role: "assistant", Content: "on it"},
+	}
+	kept := []llm.Message{{Role: "user", Content: "continue"}}
+
+	t.Run("archived", func(t *testing.T) {
+		got := defaultCompactStub(dropped, kept, nil, true)
+		if !strings.Contains(got, "context_search") {
+			t.Fatalf("stub omits context_search when archived:\n%s", got)
+		}
+	})
+
+	t.Run("not archived", func(t *testing.T) {
+		got := defaultCompactStub(dropped, kept, nil, false)
+		if strings.Contains(got, "context_search") {
+			t.Fatalf("stub promises context_search with no archive:\n%s", got)
+		}
+	})
+}
+
+func TestArchiveAvailableToggle(t *testing.T) {
+	prev := ArchiveAvailable()
+	t.Cleanup(func() { SetArchiveAvailable(prev) })
+
+	SetArchiveAvailable(true)
+	if !ArchiveAvailable() {
+		t.Fatal("SetArchiveAvailable(true) not observed")
+	}
+	SetArchiveAvailable(false)
+	if ArchiveAvailable() {
+		t.Fatal("SetArchiveAvailable(false) not observed")
+	}
+}

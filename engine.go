@@ -498,6 +498,8 @@ func New(opt Options) (*Engine, error) {
 				e.readOnlyExt = map[string]bool{}
 			}
 			e.readOnlyExt["context_search"] = true
+			// Let the compact stub tell the model the archive is searchable.
+			agent.SetArchiveAvailable(true)
 		}
 		if mediaClient != nil && sid != "" {
 			if mediaClient.ExtraHeaders == nil {
