@@ -1,4 +1,4 @@
-package mow_test
+package engine_test
 
 import (
 	"testing"

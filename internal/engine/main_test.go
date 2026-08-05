@@ -1,13 +1,13 @@
-package mow_test
+package engine
 
 import (
 	"os"
 	"testing"
 )
 
-// Isolate package tests from the developer's ~/.mow (config, skills, AGENTS).
+// Isolate engine tests from the developer's ~/.mow (config, skills, AGENTS).
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "mow-home-test-*")
+	dir, err := os.MkdirTemp("", "mow-engine-test-*")
 	if err != nil {
 		panic(err)
 	}
