@@ -226,6 +226,14 @@ func colorDiffLines(th theme, code string) string {
 //
 // Dual line numbers (old | new) match GitHub-style review UIs. Meta ---/+++
 // headers are omitted (path lives on the entry title).
+//
+// Replaced lines are paired: a −/+ run of equal length is emitted as adjacent
+// old/new rows (first removal, first addition, second removal, …) instead of
+// every deletion followed by every addition. Within a pair the words that
+// actually differ are emphasised, so a one-token edit does not read as two
+// entirely rewritten lines. True side-by-side panes are deliberately not used:
+// at 80 columns each pane would get ~28 cells, which wraps real code to
+// uselessness inside the transcript's indent.
 func renderPrettyDiff(th theme, code string, width int) string {
 	code = strings.TrimRight(code, "\n")
 	if code == "" {
@@ -235,12 +243,39 @@ func renderPrettyDiff(th theme, code string, width int) string {
 	oldLn, newLn := 1, 1
 	haveNums := false
 	first := true
-	for _, line := range strings.Split(code, "\n") {
+	// Pending removals held back so an immediately following addition run can
+	// be paired with them line-for-line.
+	var pendingDel []string
+
+	nl := func() {
+		if !first {
+			b.WriteByte('\n')
+		}
+		first = false
+	}
+	// flushDel emits held removals unpaired (a pure deletion run).
+	flushDel := func() {
+		for _, body := range pendingDel {
+			on, nn := "    ", diffSignDel
+			if haveNums {
+				on = fmt.Sprintf("%4d", oldLn)
+				oldLn++
+			}
+			nl()
+			b.WriteString(formatDiffRow(th, th.DiffDel, on, nn, body, width))
+		}
+		pendingDel = nil
+	}
+
+	lines := strings.Split(code, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") ||
 			strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index ") {
 			continue
 		}
 		if strings.HasPrefix(line, "@@") {
+			flushDel()
 			oh, nh, ok := parseHunkHeader(line)
 			if ok {
 				oldLn, newLn = oh.start, nh.start
@@ -251,58 +286,69 @@ func renderPrettyDiff(th theme, code string, width int) string {
 					newLn = 0
 				}
 				haveNums = true
-				label := formatHunkReviewLabel(oh, nh)
-				if !first {
-					b.WriteByte('\n')
-				}
-				b.WriteString(th.DiffMeta.Render("  " + label))
-				first = false
+				nl()
+				b.WriteString(th.DiffMeta.Render("  " + formatHunkReviewLabel(oh, nh)))
 			} else if strings.TrimSpace(line) == "@@" {
 				oldLn, newLn = 1, 1
 				haveNums = true
-				if !first {
-					b.WriteByte('\n')
-				}
+				nl()
 				b.WriteString(th.DiffMeta.Render("  change"))
-				first = false
 			} else {
-				if !first {
-					b.WriteByte('\n')
-				}
+				nl()
 				b.WriteString(th.DiffMeta.Render("  " + strings.TrimSpace(line)))
-				first = false
 			}
 			continue
 		}
-		if !first {
-			b.WriteByte('\n')
-		}
-		first = false
 
 		switch {
+		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+			// Hold: the next run may be its replacement.
+			pendingDel = append(pendingDel, strings.TrimPrefix(line, "-"))
+
 		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
 			body := strings.TrimPrefix(line, "+")
+			if len(pendingDel) > 0 {
+				// Paired replace: old row then its new row, so the change reads
+				// as one edit rather than two unrelated blocks.
+				oldBody := pendingDel[0]
+				pendingDel = pendingDel[1:]
+				oldText, newText := emphasizeWordDiff(th, oldBody, body)
+
+				on, nn := "    ", diffSignDel
+				if haveNums {
+					on = fmt.Sprintf("%4d", oldLn)
+					oldLn++
+				}
+				nl()
+				b.WriteString(formatDiffRowPre(th, on, nn, oldText, width))
+
+				on, nn = diffSignAdd, "    "
+				if haveNums {
+					nn = fmt.Sprintf("%4d", newLn)
+					newLn++
+				}
+				nl()
+				b.WriteString(formatDiffRowPre(th, on, nn, newText, width))
+				continue
+			}
 			on, nn := diffSignAdd, "    "
 			if haveNums {
 				nn = fmt.Sprintf("%4d", newLn)
 				newLn++
 			}
-			row := formatDiffRow(th, th.DiffAdd, on, nn, body, width)
-			b.WriteString(row)
-		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
-			body := strings.TrimPrefix(line, "-")
-			on, nn := "    ", diffSignDel
-			if haveNums {
-				on = fmt.Sprintf("%4d", oldLn)
-				oldLn++
-			}
-			row := formatDiffRow(th, th.DiffDel, on, nn, body, width)
-			b.WriteString(row)
+			nl()
+			b.WriteString(formatDiffRow(th, th.DiffAdd, on, nn, body, width))
+
 		case strings.HasPrefix(line, "\\"): // "\ No newline at end of file"
+			flushDel()
+			nl()
 			b.WriteString(th.Muted.Render(fmt.Sprintf("  %s  %s │ %s", "    ", "    ", "no newline at end of file")))
 		case strings.HasPrefix(line, "…"):
+			flushDel()
+			nl()
 			b.WriteString(th.Muted.Render(fmt.Sprintf("  %s  %s │ %s", "  ··", "  ··", strings.TrimSpace(line))))
 		default:
+			flushDel()
 			body := line
 			if strings.HasPrefix(body, " ") {
 				body = body[1:]
@@ -315,12 +361,12 @@ func renderPrettyDiff(th theme, code string, width int) string {
 				newLn++
 			}
 			// Context: muted numbers, normal text — no tint.
+			nl()
 			gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", on, nn))
-			text := th.DiffCtx.Render(body)
-			row := gutter + text
-			b.WriteString(clipDiffRow(row, width))
+			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(body), width))
 		}
 	}
+	flushDel()
 	return b.String()
 }
 
@@ -334,14 +380,104 @@ const (
 
 // formatDiffRow builds "  old  new │ body" with tinted body (add/del).
 func formatDiffRow(th theme, bodyStyle lipgloss.Style, oldN, newN, body string, width int) string {
-	gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", oldN, newN))
-	// Pad body slightly so background tint is readable on short lines.
 	if body == "" {
 		body = " "
 	}
-	text := bodyStyle.Render(body)
-	row := gutter + text
-	return clipDiffRow(row, width)
+	return formatDiffRowPre(th, oldN, newN, bodyStyle.Render(body), width)
+}
+
+// formatDiffRowPre is formatDiffRow for a body that is already styled (word
+// diff spans), so the caller's per-word emphasis is not flattened by a single
+// Render over the whole line.
+func formatDiffRowPre(th theme, oldN, newN, styledBody string, width int) string {
+	gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", oldN, newN))
+	return clipDiffRow(gutter+styledBody, width)
+}
+
+// emphasizeWordDiff styles a replaced pair so the changed words stand out from
+// the words both lines share.
+//
+// A one-token edit ("timeout 30" → "timeout 60") otherwise paints two fully
+// tinted lines and the reader has to diff them by eye. Shared prefix/suffix
+// words render in the row's base tint; the differing middle is bold, so the
+// actual edit is findable at a glance.
+//
+// Falls back to plain whole-line tint when the lines share nothing (a genuine
+// rewrite), where per-word emphasis would just add noise.
+func emphasizeWordDiff(th theme, oldBody, newBody string) (oldText, newText string) {
+	delStyle, addStyle := th.DiffDel, th.DiffAdd
+	plain := func() (string, string) {
+		o, n := oldBody, newBody
+		if o == "" {
+			o = " "
+		}
+		if n == "" {
+			n = " "
+		}
+		return delStyle.Render(o), addStyle.Render(n)
+	}
+	if oldBody == "" || newBody == "" {
+		return plain()
+	}
+
+	oldWords, newWords := splitDiffWords(oldBody), splitDiffWords(newBody)
+	// Common prefix, then common suffix over what remains.
+	pre := 0
+	for pre < len(oldWords) && pre < len(newWords) && oldWords[pre] == newWords[pre] {
+		pre++
+	}
+	suf := 0
+	for suf < len(oldWords)-pre && suf < len(newWords)-pre &&
+		oldWords[len(oldWords)-1-suf] == newWords[len(newWords)-1-suf] {
+		suf++
+	}
+	// Nothing shared, or everything shared: whole-line tint is clearer.
+	if pre == 0 && suf == 0 {
+		return plain()
+	}
+	if pre == len(oldWords) && pre == len(newWords) {
+		return plain()
+	}
+
+	build := func(words []string, base lipgloss.Style) string {
+		mid := base.Bold(true)
+		var b strings.Builder
+		for i, w := range words {
+			if i < pre || i >= len(words)-suf {
+				b.WriteString(base.Render(w))
+				continue
+			}
+			b.WriteString(mid.Render(w))
+		}
+		return b.String()
+	}
+	return build(oldWords, delStyle), build(newWords, addStyle)
+}
+
+// splitDiffWords splits a line into words that keep their trailing whitespace,
+// so joining the pieces reproduces the line exactly (indentation included).
+func splitDiffWords(s string) []string {
+	var out []string
+	var cur strings.Builder
+	inSpace := false
+	for _, r := range s {
+		isSpace := r == ' ' || r == '\t'
+		if isSpace {
+			inSpace = true
+			cur.WriteRune(r)
+			continue
+		}
+		if inSpace {
+			out = append(out, cur.String())
+			cur.Reset()
+			inSpace = false
+		}
+		cur.WriteRune(r)
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
 }
 
 // countDiffStats tallies +/− lines in a unified diff body (ignores headers).
