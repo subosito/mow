@@ -17,7 +17,9 @@ Requires **Go 1.26.4+** (pinned in `go.mod`). Prefer `devenv shell` (sets
 devenv shell -- just verify    # vet + go test -race + build  — gate before commit
 devenv shell -- just verify-ci # same, but with no credentials and an empty MOW_HOME
 devenv shell -- just build     # → bin/mow
+devenv shell -- just build-mowi # → bin/mowi (nested module)
 devenv shell -- just test      # fast inner loop (no race detector)
+devenv shell -- just smoke-tui # drive bin/mowi in a PTY (needs a model endpoint)
 ```
 
 `just verify` mirrors `.github/workflows/ci.yml` step for step, so a green
@@ -36,6 +38,14 @@ fail on CI. `verify-ci` runs the suite with credentials unset and a throwaway
 collector, database, or peer; a hard-coded `127.0.0.1:PORT` passes only on a
 box that happens to run that service. Start an `httptest.NewServer` and use
 its URL. `verify-ci` does not sandbox the network, so this one is on review.
+
+**`just smoke-tui` is opt-in, not part of `verify`.** It drives the real
+`bin/mowi` in a PTY via `shell-use` (pinned in `devenv.nix`) and asserts on the
+painted grid — per-cell char/fg/bg — rather than on the ANSI string a renderer
+returns. That is the only way to catch column geometry: the diff sign glyphs
+once sat 6 columns apart with every Go test passing. It needs a model endpoint
+and a network round trip, so CI cannot run it. Use it when touching mowi
+rendering.
 
 No separate lint step. Format with `gofmt`. Do not invent Make/npm scripts.
 

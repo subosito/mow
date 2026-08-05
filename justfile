@@ -31,6 +31,20 @@ build:
     mkdir -p bin
     go build -o bin/mow ./cmd/mow
 
+# mowi lives in a nested module, so it is not covered by `just build`.
+build-mowi:
+    mkdir -p bin
+    cd packs/mowi && go build -o ../../bin/mowi ./cmd/mowi
+
+# Drive the real mowi binary in a PTY and assert on the painted grid.
+#
+# Deliberately NOT part of `verify`: it needs a model endpoint and a network
+# round trip, and CI has neither. It catches what string-level tests cannot —
+# column geometry and rendered colour. Requires bin/mowi and the devenv shell
+# (shell-use is pinned in devenv.nix).
+smoke-tui: build-mowi
+    ./scripts/smoke-tui.sh
+
 # Closest local approximation of a CI run: no developer credentials and an
 # empty MOW_HOME. CI has no API key, so tests that build an Engine fail there
 # while passing on a box where ~/.mow supplies one. Run this before pushing.
