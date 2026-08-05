@@ -54,6 +54,66 @@ func TestRunWithPriorMessages(t *testing.T) {
 	}
 }
 
+// Durable compaction: when history overflows the budget mid-run, the compacted
+// projection must become the live history — the NEXT LLM call (and the final
+// Result.Messages) starts from the reduced history, not the full pre-compact
+// span again. Regression for compaction being transient (projection only).
+func TestRunCompactionIsDurableAcrossTurns(t *testing.T) {
+	var prior []llm.Message
+	prior = append(prior, llm.Message{Role: "system", Content: "sys"})
+	for i := 0; i < 30; i++ {
+		prior = append(prior,
+			llm.Message{Role: "user", Content: strings.Repeat("u", 300)},
+			llm.Message{Role: "assistant", Content: strings.Repeat("a", 300)},
+		)
+	}
+	full := len(prior)
+
+	// Chat: first call replies with a tool call (forces a second LLM call
+	// after the tool result); second call replies with text. Record each
+	// call's message count.
+	var callSizes []int
+	step := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		callSizes = append(callSizes, len(messages))
+		step++
+		if step == 1 {
+			return llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "echo", Arguments: `{"text":"hi"}`},
+			}}}, nil
+		}
+		return llm.Message{Role: "assistant", Content: "done"}, nil
+	}
+	res, err := agent.Run(context.Background(), chat, "continue", agent.Options{
+		Tools:           []agent.Tool{echoTool{}},
+		PriorMessages:   prior,
+		MaxContextChars: 4_000, // well under the ~18k history → must compact
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(callSizes) != 2 {
+		t.Fatalf("calls=%d want 2 (tool turn then final)", len(callSizes))
+	}
+	// First call: compaction must have shrunk the history.
+	if callSizes[0] >= full {
+		t.Fatalf("first call sent %d messages, want < %d (compaction did not fire)", callSizes[0], full)
+	}
+	// Second call: must NOT re-grow to the full pre-compact history. Durable
+	// compaction means it starts from the compacted span (+ tool result).
+	if callSizes[1] >= full {
+		t.Fatalf("second call sent %d messages, want < %d (compaction was transient, history re-grew)", callSizes[1], full)
+	}
+	if callSizes[1] <= callSizes[0] {
+		t.Fatalf("second call %d should be first call %d + tool result", callSizes[1], callSizes[0])
+	}
+	// Result.Messages must reflect the compacted history, not the full span.
+	if len(res.Messages) >= full {
+		t.Fatalf("Result.Messages=%d, want < %d (compaction not durable)", len(res.Messages), full)
+	}
+}
+
 func TestRunWithFakeLLMToolThenText(t *testing.T) {
 	step := 0
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {

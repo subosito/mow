@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/subosito/mow/internal/llm"
 )
@@ -339,6 +340,109 @@ func (e *Engine) SetEffort(effort string) error {
 		return fmt.Errorf("mow: effort switch requires a live engine")
 	}
 	return nil
+}
+
+// simplePromptMaxRunes is the length ceiling for automatic effort downshift.
+// Longer prompts keep the configured high/max effort.
+const simplePromptMaxRunes = 120
+
+// complexPromptKeywords mark turns that should keep high/max reasoning even
+// when short (design, debugging, security, …). Matched case-insensitively as
+// substrings of the user message.
+var complexPromptKeywords = []string{
+	"architect", "architecture", "design", "debug", "root cause",
+	"why does", "why is", "why are", "analyze", "analyse", "refactor",
+	"implement", "migrate", "security", "race condition", "deadlock",
+	"performance", "algorithm", "investigate", "trade-off", "tradeoff",
+	"thorough", "carefully", "from scratch", "step by step", "deep dive",
+	"review the", "audit", "prove", "formal", "concurrency",
+}
+
+// isHighCostEffort reports whether effort is a high-spend reasoning tier
+// (high, max, and common catalog synonyms). Empty/low/medium are not.
+func isHighCostEffort(effort string) bool {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "high", "max", "xhigh", "ultra", "highest":
+		return true
+	default:
+		return false
+	}
+}
+
+// SuggestEffortForPrompt returns a recommended effort for one user message.
+// When current is a high-cost tier and the prompt looks short and mechanical,
+// it returns "medium" so the harness can downshift. Empty means leave current.
+//
+// allowed is the catalog efforts list for the active model (nil = static set).
+// If medium is not allowed, returns "".
+func SuggestEffortForPrompt(text, current string, allowed []string) string {
+	if !isHighCostEffort(current) {
+		return ""
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(text) > simplePromptMaxRunes {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	for _, kw := range complexPromptKeywords {
+		if strings.Contains(lower, kw) {
+			return ""
+		}
+	}
+	// medium must be valid for this model (catalog or static).
+	if _, err := llm.NormalizeEffortFor(llm.EffortMedium, allowed); err != nil {
+		return ""
+	}
+	return llm.EffortMedium
+}
+
+// applyAutoEffort temporarily downshifts high/max effort for a simple prompt.
+// Session runtime is left unchanged (caller should append runtime first).
+// Restores the previous effort and pin state when the returned func runs.
+func (e *Engine) applyAutoEffort(text string) (restore func()) {
+	noop := func() {}
+	if e == nil {
+		return noop
+	}
+	e.mu.Lock()
+	cur := ""
+	var allowed []string
+	if e.client != nil {
+		cur = e.client.Effort
+		allowed = e.client.EffortsForModel(e.client.Model)
+	} else if e.cfg != nil {
+		cur = e.cfg.LLM.Effort
+	}
+	want := SuggestEffortForPrompt(text, cur, allowed)
+	if want == "" || want == cur {
+		e.mu.Unlock()
+		return noop
+	}
+	prevEffort := cur
+	prevPinned := false
+	if e.client != nil {
+		prevPinned = e.client.EffortPinned
+		e.client.Effort = want
+		// Temporary: do not pin so model switches still treat the session default.
+	}
+	if e.cfg != nil {
+		e.cfg.LLM.Effort = want
+	}
+	e.mu.Unlock()
+	return func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if e.client != nil {
+			e.client.Effort = prevEffort
+			e.client.EffortPinned = prevPinned
+		}
+		if e.cfg != nil {
+			e.cfg.LLM.Effort = prevEffort
+		}
+	}
 }
 
 // Efforts returns catalog-advertised effort levels for the active model, or nil

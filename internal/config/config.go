@@ -146,9 +146,10 @@ type PolicyConfig struct {
 	// positive value is an absolute budget (ignores CompactRatio auto-scale).
 	MaxContextChars int `yaml:"max_context_chars"`
 	// CompactRatio is the fraction of gateway context_window used as soft history
-	// budget when auto-scaling (default 0.8 → 1M tokens ≈ 800k tok-eq history).
-	// Clamped to [0.3, 0.95]. 0 / omit → default. Ignored when MaxContextChars is
-	// an explicit non-default absolute.
+	// budget when auto-scaling (default 0.5 → 1M tokens ≈ 500k tok-eq history,
+	// hard-capped at agent.MaxContextCharsHardCap). Clamped to [0.3, 0.95].
+	// 0 / omit → default. Ignored when MaxContextChars is an explicit
+	// non-default absolute.
 	CompactRatio float64 `yaml:"compact_ratio"`
 	// MaxToolResultChars caps each tool result stored in history (default 24k).
 	// Protects the model from huge read/bash dumps.
@@ -235,7 +236,7 @@ func defaults() *File {
 			MaxBashTimeoutSec:  900,
 			MaxReadBytes:       512 << 10, // 512 KiB — enough for code files; loop also caps tool results
 			MaxContextChars:    100_000,   // default floor; Engine scales up from gateway context_window
-			CompactRatio:       0.8,       // of context_window when auto-scaling (1M → ~800k tok-eq)
+			CompactRatio:       0.5,       // of context_window when auto-scaling (1M → ~500k tok-eq, hard-capped)
 			MaxToolResultChars: 24_000,    // ~6k tokens max per tool result in history
 			MaxParallelTools:   8,         // concurrent tools per assistant batch
 		},
@@ -709,9 +710,9 @@ func (f *File) normalize() error {
 	if f.Policy.MaxContextChars < 0 {
 		f.Policy.MaxContextChars = 0
 	}
-	// Compact ratio: default 0.8; clamp to a safe band for headroom.
+	// Compact ratio: default 0.5; clamp to a safe band for headroom.
 	if f.Policy.CompactRatio <= 0 {
-		f.Policy.CompactRatio = 0.8
+		f.Policy.CompactRatio = 0.5
 	} else if f.Policy.CompactRatio < 0.3 {
 		f.Policy.CompactRatio = 0.3
 	} else if f.Policy.CompactRatio > 0.95 {

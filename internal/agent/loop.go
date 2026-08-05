@@ -181,9 +181,18 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		if len(toolSpecs) > 0 {
 			specs = toolSpecs
 		}
-		send, err := applyCompact(ctx, messages, opt, calib)
+		send, compacted, err := applyCompact(ctx, messages, opt, calib)
 		if err != nil {
 			return Result{Messages: messages, Usage: usage}, err
+		}
+		// Durable compaction: when history actually compacted (not merely the
+		// under-budget tool trim), adopt the compacted projection as the live
+		// history. The dropped turns were archived by the PreCompact hook
+		// before this point; the next turn (and Result.Messages / session
+		// snapshot) then starts from the reduced history instead of re-growing
+		// from the full pre-compact span.
+		if compacted {
+			messages = send
 		}
 		sentChars := EstChars(send)
 		// Per-call LLM ctx: a mid-turn steer cancels ONLY this call (via
@@ -634,10 +643,21 @@ func toolResultLimit(opt Options) int {
 	return DefaultMaxToolResultChars
 }
 
-func applyCompact(ctx context.Context, messages []llm.Message, opt Options, calib *ratioCalibrator) ([]llm.Message, error) {
+// applyCompact returns the message list to send for one LLM call, plus
+// compacted = true when history was actually compacted (drop/snip tier ran,
+// not just the under-budget tool trim). The soft budget from opt is hard-
+// capped at MaxContextCharsHardCap regardless of ratio or explicit config.
+func applyCompact(ctx context.Context, messages []llm.Message, opt Options, calib *ratioCalibrator) ([]llm.Message, bool, error) {
 	toolLim := toolResultLimit(opt)
 	if opt.MaxContextChars <= 0 {
-		return trimAllToolResults(messages, toolLim, toolLim/2), nil
+		return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
+	}
+	// Absolute ceiling: never let the soft budget exceed the hard cap. This
+	// applies even to an explicit max_context_chars above the cap — a huge
+	// window/config must not grow history past ~400k tokens.
+	budget := opt.MaxContextChars
+	if budget > MaxContextCharsHardCap {
+		budget = MaxContextCharsHardCap
 	}
 	// Estimate in "budget chars": raw chars rescaled by the calibrated
 	// chars/token ratio, so a code-heavy history (which tokenizes denser than
@@ -645,8 +665,8 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 	ratio := calib.Ratio()
 	raw := EstChars(messages)
 	est := budgetChars(raw, ratio)
-	if est <= opt.MaxContextChars {
-		return trimAllToolResults(messages, toolLim, toolLim/2), nil
+	if est <= budget {
+		return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
 	}
 	summary := ""
 	for _, h := range opt.Hooks.PreCompact {
@@ -655,21 +675,21 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 		}
 		d, err := h(ctx, PreCompactEvent{
 			EstChars:      est,
-			MaxChars:      opt.MaxContextChars,
+			MaxChars:      budget,
 			CharsPerToken: ratio,
 			Messages:      messages,
 		})
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if d.Skip {
-			return messages, nil
+			return messages, false, nil
 		}
 		if d.Summary != "" {
 			summary = d.Summary
 		}
 	}
-	result := CompactTiered(messages, CompactTarget(opt.MaxContextChars, ratio), summary, toolLim)
+	result := CompactTiered(messages, CompactTarget(budget, ratio), summary, toolLim)
 	if result.CharsSaved > 0 || result.OverBudget {
 		for _, h := range opt.Hooks.AfterCompact {
 			if h != nil {
@@ -681,7 +701,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 			}
 		}
 	}
-	return result.Messages, nil
+	return result.Messages, true, nil
 }
 
 // runTool applies PreTool → Exec (or deny) → PostTool and returns the model-visible result.

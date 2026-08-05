@@ -137,7 +137,7 @@ func TestApplyCompactUsesCalibratedRatio(t *testing.T) {
 	opt := Options{MaxContextChars: raw + 1_000, MaxToolResultChars: 100_000}
 
 	seed := newRatioCalibrator()
-	out, err := applyCompact(context.Background(), msgs, opt, seed)
+	out, _, err := applyCompact(context.Background(), msgs, opt, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestApplyCompactUsesCalibratedRatio(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		dense.Observe(2_000, 1_000)
 	}
-	out2, err := applyCompact(context.Background(), msgs, opt, dense)
+	out2, _, err := applyCompact(context.Background(), msgs, opt, dense)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestApplyCompactHookSeesRatio(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		c.Observe(2_000, 1_000) // ~2 chars/token
 	}
-	if _, err := applyCompact(context.Background(), msgs, opt, c); err != nil {
+	if _, _, err := applyCompact(context.Background(), msgs, opt, c); err != nil {
 		t.Fatal(err)
 	}
 	if math.Abs(gotRatio-2.0) > 0.05 {

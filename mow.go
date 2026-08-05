@@ -29,6 +29,7 @@ type Usage = engine.Usage
 type PromptOpts = engine.PromptOpts
 type ModelInfo = engine.ModelInfo
 type ModelLimits = engine.ModelLimits
+type PromptCostEstimate = engine.PromptCostEstimate
 type CompactReport = engine.CompactReport
 type SessionInfo = engine.SessionInfo
 

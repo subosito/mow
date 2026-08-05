@@ -188,14 +188,18 @@ func TestContextCharsBudgetScalesWithWindow(t *testing.T) {
 	if got := ContextCharsBudget(0, 0); got != 0 {
 		t.Fatalf("unknown window → %d", got)
 	}
-	// Default 0.8 ratio: 1M × 4 × 0.8 = 3.2M chars (~800k tok-eq).
+	// Default 0.5 ratio: 1M × 4 × 0.5 = 2M chars, hard-capped at 1.6M (~400k tok-eq).
 	got := ContextCharsBudget(1_000_000, 0)
-	if got != 3_200_000 {
-		t.Fatalf("1M @0.8 default: got %d want 3200000", got)
+	if got != 1_600_000 {
+		t.Fatalf("1M @0.5 default: got %d want 1600000", got)
 	}
-	// Explicit lower ratio.
-	if got := ContextCharsBudget(1_000_000, 0.55); got != 2_200_000 {
-		t.Fatalf("1M @0.55: got %d", got)
+	// Explicit lower ratio under the cap passes through.
+	if got := ContextCharsBudget(1_000_000, 0.3); got != 1_200_000 {
+		t.Fatalf("1M @0.3: got %d", got)
+	}
+	// Above the cap is clamped regardless of ratio.
+	if got := ContextCharsBudget(1_000_000, 0.55); got != 1_600_000 {
+		t.Fatalf("1M @0.55: got %d want 1600000 (hard cap)", got)
 	}
 	// Smaller window still usable.
 	if got := ContextCharsBudget(128_000, DefaultCompactRatio); got < 80_000 {
@@ -362,7 +366,7 @@ func TestApplyCompactReportsLayerAndSavings(t *testing.T) {
 	var event AfterCompactEvent
 	opt := Options{MaxContextChars: 4_000, MaxToolResultChars: 24_000,
 		Hooks: Hooks{AfterCompact: []AfterCompactFunc{func(_ context.Context, e AfterCompactEvent) { event = e }}}}
-	if _, err := applyCompact(context.Background(), msgs, opt, newRatioCalibrator()); err != nil {
+	if _, _, err := applyCompact(context.Background(), msgs, opt, newRatioCalibrator()); err != nil {
 		t.Fatal(err)
 	}
 	if event.Layer != "snip" || event.CharsSaved <= 0 {

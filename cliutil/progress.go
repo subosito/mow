@@ -19,6 +19,56 @@ func EnableVerbose(on bool) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
 }
 
+// promptCostWarnTokens is the floor for printing a pre-send cost line.
+// Below this, the hint is noise on short/cold prompts.
+const promptCostWarnTokens = 8_000
+
+// PrintPromptCostEstimate writes a one-line approximate input cost to stderr
+// when the next Prompt would re-send a non-trivial context. Makes token waste
+// visible before the round trip. No-op when eng is nil or the estimate is small.
+func PrintPromptCostEstimate(eng *mow.Engine) {
+	if eng == nil {
+		return
+	}
+	est := eng.EstimatePromptCost()
+	if est.InputTokens < promptCostWarnTokens {
+		return
+	}
+	src := "est"
+	if est.FromProvider {
+		src = "last"
+	}
+	line := fmt.Sprintf("≈%s input tokens (%s)", formatTokenCount(est.InputTokens), src)
+	if est.ContextWindow > 0 {
+		pct := float64(est.InputTokens) / float64(est.ContextWindow) * 100
+		if pct > 100 {
+			pct = 100
+		}
+		line += fmt.Sprintf(" · %.0f%% context", pct)
+	}
+	if est.InputUSD > 0 {
+		line += fmt.Sprintf(" · ~$%.4f input", est.InputUSD)
+	}
+	fmt.Fprintf(os.Stderr, "mow: next prompt %s\n", line)
+}
+
+// formatTokenCount renders a token count for CLI (e.g. 12k, 1.2M).
+func formatTokenCount(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 10_000:
+		return fmt.Sprintf("%dk", n/1000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
 // OptionsCLI is Options plus stock CLI UX: optional token stream and compact
 // tool progress on stderr. Used by run/tty and packs that drive Prompt.
 func (f *EngineFlags) OptionsCLI() mow.Options {

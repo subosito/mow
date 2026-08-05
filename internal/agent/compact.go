@@ -20,9 +20,20 @@ const DefaultMaxToolResultChars = 24_000
 const DefaultMaxContextChars = 100_000
 
 // DefaultCompactRatio is the fraction of gateway context_window used as the
-// soft history budget when auto-scaling (1M window → ~800k tokens of history
-// at ~4 chars/token before compaction).
-const DefaultCompactRatio = 0.8
+// soft history budget when auto-scaling (1M window → ~500k tokens of history
+// at ~4 chars/token before compaction). 0.5, not higher: coding sessions
+// burn through context with tool output, and a 1M-token window should still
+// compact well before half the window — see MaxContextCharsHardCap.
+const DefaultCompactRatio = 0.5
+
+// MaxContextCharsHardCap is the absolute ceiling on the soft history budget
+// (in chars, ~400k tokens at ~4 chars/token), enforced in applyCompact
+// regardless of gateway context_window or configured ratio. A huge window
+// must not let history grow past ~40% of a 1M-token model before compacting —
+// oversized histories are the dominant token-waste failure mode in long
+// coding sessions (contexts of 500K+ tokens cost tens of millions of input
+// tokens before the first compaction).
+const MaxContextCharsHardCap = 1_600_000
 
 // ClampCompactRatio bounds ratio for auto budget. Non-positive → default.
 func ClampCompactRatio(ratio float64) float64 {
@@ -39,8 +50,10 @@ func ClampCompactRatio(ratio float64) float64 {
 }
 
 // ContextCharsBudget converts a gateway context_window (tokens) into a soft
-// history char budget. ~4 chars/token × ratio of the window (default 0.8 so
-// system, tools, and reply keep headroom). Returns 0 when window is unknown.
+// history char budget. ~4 chars/token × ratio of the window (default 0.5 so
+// system, tools, and reply keep headroom), floored at 80k and hard-capped at
+// MaxContextCharsHardCap so a huge window cannot inflate history past the
+// ceiling. Returns 0 when window is unknown.
 func ContextCharsBudget(windowTokens int, ratio float64) int {
 	if windowTokens <= 0 {
 		return 0
@@ -48,12 +61,11 @@ func ContextCharsBudget(windowTokens int, ratio float64) int {
 	ratio = ClampCompactRatio(ratio)
 	b := int(float64(windowTokens) * 4 * ratio)
 	const floor = 80_000
-	const ceil = 3_500_000 // ~875k tokens of history — memory/safety cap
 	if b < floor {
 		return floor
 	}
-	if b > ceil {
-		return ceil
+	if b > MaxContextCharsHardCap {
+		return MaxContextCharsHardCap
 	}
 	return b
 }

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +29,54 @@ func TestMain(m *testing.M) {
 		panic("build mow CLI: " + err.Error() + "\n" + string(output))
 	}
 	os.Exit(m.Run())
+}
+
+func TestRunEphemeralFlagDoesNotCreateSessionHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/models"):
+			fmt.Fprint(w, `{"data":[{"id":"deepseek-chat"}]}`)
+		case strings.HasSuffix(r.URL.Path, "/chat/completions"):
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	home := t.TempDir()
+	cmd := exec.Command(mowBinary, "run", "--ephemeral", "-p", "hi")
+	cmd.Env = append(os.Environ(),
+		"MOW_HOME="+home,
+		"MOW_BASE_URL="+server.URL+"/v1",
+		"MOW_API_KEY=test",
+		"MOW_MODEL=deepseek-chat",
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mow run --ephemeral: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "hello") {
+		t.Fatalf("output missing response (%q)", output)
+	}
+	var sessionFiles []string
+	err = filepath.WalkDir(home, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".jsonl") {
+			sessionFiles = append(sessionFiles, path)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessionFiles) != 0 {
+		t.Fatalf("ephemeral run persisted session history: %v", sessionFiles)
+	}
 }
 
 func TestCLIHelp(t *testing.T) {

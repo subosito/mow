@@ -78,7 +78,7 @@ func BenchmarkApplyCompactUnderBudget(b *testing.B) {
 	calib := newRatioCalibrator()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := applyCompact(context.Background(), msgs, opt, calib); err != nil {
+		if _, _, err := applyCompact(context.Background(), msgs, opt, calib); err != nil {
 			b.Fatal(err)
 		}
 	}

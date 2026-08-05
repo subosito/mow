@@ -138,6 +138,9 @@ func runCmd(args []string) int {
 	}
 	fs := cliutil.NewFlagSet("run")
 	promptFlag := fs.String("p", "", "one-shot prompt")
+	var ephemeral bool
+	fs.BoolVar(&ephemeral, "ephemeral", false, "run against current context without saving this turn")
+	fs.BoolVar(&ephemeral, "e", false, "shorthand for --ephemeral")
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
 	if err := fs.Parse(args); err != nil {
@@ -155,7 +158,15 @@ func runCmd(args []string) int {
 	opt := ef.OptionsCLI()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	res, err := mow.Run(ctx, prompt, opt)
+	eng, err := mow.New(opt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mow: %v\n", err)
+		return 1
+	}
+	defer eng.Close()
+	// Surface approximate input cost before the round trip (especially --continue).
+	cliutil.PrintPromptCostEstimate(eng)
+	res, err := eng.PromptWith(ctx, prompt, mow.PromptOpts{Ephemeral: ephemeral})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Fprintln(os.Stderr, "mow: cancelled")
@@ -171,7 +182,7 @@ func runCmd(args []string) int {
 		return 1
 	}
 	fmt.Println(res.Text)
-	if res.SessionID != "" && !ef.NoSession {
+	if res.SessionID != "" && !ef.NoSession && !ephemeral {
 		fmt.Fprintf(os.Stderr, "session=%s\n", res.SessionID)
 	}
 	return 0
@@ -240,6 +251,8 @@ func ttyCmd(args []string) int {
 		if ef.Stream {
 			fmt.Fprint(os.Stderr, "\n")
 		}
+		// Surface approximate input cost when context is already large.
+		cliutil.PrintPromptCostEstimate(eng)
 		// Per-prompt cancel: first Ctrl+C aborts this turn only; session stays up.
 		pctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		res, err := eng.PromptWith(pctx, line, mow.PromptOpts{Ephemeral: btw})
@@ -449,6 +462,7 @@ func printRunUsage() {
 Flags:
 
   -p TEXT              prompt (or pass as args)
+  -e, --ephemeral      run against resumed context without saving this turn
   --config --workspace --model --base-url
   --allow-shell --allow-write --max-turns --effort --extra-root
   --stream --verbose --session --continue --no-session
@@ -458,6 +472,7 @@ Examples:
   mow run -p "summarize this repo"
   mow run -p "fix the tests" --allow-write --allow-shell
   mow run --continue -p "try again"
+  mow run --continue -e -p "thanks"
 
 `)
 }

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/subosito/mow/internal/agent"
+	"github.com/subosito/mow/internal/llm"
 )
 
 // Prompt must not deadlock when scaling max_context_chars from Limits while
@@ -44,13 +46,14 @@ func TestResolveMaxContextChars(t *testing.T) {
 		t.Fatalf("disabled → %d", got)
 	}
 	got := resolveMaxContextChars(agent.DefaultMaxContextChars, 1_000_000, 0.8)
-	// 1M × 4 × 0.8 = 3.2M chars
-	if got != 3_200_000 {
-		t.Fatalf("1M @0.8 → %d want 3200000", got)
+	// 1M × 4 × 0.8 = 3.2M raw, but hard-capped at MaxContextCharsHardCap (~400k tok).
+	if got != agent.MaxContextCharsHardCap {
+		t.Fatalf("1M @0.8 → %d want hard cap %d", got, agent.MaxContextCharsHardCap)
 	}
-	got55 := resolveMaxContextChars(agent.DefaultMaxContextChars, 1_000_000, 0.55)
-	if got55 != 2_200_000 {
-		t.Fatalf("1M @0.55 → %d", got55)
+	// 200k window × 4 × 0.5 = 400k — below hard cap, above floor.
+	gotMid := resolveMaxContextChars(agent.DefaultMaxContextChars, 200_000, 0.5)
+	if gotMid != 400_000 {
+		t.Fatalf("200k @0.5 → %d want 400000", gotMid)
 	}
 	if got := resolveMaxContextChars(200_000, 1_000_000, 0.8); got != 200_000 {
 		t.Fatalf("explicit cfg → %d", got)
@@ -69,6 +72,68 @@ func TestUsageCost(t *testing.T) {
 	}
 	if got := u.Cost(ModelLimits{}); got != 0 {
 		t.Fatalf("unknown price cost=%v want 0", got)
+	}
+}
+
+func TestEstimatePromptCost_fromLastTokens(t *testing.T) {
+	eng, err := New(Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []Message, tools []ToolSpec) (Message, error) {
+			return Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	// Seed lastCtxTokens as if a prior provider report landed.
+	eng.mu.Lock()
+	eng.lastCtxTokens = 50_000
+	if eng.cfg != nil {
+		eng.cfg.LLM.InputPrice = 3 // $3 / 1M
+		eng.cfg.LLM.ContextWindow = 200_000
+	}
+	eng.mu.Unlock()
+
+	est := eng.EstimatePromptCost()
+	if !est.FromProvider || est.InputTokens != 50_000 {
+		t.Fatalf("est=%+v want FromProvider 50000", est)
+	}
+	// 50k / 1e6 * 3 = 0.15
+	if est.InputUSD < 0.149 || est.InputUSD > 0.151 {
+		t.Fatalf("InputUSD=%v want ~0.15", est.InputUSD)
+	}
+	if est.ContextWindow != 200_000 {
+		t.Fatalf("ContextWindow=%d", est.ContextWindow)
+	}
+}
+
+func TestEstimatePromptCost_fromPriorChars(t *testing.T) {
+	eng, err := New(Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []Message, tools []ToolSpec) (Message, error) {
+			return Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	// No lastCtxTokens — estimate from prior history bulk.
+	eng.mu.Lock()
+	eng.lastCtxTokens = 0
+	// ~40k chars → ~10k tokens at 4 chars/token
+	eng.prior = []llm.Message{{Role: "user", Content: strings.Repeat("x", 40_000)}}
+	eng.mu.Unlock()
+
+	est := eng.EstimatePromptCost()
+	if est.FromProvider {
+		t.Fatalf("expected char estimate, got provider: %+v", est)
+	}
+	if est.InputTokens < 9_000 || est.InputTokens > 11_000 {
+		t.Fatalf("InputTokens=%d want ~10000", est.InputTokens)
 	}
 }
 

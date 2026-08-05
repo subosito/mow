@@ -161,6 +161,8 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	if sess != nil && !opt.Ephemeral {
 		// Persist the model at the turn boundary so resume follows the session's
 		// last-used model rather than whatever default is active next launch.
+		// Record the session default effort (before any auto-downshift) so a
+		// short "thanks" turn does not stick medium into resume forever.
 		if aerr := sess.Append(session.Event{Type: "runtime", Model: model, Wire: e.Wire(), Effort: e.Effort()}); aerr != nil {
 			e.log().Warn("mow: session model append failed (resume may use default)", "err", aerr)
 		}
@@ -168,6 +170,10 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 			e.log().Warn("mow: session append failed (resume history incomplete)", "err", aerr)
 		}
 	}
+
+	// Downshift high/max effort for short mechanical prompts (restored after).
+	restoreEffort := e.applyAutoEffort(text)
+	defer restoreEffort()
 
 	e.log().Debug("mow run start", "run_id", runID, "session_id", sid, "workspace", ws)
 	e.Emit(Event{Type: EventRunStart, RunID: runID, SessionID: sid, Text: text})
@@ -408,7 +414,7 @@ func stopReasonFrom(err error) string {
 // resolveMaxContextChars picks the soft history budget.
 //   - cfgMax 0 → compaction off
 //   - cfgMax == default (100k) and window known → scale from window × ratio
-//     (default ratio 0.8 → 1M tokens ≈ 3.2M chars ≈ 800k tok-eq history)
+//     (default ratio 0.5 → 1M tokens ≈ 2M chars ≈ 500k tok-eq history, hard-capped at agent.MaxContextCharsHardCap)
 //   - cfgMax explicit other value → respect absolute config
 //   - no window → keep cfgMax
 func resolveMaxContextChars(cfgMax, windowTokens int, ratio float64) int {

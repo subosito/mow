@@ -1,6 +1,9 @@
 package engine
 
-import "github.com/subosito/mow/internal/llm"
+import (
+	"github.com/subosito/mow/internal/agent"
+	"github.com/subosito/mow/internal/llm"
+)
 
 // ModelLimits describes the active model's context window and pricing.
 // Prefer values published by GET /v1/models (gateway). Config may override.
@@ -15,6 +18,45 @@ type ModelLimits struct {
 // Cache discounts are not applied (gateway may still bill less for cache hits).
 func (u Usage) Cost(l ModelLimits) float64 {
 	return float64(u.InputTokens)/1e6*l.InputPrice + float64(u.OutputTokens)/1e6*l.OutputPrice
+}
+
+// PromptCostEstimate is a pre-send approximation of the next Prompt's input size
+// and USD cost so hosts can surface waste before the round trip.
+type PromptCostEstimate struct {
+	// InputTokens is approximate context size for the next call.
+	InputTokens int
+	// InputUSD is InputTokens priced at Limits.InputPrice (0 if price unknown).
+	InputUSD float64
+	// ContextWindow is Limits.ContextWindow (0 if unknown).
+	ContextWindow int
+	// FromProvider is true when InputTokens came from the last provider usage
+	// report (ContextTokens); false when estimated from history char count.
+	FromProvider bool
+}
+
+// EstimatePromptCost approximates the next Prompt's input token cost from
+// current context. Prefers the last provider-reported ContextTokens; otherwise
+// estimates from prior history at ~4 chars/token. System prompt and the new
+// user message are not included in the history estimate (under-counts slightly
+// on a cold first turn; fine for a pre-send warning).
+func (e *Engine) EstimatePromptCost() PromptCostEstimate {
+	if e == nil {
+		return PromptCostEstimate{}
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	lim := e.limitsLocked()
+	out := PromptCostEstimate{ContextWindow: lim.ContextWindow}
+	if e.lastCtxTokens > 0 {
+		out.InputTokens = e.lastCtxTokens
+		out.FromProvider = true
+	} else if n := agent.EstChars(e.prior); n > 0 {
+		out.InputTokens = estimateCtxTokens(n, agent.DefaultCharsPerToken)
+	}
+	if out.InputTokens > 0 && lim.InputPrice > 0 {
+		out.InputUSD = float64(out.InputTokens) / 1e6 * lim.InputPrice
+	}
+	return out
 }
 
 // Limits returns context window and pricing for the active model.

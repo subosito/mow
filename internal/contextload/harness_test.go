@@ -15,6 +15,9 @@ func TestDefaultHarnessRules_core(t *testing.T) {
 		"Continue",
 		"workspace",
 		"extra root",
+		"Context cost",
+		"full conversation",
+		"batch status",
 	} {
 		if !strings.Contains(strings.ToLower(s), strings.ToLower(want)) {
 			t.Errorf("harness rules missing %q", want)

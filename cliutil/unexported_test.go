@@ -6,6 +6,31 @@ import (
 	"testing"
 )
 
+func TestFormatTokenCount(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1_000, "1.0k"},
+		{12_500, "12k"},
+		{1_500_000, "1.5M"},
+		{-1, "0"},
+	}
+	for _, tc := range cases {
+		if got := formatTokenCount(tc.n); got != tc.want {
+			t.Errorf("formatTokenCount(%d)=%q want %q", tc.n, got, tc.want)
+		}
+	}
+}
+
+func TestPrintPromptCostEstimate_nilNoOp(t *testing.T) {
+	// Must not panic.
+	PrintPromptCostEstimate(nil)
+}
+
 func TestParseRootSpec(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
