@@ -3,6 +3,7 @@ package mowi
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"strings"
@@ -160,7 +161,8 @@ func (m *model) applyReviewDone(msg reviewDoneMsg) tea.Cmd {
 	m.toolCurrentArgs = ""
 	m.syncInputChrome()
 	if msg.err != nil {
-		if msg.err == context.Canceled {
+		errStr := strings.ToLower(msg.err.Error())
+		if errors.Is(msg.err, context.Canceled) || strings.Contains(errStr, "context canceled") {
 			m.add(kindStatus, msg.cmd+" · cancelled")
 		} else {
 			m.add(kindError, msg.cmd+": "+msg.err.Error())

@@ -206,7 +206,7 @@ func (m *model) View() tea.View {
 	case m.quitting:
 		content = ""
 	case !m.ready:
-		content = m.theme.Muted.Render(" mow ")
+		content = m.theme.Muted.Render(" mowi ")
 	case m.tooSmall():
 		content = m.sizeWarnView()
 	default:

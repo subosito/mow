@@ -599,10 +599,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.resetStreamState()
 		if msg.err != nil {
+			errStr := strings.ToLower(msg.err.Error())
 			switch {
-			case errors.Is(msg.err, context.Canceled):
+			case errors.Is(msg.err, context.Canceled) || strings.Contains(errStr, "context canceled"):
 				m.add(kindStatus, "cancelled")
-			case errors.Is(msg.err, context.DeadlineExceeded):
+			case errors.Is(msg.err, context.DeadlineExceeded) || strings.Contains(errStr, "context deadline exceeded"):
 				m.add(kindStatus, "timed out")
 			default:
 				m.add(kindError, msg.err.Error())
