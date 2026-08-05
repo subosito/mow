@@ -599,9 +599,9 @@ func resolveDiffBg(override, accent string, p palette, dark bool) string {
 		}
 	}
 	// Dark themes need a stronger wash to stay visible on near-black surfaces.
-	t := 0.22
+	t := 0.35
 	if !dark {
-		t = 0.14
+		t = 0.24
 	}
 	return mixHex(base, accent, t)
 }
