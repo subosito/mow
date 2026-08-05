@@ -15,5 +15,5 @@ bin/
 # go
 # (keep go.sum tracked once dependencies exist)
 
-# Python scratch harness bytecode (packs/mowi/_capture.py, _analyze.py)
+# Python bytecode (the smoke-tui geometry checks shell out to python3)
 __pycache__/
