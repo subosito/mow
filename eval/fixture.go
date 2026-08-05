@@ -34,11 +34,6 @@ type Case struct {
 	// returns on successive Chat calls. Empty means Options.Provider/Chat
 	// must supply the model (live eval).
 	Script []mow.Message `json:"script,omitempty"`
-	// Prior seeds engine history before Prompt (session-style resume).
-	// When set, New uses NoSession and the runner injects via a one-shot
-	// engine built with Chat that first restores context — prefer Script
-	// for pure turn scripts; Prior is for replaying mid-session state.
-	Prior []mow.Message `json:"prior,omitempty"`
 	// Expect is checked against the run result. Empty Expect only checks err==nil
 	// unless Expect.AllowError is set.
 	Expect Expect `json:"expect,omitempty"`

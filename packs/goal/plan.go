@@ -40,21 +40,6 @@ func (p *Plan) HasItems() bool {
 	return p != nil && len(p.Items) > 0
 }
 
-// AllTerminal reports every item is done, failed, or skipped.
-func (p *Plan) AllTerminal() bool {
-	if !p.HasItems() {
-		return true
-	}
-	for _, it := range p.Items {
-		switch it.Status {
-		case ItemDone, ItemFailed, ItemSkipped:
-		default:
-			return false
-		}
-	}
-	return true
-}
-
 // AllDone reports every item is done or skipped (no failed, no pending).
 func (p *Plan) AllDone() bool {
 	if !p.HasItems() {
@@ -68,19 +53,6 @@ func (p *Plan) AllDone() bool {
 		}
 	}
 	return true
-}
-
-// AnyFailed reports any item failed.
-func (p *Plan) AnyFailed() bool {
-	if p == nil {
-		return false
-	}
-	for _, it := range p.Items {
-		if it.Status == ItemFailed {
-			return true
-		}
-	}
-	return false
 }
 
 // NextPending returns the first pending item, or false.

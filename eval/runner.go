@@ -3,7 +3,6 @@ package eval
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -110,8 +109,6 @@ func Run(ctx context.Context, c Case, opt Options) (Report, error) {
 		return rep, fmt.Errorf("eval: %s: engine: %w", name, err)
 	}
 	defer eng.Close()
-
-	_ = c.Prior // reserved: mid-session seed (use Script for pure turn scripts)
 
 	popt := mow.PromptOpts{}
 	if s := strings.TrimSpace(c.SystemAppend); s != "" {
@@ -249,13 +246,4 @@ func checkExpect(ex Expect, rep Report, eng *mow.Engine) []string {
 		}
 	}
 	return fails
-}
-
-// AbsWorkspace resolves workspace to an absolute path when non-empty.
-func AbsWorkspace(dir string) (string, error) {
-	dir = strings.TrimSpace(dir)
-	if dir == "" {
-		return "", nil
-	}
-	return filepath.Abs(dir)
 }

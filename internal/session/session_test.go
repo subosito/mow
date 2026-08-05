@@ -44,23 +44,12 @@ func TestLoadModelReturnsLastRecordedModel(t *testing.T) {
 	if err := s.Append(Event{Type: "runtime", Model: "claude-sonnet-4"}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.LoadModel()
+	rt, err := s.LoadRuntime()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "claude-sonnet-4" {
-		t.Fatalf("model=%q want claude-sonnet-4", got)
-	}
-}
-
-func TestLoadModelLegacySessionIsEmpty(t *testing.T) {
-	s := &Store{Dir: t.TempDir(), ID: "legacy"}
-	if err := s.Append(Event{Type: "user", Role: "user", Content: "hello"}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := s.LoadModel()
-	if err != nil || got != "" {
-		t.Fatalf("model=%q err=%v", got, err)
+	if rt.Model != "claude-sonnet-4" {
+		t.Fatalf("model=%q want claude-sonnet-4", rt.Model)
 	}
 }
 

@@ -465,12 +465,12 @@ func TestJailfileAndHelpersExtra(t *testing.T) {
 	tmpDir := t.TempDir()
 	p := newTestPolicy(tmpDir, "write")
 
-	t.Run("OpenJailedPath", func(t *testing.T) {
+	t.Run("OpenJailedPathFor", func(t *testing.T) {
 		t.Parallel()
 		filePath := filepath.Join(tmpDir, "open_jailed.txt")
-		f, path, err := OpenJailedPath(p, filePath, os.O_CREATE|os.O_WRONLY, 0600)
+		f, path, err := OpenJailedPathFor(p, filePath, os.O_CREATE|os.O_WRONLY, 0600, true)
 		if err != nil {
-			t.Fatalf("OpenJailedPath failed: %v", err)
+			t.Fatalf("OpenJailedPathFor failed: %v", err)
 		}
 		f.Close()
 		if path != filePath {
@@ -492,8 +492,8 @@ func TestJailfileAndHelpersExtra(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "nil file") {
 			t.Fatalf("expected nil file error, got %v", err)
 		}
-		if err := verifyFDInJail(p, nil); err == nil {
-			t.Fatal("expected error from verifyFDInJail")
+		if err := VerifyFDInJail(p, nil); err == nil {
+			t.Fatal("expected error from VerifyFDInJail")
 		}
 	})
 

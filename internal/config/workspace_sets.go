@@ -72,21 +72,6 @@ func LookupWorkspaceSet(name string) (set WorkspaceSet, names []string, found bo
 	return set, names, found, nil
 }
 
-// LoadWorkspaceSet reads one named set, or errors naming the file and the
-// defined sets so typos are fixable without re-reading docs. Callers that
-// also need the candidate list for a "not found" branch should use
-// LookupWorkspaceSet to avoid a second read.
-func LoadWorkspaceSet(name string) (WorkspaceSet, error) {
-	set, names, found, err := LookupWorkspaceSet(name)
-	if err != nil {
-		return WorkspaceSet{}, err
-	}
-	if !found {
-		return WorkspaceSet{}, fmt.Errorf("workspace set %q not defined in %s (have: %s)", name, WorkspaceSetsPath(), strings.Join(names, ", "))
-	}
-	return set, nil
-}
-
 // ResolveWorkspaceSet expands the set into absolute paths: Root against cwd,
 // relative ExtraRoots against Root, "~" against the user home. Each returned
 // root keeps its optional ":ro"/":rw" suffix so callers can feed it to the

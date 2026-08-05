@@ -161,12 +161,6 @@ func (s *Store) LoadRuntime() (Runtime, error) {
 	return last, nil
 }
 
-// LoadModel is retained for callers that only need the model.
-func (s *Store) LoadModel() (string, error) {
-	rt, err := s.LoadRuntime()
-	return rt.Model, err
-}
-
 // LoadMessages reconstructs agent prior history for session resume.
 //
 // Session files append (1) simple user/assistant turns for the UI and (2) full

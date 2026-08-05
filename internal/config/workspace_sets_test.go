@@ -7,12 +7,12 @@ import (
 	"testing"
 )
 
-func TestLoadWorkspaceSet(t *testing.T) {
+func TestLookupWorkspaceSet(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("MOW_HOME", home)
 
-	if _, err := LoadWorkspaceSet("ghost"); err == nil {
-		t.Fatal("want error when workspaces.yaml missing")
+	if _, _, found, err := LookupWorkspaceSet("ghost"); err == nil && found {
+		t.Fatal("want miss when workspaces.yaml is absent")
 	}
 
 	ws := t.TempDir()
@@ -26,13 +26,17 @@ func TestLoadWorkspaceSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := LoadWorkspaceSet("nope"); err == nil || !strings.Contains(err.Error(), "have:") {
-		t.Fatalf("err = %v, want unknown name listing defined sets", err)
+	_, names, found, err := LookupWorkspaceSet("nope")
+	if err != nil || found {
+		t.Fatalf("found=%v err=%v, want a clean miss", found, err)
+	}
+	if !strings.Contains(strings.Join(names, ","), "duo") {
+		t.Fatalf("names=%v, want the defined sets so a typo is fixable", names)
 	}
 
-	set, err := LoadWorkspaceSet("duo")
-	if err != nil {
-		t.Fatal(err)
+	set, _, found, err := LookupWorkspaceSet("duo")
+	if err != nil || !found {
+		t.Fatalf("found=%v err=%v", found, err)
 	}
 	got, roots, err := set.ResolveWorkspaceSet()
 	if err != nil {

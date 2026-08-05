@@ -56,20 +56,8 @@ func retryDelayRefused(n int) time.Duration {
 	return d
 }
 
-// doHTTP runs req with retries. req must be replayable (GetBody set when Body non-nil).
-//
-// Deprecated for LLM calls: the non-streaming wires use doJSON, which also
-// bounds each attempt and retries HTTP 200 bodies that carry a transient
-// error envelope. Kept for callers that need a raw streaming-free response.
-func (c *Client) doHTTP(req *http.Request) (*http.Response, error) {
-	hc := c.HTTP
-	if hc == nil {
-		hc = &http.Client{Timeout: 120 * time.Second}
-	}
-	return doWithRetry(hc, req, maxHTTPAttempts)
-}
-
-// doHTTPStream is like doHTTP but uses a long-lived client when c.HTTP is nil.
+// doHTTPStream retries a replayable request using a long-lived client when
+// c.HTTP is nil.
 // Timeout is 0 for the overall body (streams can run for minutes) but dial and
 // response-header waits are bounded so a silent gateway cannot freeze forever.
 func (c *Client) doHTTPStream(req *http.Request) (*http.Response, error) {

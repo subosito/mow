@@ -30,11 +30,6 @@ const (
 	OutcomePartialStop StepOutcome = "partial_stop"
 )
 
-// StepRequest is one unit of work for the Executor.
-type StepRequest struct {
-	State State
-}
-
 // StepResult is the structured result of one Executor step.
 // The Runner only advances durable state from this (not free-form scraping).
 type StepResult struct {

@@ -31,12 +31,6 @@ func openJailed(p *policy.Policy, rel string, flag int, perm os.FileMode) (*os.F
 	return OpenJailedPathFor(p, path, flag, perm, write)
 }
 
-// OpenJailedPath opens an already-resolved absolute path and verifies the fd.
-func OpenJailedPath(p *policy.Policy, path string, flag int, perm os.FileMode) (*os.File, string, error) {
-	write := flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND) != 0
-	return OpenJailedPathFor(p, path, flag, perm, write)
-}
-
 // OpenJailedPathFor opens an already-resolved absolute path and verifies the fd with write context.
 func OpenJailedPathFor(p *policy.Policy, path string, flag int, perm os.FileMode, write bool) (*os.File, string, error) {
 	f, err := os.OpenFile(path, flag, perm)
@@ -124,10 +118,6 @@ func VerifyFDInJailFor(p *policy.Policy, f *os.File, write bool) error {
 		return fmt.Errorf("path %q escapes workspace after open: %w", actual, err)
 	}
 	return nil
-}
-
-func verifyFDInJail(p *policy.Policy, f *os.File) error {
-	return VerifyFDInJail(p, f)
 }
 
 // workspaceRel renders a resolved path relative to the workspace for display:
