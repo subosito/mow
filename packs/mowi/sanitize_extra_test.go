@@ -1,0 +1,77 @@
+package mowi
+
+import (
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+func TestNoColorStripsSGR(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("MOW_FORCE_COLOR", "")
+	m := newModel(testEngine(t), false, false)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.add(kindAssistant, "**bold** and `code`")
+	m.add(kindError, "something failed")
+	m.refreshVP()
+	view := m.View().Content
+	// No SGR color sequences (foreground/background) anywhere.
+	if strings.Contains(view, "\x1b[38;") || strings.Contains(view, "\x1b[48;") {
+		t.Fatalf("NO_COLOR still emitted color SGR: %q", firstColorSeq(view))
+	}
+}
+
+func TestForceColorOverridesNoColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("MOW_FORCE_COLOR", "1")
+	m := newModel(testEngine(t), false, false)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.add(kindError, "boom")
+	m.refreshVP()
+	if !strings.Contains(m.View().Content, "\x1b[38;") {
+		t.Fatal("MOW_FORCE_COLOR should re-enable color despite NO_COLOR")
+	}
+}
+
+func firstColorSeq(s string) string {
+	i := strings.Index(s, "\x1b[38;")
+	if i < 0 {
+		i = strings.Index(s, "\x1b[48;")
+	}
+	if i < 0 {
+		return ""
+	}
+	end := i + 20
+	if end > len(s) {
+		end = len(s)
+	}
+	return s[i:end]
+}
+
+func TestReducedMotionStaticSpinner(t *testing.T) {
+	t.Setenv("MOW_NO_ANIM", "1")
+	m := newModel(testEngine(t), false, false)
+	// Static glyph, not an animated spinner frame.
+	if got := stripAnsiTest2(m.spinnerView()); got != "◇" {
+		t.Fatalf("reduced-peer-bion spinner=%q want ◇", got)
+	}
+	// advanceSpinnerFrame is a no-op under reduced peer-bion (does not panic / change).
+	m.advanceSpinnerFrame()
+}
+
+func stripAnsiTest2(s string) string {
+	out := ""
+	inEsc := false
+	for _, r := range s {
+		switch {
+		case r == 0x1b:
+			inEsc = true
+		case inEsc && (r == 'm' || r == 'K'):
+			inEsc = false
+		case !inEsc:
+			out += string(r)
+		}
+	}
+	return strings.TrimSpace(out)
+}

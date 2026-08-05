@@ -64,6 +64,7 @@ Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool batches: `policy.max_
 | `ext/` | Registration (`ext.go`) + core packs: acp, mcp, proc, rpc, cmdhook, eval |
 | `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): goal, review, ops, lsp, job |
 | `packs/otel/` | OTLP export (nested submodule `github.com/subosito/mow/packs/otel`; config-driven) |
+| `packs/mowi/` | Interactive TUI (nested submodule `github.com/subosito/mow/packs/mowi`; full binary) |
 | `internal/` | Implementation — **not** an integrator import surface |
 | `cmd/mow/` | Thin CLI; blank-imports packs |
 | `docs/` | architecture, harness, extensions |
