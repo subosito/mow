@@ -271,11 +271,11 @@ func (c *Client) finalizeChatBody(raw []byte) ([]byte, error) {
 		return raw, nil
 	}
 	if needTools {
-		// chat-completions has no server-tool channel: the provider drops the
-		// declaration without an error, so the model answers from training
-		// data as if it had searched. Silent staleness is worse than a loud
-		// failure — say so once rather than let it look like it worked.
-		if NormalizeWire(c.Wire) == WireOpenAIChat {
+		// chat-completions is mixed: raw OpenAI gpt drops web_search silently,
+		// but gateways (a gateway Gemini → googleSearch, Qwen enable_search) publish
+		// native_tools on GET /models when the path works. Trust the catalog;
+		// only warn when local config forces tools the catalog does not claim.
+		if NormalizeWire(c.Wire) == WireOpenAIChat && len(c.catalogNativeTools()) == 0 {
 			c.warnNativeToolsUnsupported()
 		}
 		m["tools"] = mergeNativeTools(m["tools"], native)

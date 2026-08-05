@@ -21,7 +21,12 @@ func (c *Client) activeNativeTools() []map[string]any {
 	if len(c.NativeTools) > 0 {
 		return c.NativeTools
 	}
-	if len(c.CatalogModels) == 0 {
+	return c.catalogNativeTools()
+}
+
+// catalogNativeTools returns GET /models native_tools for the active model, if any.
+func (c *Client) catalogNativeTools() []map[string]any {
+	if c == nil || len(c.CatalogModels) == 0 {
 		return nil
 	}
 	id := strings.TrimSpace(StripEffortTiers(c.Model))
@@ -73,8 +78,13 @@ func mergeNativeTools(existing any, native []map[string]any) []any {
 var nativeToolWarned sync.Map // model -> struct{}
 
 // warnNativeToolsUnsupported logs once per model that native tools were
-// configured on a wire that cannot carry them, so a long agent loop does not
+// forced on a wire without catalog support, so a long agent loop does not
 // repeat it on every call.
+//
+// Only used when local NativeTools are set and GET /models does not advertise
+// native_tools for this model. Catalog-listed tools (e.g. gemini web_search on
+// chat-completions via a gateway → googleSearch) are trusted: the gateway already
+// declared the capability on that wire.
 func (c *Client) warnNativeToolsUnsupported() {
 	if _, dup := nativeToolWarned.LoadOrStore(c.Model, struct{}{}); dup {
 		return
@@ -85,9 +95,9 @@ func (c *Client) warnNativeToolsUnsupported() {
 			types = append(types, s)
 		}
 	}
-	slog.Warn("llm: native_tools ignored on this wire",
+	slog.Warn("llm: native_tools may be dropped on this wire",
 		"wire", WireOpenAIChat,
 		"model", c.Model,
 		"tools", strings.Join(types, ","),
-		"detail", "chat-completions has no server-tool channel; the provider drops the declaration and the model answers from training data. Use openai-responses or anthropic-messages.")
+		"detail", "chat-completions often has no server-tool channel (e.g. raw OpenAI gpt). Prefer openai-responses or anthropic-messages, or use a gateway model that advertises native_tools on GET /v1/models.")
 }

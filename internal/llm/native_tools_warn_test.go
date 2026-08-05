@@ -8,12 +8,9 @@ import (
 	"testing"
 )
 
-// chat-completions has no server-tool channel. Verified against a live
-// gateway: gpt-5.x with tools:[{"type":"web_search"}] on this wire answers
-// from training data and never searches, with no error — while grok-4.5 on
-// openai-responses searches and cites. Silent staleness is the worst failure
-// mode here, so mow warns rather than letting it look like it worked.
-func TestNativeToolsWarnOnChatCompletions(t *testing.T) {
+// Local native tools on chat-completions without catalog support: warn once
+// (raw OpenAI gpt drops web_search silently). Catalog-listed tools must not warn.
+func TestNativeToolsWarnOnChatCompletionsLocalOnly(t *testing.T) {
 	var buf bytes.Buffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
@@ -32,7 +29,7 @@ func TestNativeToolsWarnOnChatCompletions(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	if !strings.Contains(got, "native_tools ignored") {
+	if !strings.Contains(got, "native_tools may be dropped") {
 		t.Fatalf("no warning for unsupported wire: %q", got)
 	}
 
@@ -42,8 +39,36 @@ func TestNativeToolsWarnOnChatCompletions(t *testing.T) {
 	if _, err := c.finalizeChatBody(raw); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(buf.String(), "native_tools ignored") {
+	if strings.Contains(buf.String(), "native_tools may be dropped") {
 		t.Fatalf("warning repeated on later calls: %q", buf.String())
+	}
+}
+
+// Gateway models that advertise native_tools on chat-completions (Gemini via
+// a gateway, etc.) must not warn — the catalog is the capability claim.
+func TestNativeToolsNoWarnWhenCatalogAdvertisesOnChat(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	c := &Client{
+		Wire:  WireOpenAIChat,
+		Model: "gemini-3.6-flash",
+		CatalogModels: map[string]ModelInfo{
+			"gemini-3.6-flash": {
+				ID:          "gemini-3.6-flash",
+				Wire:        WireOpenAIChat,
+				NativeTools: []map[string]any{{"type": "web_search"}},
+			},
+		},
+	}
+	raw, _ := json.Marshal(map[string]any{"model": "gemini-3.6-flash"})
+	if _, err := c.finalizeChatBody(raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "native_tools") {
+		t.Fatalf("catalog-advertised tools must not warn: %q", buf.String())
 	}
 }
 
@@ -65,7 +90,7 @@ func TestNativeToolsNoWarnOnSupportedWires(t *testing.T) {
 			if _, err := c.finalizeChatBody(raw); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(buf.String(), "native_tools ignored") {
+			if strings.Contains(buf.String(), "native_tools") {
 				t.Fatalf("%s warned but does carry server tools: %q", wire, buf.String())
 			}
 		})
