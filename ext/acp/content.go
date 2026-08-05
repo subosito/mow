@@ -3,7 +3,6 @@ package acp
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -39,10 +38,6 @@ type ResourceContents struct {
 func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (string, error) {
 	var parts []string
 	var nMedia int
-	_, err := mediaDir(workspace)
-	if err != nil {
-		return "", err
-	}
 	stamp := time.Now().Format("20060102-150405")
 	sid := strings.TrimSpace(sessionID)
 	if sid == "" {
@@ -139,33 +134,6 @@ func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (stri
 		}
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n")), nil
-}
-
-func mediaDir(workspace string) (string, error) {
-	pol := &policy.Policy{Workspace: workspace}
-	dir, err := pol.ResolvePath(filepath.Join("media", "acp"))
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	// Resolve again after creation and reject a swapped or final-component link.
-	verified, err := pol.ResolvePath(filepath.Join("media", "acp"))
-	if err != nil || verified != dir {
-		if err != nil {
-			return "", err
-		}
-		return "", fmt.Errorf("media directory changed during creation")
-	}
-	fi, err := os.Lstat(dir)
-	if err != nil {
-		return "", err
-	}
-	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
-		return "", fmt.Errorf("media path is not a real directory")
-	}
-	return dir, nil
 }
 
 func decodeB64(s string) ([]byte, error) {

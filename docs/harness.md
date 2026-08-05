@@ -494,9 +494,24 @@ writes a plain-text archive under the session dir:
 \$MOW_HOME/sessions/<project>/<session-id>.archive/0001-….md
 ```
 
-Sessions enable a read-only `context_search` tool (pattern only — no path arg)
+Sessions enable a read-only `context_search` tool (patterns only — no path arg)
 so the agent can recover details dropped from the live window. No embeddings
 or vector DB; fixed-string scan over a bounded set of newest archive files.
+
+Args: `pattern` (a string, or a list of strings — a line matching **any** of
+them hits), optional `max_results` and `context_lines`. Both budgets are
+clamped to hard ceilings, so a model cannot raise them.
+
+Results are **snippets**, not raw grep output: each hit is rendered under a
+stable `<session>.archive/<file>.md:<line>` reference with a few surrounding
+lines, the matched line marked `>`. Retrieval is bounded at every level —
+per-line length, per-snippet size, result count, and a hard total output cap
+well under the compaction budget it recovers from. Overlapping hits in one
+file merge into a single window, and identical snippets are reported once even
+when two compactions archived the same turn. A single tool instance also has a
+cumulative retrieval budget across calls, so repeating broad searches cannot
+refill the live context indefinitely. When a budget stops the scan the result
+ends with an explicit "refine the pattern" notice.
 
 ### MCP as untrusted output
 

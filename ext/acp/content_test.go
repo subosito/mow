@@ -8,6 +8,16 @@ import (
 	"testing"
 )
 
+func TestMaterializePromptTextDoesNotCreateMediaDir(t *testing.T) {
+	ws := t.TempDir()
+	if _, err := materializePrompt([]ContentBlock{{Type: "text", Text: "hello"}}, ws, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "media", "acp")); !os.IsNotExist(err) {
+		t.Fatalf("text-only prompt created media/acp: %v", err)
+	}
+}
+
 func TestMaterializePromptImage(t *testing.T) {
 	ws := t.TempDir()
 	png := []byte{0x89, 0x50, 0x4e, 0x47}
@@ -25,7 +35,6 @@ func TestMaterializePromptImage(t *testing.T) {
 	if !strings.Contains(text, "media/acp/") || !strings.Contains(text, "understand_image") {
 		t.Fatalf("missing attachment note: %q", text)
 	}
-	// file exists
 	entries, err := os.ReadDir(filepath.Join(ws, "media", "acp"))
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("entries=%v err=%v", entries, err)
