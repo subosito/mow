@@ -320,7 +320,7 @@ func renderPrettyDiff(th theme, code string, width int) string {
 					oldLn++
 				}
 				nl()
-				b.WriteString(formatDiffRowPre(th, on, nn, oldText, width))
+				b.WriteString(formatDiffRowPre(th, th.DiffDel, on, nn, oldText, width))
 
 				on, nn = diffSignAdd, "    "
 				if haveNums {
@@ -328,7 +328,7 @@ func renderPrettyDiff(th theme, code string, width int) string {
 					newLn++
 				}
 				nl()
-				b.WriteString(formatDiffRowPre(th, on, nn, newText, width))
+				b.WriteString(formatDiffRowPre(th, th.DiffAdd, on, nn, newText, width))
 				continue
 			}
 			on, nn := diffSignAdd, "    "
@@ -383,14 +383,25 @@ func formatDiffRow(th theme, bodyStyle lipgloss.Style, oldN, newN, body string, 
 	if body == "" {
 		body = " "
 	}
-	return formatDiffRowPre(th, oldN, newN, bodyStyle.Render(body), width)
+	return formatDiffRowPre(th, bodyStyle, oldN, newN, bodyStyle.Render(body), width)
 }
 
 // formatDiffRowPre is formatDiffRow for a body that is already styled (word
 // diff spans), so the caller's per-word emphasis is not flattened by a single
 // Render over the whole line.
-func formatDiffRowPre(th theme, oldN, newN, styledBody string, width int) string {
+//
+// The row is padded to the full body width so the add/del tint reads as a
+// continuous band. Tinting only the glyphs left a ragged right edge whose
+// shape tracked line length rather than the change itself, which is noisier
+// to scan than a solid block. Padding is skipped when width is unknown
+// (colorDiffLines passes 0) — there is no column to pad to.
+func formatDiffRowPre(th theme, bodyStyle lipgloss.Style, oldN, newN, styledBody string, width int) string {
 	gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", oldN, newN))
+	if width > 0 {
+		if pad := width - lipgloss.Width(gutter) - lipgloss.Width(styledBody); pad > 0 {
+			styledBody += bodyStyle.Render(strings.Repeat(" ", pad))
+		}
+	}
 	return clipDiffRow(gutter+styledBody, width)
 }
 

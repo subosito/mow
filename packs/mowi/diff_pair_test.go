@@ -1,6 +1,7 @@
 package mowi
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -26,6 +27,103 @@ func rowIndex(rows []string, sub string) int {
 		}
 	}
 	return -1
+}
+
+// Changed rows paint as a full-width band, so the tint marks the change rather
+// than tracing the length of each line.
+func TestDiffChangedRowsFillWidth(t *testing.T) {
+	t.Setenv("MOW_FORCE_COLOR", "1")
+	th := newTheme()
+	const width = 60
+	src := "@@ -10,3 +10,3 @@\n ctx before\n-\tshort\n+\ta much longer replacement line\n ctx after\n"
+	out := renderPrettyDiff(th, src, width)
+
+	for _, ln := range strings.Split(out, "\n") {
+		plain := xansi.Strip(ln)
+		body := strings.TrimSpace(plain)
+		if body == "" {
+			continue
+		}
+		tinted := strings.Contains(ln, "48;2;")
+		isChange := strings.Contains(plain, "short") || strings.Contains(plain, "replacement")
+		switch {
+		case isChange:
+			if !tinted {
+				t.Fatalf("changed row not tinted: %q", plain)
+			}
+			if w := xansi.StringWidth(plain); w != width {
+				t.Fatalf("changed row width=%d, want a full %d-cell band: %q", w, width, plain)
+			}
+		case strings.Contains(plain, "ctx "):
+			// Context must stay untinted; a band there would read as a change.
+			if tinted {
+				t.Fatalf("context row should not be tinted: %q", plain)
+			}
+			if w := xansi.StringWidth(plain); w == width {
+				t.Fatalf("context row padded to full width: %q", plain)
+			}
+		}
+	}
+}
+
+// The padding must carry the row's own tint — add and del bands stay distinct
+// all the way to the right edge.
+func TestDiffBandPadUsesRowColor(t *testing.T) {
+	t.Setenv("MOW_FORCE_COLOR", "1")
+	th := newTheme()
+	out := renderPrettyDiff(th, "@@ -1,2 +1,2 @@\n-old line\n+new line\n", 44)
+
+	bgRe := regexp.MustCompile(`48;2;\d+;\d+;\d+`)
+	var delBG, addBG string
+	for _, ln := range strings.Split(out, "\n") {
+		plain := xansi.Strip(ln)
+		// Look at the span after the last visible character: that is the pad.
+		i := strings.LastIndex(ln, "e")
+		if i < 0 {
+			continue
+		}
+		found := bgRe.FindAllString(ln[i:], -1)
+		switch {
+		case strings.Contains(plain, "old line") && len(found) > 0:
+			delBG = found[0]
+		case strings.Contains(plain, "new line") && len(found) > 0:
+			addBG = found[0]
+		}
+	}
+	if delBG == "" || addBG == "" {
+		t.Fatalf("pad is unstyled — band stops at the text (del=%q add=%q)\n%s", delBG, addBG, out)
+	}
+	if delBG == addBG {
+		t.Fatalf("add and del pads share a colour %q — bands are indistinguishable", delBG)
+	}
+}
+
+// Width 0 means "unknown column" (colorDiffLines): padding would invent a
+// width the caller never asked for.
+func TestDiffNoPadWhenWidthUnknown(t *testing.T) {
+	t.Setenv("MOW_FORCE_COLOR", "1")
+	th := newTheme()
+	out := colorDiffLines(th, "@@ -1,2 +1,2 @@\n-x\n+y\n")
+	for _, ln := range strings.Split(out, "\n") {
+		plain := xansi.Strip(ln)
+		if strings.HasSuffix(plain, "   ") {
+			t.Fatalf("row padded despite unknown width: %q", plain)
+		}
+	}
+}
+
+// A line longer than the budget is still clipped, not padded past the edge.
+func TestDiffBandDoesNotOverflow(t *testing.T) {
+	t.Setenv("MOW_FORCE_COLOR", "1")
+	th := newTheme()
+	const width = 40
+	long := strings.Repeat("verylongtoken ", 12)
+	out := renderPrettyDiff(th, "@@ -1,2 +1,2 @@\n-"+long+"\n+"+long+"x\n", width)
+	for _, ln := range strings.Split(out, "\n") {
+		if w := xansi.StringWidth(xansi.Strip(ln)); w > width {
+			t.Fatalf("row overflows %d cells (%d): %q", width, w, xansi.Strip(ln))
+		}
+	}
 }
 
 // A replaced line should read as one edit: the old row immediately followed by
