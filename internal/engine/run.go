@@ -10,7 +10,7 @@
 //   - cliutil / packcfg — host helpers (not packs)
 //
 // Implementation lives under internal/ (agent loop, llm, tools, config, …).
-package mow
+package engine
 
 import (
 	"context"

@@ -3,7 +3,7 @@
 // packs/goal's process tools — import mow.Proc* instead of internal/proc.
 //
 // ext/proc (which stays in the root module) imports internal/proc directly.
-package mow
+package engine
 
 import "github.com/subosito/mow/internal/proc"
 

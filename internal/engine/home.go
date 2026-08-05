@@ -1,4 +1,4 @@
-package mow
+package engine
 
 import "github.com/subosito/mow/internal/config"
 
