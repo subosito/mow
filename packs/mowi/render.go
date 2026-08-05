@@ -511,17 +511,3 @@ func isBadControlRune(r rune) bool {
 	}
 	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

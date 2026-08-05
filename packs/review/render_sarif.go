@@ -205,7 +205,7 @@ func sarifResults(rep *Report) []sarifResult {
 			Fingerprints: map[string]string{"mow/v1": f.Fingerprint},
 			Properties:   props,
 		}
-		for _, l := range f.Locations[minInt(1, len(f.Locations)):] {
+		for _, l := range f.Locations[min(1, len(f.Locations)):] {
 			res.RelatedLocation = append(res.RelatedLocation, sarifLocation{
 				PhysicalLocation: sarifPhysical{
 					ArtifactLocation: sarifArtifact{URI: l.Path},
@@ -260,11 +260,4 @@ func sarifLevel(s Severity) string {
 	default:
 		return "none"
 	}
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

@@ -209,11 +209,8 @@ func (b *bridge) run(ctx context.Context, event, matchName string, payload map[s
 		if ent.re != nil && matchName != "" && !ent.re.MatchString(matchName) {
 			continue
 		}
-		if ent.re != nil && matchName == "" && ent.re.String() != "" {
-			// Non-tool events with a non-empty matcher: Claude treats the
-			// matcher as always-true there; mirror that.
-			_ = ent
-		}
+		// Non-tool events (empty matchName) ignore the matcher entirely:
+		// Claude treats it as always-true there, so the entry still runs.
 		for _, ce := range ent.cmds {
 			ho, blocked, reason, ok := b.execOne(ctx, ce, payload)
 			if !ok {
