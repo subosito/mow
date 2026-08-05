@@ -308,10 +308,32 @@ func renderPrettyDiff(th theme, code string, width int) string {
 		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
 			body := strings.TrimPrefix(line, "+")
 			if len(pendingDel) > 0 {
-				// Paired replace: old row then its new row, so the change reads
-				// as one edit rather than two unrelated blocks.
 				oldBody := pendingDel[0]
 				pendingDel = pendingDel[1:]
+
+				// An "edit" can hand us a whole rewritten block: every line
+				// arrives as −old/+new even where the text is untouched. A
+				// two-token change then paints twelve banded rows and the real
+				// edit gets a sixth of the weight. Identical pairs are context
+				// by definition — render them as such so the bands mark only
+				// what actually changed.
+				if oldBody == body {
+					on, nn := "    ", "    "
+					if haveNums {
+						on = fmt.Sprintf("%4d", oldLn)
+						nn = fmt.Sprintf("%4d", newLn)
+						oldLn++
+						newLn++
+					}
+					nl()
+					gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", on, nn)) +
+						th.DiffCtx.Render(diffSignCtx+" ")
+					b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(body), width))
+					continue
+				}
+
+				// Paired replace: old row then its new row, so the change reads
+				// as one edit rather than two unrelated blocks.
 				oldText, newText := emphasizeWordDiff(th, oldBody, body)
 
 				on, nn := "    ", "    "
@@ -393,20 +415,34 @@ func formatDiffRow(th theme, bodyStyle lipgloss.Style, oldN, newN, sign, body st
 	return formatDiffRowPre(th, bodyStyle, oldN, newN, sign, bodyStyle.Render(body), width)
 }
 
+// diffNumOnBand is the line-number ink for a changed row.
+//
+// DiffNum is muted + dim, which reads correctly against the terminal
+// background but collapses once the row carries an add/del wash: measured on a
+// real terminal it came out at 1.65:1 on the add band and 1.90:1 on the del
+// band, i.e. numbers that are effectively invisible in exactly the surface
+// where you navigate by them. This tone clears 4.5:1 on both bands while
+// staying quieter than body text, and drops `dim` because terminals implement
+// faint inconsistently.
+func diffNumOnBand(th theme, bodyStyle lipgloss.Style) lipgloss.Style {
+	st := th.DiffNum
+	bg := bodyStyle.GetBackground()
+	if bg == nil {
+		return st
+	}
+	return st.Background(bg).Faint(false).Foreground(th.DiffNumOnBand)
+}
+
 // formatDiffRowPre is formatDiffRow for a body that is already styled (word
 // diff spans), so the caller's per-word emphasis is not flattened by a single
 // Render over the whole line.
 //
 // The whole row — number gutter included — carries the add/del wash, so a
 // changed block reads as one rectangle. Washing only the body left a 15-cell
-// notch on the left and the block read as stripes. Numbers keep their muted
-// foreground on top of that wash. Padding is skipped when width is unknown
-// (colorDiffLines passes 0): there is no column to pad to.
+// notch on the left and the block read as stripes. Padding is skipped when
+// width is unknown (colorDiffLines passes 0): there is no column to pad to.
 func formatDiffRowPre(th theme, bodyStyle lipgloss.Style, oldN, newN, sign, styledBody string, width int) string {
-	numStyle := th.DiffNum
-	if bg := bodyStyle.GetBackground(); bg != nil {
-		numStyle = numStyle.Background(bg)
-	}
+	numStyle := diffNumOnBand(th, bodyStyle)
 	gutter := numStyle.Render(fmt.Sprintf("  %s  %s ", oldN, newN)) +
 		numStyle.Render("\u2502 ") + bodyStyle.Render(sign+" ")
 	if width > 0 {

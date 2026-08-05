@@ -1,6 +1,7 @@
 package mowi
 
 import (
+	"math"
 	"regexp"
 	"strings"
 	"testing"
@@ -130,6 +131,114 @@ func TestDiffBandCoversGutter(t *testing.T) {
 		if !strings.Contains(ln[:bar], "48;2;") {
 			t.Fatalf("number gutter is unwashed — block reads as a stripe: %q", plain)
 		}
+	}
+}
+
+// An edit can hand the renderer a whole rewritten block: every line arrives as
+// −old/+new even where the text never changed. Pairing on run length alone then
+// paints a two-token edit as twelve banded rows, and the real change gets a
+// sixth of the visual weight. Identical pairs are context by definition.
+func TestDiffIdenticalPairsRenderAsContext(t *testing.T) {
+	t.Setenv("MOW_FORCE_COLOR", "1")
+	th := newTheme()
+	// Shape produced by a real `edit`: whole block replaced, one token changed.
+	src := "@@ -1,4 +1,4 @@\n" +
+		"-func New() *Client {\n-\ttimeout := 30\n-\treturn nil\n-}\n" +
+		"+func New() *Client {\n+\ttimeout := 60\n+\treturn nil\n+}\n"
+	out := renderPrettyDiff(th, src, 60)
+
+	var banded, ctx int
+	for _, ln := range strings.Split(out, "\n") {
+		plain := xansi.Strip(ln)
+		if !strings.Contains(plain, "│") {
+			continue
+		}
+		if strings.Contains(ln, "48;2;") {
+			banded++
+		} else {
+			ctx++
+		}
+	}
+	// Only the timeout line actually changed: one del row + one add row.
+	if banded != 2 {
+		t.Fatalf("banded rows = %d, want 2 (only the real change):\n%s", banded, xansi.Strip(out))
+	}
+	if ctx != 3 {
+		t.Fatalf("context rows = %d, want 3 (the untouched lines):\n%s", ctx, xansi.Strip(out))
+	}
+	// The unchanged lines keep BOTH line numbers, as context does.
+	plain := xansi.Strip(out)
+	if !strings.Contains(plain, "func New() *Client {") {
+		t.Fatalf("unchanged line lost:\n%s", plain)
+	}
+}
+
+// Identical pairs must not consume the sign column or a band, but a genuine
+// replacement in the same run still renders as a pair.
+func TestDiffMixedRunKeepsRealChangePaired(t *testing.T) {
+	th := newTheme()
+	src := "@@ -1,2 +1,2 @@\n-same\n-was\n+same\n+now\n"
+	rows := rowsOf(renderPrettyDiff(th, src, 50))
+
+	sameRow := rowIndex(rows, "same")
+	wasRow, nowRow := rowIndex(rows, "was"), rowIndex(rows, "now")
+	if sameRow < 0 || wasRow < 0 || nowRow < 0 {
+		t.Fatalf("missing rows:\n%s", strings.Join(rows, "\n"))
+	}
+	if strings.Count(strings.Join(rows, "\n"), "same") != 1 {
+		t.Fatalf("identical line rendered twice:\n%s", strings.Join(rows, "\n"))
+	}
+	if nowRow != wasRow+1 {
+		t.Fatalf("real change not paired (was=%d now=%d):\n%s", wasRow, nowRow, strings.Join(rows, "\n"))
+	}
+}
+
+// Line numbers must stay legible once a row carries an add/del wash. The muted
+// gutter tone measured 1.65:1 on the add band and 1.90:1 on the del band — the
+// numbers effectively vanished in the one surface you navigate by them.
+func TestDiffNumbersLegibleOnBands(t *testing.T) {
+	t.Setenv("MOW_FORCE_COLOR", "1")
+	th := newTheme()
+
+	// Contrast of the number ink against each band, per WCAG.
+	lum := func(hex string) float64 {
+		r, g, b := hexRGB(hex)
+		ch := func(v int) float64 {
+			f := float64(v) / 255
+			if f <= 0.03928 {
+				return f / 12.92
+			}
+			return math.Pow((f+0.055)/1.055, 2.4)
+		}
+		return 0.2126*ch(r) + 0.7152*ch(g) + 0.0722*ch(b)
+	}
+	ratio := func(fg, bg string) float64 {
+		a, b := lum(fg), lum(bg)
+		if a < b {
+			a, b = b, a
+		}
+		return (a + 0.05) / (b + 0.05)
+	}
+
+	p := defaultPalette(true)
+	num := mixHex(p.muted, p.fg, 0.8)
+	for _, band := range []struct {
+		name, bg string
+	}{
+		{"add", resolveDiffBg(p.addBg, p.add, p, true)},
+		{"del", resolveDiffBg(p.delBg, p.del, p, true)},
+	} {
+		if band.bg == "" {
+			continue
+		}
+		if got := ratio(num, band.bg); got < 4.5 {
+			t.Errorf("line numbers on the %s band: %.2f:1, want >= 4.5:1 (ink %s on %s)",
+				band.name, got, num, band.bg)
+		}
+	}
+	// And the style really is used, not just defined.
+	if th.DiffNumOnBand == nil {
+		t.Fatal("DiffNumOnBand not set on the theme")
 	}
 }
 

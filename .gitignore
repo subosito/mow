@@ -14,3 +14,6 @@ bin/
 
 # go
 # (keep go.sum tracked once dependencies exist)
+
+# Python scratch harness bytecode (packs/mowi/_capture.py, _analyze.py)
+__pycache__/

@@ -44,7 +44,12 @@ type theme struct {
 	DiffMeta lipgloss.Style // hunk headers / stats
 	DiffNum  lipgloss.Style // line-number gutter
 	DiffCtx  lipgloss.Style // unchanged context line
-	Sep      lipgloss.Style
+	// DiffNumOnBand is the line-number ink once a row carries an add/del wash.
+	// The muted+dim gutter tone measures ~1.7:1 against those backgrounds, so
+	// numbers vanish exactly where you navigate by them; this is derived to
+	// clear AA on both bands while staying below body-text weight.
+	DiffNumOnBand color.Color
+	Sep           lipgloss.Style
 	// SlashCmd colors /commands in the input field.
 	SlashCmd lipgloss.Style
 	// palette is the hex token set shared by chrome and glamour markdown.
@@ -534,18 +539,19 @@ func buildTheme(name string, p palette, mdDark bool, chroma string) theme {
 			Border(square).
 			BorderForeground(c(p.border)).
 			Padding(0, 1),
-		Title:       lipgloss.NewStyle().Bold(true).Foreground(c(p.accent)),
-		RoleUserBar: lipgloss.NewStyle().Foreground(c(p.user)),
-		RoleAsstBar: lipgloss.NewStyle().Foreground(c(p.accent)),
-		RoleUserBg:  lipgloss.NewStyle().Background(c(p.userBg)).Foreground(c(p.fg)),
-		StampUser:   lipgloss.NewStyle().Background(c(p.userBg)).Foreground(c(p.muted)),
-		DiffAdd:     diffAddStyle(c, p, mdDark),
-		DiffDel:     diffDelStyle(c, p, mdDark),
-		DiffMeta:    lipgloss.NewStyle().Foreground(c(p.meta)),
-		DiffNum:     lipgloss.NewStyle().Foreground(c(p.muted)).Faint(true),
-		DiffCtx:     lipgloss.NewStyle().Foreground(c(p.fg)),
-		Sep:         lipgloss.NewStyle().Foreground(c(p.border)),
-		SlashCmd:    lipgloss.NewStyle().Foreground(c(p.slash)).Bold(true),
+		Title:         lipgloss.NewStyle().Bold(true).Foreground(c(p.accent)),
+		RoleUserBar:   lipgloss.NewStyle().Foreground(c(p.user)),
+		RoleAsstBar:   lipgloss.NewStyle().Foreground(c(p.accent)),
+		RoleUserBg:    lipgloss.NewStyle().Background(c(p.userBg)).Foreground(c(p.fg)),
+		StampUser:     lipgloss.NewStyle().Background(c(p.userBg)).Foreground(c(p.muted)),
+		DiffAdd:       diffAddStyle(c, p, mdDark),
+		DiffDel:       diffDelStyle(c, p, mdDark),
+		DiffMeta:      lipgloss.NewStyle().Foreground(c(p.meta)),
+		DiffNum:       lipgloss.NewStyle().Foreground(c(p.muted)).Faint(true),
+		DiffNumOnBand: c(mixHex(p.muted, p.fg, 0.8)),
+		DiffCtx:       lipgloss.NewStyle().Foreground(c(p.fg)),
+		Sep:           lipgloss.NewStyle().Foreground(c(p.border)),
+		SlashCmd:      lipgloss.NewStyle().Foreground(c(p.slash)).Bold(true),
 	}
 }
 
