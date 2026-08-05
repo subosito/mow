@@ -348,18 +348,11 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		if err != nil {
 			return nil, err
 		}
-		var msg struct {
-			ID     json.RawMessage `json:"id"`
-			Result json.RawMessage `json:"result"`
-			Error  *struct {
-				Message string `json:"message"`
-			} `json:"error"`
-			Method string `json:"method"`
-		}
+		var msg rpcMessage
 		if err := json.Unmarshal(line, &msg); err != nil {
 			continue
 		}
-		if msg.Method != "" && len(msg.ID) == 0 {
+		if !msg.isReplyTo(id) {
 			continue
 		}
 		if msg.Error != nil {
@@ -367,6 +360,39 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		}
 		return msg.Result, nil
 	}
+}
+
+// rpcMessage is any inbound JSON-RPC frame: a response to one of our calls, a
+// notification, or a server→client request.
+type rpcMessage struct {
+	ID     json.RawMessage `json:"id"`
+	Result json.RawMessage `json:"result"`
+	Error  *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+	Method string `json:"method"`
+}
+
+// isReplyTo reports whether this frame answers the call with id want.
+//
+// Two frames must never be mistaken for our reply:
+//
+//   - Anything carrying "method" is a notification or a server→client request
+//     (sampling/createMessage, roots/list, elicitation/create). A JSON-RPC
+//     response never has that field. Returning one handed the caller an empty
+//     Result and reported success.
+//   - A response whose id is not ours is a late reply to a call we abandoned
+//     (ctx cancel, timeout). Accepting it shifted every later call one reply
+//     behind, so each tool returned the previous tool's output.
+func (m rpcMessage) isReplyTo(want int64) bool {
+	if m.Method != "" || len(m.ID) == 0 {
+		return false
+	}
+	var got int64
+	if err := json.Unmarshal(m.ID, &got); err != nil {
+		return false
+	}
+	return got == want
 }
 
 func (c *client) notify(method string, params any) error {

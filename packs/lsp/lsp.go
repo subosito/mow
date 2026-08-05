@@ -380,18 +380,11 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		if _, err := io.ReadFull(c.stdout, buf); err != nil {
 			return nil, err
 		}
-		var msg struct {
-			ID     json.RawMessage `json:"id"`
-			Result json.RawMessage `json:"result"`
-			Error  *struct {
-				Message string `json:"message"`
-			} `json:"error"`
-			Method string `json:"method"`
-		}
+		var msg rpcMessage
 		if err := json.Unmarshal(buf, &msg); err != nil {
 			continue
 		}
-		if msg.Method != "" && len(msg.ID) == 0 {
+		if !msg.isReplyTo(id) {
 			continue
 		}
 		if msg.Error != nil {
@@ -399,6 +392,37 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		}
 		return msg.Result, nil
 	}
+}
+
+// rpcMessage is any inbound JSON-RPC frame. A language server interleaves
+// notifications (publishDiagnostics, window/logMessage, $/progress) and
+// server→client requests (workspace/configuration, client/registerCapability)
+// with responses on the same stream.
+type rpcMessage struct {
+	ID     json.RawMessage `json:"id"`
+	Result json.RawMessage `json:"result"`
+	Error  *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+	Method string `json:"method"`
+}
+
+// isReplyTo reports whether this frame answers the call with id want.
+//
+// Matching on the id matters most here: gopls answers a slow request (initial
+// workspace load) after we have moved on, and a stray "method" frame that
+// happens to carry an id — a server→client request — is not a reply at all.
+// Either one, accepted blindly, returns another message's payload as if it
+// were this call's result.
+func (m rpcMessage) isReplyTo(want int64) bool {
+	if m.Method != "" || len(m.ID) == 0 {
+		return false
+	}
+	var got int64
+	if err := json.Unmarshal(m.ID, &got); err != nil {
+		return false
+	}
+	return got == want
 }
 
 func (c *client) notify(method string, params any) error {
