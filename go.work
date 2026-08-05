@@ -3,4 +3,5 @@ go 1.26.4
 use (
 	.
 	./packs
+	./packs/otel
 )

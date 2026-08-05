@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/subosito/mow"
-	mowotel "github.com/subosito/mow/otel"
+	mowotel "github.com/subosito/mow/packs/otel"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"

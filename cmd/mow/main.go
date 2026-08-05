@@ -23,7 +23,7 @@ import (
 	// Linked packs — each registers tools/commands in init.
 	// Remove an import to drop that pack (and its subcommand) from this binary.
 	_ "github.com/subosito/mow/ext/acp"
-	_ "github.com/subosito/mow/otel" // config-driven OTLP when otel.endpoint set
+	_ "github.com/subosito/mow/packs/otel" // config-driven OTLP when otel.endpoint set
 	_ "github.com/subosito/mow/ext/cmdhook"
 	_ "github.com/subosito/mow/ext/eval"
 	_ "github.com/subosito/mow/packs/goal"
