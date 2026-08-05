@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 )
 
 // Message is a chat message in OpenAI-ish shape.
@@ -335,9 +336,17 @@ func (c *Client) chatOpenAI(ctx context.Context, messages []Message, tools []Too
 	return msg, nil
 }
 
+// truncate clamps s to n bytes, cutting on a rune boundary.
+//
+// Callers pass untrusted external bytes (HTTP error bodies from a gateway or
+// provider), so a naive s[:n] can land mid-rune and emit invalid UTF-8 into an
+// error string that then flows to logs, sessions, and the model.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "…"
 }

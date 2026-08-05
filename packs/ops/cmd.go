@@ -12,6 +12,7 @@ import (
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/packs/job"
+	"unicode/utf8"
 )
 
 // opsCmd is the mow ops entrypoint.
@@ -524,10 +525,15 @@ func firstNonEmpty(ss ...string) string {
 	return ""
 }
 
+// truncateLog clamps s to n bytes, cutting on a rune boundary. Callers pass
+// service log text and prompts, which are routinely non-ASCII.
 func truncateLog(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if n <= 0 || len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "…"
 }

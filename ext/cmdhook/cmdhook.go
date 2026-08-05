@@ -38,6 +38,7 @@ import (
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/extcfg"
+	"unicode/utf8"
 )
 
 // Config is extensions.cmdhook.
@@ -454,9 +455,14 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// truncate clamps s to n bytes, cutting on a rune boundary. Callers pass hook
+// subprocess output, so a naive s[:n] can split a rune and log invalid UTF-8.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "…"
 }
