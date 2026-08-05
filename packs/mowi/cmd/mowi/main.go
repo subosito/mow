@@ -122,61 +122,13 @@ func versionString() string {
 
 // suggestSubcommand prints a "did you mean" hint for a close command name.
 func suggestSubcommand(name string) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return
-	}
 	cands := []string{"help", "version", "trust"}
 	for _, c := range ext.Commands() {
 		cands = append(cands, c.Name)
 	}
-	best, bestD := "", 3
-	for _, c := range cands {
-		d := editDistance(name, c)
-		if d > 0 && d < bestD {
-			bestD, best = d, c
-		}
-	}
-	if bestD <= 2 {
+	if best := cliutil.SuggestCommand(name, cands); best != "" {
 		fmt.Fprintf(os.Stderr, "did you mean %q?\n", best)
 	}
-}
-
-func editDistance(a, b string) int {
-	if a == b {
-		return 0
-	}
-	ra, rb := []rune(a), []rune(b)
-	if len(ra) == 0 {
-		return len(rb)
-	}
-	if len(rb) == 0 {
-		return len(ra)
-	}
-	prev := make([]int, len(rb)+1)
-	cur := make([]int, len(rb)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(ra); i++ {
-		cur[0] = i
-		for j := 1; j <= len(rb); j++ {
-			cost := 1
-			if ra[i-1] == rb[j-1] {
-				cost = 0
-			}
-			ins, del, sub := cur[j-1]+1, prev[j]+1, prev[j-1]+cost
-			cur[j] = ins
-			if del < cur[j] {
-				cur[j] = del
-			}
-			if sub < cur[j] {
-				cur[j] = sub
-			}
-		}
-		prev, cur = cur, prev
-	}
-	return prev[len(rb)]
 }
 
 func printUsage() {
