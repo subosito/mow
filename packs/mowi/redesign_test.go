@@ -194,7 +194,7 @@ func TestHeaderTokensWithoutGatewayLimits(t *testing.T) {
 	m.tokIn, m.tokOut = 100_000, 50
 	hdr := xansi.Strip(m.renderHeader())
 	// Header combines all reported usage and labels the metric explicitly.
-	if !strings.Contains(hdr, "tok 100.0k") {
+	if !strings.Contains(hdr, "100.0k tok") {
 		t.Fatalf("header missing token chip: %q", hdr)
 	}
 	// Injected Chat has no /v1/models catalog → no speculative chips.

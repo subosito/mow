@@ -3228,7 +3228,7 @@ func (m *model) renderHeader() string {
 	// The header shows one transparent aggregate; /status carries provenance and
 	// the host/peer input-output breakdown.
 	if tok := m.tokIn + m.tokOut + m.peerTokIn + m.peerTokOut; tok > 0 {
-		vanity = append(vanity, chip{th.Muted.Render("tok " + formatTokens(tok)), false})
+		vanity = append(vanity, chip{th.Muted.Render(formatTokens(tok) + " tok"), false})
 	}
 	if gchip := goalHeaderChip(m.goalLive); gchip != "" {
 		vanity = append(vanity, chip{th.Muted.Render(gchip), false})

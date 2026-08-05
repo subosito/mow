@@ -583,7 +583,7 @@ func TestHeaderShowsPeerTokenShare(t *testing.T) {
 
 	hdr := m.renderHeader()
 	plain := xansi.Strip(hdr)
-	if !strings.Contains(plain, "tok 155.0k") {
+	if !strings.Contains(plain, "155.0k tok") {
 		t.Fatalf("header missing combined reported total: %q", plain)
 	}
 	status := m.reportedUsageStatus()
