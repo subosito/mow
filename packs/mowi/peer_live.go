@@ -41,22 +41,34 @@ func (m *model) ensurePeerBuf(agent string) *peerLiveBuf {
 // is unaffected).
 const maxPeerBufBytes = 8 << 10
 
+// trimUTF8Tail keeps the newest maxBytes without splitting a UTF-8 rune.
+func trimUTF8Tail(s string, maxBytes int) string {
+	if maxBytes <= 0 || len(s) <= maxBytes {
+		return s
+	}
+	start := len(s) - maxBytes
+	for start < len(s) && (s[start]&0xc0) == 0x80 {
+		start++
+	}
+	return s[start:]
+}
+
 func (m *model) appendPeerDelta(agent, delta string) {
 	if delta == "" {
 		return
 	}
 	b := m.ensurePeerBuf(agent)
-	// Peer chunks come straight from the ACP protocol text (model output or
-	// tool feedback) — sanitize at ingestion, exactly like the host stream,
-	// because the live frame paints b.buf raw and peerLiveBody re-emits the
-	// accumulated text on every frame. A stray ESC/CSI in one delta would
-	// paint garbage for the whole peer session (and could inject terminal
-	// control under the alt-screen).
-	b.buf += sanitizeDisplay(delta)
+	safe := sanitizeDisplay(delta)
+	// Keep the complete answer separately: buf is intentionally bounded for
+	// live rendering, but finishPeerStream must never commit a tail-truncated
+	// or mid-markdown reply. A full reply is still bounded by the engine/tool
+	// result policy; this TUI buffer only avoids corrupting the beginning.
+	b.full += safe
+	b.buf += safe
 	if len(b.buf) > maxPeerBufBytes {
-		// Keep the tail (most recent) and reset the body so the next render
+		// Keep the tail (most recent) for the live area and reset the body so the next render
 		// rebuilds from scratch rather than carrying a stale prefix.
-		b.buf = b.buf[len(b.buf)-maxPeerBufBytes:]
+		b.buf = trimUTF8Tail(b.buf, maxPeerBufBytes)
 		b.body, b.bodySrc = "", ""
 	}
 	b.dirty = true
@@ -243,6 +255,12 @@ func peerLiveBody(b *peerLiveBuf, inner int) string {
 	return wordWrap(b.buf, inner)
 }
 
+func (m *model) drainPeerIngest() {
+	for _, d := range m.peerIngest.take() {
+		m.appendPeerDelta(d.agent, d.text)
+	}
+}
+
 // finishPeerStream commits one peer's live answer (agent empty = all peers).
 func (m *model) finishPeerStream(agent string) tea.Cmd {
 	var cmds []tea.Cmd
@@ -250,7 +268,7 @@ func (m *model) finishPeerStream(agent string) tea.Cmd {
 		if b == nil {
 			return
 		}
-		peer := strings.TrimRight(b.buf, " \t\r\n")
+		peer := strings.TrimRight(b.full, " \t\r\n")
 		if peer != "" {
 			name := b.agent
 			if name == "" {
@@ -274,6 +292,9 @@ func (m *model) finishPeerStream(agent string) tea.Cmd {
 
 	if agent != "" {
 		key := peerKey(agent)
+		// Events can arrive faster than Bubble Tea updates. Drain the external
+		// unbounded ingest before committing so the final reply is complete.
+		m.drainPeerIngest()
 		if b := m.peerBufs[key]; b != nil {
 			commitOne(b, key)
 		} else if len(m.peerBufs) == 1 {
@@ -282,6 +303,7 @@ func (m *model) finishPeerStream(agent string) tea.Cmd {
 			}
 		}
 	} else {
+		m.drainPeerIngest()
 		for _, key := range append([]string(nil), m.peerOrder...) {
 			commitOne(m.peerBufs[key], key)
 		}

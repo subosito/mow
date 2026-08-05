@@ -83,10 +83,77 @@ type toolCount struct {
 	count int
 }
 
+// peerDeltaIngest batches peer answer chunks outside Bubble Tea's bounded
+// message channel. The ACP event callback must never drop model output or
+// block the engine goroutine; Update drains this buffer on its regular paint
+// heartbeat and before committing an endPeer event.
+type peerDeltaIngest struct {
+	mu     sync.Mutex
+	parts  map[string]string
+	agents map[string]string
+	order  []string
+}
+
+func newPeerDeltaIngest() *peerDeltaIngest {
+	return &peerDeltaIngest{
+		parts:  make(map[string]string),
+		agents: make(map[string]string),
+	}
+}
+
+func (p *peerDeltaIngest) push(agent, delta string) {
+	if p == nil || delta == "" {
+		return
+	}
+	key := peerKey(agent)
+	p.mu.Lock()
+	if _, ok := p.parts[key]; !ok {
+		p.order = append(p.order, key)
+		p.agents[key] = strings.TrimSpace(agent)
+	}
+	p.parts[key] += delta
+	p.mu.Unlock()
+}
+
+func (p *peerDeltaIngest) take() []peerDelta {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]peerDelta, 0, len(p.order))
+	for _, key := range p.order {
+		if text := p.parts[key]; text != "" {
+			out = append(out, peerDelta{agent: p.agents[key], text: text})
+		}
+	}
+	p.parts = make(map[string]string)
+	p.agents = make(map[string]string)
+	p.order = nil
+	return out
+}
+
+func (p *peerDeltaIngest) clear() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.parts = make(map[string]string)
+	p.agents = make(map[string]string)
+	p.order = nil
+	p.mu.Unlock()
+}
+
+type peerDelta struct {
+	agent string
+	text  string
+}
+
 // peerLiveBuf is one in-flight acp_delegate answer, keyed by agent name.
 type peerLiveBuf struct {
 	agent    string
-	buf      string   // answer text only
+	buf      string   // bounded display buffer; full is committed
+	full     string   // complete sanitized answer, never trimmed for live paint
 	body     string   // last markdown-rendered answer body
 	bodySrc  string   // source snapshot for body
 	dirty    bool     // answer needs a markdown render
@@ -217,8 +284,9 @@ type (
 	// indicator only); end events update the per-turn tally line in place —
 	// one transcript line per turn, not one per call. Diffs for write/edit.
 	// streamDelta is peer acp_delegate answer text (EventDelegateChunk).
-	// Production chunks go through liveIngest (never drop); streamDelta is
-	// for tests and the rare no-ingest fallback.
+	// Peer answer chunks are batched through peerIngest (never dropped on a
+	// full toolUI channel); streamDelta is for tests and the rare no-ingest
+	// fallback.
 	toolUIMsg struct {
 		name  string
 		start bool   // tool began; update the live indicator, nothing else
@@ -239,6 +307,9 @@ type (
 		peerAgent string
 		// clearStream opens a peer live slot (acp_delegate start); host stream wiped once.
 		clearStream bool
+		// peerArmed means the PreTool hook armed the peer before enqueueing this
+		// UI message; tests and synthetic messages leave it false.
+		peerArmed bool
 		// endPeer: acp_delegate finished — commit that peer's live text only.
 		endPeer bool
 		// lsp carries post-edit diagnostics from the engine event hook.
@@ -354,6 +425,7 @@ type model struct {
 	// goroutine (EventDelegateChunk). Same batching as OnToken — never drop
 	// peer answer deltas on a full toolUI channel.
 	liveIngest atomic.Pointer[streamIngest]
+	peerIngest *peerDeltaIngest
 	// peerLive: any acp_delegate answer is streaming (derived from peerBufs).
 	// Late EventDelegate* after the last endPeer must not re-arm the UI.
 	peerLive atomic.Bool
@@ -679,6 +751,7 @@ func newModel(eng *mow.Engine, stream, ask bool) *model {
 		cfg:            tuiCfg,
 		md:             newMDCacheFromTheme(th),
 		mdFaint:        newMDCacheFaintFromTheme(th),
+		vp:             viewport.New(),
 		ta:             ta,
 		spin:           sp,
 		stream:         stream,
@@ -686,6 +759,7 @@ func newModel(eng *mow.Engine, stream, ask bool) *model {
 		followBottom:   true,
 		permCh:         make(chan permAskMsg, 8),
 		toolUICh:       toolUI,
+		peerIngest:     newPeerDeltaIngest(),
 		inputTextColor: inputText,
 		inputPrompt:    inputPrompt,
 		slashTextColor: slashText,
@@ -694,14 +768,14 @@ func newModel(eng *mow.Engine, stream, ask bool) *model {
 	m.setPerm(perm)
 	m.resetToolTally() // indices are -1-based sentinels, not zero values
 
-	// Prompt indicator on the FIRST line only. The head (idle "❯ " or the busy
-	// spinner/timer) still lives in ta.Prompt; this per-line func surfaces it on
-	// line 0 and leaves continuation lines blank (padded to the reserved width),
-	// so a multi-line message aligns under one prompt instead of repeating it.
-	promptW := lipgloss.Width(tuiCfg.PromptPrefix())
+	// Bubble's prompt function uses one fixed reservation for every row. Reserve
+	// enough room for the longest live prompt (spinner + elapsed), then clamp the
+	// returned prompt to that reservation so it can never push the first text row
+	// past the textarea viewport during a busy turn.
+	promptW := max(lipgloss.Width(tuiCfg.PromptPrefix()), 24)
 	m.ta.SetPromptFunc(promptW, func(pi textarea.PromptInfo) string {
 		if pi.LineNumber == 0 {
-			return m.ta.Prompt
+			return xansi.Truncate(m.ta.Prompt, promptW, "")
 		}
 		return ""
 	})
@@ -821,7 +895,8 @@ func newModel(eng *mow.Engine, stream, ask bool) *model {
 			if ev.Delta == "" {
 				return
 			}
-			// Only while an acp_delegate is in flight — do not re-arm after endPeer.
+			// Peer answer chunks bypass the bounded Bubble Tea channel. They are
+			// drained on the UI heartbeat and before endPeer commits the reply.
 			if !m.peerLive.Load() {
 				return
 			}
@@ -829,11 +904,7 @@ func newModel(eng *mow.Engine, stream, ask bool) *model {
 			if agent != "" {
 				m.peerAgent.Store(agent)
 			}
-			// Per-agent buffers so parallel peers do not interleave into streamBuf.
-			select {
-			case m.toolUICh <- toolUIMsg{streamDelta: ev.Delta, peerAgent: agent}:
-			default:
-			}
+			m.peerIngest.push(agent, ev.Delta)
 		}
 	})
 
@@ -842,8 +913,13 @@ func newModel(eng *mow.Engine, stream, ask bool) *model {
 		// acp_delegate: clear host stream so peer answer does not weld onto it.
 		msg := toolUIMsg{name: e.Name, start: true, args: permPreview(e.Name, e.Args)}
 		if strings.EqualFold(e.Name, "acp_delegate") {
+			// Arm the peer window before the tool runs. Delegate chunks arrive on
+			// the engine goroutine and can precede Bubble Tea consuming clearStream;
+			// gating only on the UI message would drop the beginning of a reply.
+			m.peerActive.Add(1)
+			m.peerLive.Store(true)
 			msg.clearStream = true
-			// Prefer "claude: acp_delegate" so the spinner names the peer immediately.
+			msg.peerArmed = true
 			var a struct {
 				Agent string `json:"agent"`
 			}
@@ -1568,6 +1644,7 @@ func (m *model) commitAssistant(final string) (idx int, needsPretty bool) {
 	// Full final text as plain immediately; glamour catches up async.
 	m.entries[idx].view = m.renderTurn(false, wordWrap(final, inner), at, w)
 	m.entries[idx].viewW = w
+	m.entries[idx].plain = true
 	m.invalidateHistoryCache()
 	return idx, true
 }
@@ -1785,6 +1862,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.advanceSpinnerFrame()
+		m.drainPeerIngest()
 		m.syncInputChrome()
 		// Refresh thinking indicator elapsed (one line — cheap).
 		if m.reasonBuf != "" && m.streamBuf == "" {
@@ -1878,6 +1956,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.body != "" {
 			e.view = m.renderTurn(false, msg.body, e.at, msg.width)
 			e.viewW = msg.width
+			e.plain = false
 			m.invalidateHistoryCache()
 			m.refreshVP()
 		}
@@ -1980,6 +2059,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						agent = v
 					}
 				}
+				m.drainPeerIngest()
 				m.appendPeerDelta(agent, msg.streamDelta)
 				m.paintLiveStream()
 				return m, tea.Batch(m.pollToolUI(), m.ensureStreamPaint())
@@ -1996,7 +2076,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					_, _, _ = m.ingest.take() // discard stray host tokens
 				}
 				m.clearLiveStream()
-				m.peerActive.Add(1)
+				if m.peerActive.Load() <= 0 || !msg.peerArmed {
+					m.peerActive.Add(1)
+				}
 				m.peerLive.Store(true)
 				agent := msg.peerAgent
 				if agent == "" {
@@ -2032,6 +2114,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var prettyCmd tea.Cmd
 		if msg.endPeer {
+			m.drainPeerIngest()
 			prettyCmd = m.finishPeerStream(msg.peerAgent)
 			n := m.peerActive.Add(-1)
 			if n < 0 {
@@ -2118,8 +2201,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyStreamSnap(c, r)
 			m.ingest = nil
 		}
+		var prettyCmd tea.Cmd
+		var peerPrettyCmd tea.Cmd
 		if m.peerLive.Load() || m.peerActive.Load() > 0 || len(m.peerBufs) > 0 {
-			_ = m.finishPeerStream("")
+			m.drainPeerIngest()
+			peerPrettyCmd = m.finishPeerStream("")
 			m.peerLive.Store(false)
 			m.peerActive.Store(0)
 			m.clearPeerBufs()
@@ -2138,7 +2224,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			final = vis
 		}
 		// Reasoning is live-only. Prefer live glamour; else plain + async pretty.
-		var prettyCmd tea.Cmd
 		if final != "" {
 			idx, needsPretty := m.commitAssistant(final)
 			if needsPretty {
@@ -2165,12 +2250,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Auto-send the next queued message, if any.
 		if len(m.queued) > 0 {
 			if _, cmd := m.dequeue(); cmd != nil {
-				return m, tea.Batch(m.pollPerm(), m.pollToolUI(), cmd, prettyCmd)
+				return m, tea.Batch(m.pollPerm(), m.pollToolUI(), cmd, prettyCmd, peerPrettyCmd)
 			}
 		}
 		// Re-arm cursor blink — we drop BlinkMsg while busy, so without this
 		// the input looks dead after the first reply.
-		return m, tea.Batch(m.pollPerm(), m.pollToolUI(), textarea.Blink, prettyCmd)
+		return m, tea.Batch(m.pollPerm(), m.pollToolUI(), textarea.Blink, prettyCmd, peerPrettyCmd)
 	}
 
 	// Typing: idle and busy (draft next message while the turn runs).
@@ -2443,6 +2528,7 @@ func (m *model) maybeCtxPressureStatus() {
 func (m *model) resetStreamState() {
 	m.clearLiveStream()
 	m.clearPeerBufs()
+	m.peerIngest.clear()
 	m.streamPaint = false
 	m.streamRenderBusy = false
 	m.peerLive.Store(false)
@@ -3496,8 +3582,25 @@ func (m *model) renderInput() string {
 		sep = xansi.Truncate(sep, ww, "")
 	}
 	// Soft horizontal inset, matching header's leading/trailing space.
+	// Textarea normally wraps at its configured width, but a stale width during
+	// resize/SetValue can leave one visual row wider than the viewport. Clamp
+	// every rendered row here as the final frame-safety boundary.
 	body := m.theme.Input.MaxWidth(ww).Width(ww).Render(m.ta.View())
+	body = clampFrameLines(body, ww)
 	return sep + "\n" + body
+}
+
+func clampFrameLines(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if lipgloss.Width(line) > width {
+			lines[i] = xansi.Truncate(line, width, "")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *model) applyModelList(msg modelListMsg) {
@@ -3761,9 +3864,11 @@ func (m *model) layout() {
 		m.vp.SetWidth(w)
 		m.vp.SetHeight(vh)
 	}
-	// Padding(0,1) on Input → content width is terminal − 2.
-	// SetWidth before any DynamicHeight wrap math on the next keystroke.
-	m.ta.SetWidth(max(8, m.width-2))
+	// Width includes the textarea's horizontal padding, while textarea.SetWidth
+	// receives the content frame width. Keep both in agreement so the first
+	// prompt row does not exceed the visible terminal viewport.
+	inputFrameW := max(1, m.width-2)
+	m.ta.SetWidth(inputFrameW)
 }
 
 func (m *model) add(kind entryKind, text string) {

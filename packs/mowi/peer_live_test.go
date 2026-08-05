@@ -4,9 +4,81 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	xansi "github.com/charmbracelet/x/ansi"
 )
+
+func TestAppendPeerDeltaKeepsFullCommitAndUTF8Tail(t *testing.T) {
+	m := freshModel(t)
+	first := "intro — keep this markdown\n\n```go\n"
+	m.appendPeerDelta("opus", first)
+	m.appendPeerDelta("opus", strings.Repeat("x", maxPeerBufBytes)+"\n```\n")
+	b := m.peerBufs[peerKey("opus")]
+	if b == nil {
+		t.Fatal("peer buffer missing")
+	}
+	if !strings.HasPrefix(b.full, first) {
+		t.Fatalf("full peer answer lost its prefix: %q", b.full[:min(len(b.full), 80)])
+	}
+	if len(b.buf) > maxPeerBufBytes {
+		t.Fatalf("display buffer exceeded cap: %d", len(b.buf))
+	}
+	if !utf8.ValidString(b.buf) {
+		t.Fatal("display tail is invalid UTF-8")
+	}
+	if strings.Contains(b.full, "intro — keep this markdown") == false {
+		t.Fatal("full answer missing original text")
+	}
+}
+
+func TestTrimUTF8Tail(t *testing.T) {
+	in := strings.Repeat("x", maxPeerBufBytes-1) + "🙂"
+	got := trimUTF8Tail(in, maxPeerBufBytes)
+	if !utf8.ValidString(got) {
+		t.Fatalf("trimmed tail is invalid UTF-8: %q", got)
+	}
+}
+
+func TestPeerDeltaIngestPreservesChunksAndAgentOrder(t *testing.T) {
+	p := newPeerDeltaIngest()
+	p.push("opus", "## O")
+	p.push("opus", "pus\n")
+	p.push("grok", "hello")
+	got := p.take()
+	if len(got) != 2 {
+		t.Fatalf("got %d peer batches, want 2: %#v", len(got), got)
+	}
+	if got[0].agent != "opus" || got[0].text != "## Opus\n" {
+		t.Fatalf("opus chunks were not preserved: %#v", got[0])
+	}
+	if got[1].agent != "grok" || got[1].text != "hello" {
+		t.Fatalf("grok chunk was not preserved: %#v", got[1])
+	}
+	if rest := p.take(); len(rest) != 0 {
+		t.Fatalf("take should drain the ingest: %#v", rest)
+	}
+}
+
+func TestPeerCommitUsesFullReplyAfterDisplayTrim(t *testing.T) {
+	m := goalTestModel(t)
+	m.busy = true
+	prefix := "# Opus reply\n\n"
+	m.appendPeerDelta("opus", prefix)
+	m.appendPeerDelta("opus", strings.Repeat("z", maxPeerBufBytes)+"\n")
+	before := len(m.entries)
+	cmd := m.finishPeerStream("opus")
+	if len(m.entries) != before+2 {
+		t.Fatalf("entries grew by %d, want status + reply", len(m.entries)-before)
+	}
+	got := m.entries[len(m.entries)-1].text
+	if got != strings.TrimRight(prefix+strings.Repeat("z", maxPeerBufBytes)+"\n", " \t\r\n") {
+		t.Fatalf("peer commit lost full reply: got %d bytes, want %d", len(got), len(prefix)+maxPeerBufBytes)
+	}
+	if cmd == nil {
+		t.Fatal("long peer reply should schedule markdown rendering")
+	}
+}
 
 // TestPeerLabelAlignment: short and long peer names must share one body
 // column — labels are right-padded to the widest "→ name" so blocks align.
