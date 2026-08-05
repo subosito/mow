@@ -1,5 +1,7 @@
 // Command mowi is the interactive TUI for the mow headless harness
-// ("mow with interface").
+// ("mow with interface"). It also dispatches pack subcommands (acp, ops,
+// goal, review, …) just like cmd/mow, so a single binary serves both the
+// interactive TUI and the headless subcommand surface.
 package main
 
 import (
@@ -9,21 +11,22 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
+	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/packs/mowi"
 
 	// Linked packs — each registers tools/commands in init.
-	// Same set as cmd/mow so the TUI engine has acp_delegate, mcp, ops, etc.
-	// otel: config-driven OTLP when otel.endpoint is set (same as stock mow).
 	_ "github.com/subosito/mow/ext/acp"
 	_ "github.com/subosito/mow/ext/cmdhook"
+	_ "github.com/subosito/mow/ext/eval"
+	_ "github.com/subosito/mow/ext/mcp"
+	_ "github.com/subosito/mow/ext/proc"
+	_ "github.com/subosito/mow/ext/rpc"
 	_ "github.com/subosito/mow/packs/goal"
 	_ "github.com/subosito/mow/packs/job"
 	_ "github.com/subosito/mow/packs/lsp"
-	_ "github.com/subosito/mow/ext/mcp"
 	_ "github.com/subosito/mow/packs/ops"
-	_ "github.com/subosito/mow/ext/proc"
-	_ "github.com/subosito/mow/ext/rpc"
 	_ "github.com/subosito/mow/packs/otel"
+	_ "github.com/subosito/mow/packs/review"
 )
 
 func main() {
@@ -31,17 +34,35 @@ func main() {
 }
 
 func run(args []string) int {
-	if len(args) > 0 {
-		switch args[0] {
-		case "help", "-h", "--help":
-			printUsage()
-			return 0
-		case "version", "-v", "--version":
-			fmt.Println(versionString())
-			return 0
-		}
+	if len(args) == 0 {
+		return startTUI(args)
 	}
-	// Also catch -h / --help mixed with flags (flag.Parse would dump Usage of …).
+	switch args[0] {
+	case "help", "-h", "--help":
+		printUsage()
+		return 0
+	case "version", "-v", "--version":
+		fmt.Println(versionString())
+		return 0
+	}
+	// Pack-registered subcommands (acp, ops, goal, review, mcp, …).
+	if c, ok := ext.LookupCommand(args[0]); ok {
+		return c.Run(args[1:])
+	}
+	// Flag-style args (no subcommand): start the TUI with flags.
+	if strings.HasPrefix(args[0], "-") {
+		return startTUI(args)
+	}
+	// Unknown: suggest the closest subcommand.
+	fmt.Fprintf(os.Stderr, "mowi: unknown command %q\n", args[0])
+	suggestSubcommand(args[0])
+	fmt.Fprintln(os.Stderr, "  run `mowi help` to list available commands")
+	return 2
+}
+
+// startTUI parses TUI flags and launches the interactive session.
+func startTUI(args []string) int {
+	// Also catch -h / --help mixed with flags.
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printUsage()
@@ -60,7 +81,6 @@ func run(args []string) int {
 	ask := fs.Bool("ask", false, "prompt before write/edit/bash (default when --allow-write/--allow-shell)")
 	auto := fs.Bool("auto", false, "run power tools without prompting (opt out of the ask default)")
 	noStream := fs.Bool("no-stream", false, "disable live token streaming")
-	// Stream on by default; resume with --continue / --session.
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -98,12 +118,83 @@ func versionString() string {
 	return "mowi " + s
 }
 
+// suggestSubcommand prints a "did you mean" hint for a close command name.
+func suggestSubcommand(name string) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return
+	}
+	cands := []string{"help", "version"}
+	for _, c := range ext.Commands() {
+		cands = append(cands, c.Name)
+	}
+	best, bestD := "", 3
+	for _, c := range cands {
+		d := editDistance(name, c)
+		if d > 0 && d < bestD {
+			bestD, best = d, c
+		}
+	}
+	if bestD <= 2 {
+		fmt.Fprintf(os.Stderr, "did you mean %q?\n", best)
+	}
+}
+
+func editDistance(a, b string) int {
+	if a == b {
+		return 0
+	}
+	ra, rb := []rune(a), []rune(b)
+	if len(ra) == 0 {
+		return len(rb)
+	}
+	if len(rb) == 0 {
+		return len(ra)
+	}
+	prev := make([]int, len(rb)+1)
+	cur := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			ins, del, sub := cur[j-1]+1, prev[j]+1, prev[j-1]+cost
+			cur[j] = ins
+			if del < cur[j] {
+				cur[j] = del
+			}
+			if sub < cur[j] {
+				cur[j] = sub
+			}
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(rb)]
+}
+
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `mowi — mow with interface (Bubble Tea TUI)
+	// List pack-registered subcommands.
+	var cmds []string
+	for _, c := range ext.Commands() {
+		cmds = append(cmds, c.Name)
+	}
+	cmdsStr := "  (none)"
+	if len(cmds) > 0 {
+		cmdsStr = "  " + strings.Join(cmds, ", ")
+	}
+
+	fmt.Fprint(os.Stderr, `mowi — mow with interface (Bubble Tea TUI)
 
   Interactive chat over the mow harness. Agent loop, tools, sessions live in mow.
+  Pack subcommands (acp, ops, goal, review, mcp, …) work the same as `+"`mow`"+`.
 
-  mowi [flags]
+  mowi [flags]             start interactive TUI
+  mowi <command> [args]    run a pack subcommand (same surface as mow)
   mowi help | version
 
 Session:
@@ -123,26 +214,13 @@ Other:
 
   --no-stream            disable live token streaming
   --model NAME           override model
-  --workspace NAME|PATH  workspace root: a set name from $MOW_HOME/workspaces.yaml
-                         (root + extra_roots) or a directory path
-  --extra-root PATH      extra FS root for path jail (repeatable)
   --config PATH          config yaml
   -h, --help             this help
   -v, --version          print version
 
+Available commands:
+`+cmdsStr+`
+
 Config: $MOW_HOME (default ~/.mow). TUI prefs: extensions.tui in config.
-  policy.extra_roots in user config (not project .mow/config).
-
-Workspace sets ($MOW_HOME/workspaces.yaml):
-
-  workspaces:
-    monorepo:
-      root: ~/code/app
-      extra_roots:
-        - ~/code/shared
-        - ~/code/vendor:ro
-
-  mowi --workspace monorepo      # set name → root + extra_roots
-  mowi --workspace /tmp/ci       # plain directory path
 `)
 }
