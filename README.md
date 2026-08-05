@@ -77,6 +77,7 @@ export OPENAI_MODEL=gpt-5-mini
 ./bin/mow help                                # linked commands, dynamically
 
 ./bin/mowi                                    # interactive TUI
+./bin/mowi trust .                            # same trust store as mow
 ./bin/mowi acp --model gpt-5-mini             # same pack commands as mow
 ./bin/mowi help
 ```

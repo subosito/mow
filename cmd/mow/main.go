@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -23,17 +22,17 @@ import (
 	// Linked packs — each registers tools/commands in init.
 	// Remove an import to drop that pack (and its subcommand) from this binary.
 	_ "github.com/subosito/mow/ext/acp"
-	_ "github.com/subosito/mow/packs/otel" // config-driven OTLP when otel.endpoint set
 	_ "github.com/subosito/mow/ext/cmdhook"
 	_ "github.com/subosito/mow/ext/eval"
+	_ "github.com/subosito/mow/ext/mcp"
+	_ "github.com/subosito/mow/ext/proc"
+	_ "github.com/subosito/mow/ext/rpc"
 	_ "github.com/subosito/mow/packs/goal"
 	_ "github.com/subosito/mow/packs/job"
 	_ "github.com/subosito/mow/packs/lsp"
-	_ "github.com/subosito/mow/ext/mcp"
 	_ "github.com/subosito/mow/packs/ops"
-	_ "github.com/subosito/mow/ext/proc"
+	_ "github.com/subosito/mow/packs/otel" // config-driven OTLP when otel.endpoint set
 	_ "github.com/subosito/mow/packs/review"
-	_ "github.com/subosito/mow/ext/rpc"
 )
 
 func main() {
@@ -56,7 +55,7 @@ func run(args []string) int {
 	case "tty":
 		return ttyCmd(args[1:])
 	case "trust":
-		return trustCmd(args[1:])
+		return cliutil.TrustCommand("mow", args[1:])
 	case "version", "-v", "--version":
 		fmt.Println(mow.VersionString())
 		return 0
@@ -103,7 +102,7 @@ func helpCmd(args []string) int {
 	case "tty":
 		return ttyCmd(append([]string{"help"}, args[1:]...))
 	case "trust":
-		return trustCmd(append([]string{"help"}, args[1:]...))
+		return cliutil.TrustCommand("mow", append([]string{"help"}, args[1:]...))
 	default:
 		if c, ok := ext.LookupCommand(args[0]); ok {
 			return c.Run(append([]string{"help"}, args[1:]...))
@@ -233,60 +232,6 @@ func runCmd(args []string) int {
 // trustCmd manages the out-of-band workspace trust list ($MOW_HOME/trusted).
 // Trust gates project-local .mow/config.yaml and skills; it is stored under
 // the user home so a cloned repo can never grant itself trust.
-func trustCmd(args []string) int {
-	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
-		fmt.Fprintf(os.Stderr, `mow trust — allow project .mow/config and skills
-
-Trust is stored under $MOW_HOME/trusted (not inside the repo).
-
-  mow trust [path]           trust this workspace (default: .)
-  mow trust --list           list trusted workspaces
-  mow trust --revoke [path]  revoke trust
-
-  --workspace path           same as [path] (flag form)
-  MOW_TRUST_PROJECT=1        trust project config for this run only
-
-`)
-		return 0
-	}
-	fs := cliutil.NewFlagSet("trust")
-	list := fs.Bool("list", false, "show trusted workspaces")
-	revoke := fs.Bool("revoke", false, "revoke trust instead of granting it")
-	dir := fs.String("workspace", ".", "workspace to trust/revoke")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	// Positional path: mow trust /path/to/repo
-	if fs.NArg() > 0 && (*dir == "." || *dir == "") {
-		*dir = fs.Arg(0)
-	}
-	// Confirm with the same canonical spelling the trust list stores.
-	abs, aerr := filepath.Abs(*dir)
-	if aerr != nil {
-		abs = *dir
-	}
-	if *list {
-		for _, ws := range mow.TrustedWorkspaces() {
-			fmt.Println(ws)
-		}
-		return 0
-	}
-	if *revoke {
-		if err := mow.RevokeWorkspaceTrust(*dir); err != nil {
-			fmt.Fprintf(os.Stderr, "mow trust: %v\n", err)
-			return 1
-		}
-		fmt.Fprintf(os.Stderr, "mow: untrusted %s\n", abs)
-		return 0
-	}
-	if err := mow.TrustWorkspace(*dir); err != nil {
-		fmt.Fprintf(os.Stderr, "mow trust: %v\n", err)
-		return 1
-	}
-	fmt.Fprintf(os.Stderr, "mow: trusted %s  (project .mow/config.yaml + skills load)\n", abs)
-	return 0
-}
-
 func ttyCmd(args []string) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
 		printTtyUsage()

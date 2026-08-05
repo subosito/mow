@@ -44,6 +44,8 @@ func run(args []string) int {
 	case "version", "-v", "--version":
 		fmt.Println(versionString())
 		return 0
+	case "trust":
+		return cliutil.TrustCommand("mowi", args[1:])
 	}
 	// Pack-registered subcommands (acp, ops, goal, review, mcp, …).
 	if c, ok := ext.LookupCommand(args[0]); ok {
@@ -124,7 +126,7 @@ func suggestSubcommand(name string) {
 	if name == "" {
 		return
 	}
-	cands := []string{"help", "version"}
+	cands := []string{"help", "version", "trust"}
 	for _, c := range ext.Commands() {
 		cands = append(cands, c.Name)
 	}
@@ -179,7 +181,7 @@ func editDistance(a, b string) int {
 
 func printUsage() {
 	// List pack-registered subcommands.
-	var cmds []string
+	cmds := []string{"trust"}
 	for _, c := range ext.Commands() {
 		cmds = append(cmds, c.Name)
 	}
@@ -194,6 +196,7 @@ func printUsage() {
   Pack subcommands (acp, ops, goal, review, mcp, …) work the same as `+"`mow`"+`.
 
   mowi [flags]             start interactive TUI
+  mowi trust [path]        manage trusted workspaces
   mowi <command> [args]    run a pack subcommand (same surface as mow)
   mowi help | version
 
