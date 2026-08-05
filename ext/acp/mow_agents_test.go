@@ -7,6 +7,12 @@ import (
 )
 
 func TestExpandMowAgents(t *testing.T) {
+	// Pin the binary name so assertions check flag construction, not
+	// os.Executable resolution (which returns the test binary path).
+	orig := mowAgentBinary
+	mowAgentBinary = func() string { return "mow" }
+	defer func() { mowAgentBinary = orig }()
+
 	falseV := false
 	specs, err := expandMowAgents(map[string]MowAgentSpec{
 		"peer-b": {Model: "gpt-5-mini"},

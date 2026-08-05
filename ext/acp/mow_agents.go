@@ -2,6 +2,7 @@ package acp
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 )
@@ -80,7 +81,13 @@ func expandOneMowAgent(name string, s MowAgentSpec) (AgentSpec, error) {
 	if model == "" {
 		return AgentSpec{}, fmt.Errorf("acp: mow_agents.%s: model is required", name)
 	}
-	cmd := []string{"mow", "acp", "--model", model}
+	// Resolve the binary that should run the `acp` subcommand. Prefer the
+	// current process's own executable (so mowi spawns `mowi acp`, mow spawns
+	// `mow acp`) — a host always speaks its own ACP dialect. Fall back to
+	// "mow" on PATH (covers callers that are not a mow binary, e.g. a test
+	// harness or an embedder that builds a custom binary without ACP).
+	bin := mowAgentBinary()
+	cmd := []string{bin, "acp", "--model", model}
 	if boolDefaultTrue(s.AllowWrite) {
 		cmd = append(cmd, "--allow-write")
 	}
@@ -111,6 +118,21 @@ func expandOneMowAgent(name string, s MowAgentSpec) (AgentSpec, error) {
 		// Effort on AgentSpec injects --reasoning-effort for non-mow peers;
 		// mow peers already got --effort above.
 	}, nil
+}
+
+// mowAgentBinary returns the executable path to use for the `acp` subcommand
+// in mow_agents. It prefers os.Executable() so the host spawns itself
+// (mowi → mowi acp, mow → mow acp) and falls back to "mow" when the
+// executable path cannot be resolved (e.g. test harness or a custom binary).
+var mowAgentBinary = defaultMowAgentBinary
+
+func defaultMowAgentBinary() string {
+	if exe, err := os.Executable(); err == nil && exe != "" {
+		if fi, err := os.Stat(exe); err == nil && !fi.IsDir() {
+			return exe
+		}
+	}
+	return "mow"
 }
 
 // resolveAgents merges external agents[] with expanded mow_agents.
