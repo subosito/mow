@@ -767,11 +767,12 @@ func newModel(eng *mow.Engine, stream, ask bool) *model {
 	m.setPerm(perm)
 	m.resetToolTally() // indices are -1-based sentinels, not zero values
 
-	// Bubble's prompt function uses one fixed reservation for every row. Reserve
-	// enough room for the longest live prompt (spinner + elapsed), then clamp the
-	// returned prompt to that reservation so it can never push the first text row
-	// past the textarea viewport during a busy turn.
-	promptW := max(lipgloss.Width(tuiCfg.PromptPrefix()), 24)
+	// Prompt indicator on the FIRST line only. The head (idle "❯ " or the busy
+	// spinner/timer) lives in ta.Prompt; continuation lines stay blank so a
+	// multi-line message aligns under one prompt. The reservation must match the
+	// prompt's own width — a wider reservation pads every row and pushes the
+	// draft text away from the left edge.
+	promptW := lipgloss.Width(tuiCfg.PromptPrefix())
 	m.ta.SetPromptFunc(promptW, func(pi textarea.PromptInfo) string {
 		if pi.LineNumber == 0 {
 			return xansi.Truncate(m.ta.Prompt, promptW, "")
