@@ -86,12 +86,15 @@ func serve(eng *mow.Engine, in io.Reader, out io.Writer) int {
 				Method string          `json:"method"`
 				Params json.RawMessage `json:"params"`
 			}
-			if json.Unmarshal(trimmed, &req) == nil {
+			if perr := json.Unmarshal(trimmed, &req); perr != nil {
+				// JSON-RPC 2.0: unparseable input gets -32700 with a null id.
+				// Dropping it silently left the peer waiting for a reply that
+				// was never coming.
+				_ = enc.Encode(replyErr(json.RawMessage("null"), -32700, "parse error"))
+			} else if len(req.ID) > 0 {
 				// Notifications (no id) get no response.
-				if len(req.ID) > 0 {
-					if resp := serveHandle(eng, req.ID, req.Method, req.Params); resp != nil {
-						_ = enc.Encode(resp)
-					}
+				if resp := serveHandle(eng, req.ID, req.Method, req.Params); resp != nil {
+					_ = enc.Encode(resp)
 				}
 			}
 		}
