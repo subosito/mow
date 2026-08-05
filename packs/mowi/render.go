@@ -243,9 +243,7 @@ func renderPrettyDiff(th theme, code string, width int) string {
 	oldLn, newLn := 1, 1
 	haveNums := false
 	first := true
-	// Pending removals held back so an immediately following addition run can
-	// be paired with them line-for-line.
-	var pendingDel []string
+	var dels, adds []string
 
 	nl := func() {
 		if !first {
@@ -253,18 +251,90 @@ func renderPrettyDiff(th theme, code string, width int) string {
 		}
 		first = false
 	}
-	// flushDel emits held removals unpaired (a pure deletion run).
-	flushDel := func() {
-		for _, body := range pendingDel {
+
+	flushRun := func() {
+		if len(dels) == 0 && len(adds) == 0 {
+			return
+		}
+		pre := 0
+		for pre < len(dels) && pre < len(adds) && dels[pre] == adds[pre] {
+			on, nn := "    ", "    "
+			if haveNums {
+				on = fmt.Sprintf("%4d", oldLn)
+				nn = fmt.Sprintf("%4d", newLn)
+				oldLn++
+				newLn++
+			}
+			nl()
+			gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", on, nn)) +
+				th.DiffCtx.Render(diffSignCtx+" ")
+			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(dels[pre]), width))
+			pre++
+		}
+
+		remDels, remAdds := dels[pre:], adds[pre:]
+		suf := 0
+		for suf < len(remDels) && suf < len(remAdds) &&
+			remDels[len(remDels)-1-suf] == remAdds[len(remAdds)-1-suf] {
+			suf++
+		}
+		midDels := remDels[:len(remDels)-suf]
+		midAdds := remAdds[:len(remAdds)-suf]
+		sufDels := remDels[len(remDels)-suf:]
+
+		var oldStyled, newStyled []string
+		if len(midDels) > 0 && len(midDels) == len(midAdds) {
+			oldStyled = make([]string, len(midDels))
+			newStyled = make([]string, len(midAdds))
+			for i := range midDels {
+				oldStyled[i], newStyled[i] = emphasizeWordDiff(th, midDels[i], midAdds[i])
+			}
+		}
+
+		for i, body := range midDels {
 			on, nn := "    ", "    "
 			if haveNums {
 				on = fmt.Sprintf("%4d", oldLn)
 				oldLn++
 			}
 			nl()
-			b.WriteString(formatDiffRow(th, th.DiffDel, on, nn, diffSignDel, body, width))
+			if oldStyled != nil {
+				b.WriteString(formatDiffRowPre(th, th.DiffDel, on, nn, diffSignDel, oldStyled[i], width))
+			} else {
+				b.WriteString(formatDiffRow(th, th.DiffDel, on, nn, diffSignDel, body, width))
+			}
 		}
-		pendingDel = nil
+
+		for i, body := range midAdds {
+			on, nn := "    ", "    "
+			if haveNums {
+				nn = fmt.Sprintf("%4d", newLn)
+				newLn++
+			}
+			nl()
+			if newStyled != nil {
+				b.WriteString(formatDiffRowPre(th, th.DiffAdd, on, nn, diffSignAdd, newStyled[i], width))
+			} else {
+				b.WriteString(formatDiffRow(th, th.DiffAdd, on, nn, diffSignAdd, body, width))
+			}
+		}
+
+		for i := 0; i < suf; i++ {
+			on, nn := "    ", "    "
+			if haveNums {
+				on = fmt.Sprintf("%4d", oldLn)
+				nn = fmt.Sprintf("%4d", newLn)
+				oldLn++
+				newLn++
+			}
+			nl()
+			gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", on, nn)) +
+				th.DiffCtx.Render(diffSignCtx+" ")
+			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(sufDels[i]), width))
+		}
+
+		dels = nil
+		adds = nil
 	}
 
 	lines := strings.Split(code, "\n")
@@ -275,7 +345,7 @@ func renderPrettyDiff(th theme, code string, width int) string {
 			continue
 		}
 		if strings.HasPrefix(line, "@@") {
-			flushDel()
+			flushRun()
 			oh, nh, ok := parseHunkHeader(line)
 			if ok {
 				oldLn, newLn = oh.start, nh.start
@@ -302,75 +372,21 @@ func renderPrettyDiff(th theme, code string, width int) string {
 
 		switch {
 		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
-			// Hold: the next run may be its replacement.
-			pendingDel = append(pendingDel, strings.TrimPrefix(line, "-"))
+			dels = append(dels, strings.TrimPrefix(line, "-"))
 
 		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-			body := strings.TrimPrefix(line, "+")
-			if len(pendingDel) > 0 {
-				oldBody := pendingDel[0]
-				pendingDel = pendingDel[1:]
-
-				// An "edit" can hand us a whole rewritten block: every line
-				// arrives as −old/+new even where the text is untouched. A
-				// two-token change then paints twelve banded rows and the real
-				// edit gets a sixth of the weight. Identical pairs are context
-				// by definition — render them as such so the bands mark only
-				// what actually changed.
-				if oldBody == body {
-					on, nn := "    ", "    "
-					if haveNums {
-						on = fmt.Sprintf("%4d", oldLn)
-						nn = fmt.Sprintf("%4d", newLn)
-						oldLn++
-						newLn++
-					}
-					nl()
-					gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", on, nn)) +
-						th.DiffCtx.Render(diffSignCtx+" ")
-					b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(body), width))
-					continue
-				}
-
-				// Paired replace: old row then its new row, so the change reads
-				// as one edit rather than two unrelated blocks.
-				oldText, newText := emphasizeWordDiff(th, oldBody, body)
-
-				on, nn := "    ", "    "
-				if haveNums {
-					on = fmt.Sprintf("%4d", oldLn)
-					oldLn++
-				}
-				nl()
-				b.WriteString(formatDiffRowPre(th, th.DiffDel, on, nn, diffSignDel, oldText, width))
-
-				on, nn = "    ", "    "
-				if haveNums {
-					nn = fmt.Sprintf("%4d", newLn)
-					newLn++
-				}
-				nl()
-				b.WriteString(formatDiffRowPre(th, th.DiffAdd, on, nn, diffSignAdd, newText, width))
-				continue
-			}
-			on, nn := "    ", "    "
-			if haveNums {
-				nn = fmt.Sprintf("%4d", newLn)
-				newLn++
-			}
-			nl()
-			b.WriteString(formatDiffRow(th, th.DiffAdd, on, nn, diffSignAdd, body, width))
+			adds = append(adds, strings.TrimPrefix(line, "+"))
 
 		case strings.HasPrefix(line, "\\"): // "\ No newline at end of file"
-			flushDel()
+			flushRun()
 			nl()
 			b.WriteString(th.Muted.Render(fmt.Sprintf("  %s  %s │ %s %s", "    ", "    ", diffSignCtx, "no newline at end of file")))
 		case strings.HasPrefix(line, "…"):
-			flushDel()
+			flushRun()
 			nl()
 			b.WriteString(th.Muted.Render(fmt.Sprintf("  %s  %s │ %s %s", "  ··", "  ··", diffSignCtx, strings.TrimSpace(line))))
 		default:
-			flushDel()
+			flushRun()
 			body := line
 			if strings.HasPrefix(body, " ") {
 				body = body[1:]
@@ -389,7 +405,7 @@ func renderPrettyDiff(th theme, code string, width int) string {
 			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(body), width))
 		}
 	}
-	flushDel()
+	flushRun()
 	return b.String()
 }
 

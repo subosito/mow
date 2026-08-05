@@ -339,9 +339,9 @@ func TestDiffBandDoesNotOverflow(t *testing.T) {
 	}
 }
 
-// A replaced line should read as one edit: the old row immediately followed by
-// its new row, instead of every deletion then every addition.
-func TestDiffPairsReplacedLines(t *testing.T) {
+// A replaced block should render as a unified diff block: all removals
+// followed by all additions, preserving block structure instead of alternating.
+func TestDiffGroupsReplacedLines(t *testing.T) {
 	th := newTheme()
 	src := "@@ -10,4 +10,4 @@\n ctx before\n" +
 		"-\ttimeout := 30\n-\treturn newClient(timeout, false)\n" +
@@ -356,11 +356,14 @@ func TestDiffPairsReplacedLines(t *testing.T) {
 			t.Fatalf("%s row missing:\n%s", name, strings.Join(rows, "\n"))
 		}
 	}
-	if new1 != old1+1 {
-		t.Fatalf("first replacement not adjacent (old=%d new=%d):\n%s", old1, new1, strings.Join(rows, "\n"))
+	if old2 != old1+1 {
+		t.Fatalf("removals should be contiguous (old1=%d old2=%d):\n%s", old1, old2, strings.Join(rows, "\n"))
 	}
-	if old2 != new1+1 || new2 != old2+1 {
-		t.Fatalf("second replacement not paired (old=%d new=%d):\n%s", old2, new2, strings.Join(rows, "\n"))
+	if new1 != old2+1 {
+		t.Fatalf("additions block should follow removals block (old2=%d new1=%d):\n%s", old2, new1, strings.Join(rows, "\n"))
+	}
+	if new2 != new1+1 {
+		t.Fatalf("additions should be contiguous (new1=%d new2=%d):\n%s", new1, new2, strings.Join(rows, "\n"))
 	}
 }
 
