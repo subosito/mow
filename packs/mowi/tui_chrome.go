@@ -444,6 +444,13 @@ func (m *model) renderHeader() string {
 	if m.perm() == PermAsk {
 		must = append(must, chip{th.Muted.Render("ask"), true})
 	}
+	// Select mode is a persistent interaction state: the wheel no longer
+	// scrolls and the mouse belongs to the terminal. It must survive width
+	// pressure (dropping it would look like a broken wheel), so it is a must
+	// chip like the permission posture.
+	if !m.mouseOn() {
+		must = append(must, chip{th.Accent.Render(glyphSelect + " select"), true})
+	}
 
 	// Context: must when warn; else vanity with higher keep priority than tokens.
 	limits := m.eng.Limits()

@@ -195,6 +195,9 @@ type model struct {
 	permStripShown bool
 	// queueTeachShown: one-shot status explaining queue vs /steer.
 	queueTeachShown bool
+	// selectTeachShown: one-shot status explaining select mode (mouse release).
+	// The header chip carries the persistent state after the first toggle.
+	selectTeachShown bool
 	// lastActivityAt tracks last stream/tool event for stall notes on the band.
 	lastActivityAt time.Time
 	// lastMouseAt is when the last mouse event was consumed. Up-arrow prompt

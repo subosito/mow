@@ -82,6 +82,7 @@ const (
 	glyphWelcome = "◈" // welcome splash mark
 	glyphPeer    = "⇄" // delegated peer spend (true-total chip)
 	glyphMore    = "⋯" // collapsed / elided content (peer live summary)
+	glyphSelect  = "⛶" // select mode: mouse released to the terminal
 )
 
 // palette is fixed hex colors (no AdaptiveColor probes).

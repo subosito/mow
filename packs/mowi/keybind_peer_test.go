@@ -36,13 +36,42 @@ func TestSelectModeKeyReleasesMouse(t *testing.T) {
 	if m.mouseOn() {
 		t.Fatal("ctrl+s did not release the mouse")
 	}
-	var found bool
+	// Persistent state lives on the header chip, not in scrollback.
+	if !strings.Contains(m.renderHeader(), "select") {
+		t.Fatal("header has no select-mode chip")
+	}
+	// The transcript teaches the mechanics exactly once per session.
+	var teaches int
 	for _, e := range m.entries {
-		if strings.Contains(e.text, "select mode on") {
-			found = true
+		if strings.Contains(e.text, "select mode") {
+			teaches++
 		}
 	}
-	if !found {
-		t.Fatal("no status line telling the user select mode is on")
+	if teaches != 1 {
+		t.Fatalf("want one select-mode teach line, got %d", teaches)
+	}
+	// Toggling back and forth again must not spam the transcript.
+	m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if !m.mouseOn() {
+		t.Fatal("ctrl+s did not restore tracking")
+	}
+	if strings.Contains(m.renderHeader(), "select") {
+		t.Fatal("header chip should disappear when tracking is back")
+	}
+	m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if m.mouseOn() {
+		t.Fatal("second ctrl+s did not release the mouse")
+	}
+	teaches = 0
+	for _, e := range m.entries {
+		if strings.Contains(e.text, "select mode") {
+			teaches++
+		}
+	}
+	if teaches != 1 {
+		t.Fatalf("teach must fire once, got %d lines", teaches)
+	}
+	if !strings.Contains(m.renderHeader(), "select") {
+		t.Fatal("header chip missing after re-entering select mode")
 	}
 }

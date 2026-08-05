@@ -108,13 +108,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case ks.Matches(ks.SelectMode, keyStr):
 			// Mouse tracking steals drag-select from the terminal. Releasing
 			// it at runtime lets the user copy text without restarting; the
-			// wheel falls back to the arrow-burst guard while off.
+			// wheel falls back to the arrow-burst guard while off. The header
+			// chip is the persistent state signal; the transcript only teaches
+			// the mechanics once per session (queueTeachShown pattern), so
+			// repeated toggles do not spam scrollback.
 			m.mouseOff = !m.mouseOff
-			if m.mouseOff {
-				m.add(kindStatus, "select mode on — mouse released, drag to select ("+
+			if m.mouseOff && !m.selectTeachShown {
+				m.selectTeachShown = true
+				m.add(kindStatus, "select mode — mouse released, drag to select ("+
 					m.cfg.Keys.Primary(m.cfg.Keys.SelectMode)+" to resume scroll)")
-			} else {
-				m.add(kindStatus, "select mode off — wheel scrolls the transcript")
 			}
 			m.layout()
 			m.refreshVP()
