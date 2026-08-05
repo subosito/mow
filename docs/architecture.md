@@ -46,7 +46,7 @@ one-way: nested modules depend on the root public API, never the reverse.
 | `github.com/subosito/mow/packs/otel` | Optional OTLP integration |
 | `github.com/subosito/mow/packs/mowi` | Optional TUI host library |
 | `github.com/subosito/mow/cliutil` | CLI flags → Engine |
-| `github.com/subosito/mow/packcfg` | Decode `extensions.<name>` |
+| `github.com/subosito/mow/extcfg` | Decode `extensions.<name>` |
 
 ### Internal
 

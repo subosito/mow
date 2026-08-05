@@ -1,7 +1,7 @@
 // Package ext is the extension registration surface: tools, hooks, CLI commands.
 // Feature packs: github.com/subosito/mow/ext/<name> (blank-import to link).
-// Helpers (not packs): cliutil (CLI flags), packcfg (decode extensions.*).
-// Config: extensions.<name> via Engine.Extension or packcfg.DecodeSection.
+// Helpers (not packs): cliutil (CLI flags), extcfg (decode extensions.*).
+// Config: extensions.<name> via Engine.Extension or extcfg.DecodeSection.
 package ext
 
 import (

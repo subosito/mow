@@ -98,7 +98,7 @@ itself), and never set credentials, endpoints, or power tools.
 | `mow.go` | Thin public re-export: `mow.Engine`, `mow.Run`, events, hooks, provider APIs |
 | `internal/engine/` | Engine implementation and behavior tests |
 | `cliutil/` | CLI flags → Engine; not a pack |
-| `packcfg/` | Decode `extensions.*`; not a pack |
+| `extcfg/` | Decode `extensions.*`; shared by extensions and packs |
 | `ext/` | Registration plus core extensions: acp, mcp, proc, rpc, cmdhook, eval |
 | `packs/` | Optional module: goal, review, ops, lsp, job |
 | `packs/otel/` | Optional nested OpenTelemetry module |

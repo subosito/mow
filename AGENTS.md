@@ -61,7 +61,7 @@ Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool batches: `policy.max_
 | `mow.go` | Thin public aliases/wrappers for `Engine`, `Run`, events, hooks, providers |
 | `internal/engine/` | Engine implementation and behavior tests |
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
-| `packcfg/` | Decode `extensions.<name>` (**not** a pack) |
+| `extcfg/` | Decode `extensions.<name>` (shared by extensions and packs) |
 | `ext/` | Registration (`ext.go`) + core packs: acp, mcp, proc, rpc, cmdhook, eval |
 | `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): goal, review, ops, lsp, job |
 | `packs/otel/` | OTLP export (nested submodule `github.com/subosito/mow/packs/otel`; config-driven) |
@@ -82,7 +82,7 @@ do not tell them to import `internal/`.
   `github.com/subosito/mow/packs`): goal, review, ops, lsp, job.
 - `go.work` wires the root module and `packs/` together for local dev.
 - Remove import → subcommand/tools gone.
-- Pack config: `extensions.<name>` via `Engine.Extension` or `packcfg.DecodeSection`.
+- Extension config: `extensions.<name>` via `Engine.Extension` or `extcfg.DecodeSection`.
 - MCP/LSP only activate when configured (no config → no process).
 
 ## Conventions

@@ -1,6 +1,6 @@
-// Package packcfg decodes extensions.<name> from config paths / $MOW_HOME.
-// Not a pack: used by ext/mcp, ext/lsp, etc. before mow.New.
-package packcfg
+// Package extcfg decodes extensions.<name> from config paths / $MOW_HOME.
+// It is shared by core extensions and optional packs before mow.New.
+package extcfg
 
 import (
 	"os"

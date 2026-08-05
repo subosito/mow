@@ -26,7 +26,7 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
-	"github.com/subosito/mow/packcfg"
+	"github.com/subosito/mow/extcfg"
 )
 
 // ServerConfig is one MCP server (stdio or streamable HTTP).
@@ -84,7 +84,7 @@ func init() {
 
 func registerAll(configPaths ...string) error {
 	var c Config
-	ok, err := packcfg.DecodeSection("mcp", configPaths, &c)
+	ok, err := extcfg.DecodeSection("mcp", configPaths, &c)
 	if err != nil {
 		return fmt.Errorf("mcp extensions: %w", err)
 	}

@@ -11,7 +11,7 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext/acp"
-	"github.com/subosito/mow/packcfg"
+	"github.com/subosito/mow/extcfg"
 )
 
 // PackConfig is extensions.ops — pack-level settings only.
@@ -94,7 +94,7 @@ func loadPackConfig(eng *mow.Engine) PackConfig {
 	if eng != nil {
 		_ = eng.Extension("ops", &c)
 	} else {
-		_, _ = packcfg.DecodeSection("ops", nil, &c)
+		_, _ = extcfg.DecodeSection("ops", nil, &c)
 	}
 	return c
 }

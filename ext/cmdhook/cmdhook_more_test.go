@@ -654,7 +654,7 @@ func setupReset(t *testing.T) {
 
 func TestSetupFromConfigPaths(t *testing.T) {
 	setupReset(t)
-	t.Setenv("MOW_HOME", t.TempDir()) // keep packcfg's config.yaml fallback isolated
+	t.Setenv("MOW_HOME", t.TempDir()) // keep extcfg's config.yaml fallback isolated
 	root := t.TempDir()
 	ok := scriptAt(t, root, "ok.sh", "true")
 	writeHooksJSON(t, root, oneEntry("", ok))

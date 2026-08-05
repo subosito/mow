@@ -86,7 +86,7 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `mow` | `New`, `Engine`, `Run`, options/result types, `Tool`/`Message`/`ChatFunc`, `Engine.Extension` (files: `engine_*.go`, `run.go`) |
 | `ext` | Register tools, hooks, **CLI commands**, BeforeNew (registration only) |
 | `cliutil` | Shared CLI flags / `--long` help / `NewEngine` — **not** a pack |
-| `packcfg` | Decode `extensions.<name>` — **not** a pack |
+| `extcfg` | Decode `extensions.<name>` — shared by extensions and packs |
 | `ext/rpc` | JSON-lines embed protocol + `mow rpc` |
 | `ext/acp` | ACP agent + client + `acp_delegate` + `mow acp` |
 | `packs/goal` | Outer multi-step goals + `mow goal` |

@@ -178,7 +178,7 @@ Pack config is opaque under `extensions.<name>` and decoded with public helpers:
 
 ```go
 var cfg Config
-ok, err := packcfg.DecodeSection("name", paths, &cfg)
+ok, err := extcfg.DecodeSection("name", paths, &cfg)
 ```
 
 or through an Engine:

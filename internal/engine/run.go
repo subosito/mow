@@ -7,7 +7,7 @@
 //   - mow.Tool / Options.Tools / Hooks — integration types (per-engine tools)
 //   - RunResult.Usage / Event tokens — provider-reported token accounting
 //   - ext / ext/* — optional packs (acp, rpc, mcp, lsp, …)
-//   - cliutil / packcfg — host helpers (not packs)
+//   - cliutil / extcfg — host helpers (not packs)
 //
 // Implementation lives under internal/ (agent loop, llm, tools, config, …).
 package engine

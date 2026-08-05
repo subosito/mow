@@ -1,11 +1,11 @@
-package packcfg_test
+package extcfg_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/subosito/mow/packcfg"
+	"github.com/subosito/mow/extcfg"
 )
 
 func TestDecodeSection(t *testing.T) {
@@ -27,7 +27,7 @@ extensions:
 			Command string `yaml:"command"`
 		} `yaml:"servers"`
 	}
-	ok, err := packcfg.DecodeSection("mcp", []string{path}, &c)
+	ok, err := extcfg.DecodeSection("mcp", []string{path}, &c)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}

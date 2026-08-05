@@ -25,7 +25,7 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
-	"github.com/subosito/mow/packcfg"
+	"github.com/subosito/mow/extcfg"
 )
 
 // Config is extensions.lsp.
@@ -43,7 +43,7 @@ func init() {
 
 func registerAll(configPaths ...string) error {
 	var c Config
-	ok, err := packcfg.DecodeSection("lsp", configPaths, &c)
+	ok, err := extcfg.DecodeSection("lsp", configPaths, &c)
 	if err != nil {
 		return fmt.Errorf("lsp extensions: %w", err)
 	}

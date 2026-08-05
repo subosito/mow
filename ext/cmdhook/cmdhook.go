@@ -37,7 +37,7 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
-	"github.com/subosito/mow/packcfg"
+	"github.com/subosito/mow/extcfg"
 )
 
 // Config is extensions.cmdhook.
@@ -106,7 +106,7 @@ func setup(configPaths ...string) error {
 		return nil
 	}
 	var c Config
-	ok, err := packcfg.DecodeSection("cmdhook", configPaths, &c)
+	ok, err := extcfg.DecodeSection("cmdhook", configPaths, &c)
 	if err != nil {
 		return fmt.Errorf("cmdhook extensions: %w", err)
 	}
