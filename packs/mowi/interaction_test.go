@@ -197,6 +197,10 @@ func TestHeaderTokensWithoutGatewayLimits(t *testing.T) {
 	if !strings.Contains(hdr, "100.0k tok") {
 		t.Fatalf("header missing token chip: %q", hdr)
 	}
+	// No delegated peers this run: the chip stays a bare total, not "(⇄ 0) tok".
+	if strings.Contains(hdr, glyphPeer) {
+		t.Fatalf("peer share shown with no peer usage: %q", hdr)
+	}
 	// Injected Chat has no /v1/models catalog → no speculative chips.
 	if strings.Contains(hdr, "$") || strings.Contains(hdr, "% ctx") {
 		t.Fatalf("header must not invent cost/ctx%% without gateway limits: %q", hdr)

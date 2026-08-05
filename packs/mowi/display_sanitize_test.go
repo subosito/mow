@@ -583,8 +583,10 @@ func TestHeaderShowsPeerTokenShare(t *testing.T) {
 
 	hdr := m.renderHeader()
 	plain := xansi.Strip(hdr)
-	if !strings.Contains(plain, "155.0k tok") {
-		t.Fatalf("header missing combined reported total: %q", plain)
+	// Total is host+peers; the peer share is broken out so delegated spend —
+	// which never appears in the transcript — stays visible at a glance.
+	if !strings.Contains(plain, "155.0k ("+glyphPeer+" 35.0k) tok") {
+		t.Fatalf("header missing combined total with peer share: %q", plain)
 	}
 	status := m.reportedUsageStatus()
 	for _, want := range []string{

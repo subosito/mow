@@ -3310,10 +3310,16 @@ func (m *model) renderHeader() string {
 		vanity = append(vanity, chip{th.Accent.Render("focus:transcript"), false})
 	}
 	// Token activity observed this process (provider-reported; not a bill).
-	// The header shows one transparent aggregate; /status carries provenance and
-	// the host/peer input-output breakdown.
+	// The total is host + peers so it answers "what did this run cost"; the
+	// parenthesised peer share is called out because delegated spend is the
+	// part users cannot see in the transcript. /status carries provenance and
+	// the full input/output breakdown.
 	if tok := m.tokIn + m.tokOut + m.peerTokIn + m.peerTokOut; tok > 0 {
-		vanity = append(vanity, chip{th.Muted.Render(formatTokens(tok) + " tok"), false})
+		label := formatTokens(tok)
+		if peer := m.peerTokIn + m.peerTokOut; peer > 0 {
+			label += " (" + glyphPeer + " " + formatTokens(peer) + ")"
+		}
+		vanity = append(vanity, chip{th.Muted.Render(label + " tok"), false})
 	}
 	if gchip := goalHeaderChip(m.goalLive); gchip != "" {
 		vanity = append(vanity, chip{th.Muted.Render(gchip), false})
