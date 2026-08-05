@@ -7,6 +7,44 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
+func TestActivityToolLabelKeepsStateAndDetails(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+		want []string
+	}{
+		{"grep", `{"pattern":"activityState"}`, []string{"searching", "grep", "activityState"}},
+		{"edit", `{"path":"/work/repo/tui.go"}`, []string{"shaping", "edit", "tui.go"}},
+		{"bash", `{"command":"just verify"}`, []string{"running", "bash", "just verify"}},
+		{"gemini: read internal/agent/loop.go", "", []string{"connecting", "gemini", "read", "loop.go"}},
+	}
+	for _, tc := range tests {
+		got := activityToolLabel(tc.name, tc.args, 72)
+		for _, want := range tc.want {
+			if !strings.Contains(got, want) {
+				t.Errorf("activityToolLabel(%q) = %q, missing %q", tc.name, got, want)
+			}
+		}
+	}
+}
+
+func TestToolActivityState(t *testing.T) {
+	tests := map[string]string{
+		"read":             "searching",
+		"write":            "shaping",
+		"acp_delegate":     "connecting",
+		"generate_image":   "creating",
+		"understand_video": "inspecting",
+		"proc_start":       "running",
+		"custom_tool":      "working",
+	}
+	for name, want := range tests {
+		if got := toolActivityState(name); got != want {
+			t.Errorf("toolActivityState(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestToolLabelReadPath(t *testing.T) {
 	got := toolLabel("read", `{"path":"/work/repo/mowi/engine.go"}`, 48)
 	if got != "read · engine.go" {

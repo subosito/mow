@@ -3365,8 +3365,8 @@ func (m *model) renderActivityBand() string {
 			// last-writer tool label so it is not mistaken for the whole set.
 			label = ""
 		case m.toolCurrent == "writing":
-			// Phase marker after tools/peers — not a real tool name.
-			label = th.Muted.Render("writing")
+			// Phase marker after tools/peers — the host is composing its answer.
+			label = th.Muted.Render("composing")
 		case m.toolCurrent != "":
 			// Budget: yield exactly what the right-aligned status needs, not a
 			// fixed reserve — with a short right (e.g. just "12s") the tool
@@ -3389,7 +3389,7 @@ func (m *model) renderActivityBand() string {
 			if strings.Contains(m.toolCurrent, ":") {
 				maxLab = max(maxLab, minPeerLabelWidth)
 			}
-			lab := toolLabel(m.toolCurrent, m.toolCurrentArgs, maxLab)
+			lab := activityToolLabel(m.toolCurrent, m.toolCurrentArgs, maxLab)
 			if strings.HasPrefix(lab, glyphArrow) || strings.Contains(m.toolCurrent, ":") {
 				label = th.Muted.Render(lab)
 			} else {
@@ -3398,7 +3398,7 @@ func (m *model) renderActivityBand() string {
 		case m.reasonBuf != "" && m.streamBuf == "":
 			label = th.Muted.Render("thinking")
 		case m.streamBuf != "":
-			label = th.Muted.Render("writing")
+			label = th.Muted.Render("composing")
 		default:
 			label = th.Muted.Render("working")
 		}

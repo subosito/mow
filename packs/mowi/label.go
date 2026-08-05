@@ -13,6 +13,56 @@ import (
 
 // toolLabel builds a short activity-band label: "verb · basename" (or peer form).
 // Never mid-string-truncates a shell blob into useless noise.
+// activityToolLabel adds a truthful, broad phase without replacing the concrete
+// tool label. The right-hand side always retains the operation and its useful
+// argument (for example, "searching · grep · activityState"), so richer state
+// vocabulary never turns tool execution into an opaque animation.
+func activityToolLabel(name, args string, maxWidth int) string {
+	concrete := toolLabel(name, args, maxWidth)
+	if concrete == "" {
+		return ""
+	}
+	state := toolActivityState(name)
+	if state == "" {
+		return concrete
+	}
+	return clampLabel(state+" · "+concrete, max(maxWidth, minActivityLabelWidth))
+}
+
+// minActivityLabelWidth leaves enough room for semantic state plus a concrete
+// operation when the terminal is squeezed. The complete band remains bounded.
+const minActivityLabelWidth = 24
+
+func toolActivityState(name string) string {
+	name = strings.ToLower(strings.TrimSpace(sanitizeDisplay(name)))
+	if name == "" {
+		return ""
+	}
+	if agent, _, ok := strings.Cut(name, ":"); ok && strings.TrimSpace(agent) != "" {
+		return "connecting"
+	}
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	name = strings.TrimRight(name, ":")
+	switch name {
+	case "read", "glob", "grep":
+		return "searching"
+	case "write", "edit":
+		return "shaping"
+	case "acp_delegate", "mcp", "lsp":
+		return "connecting"
+	case "generate_image", "generate_speech", "generate_video":
+		return "creating"
+	case "understand_image", "understand_voice", "understand_video":
+		return "inspecting"
+	case "bash", "proc_start", "proc_status", "proc_stop":
+		return "running"
+	default:
+		return "working"
+	}
+}
+
 func toolLabel(name, args string, maxWidth int) string {
 	name = strings.TrimSpace(sanitizeDisplay(name))
 	args = strings.TrimSpace(sanitizeDisplay(args))
