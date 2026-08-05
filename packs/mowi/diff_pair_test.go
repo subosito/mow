@@ -29,6 +29,110 @@ func rowIndex(rows []string, sub string) int {
 	return -1
 }
 
+// The change glyph must sit at ONE column for every row kind. Right-aligning
+// it inside the number cells put "+" six columns from "−", so the eye zigzagged
+// down a replace pair and the glyph failed at the only job it has: signalling
+// direction where colour cannot.
+func TestDiffSignsShareOneColumn(t *testing.T) {
+	th := newTheme()
+	src := "@@ -10,4 +10,4 @@\n ctx\n-was\n+now\n ctx2\n"
+	out := xansi.Strip(renderPrettyDiff(th, src, 50))
+
+	col := func(row, glyph string) int {
+		i := strings.Index(row, glyph)
+		if i < 0 {
+			return -1
+		}
+		return len([]rune(row[:i]))
+	}
+	var delCol, addCol, barCols []int
+	for _, ln := range strings.Split(out, "\n") {
+		if i := col(ln, "│"); i >= 0 {
+			barCols = append(barCols, i)
+		}
+		switch {
+		case strings.Contains(ln, "was"):
+			delCol = append(delCol, col(ln, "−"))
+		case strings.Contains(ln, "now"):
+			addCol = append(addCol, col(ln, "+"))
+		}
+	}
+	if len(delCol) != 1 || len(addCol) != 1 {
+		t.Fatalf("expected one del and one add row:\n%s", out)
+	}
+	if delCol[0] != addCol[0] {
+		t.Fatalf("− at col %d but + at col %d — signs must share a column:\n%s",
+			delCol[0], addCol[0], out)
+	}
+	// Every row's separator lines up too, so the body starts at one column.
+	for _, c := range barCols {
+		if c != barCols[0] {
+			t.Fatalf("separator column drifts (%v):\n%s", barCols, out)
+		}
+	}
+}
+
+// Numbers stay numeric: the sign no longer squats in a line-number cell.
+func TestDiffNumberColumnsHoldOnlyNumbers(t *testing.T) {
+	th := newTheme()
+	out := xansi.Strip(renderPrettyDiff(th, "@@ -1,2 +1,2 @@\n-was\n+now\n", 50))
+	for _, ln := range strings.Split(out, "\n") {
+		if !strings.Contains(ln, "was") && !strings.Contains(ln, "now") {
+			continue
+		}
+		bar := strings.Index(ln, "│")
+		if bar < 0 {
+			t.Fatalf("row has no separator: %q", ln)
+		}
+		nums := ln[:bar]
+		if strings.ContainsAny(nums, "+−") {
+			t.Fatalf("sign leaked into the number gutter: %q", nums)
+		}
+	}
+}
+
+// A delete-heavy hunk must name the span that actually changed. Reporting the
+// new side turned @@ -1,4 +1,1 @@ into "lines 1" — naming the one surviving
+// line while hiding the three that were removed.
+func TestDiffHunkLabelUsesChangedSide(t *testing.T) {
+	th := newTheme()
+	head := func(src string) string {
+		return strings.Split(xansi.Strip(renderPrettyDiff(th, src, 50)), "\n")[0]
+	}
+	if got := head("@@ -1,4 +1,1 @@\n keep\n-a\n-b\n-c\n"); !strings.Contains(got, "1–4") {
+		t.Fatalf("delete-heavy hunk label = %q, want the old span 1–4", got)
+	}
+	if got := head("@@ -1,1 +1,4 @@\n keep\n+a\n+b\n+c\n"); !strings.Contains(got, "1–4") {
+		t.Fatalf("add-heavy hunk label = %q, want the new span 1–4", got)
+	}
+	// Pure delete keeps its dedicated wording.
+	if got := head("@@ -1,3 +0,0 @@\n-a\n-b\n-c\n"); !strings.Contains(got, "removed") {
+		t.Fatalf("pure delete label = %q, want 'removed'", got)
+	}
+}
+
+// The wash covers the number gutter too, so a changed block is one rectangle
+// rather than a body-only stripe with a notch on the left.
+func TestDiffBandCoversGutter(t *testing.T) {
+	t.Setenv("MOW_FORCE_COLOR", "1")
+	th := newTheme()
+	out := renderPrettyDiff(th, "@@ -10,2 +10,2 @@\n-was\n+now\n", 44)
+	for _, ln := range strings.Split(out, "\n") {
+		plain := xansi.Strip(ln)
+		if !strings.Contains(plain, "was") && !strings.Contains(plain, "now") {
+			continue
+		}
+		// The styled span covering the line number must carry a background.
+		bar := strings.Index(ln, "│")
+		if bar < 0 {
+			t.Fatalf("no separator: %q", plain)
+		}
+		if !strings.Contains(ln[:bar], "48;2;") {
+			t.Fatalf("number gutter is unwashed — block reads as a stripe: %q", plain)
+		}
+	}
+}
+
 // Changed rows paint as a full-width band, so the tint marks the change rather
 // than tracing the length of each line.
 func TestDiffChangedRowsFillWidth(t *testing.T) {

@@ -111,9 +111,26 @@ func TestRenderPrettyDiffLineNumbers(t *testing.T) {
 	if !strings.Contains(out, "old") || !strings.Contains(out, "new1") {
 		t.Fatalf("missing hunk body: %q", out)
 	}
-	// No raw git +/− markers in the painted body.
-	if strings.Contains(out, "│ +") || strings.Contains(out, "│ -") {
-		t.Fatalf("raw +/- markers should not appear: %q", out)
+	// The change glyph sits in its own column after the separator, at one x for
+	// every row kind (see TestDiffSignsShareOneColumn). What must NOT appear is
+	// a raw git marker glued to the body text itself.
+	for _, ln := range strings.Split(out, "\n") {
+		bar := strings.Index(ln, "│")
+		if bar < 0 {
+			continue
+		}
+		body := ln[bar+len("│"):]
+		// Skip the sign column, then the body must start with real content.
+		body = strings.TrimPrefix(body, " ")
+		for _, sign := range []string{"− ", "+ ", "  "} {
+			if strings.HasPrefix(body, sign) {
+				body = body[len(sign):]
+				break
+			}
+		}
+		if strings.HasPrefix(body, "+") || strings.HasPrefix(body, "-") {
+			t.Fatalf("raw git marker leaked into body text: %q", ln)
+		}
 	}
 	// File headers stripped (title carries the path).
 	if strings.Contains(out, "--- a.go") || strings.Contains(out, "+++ a.go") {

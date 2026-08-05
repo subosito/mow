@@ -256,13 +256,13 @@ func renderPrettyDiff(th theme, code string, width int) string {
 	// flushDel emits held removals unpaired (a pure deletion run).
 	flushDel := func() {
 		for _, body := range pendingDel {
-			on, nn := "    ", diffSignDel
+			on, nn := "    ", "    "
 			if haveNums {
 				on = fmt.Sprintf("%4d", oldLn)
 				oldLn++
 			}
 			nl()
-			b.WriteString(formatDiffRow(th, th.DiffDel, on, nn, body, width))
+			b.WriteString(formatDiffRow(th, th.DiffDel, on, nn, diffSignDel, body, width))
 		}
 		pendingDel = nil
 	}
@@ -314,39 +314,39 @@ func renderPrettyDiff(th theme, code string, width int) string {
 				pendingDel = pendingDel[1:]
 				oldText, newText := emphasizeWordDiff(th, oldBody, body)
 
-				on, nn := "    ", diffSignDel
+				on, nn := "    ", "    "
 				if haveNums {
 					on = fmt.Sprintf("%4d", oldLn)
 					oldLn++
 				}
 				nl()
-				b.WriteString(formatDiffRowPre(th, th.DiffDel, on, nn, oldText, width))
+				b.WriteString(formatDiffRowPre(th, th.DiffDel, on, nn, diffSignDel, oldText, width))
 
-				on, nn = diffSignAdd, "    "
+				on, nn = "    ", "    "
 				if haveNums {
 					nn = fmt.Sprintf("%4d", newLn)
 					newLn++
 				}
 				nl()
-				b.WriteString(formatDiffRowPre(th, th.DiffAdd, on, nn, newText, width))
+				b.WriteString(formatDiffRowPre(th, th.DiffAdd, on, nn, diffSignAdd, newText, width))
 				continue
 			}
-			on, nn := diffSignAdd, "    "
+			on, nn := "    ", "    "
 			if haveNums {
 				nn = fmt.Sprintf("%4d", newLn)
 				newLn++
 			}
 			nl()
-			b.WriteString(formatDiffRow(th, th.DiffAdd, on, nn, body, width))
+			b.WriteString(formatDiffRow(th, th.DiffAdd, on, nn, diffSignAdd, body, width))
 
 		case strings.HasPrefix(line, "\\"): // "\ No newline at end of file"
 			flushDel()
 			nl()
-			b.WriteString(th.Muted.Render(fmt.Sprintf("  %s  %s │ %s", "    ", "    ", "no newline at end of file")))
+			b.WriteString(th.Muted.Render(fmt.Sprintf("  %s  %s │ %s %s", "    ", "    ", diffSignCtx, "no newline at end of file")))
 		case strings.HasPrefix(line, "…"):
 			flushDel()
 			nl()
-			b.WriteString(th.Muted.Render(fmt.Sprintf("  %s  %s │ %s", "  ··", "  ··", strings.TrimSpace(line))))
+			b.WriteString(th.Muted.Render(fmt.Sprintf("  %s  %s │ %s %s", "  ··", "  ··", diffSignCtx, strings.TrimSpace(line))))
 		default:
 			flushDel()
 			body := line
@@ -362,7 +362,8 @@ func renderPrettyDiff(th theme, code string, width int) string {
 			}
 			// Context: muted numbers, normal text — no tint.
 			nl()
-			gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", on, nn))
+			gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", on, nn)) +
+				th.DiffCtx.Render(diffSignCtx+" ")
 			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(body), width))
 		}
 	}
@@ -370,33 +371,44 @@ func renderPrettyDiff(th theme, code string, width int) string {
 	return b.String()
 }
 
-// Add/deleted rows carry a glyph in the line-number column they do not own, so
-// the change direction survives a color-blind (or no-color) terminal instead of
-// being signalled by the row tint alone.
+// Add/deleted rows carry a glyph so the change direction survives a
+// color-blind (or no-color) terminal instead of being signalled by tint alone.
+//
+// The glyph sits in a fixed column just left of the body, NOT in the
+// line-number cell the row happens to leave empty. Right-aligning the sign
+// inside the 4-cell number columns put "+" six columns away from "−", so the
+// eye zigzagged down a replace pair and direction was not scannable — the one
+// job the glyph exists to do.
 const (
-	diffSignAdd = "   +"
-	diffSignDel = "   \u2212"
+	diffSignAdd = "+"
+	diffSignDel = "\u2212"
+	diffSignCtx = " "
 )
 
-// formatDiffRow builds "  old  new │ body" with tinted body (add/del).
-func formatDiffRow(th theme, bodyStyle lipgloss.Style, oldN, newN, body string, width int) string {
+// formatDiffRow builds "  old  new │ S body" with a tinted body (add/del).
+func formatDiffRow(th theme, bodyStyle lipgloss.Style, oldN, newN, sign, body string, width int) string {
 	if body == "" {
 		body = " "
 	}
-	return formatDiffRowPre(th, bodyStyle, oldN, newN, bodyStyle.Render(body), width)
+	return formatDiffRowPre(th, bodyStyle, oldN, newN, sign, bodyStyle.Render(body), width)
 }
 
 // formatDiffRowPre is formatDiffRow for a body that is already styled (word
 // diff spans), so the caller's per-word emphasis is not flattened by a single
 // Render over the whole line.
 //
-// The row is padded to the full body width so the add/del tint reads as a
-// continuous band. Tinting only the glyphs left a ragged right edge whose
-// shape tracked line length rather than the change itself, which is noisier
-// to scan than a solid block. Padding is skipped when width is unknown
-// (colorDiffLines passes 0) — there is no column to pad to.
-func formatDiffRowPre(th theme, bodyStyle lipgloss.Style, oldN, newN, styledBody string, width int) string {
-	gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", oldN, newN))
+// The whole row — number gutter included — carries the add/del wash, so a
+// changed block reads as one rectangle. Washing only the body left a 15-cell
+// notch on the left and the block read as stripes. Numbers keep their muted
+// foreground on top of that wash. Padding is skipped when width is unknown
+// (colorDiffLines passes 0): there is no column to pad to.
+func formatDiffRowPre(th theme, bodyStyle lipgloss.Style, oldN, newN, sign, styledBody string, width int) string {
+	numStyle := th.DiffNum
+	if bg := bodyStyle.GetBackground(); bg != nil {
+		numStyle = numStyle.Background(bg)
+	}
+	gutter := numStyle.Render(fmt.Sprintf("  %s  %s ", oldN, newN)) +
+		numStyle.Render("\u2502 ") + bodyStyle.Render(sign+" ")
 	if width > 0 {
 		if pad := width - lipgloss.Width(gutter) - lipgloss.Width(styledBody); pad > 0 {
 			styledBody += bodyStyle.Render(strings.Repeat(" ", pad))
@@ -569,9 +581,14 @@ func formatHunkReviewLabel(oldH, newH hunkRange) string {
 		}
 		return fmt.Sprintf("removed · %d lines", oldH.count)
 	}
-	// Range on the new side when possible (where the reader lands).
+	// Show the side that actually spans the change. Always reporting the new
+	// side made a delete-heavy hunk (@@ -1,4 +1,1 @@) read as "lines 1",
+	// naming one surviving line while hiding the three that went away.
 	rng := formatSide(newH)
-	if newH.count <= 0 {
+	switch {
+	case newH.count <= 0:
+		rng = formatSide(oldH)
+	case oldH.count > newH.count:
 		rng = formatSide(oldH)
 	}
 	return "lines " + rng
