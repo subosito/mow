@@ -20,11 +20,12 @@ func lspFrames(payloads ...string) string {
 	return b.String()
 }
 
-func fakeClient(frames string) *client {
+func fakeClient(frames string) (*client, *strings.Builder) {
+	var wrote strings.Builder
 	return &client{
-		stdin:  nopWriteCloser{io.Discard},
+		stdin:  nopWriteCloser{&wrote},
 		stdout: bufio.NewReader(strings.NewReader(frames)),
-	}
+	}, &wrote
 }
 
 type nopWriteCloser struct{ io.Writer }
@@ -33,13 +34,15 @@ func (nopWriteCloser) Close() error { return nil }
 
 // A server→client request (workspace/configuration, client/registerCapability)
 // carries a method *and* an id. Treating it as a reply returned an empty result
-// and reported success.
-func TestCallSkipsServerRequestWithID(t *testing.T) {
+// and reported success — and simply skipping it deadlocks, because gopls waits
+// for the answer before finishing the request we are blocked on.
+func TestCallAnswersConfigurationRequest(t *testing.T) {
 	frames := lspFrames(
-		`{"jsonrpc":"2.0","id":42,"method":"workspace/configuration","params":{}}`,
+		`{"jsonrpc":"2.0","id":42,"method":"workspace/configuration","params":{"items":[{"section":"gopls"}]}}`,
 		`{"jsonrpc":"2.0","id":1,"result":{"contents":"doc"}}`,
 	)
-	raw, err := fakeClient(frames).call(context.Background(), "textDocument/hover", map[string]any{})
+	c, wrote := fakeClient(frames)
+	raw, err := c.call(context.Background(), "textDocument/hover", map[string]any{})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -48,6 +51,34 @@ func TestCallSkipsServerRequestWithID(t *testing.T) {
 	}
 	if err := json.Unmarshal(raw, &res); err != nil || res.Contents != "doc" {
 		t.Fatalf("result was not our reply: %q (%v)", raw, err)
+	}
+	sent := wrote.String()
+	if !strings.Contains(sent, `"id":42`) {
+		t.Fatalf("configuration request was not answered — deadlock risk:\n%s", sent)
+	}
+	// LSP defines null per item as "no configuration"; an error here makes
+	// some servers log and fall back noisily.
+	if strings.Contains(sent, "-32601") {
+		t.Fatalf("workspace/configuration should get null config, not an error:\n%s", sent)
+	}
+	if !strings.Contains(sent, "Content-Length:") {
+		t.Fatalf("reply was not LSP-framed:\n%s", sent)
+	}
+}
+
+// An unsupported server request still has to be answered, with -32601.
+func TestCallRejectsUnsupportedServerRequest(t *testing.T) {
+	frames := lspFrames(
+		`{"jsonrpc":"2.0","id":7,"method":"window/showMessageRequest","params":{}}`,
+		`{"jsonrpc":"2.0","id":1,"result":{"contents":"doc"}}`,
+	)
+	c, wrote := fakeClient(frames)
+	if _, err := c.call(context.Background(), "textDocument/hover", map[string]any{}); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	sent := wrote.String()
+	if !strings.Contains(sent, `"id":7`) || !strings.Contains(sent, "-32601") {
+		t.Fatalf("unsupported request not rejected:\n%s", sent)
 	}
 }
 
@@ -58,7 +89,8 @@ func TestCallSkipsStaleReplyID(t *testing.T) {
 		`{"jsonrpc":"2.0","id":9,"result":{"contents":"stale"}}`,
 		`{"jsonrpc":"2.0","id":1,"result":{"contents":"fresh"}}`,
 	)
-	raw, err := fakeClient(frames).call(context.Background(), "textDocument/hover", map[string]any{})
+	c, _ := fakeClient(frames)
+	raw, err := c.call(context.Background(), "textDocument/hover", map[string]any{})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -76,7 +108,8 @@ func TestCallSkipsNotificationAndReportsError(t *testing.T) {
 		`{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{}}`,
 		`{"jsonrpc":"2.0","id":1,"error":{"message":"no server"}}`,
 	)
-	_, err := fakeClient(frames).call(context.Background(), "textDocument/hover", map[string]any{})
+	c, _ := fakeClient(frames)
+	_, err := c.call(context.Background(), "textDocument/hover", map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "no server") {
 		t.Fatalf("err = %v, want the server error", err)
 	}

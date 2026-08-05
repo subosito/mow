@@ -278,7 +278,14 @@ func startServer(s ServerConfig) (*client, error) {
 		_ = c.Close()
 		return nil, err
 	}
-	_ = c.notify("notifications/initialized", map[string]any{})
+	// MCP requires this notification before any other request. A write failure
+	// here means the pipe is already gone, so the server never leaves the
+	// initializing state and every later call would block or fail with a
+	// confusing error instead of naming the real cause.
+	if err := c.notify("notifications/initialized", map[string]any{}); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("initialized notification: %w", err)
+	}
 	return c, nil
 }
 
@@ -352,6 +359,13 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		if err := json.Unmarshal(line, &msg); err != nil {
 			continue
 		}
+		// Server→client request: it needs an answer before the server can
+		// finish our call. Ignoring it deadlocks — the server waits for a
+		// reply we never send while we wait for a response it never sends.
+		if msg.isRequest() {
+			c.rejectRequest(msg.ID, msg.Method)
+			continue
+		}
 		if !msg.isReplyTo(id) {
 			continue
 		}
@@ -360,6 +374,36 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		}
 		return msg.Result, nil
 	}
+}
+
+// rejectRequest answers a server→client request we do not implement.
+//
+// mow advertises empty capabilities, so a conforming server should not send
+// sampling/roots/elicitation at all — but ping is always allowed and a buggy
+// server may ask anyway. A -32601 keeps the server unblocked; silence would
+// hang the call that is waiting behind it. Errors are ignored: the write can
+// only fail when the pipe is gone, which the pending read reports.
+func (c *client) rejectRequest(id json.RawMessage, method string) {
+	if method == "ping" {
+		// Ping must be answered with an empty result, not an error.
+		_ = c.writeRaw(map[string]any{"jsonrpc": "2.0", "id": id, "result": map[string]any{}})
+		return
+	}
+	_ = c.writeRaw(map[string]any{
+		"jsonrpc": "2.0", "id": id,
+		"error": map[string]any{"code": -32601, "message": "method not supported by mow: " + method},
+	})
+}
+
+// writeRaw sends one frame. The caller already holds c.mu.
+func (c *client) writeRaw(v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	_, err = c.stdin.Write(raw)
+	return err
 }
 
 // rpcMessage is any inbound JSON-RPC frame: a response to one of our calls, a
@@ -371,6 +415,13 @@ type rpcMessage struct {
 		Message string `json:"message"`
 	} `json:"error"`
 	Method string `json:"method"`
+}
+
+// isRequest reports whether this frame is a server→client request: it carries
+// a method (so it is not a response) and an id (so it expects an answer).
+// Notifications carry a method with no id and need no reply.
+func (m rpcMessage) isRequest() bool {
+	return m.Method != "" && len(m.ID) > 0 && string(m.ID) != "null"
 }
 
 // isReplyTo reports whether this frame answers the call with id want.

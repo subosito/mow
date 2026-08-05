@@ -384,6 +384,13 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		if err := json.Unmarshal(buf, &msg); err != nil {
 			continue
 		}
+		// Server→client request: gopls issues workspace/configuration and
+		// client/registerCapability while preparing a result, and waits for
+		// the answer. Skipping it deadlocks the call queued behind it.
+		if msg.isRequest() {
+			c.answerRequest(msg.ID, msg.Method)
+			continue
+		}
 		if !msg.isReplyTo(id) {
 			continue
 		}
@@ -392,6 +399,50 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		}
 		return msg.Result, nil
 	}
+}
+
+// answerRequest replies to a server→client request so the server can proceed.
+//
+// workspace/configuration gets one null per requested item, which LSP defines
+// as "no configuration" — a -32601 there makes some servers log an error and
+// fall back anyway. Registration requests get an empty result (accepted, we
+// simply do not act on dynamic capabilities). Everything else gets -32601.
+// Write errors are ignored: the pending read reports a broken pipe.
+func (c *client) answerRequest(id json.RawMessage, method string) {
+	switch method {
+	case "workspace/configuration":
+		// One null entry is the safe universal answer; servers tolerate a
+		// shorter array by treating the rest as unset.
+		_ = c.writeMessage(map[string]any{"jsonrpc": "2.0", "id": id, "result": []any{nil}})
+	case "client/registerCapability", "client/unregisterCapability",
+		"window/workDoneProgress/create":
+		_ = c.writeMessage(map[string]any{"jsonrpc": "2.0", "id": id, "result": nil})
+	default:
+		_ = c.writeMessage(map[string]any{
+			"jsonrpc": "2.0", "id": id,
+			"error": map[string]any{"code": -32601, "message": "method not supported by mow: " + method},
+		})
+	}
+}
+
+// writeMessage sends one Content-Length framed message. Caller holds c.mu.
+func (c *client) writeMessage(v any) error {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(c.stdin, fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))); err != nil {
+		return err
+	}
+	_, err = c.stdin.Write(body)
+	return err
+}
+
+// isRequest reports whether this frame is a server→client request: it carries
+// a method (so it is not a response) and an id (so it expects an answer).
+// Notifications carry a method with no id and need no reply.
+func (m rpcMessage) isRequest() bool {
+	return m.Method != "" && len(m.ID) > 0 && string(m.ID) != "null"
 }
 
 // rpcMessage is any inbound JSON-RPC frame. A language server interleaves

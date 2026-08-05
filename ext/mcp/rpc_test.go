@@ -27,10 +27,13 @@ func (nopWriteCloser) Close() error { return nil }
 // A server→client request (sampling/createMessage, roots/list, …) carries both
 // a method and an id. It is not a reply, and returning it as one handed the
 // caller an empty result while reporting success.
-func TestCallSkipsServerRequestWithID(t *testing.T) {
+//
+// It must also be ANSWERED: the server can be waiting on it before it finishes
+// our call, so silently skipping it deadlocks both sides.
+func TestCallAnswersServerRequestAndKeepsWaiting(t *testing.T) {
 	frames := `{"jsonrpc":"2.0","id":99,"method":"sampling/createMessage","params":{}}` + "\n" +
 		`{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}` + "\n"
-	c, _ := fakeStdio(t, frames)
+	c, wrote := fakeStdio(t, frames)
 
 	raw, err := c.call(context.Background(), "tools/list", map[string]any{})
 	if err != nil {
@@ -41,6 +44,33 @@ func TestCallSkipsServerRequestWithID(t *testing.T) {
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
 		t.Fatalf("result was not our reply: %q (%v)", raw, err)
+	}
+	// The unsupported request got a -32601 keyed to ITS id, not ours.
+	sent := wrote.String()
+	if !strings.Contains(sent, "-32601") {
+		t.Fatalf("server request was not answered — deadlock risk:\n%s", sent)
+	}
+	if !strings.Contains(sent, `"id":99`) {
+		t.Fatalf("rejection did not echo the server's id:\n%s", sent)
+	}
+}
+
+// Ping is always legal regardless of negotiated capabilities and must get an
+// empty result, not an error.
+func TestCallAnswersPingWithResult(t *testing.T) {
+	frames := `{"jsonrpc":"2.0","id":42,"method":"ping"}` + "\n" +
+		`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n"
+	c, wrote := fakeStdio(t, frames)
+
+	if _, err := c.call(context.Background(), "tools/list", map[string]any{}); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	sent := wrote.String()
+	if !strings.Contains(sent, `"id":42`) {
+		t.Fatalf("ping not answered:\n%s", sent)
+	}
+	if strings.Contains(sent, "-32601") {
+		t.Fatalf("ping must get a result, not an error:\n%s", sent)
 	}
 }
 
