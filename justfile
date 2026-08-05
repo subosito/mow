@@ -5,14 +5,25 @@ default:
 # Keep these steps in sync with CI so failures surface locally, not on push.
 verify: vet test-race build
 
-# Fast inner-loop tests (no race detector).
+# Fast inner-loop tests (no race detector). Covers the root module and the
+# packs/ submodule (go.work wires them together for local dev).
 test:
     go test ./...
+    cd packs && go test ./...
 
 # What CI actually runs. The race detector catches unsynchronized test
 # helpers that plain `go test` happily lets through.
 test-race:
     go test -race ./...
+    cd packs && go test -race ./...
+
+vet:
+    go vet ./...
+    cd packs && go vet ./...
+
+build:
+    mkdir -p bin
+    go build -o bin/mow ./cmd/mow
 
 # Closest local approximation of a CI run: no developer credentials and an
 # empty MOW_HOME. CI has no API key, so tests that build an Engine fail there
@@ -35,13 +46,9 @@ verify-ci:
         -u MOW_MODEL -u OPENAI_MODEL -u ANTHROPIC_MODEL \
         MOW_HOME="$tmp/.mow" HOME="$tmp" \
         go test -race -count=1 ./...
+    env -u MOW_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+        -u MOW_MODEL -u OPENAI_MODEL -u ANTHROPIC_MODEL \
+        MOW_HOME="$tmp/.mow" HOME="$tmp" \
+        bash -c 'cd packs && go vet ./... && go test -race -count=1 ./...'
     go build -o bin/mow ./cmd/mow
     echo "→ verify-ci ok"
-
-vet:
-    go vet ./...
-
-build:
-    mkdir -p bin
-    go build -o bin/mow ./cmd/mow
-    @echo "→ bin/mow"

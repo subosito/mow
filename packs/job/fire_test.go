@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/subosito/mow"
-	"github.com/subosito/mow/ext/job"
+	"github.com/subosito/mow/packs/job"
 )
 
 func TestEveryFiresImmediately(t *testing.T) {

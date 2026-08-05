@@ -3,7 +3,7 @@
 // reads, allowlisted restart/status, ACP peers for code fixes, and mow ops run.
 // Each run tick is meant to detect issues and remediate (not only classify logs).
 //
-//	import _ "github.com/subosito/mow/ext/ops"
+//	import _ "github.com/subosito/mow/packs/ops"
 //
 // Profile name is always explicit: mow ops run NAME, tool arg ops=, or MOW_OPS.
 // Pack settings (root, default log caps): extensions.ops.

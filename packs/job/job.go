@@ -1,6 +1,6 @@
 // Package job runs interval or cron jobs that invoke goals or one-shot prompts.
 //
-//	import _ "github.com/subosito/mow/ext/job"
+//	import _ "github.com/subosito/mow/packs/job"
 //
 // Ways to schedule:
 //   - Inline CLI (no file): mow job --every 10m --prompt "…" [engine flags]
@@ -20,7 +20,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/subosito/mow"
-	"github.com/subosito/mow/ext/goal"
+	"github.com/subosito/mow/packs/goal"
 )
 
 // Job is one recurring unit of work (an entry under schedules).

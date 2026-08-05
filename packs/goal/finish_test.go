@@ -3,7 +3,7 @@ package goal_test
 import (
 	"testing"
 
-	"github.com/subosito/mow/ext/goal"
+	"github.com/subosito/mow/packs/goal"
 )
 
 func TestParseStatusJSON(t *testing.T) {

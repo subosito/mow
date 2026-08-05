@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/subosito/mow"
-	"github.com/subosito/mow/ext/goal"
+	"github.com/subosito/mow/packs/goal"
 )
 
 // gate blocks each chat call until `want` calls are in flight at once, which

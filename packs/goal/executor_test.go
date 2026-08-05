@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/subosito/mow"
-	"github.com/subosito/mow/ext/goal"
+	"github.com/subosito/mow/packs/goal"
 )
 
 func TestExecutorPlanThenDone(t *testing.T) {

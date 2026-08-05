@@ -61,7 +61,9 @@ Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool batches: `policy.max_
 | `mow` (root `*.go`) | Public Engine API (`engine_*.go`, `run.go`, `hooks.go`, `event.go`) |
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
 | `packcfg/` | Decode `extensions.<name>` (**not** a pack) |
-| `ext/` | Registration (`ext.go`) + packs: acp, rpc, goal, review, mcp, lsp, job, ops, proc, cmdhook |
+| `ext/` | Registration (`ext.go`) + core packs: acp, mcp, proc, rpc, cmdhook, eval |
+| `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): goal, review, ops, lsp, job |
+| `otel/` | OTLP export (config-driven; **not** a pack) |
 | `internal/` | Implementation — **not** an integrator import surface |
 | `cmd/mow/` | Thin CLI; blank-imports packs |
 | `docs/` | architecture, harness, extensions |
@@ -72,6 +74,11 @@ do not tell them to import `internal/`.
 ## Packs
 
 - Stock binary links packs via blank import in `cmd/mow/main.go`.
+- Core packs live in `ext/` (part of the root module): acp, mcp, proc, rpc,
+  cmdhook, eval.
+- Optional packs live in `packs/` (separate Go module
+  `github.com/subosito/mow/packs`): goal, review, ops, lsp, job.
+- `go.work` wires the root module and `packs/` together for local dev.
 - Remove import → subcommand/tools gone.
 - Pack config: `extensions.<name>` via `Engine.Extension` or `packcfg.DecodeSection`.
 - MCP/LSP only activate when configured (no config → no process).

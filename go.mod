@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/creack/pty v1.1.24
+	github.com/subosito/mow/packs v0.0.0
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0
@@ -13,6 +14,8 @@ require (
 	go.opentelemetry.io/otel/trace v1.43.0
 	gopkg.in/yaml.v3 v3.0.1
 )
+
+replace github.com/subosito/mow/packs => ./packs
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/subosito/mow"
-	"github.com/subosito/mow/ext/goal"
+	"github.com/subosito/mow/packs/goal"
 )
 
 func TestParseCronErrorsAndEdgeCases(t *testing.T) {

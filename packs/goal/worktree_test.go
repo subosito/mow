@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/subosito/mow"
-	"github.com/subosito/mow/ext/goal"
+	"github.com/subosito/mow/packs/goal"
 )
 
 // gitCmd runs a git command in dir and fails the test on error.

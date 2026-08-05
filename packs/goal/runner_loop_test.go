@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/subosito/mow"
-	"github.com/subosito/mow/ext/goal"
+	"github.com/subosito/mow/packs/goal"
 )
 
 // goal_report must end the Prompt in one chat call (ErrAgentDone) and complete

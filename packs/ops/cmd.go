@@ -11,7 +11,7 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
-	"github.com/subosito/mow/ext/job"
+	"github.com/subosito/mow/packs/job"
 )
 
 // opsCmd is the mow ops entrypoint.

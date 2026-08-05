@@ -9,12 +9,12 @@ import (
 	"strings"
 
 	"github.com/subosito/mow"
-	iproc "github.com/subosito/mow/internal/proc"
 )
 
-// Goal-scoped background process tools. The mechanism lives in internal/proc
-// (shared with ext/proc); these tools just scope storage to the goal dir and
-// gate on an active goal.
+// Goal-scoped background process tools. The mechanism is re-exported from
+// internal/proc via the public mow.Proc* API (packs/ lives in a separate
+// Go module and cannot import internal/). These tools scope storage to the
+// goal dir and gate on an active goal.
 
 // processScope is carried on the step context for process tools.
 type processScope struct {
@@ -71,8 +71,8 @@ func (procStartTool) Exec(ctx context.Context, args json.RawMessage) (string, er
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	info, err := iproc.Start(procDir(scope.Root, scope.GoalID), a.ID, a.Command, a.Log, "")
-	if errors.Is(err, iproc.ErrAlreadyRunning) {
+	info, err := mow.ProcStart(procDir(scope.Root, scope.GoalID), a.ID, a.Command, a.Log, "")
+	if errors.Is(err, mow.ProcErrAlreadyRunning) {
 		return fmt.Sprintf("already running id=%s pid=%d", info.ID, info.PID), nil
 	}
 	if err != nil {
@@ -102,14 +102,14 @@ func (procStatusTool) Exec(ctx context.Context, args json.RawMessage) (string, e
 	var a struct{ ID string }
 	_ = json.Unmarshal(args, &a)
 	dir := procDir(scope.Root, scope.GoalID)
-	if id := iproc.SanitizeID(a.ID); id != "" {
-		info, err := iproc.Status(dir, id)
+	if id := mow.ProcSanitizeID(a.ID); id != "" {
+		info, err := mow.ProcStatus(dir, id)
 		if err != nil {
 			return fmt.Sprintf("id=%s not found", id), nil
 		}
 		return fmt.Sprintf("id=%s pid=%d status=%s", info.ID, info.PID, procState(info.Alive)), nil
 	}
-	list, err := iproc.List(dir)
+	list, err := mow.ProcList(dir)
 	if err != nil {
 		return "", err
 	}
@@ -141,11 +141,11 @@ func (procStopTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	id := iproc.SanitizeID(a.ID)
+	id := mow.ProcSanitizeID(a.ID)
 	if id == "" {
 		return "", fmt.Errorf("id required")
 	}
-	info, err := iproc.Stop(procDir(scope.Root, scope.GoalID), id)
+	info, err := mow.ProcStop(procDir(scope.Root, scope.GoalID), id)
 	if err != nil {
 		return fmt.Sprintf("id=%s not found", id), nil
 	}

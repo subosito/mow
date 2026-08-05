@@ -26,13 +26,13 @@ import (
 	_ "github.com/subosito/mow/otel" // config-driven OTLP when otel.endpoint set
 	_ "github.com/subosito/mow/ext/cmdhook"
 	_ "github.com/subosito/mow/ext/eval"
-	_ "github.com/subosito/mow/ext/goal"
-	_ "github.com/subosito/mow/ext/job"
-	_ "github.com/subosito/mow/ext/lsp"
+	_ "github.com/subosito/mow/packs/goal"
+	_ "github.com/subosito/mow/packs/job"
+	_ "github.com/subosito/mow/packs/lsp"
 	_ "github.com/subosito/mow/ext/mcp"
-	_ "github.com/subosito/mow/ext/ops"
+	_ "github.com/subosito/mow/packs/ops"
 	_ "github.com/subosito/mow/ext/proc"
-	_ "github.com/subosito/mow/ext/review"
+	_ "github.com/subosito/mow/packs/review"
 	_ "github.com/subosito/mow/ext/rpc"
 )
 

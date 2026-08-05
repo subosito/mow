@@ -1,7 +1,7 @@
 // Package goal is a headless outer loop over mow.Engine: work a goal across
 // multiple Prompt turns until done, failed, or max steps.
 //
-//	import _ "github.com/subosito/mow/ext/goal"   // registers `mow goal`
+//	import _ "github.com/subosito/mow/packs/goal"   // registers `mow goal`
 //
 // Core stays one Prompt / one tool loop. This pack only orchestrates.
 // Hosts (RPC, embedders, …) may Subscribe to events; none are required.
