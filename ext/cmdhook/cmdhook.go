@@ -129,11 +129,13 @@ type compiled struct {
 }
 
 type bridge struct {
-	name     string
-	root     string
-	timeout  time.Duration
-	minTurns int
-	events   map[string][]compiled
+	name           string
+	root           string
+	timeout        time.Duration
+	minTurns       int
+	events         map[string][]compiled
+	mu             sync.Mutex
+	sessionStarted bool
 }
 
 var (
@@ -359,6 +361,30 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 	return ho, false, "", true
 }
 
+func (b *bridge) runSessionStart(ctx context.Context) string {
+	b.mu.Lock()
+	b.sessionStarted = true
+	b.mu.Unlock()
+
+	if len(b.events["SessionStart"]) == 0 {
+		return ""
+	}
+	payload := b.basePayload(ctx, "SessionStart")
+	payload["source"] = "startup"
+	out := b.run(ctx, "SessionStart", "", payload)
+	return strings.Join(out.contexts, "\n\n")
+}
+
+func (b *bridge) runSessionStartIfNeeded(ctx context.Context) string {
+	b.mu.Lock()
+	already := b.sessionStarted
+	b.mu.Unlock()
+	if already {
+		return ""
+	}
+	return b.runSessionStart(ctx)
+}
+
 func (b *bridge) register() {
 	ext.RegisterExtensionInstance("cmdhook", b.name, b.minTurns)
 	target := "cmdhook:" + b.name
@@ -414,6 +440,7 @@ func (b *bridge) register() {
 			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return ext.UserPromptDecision{}, nil
 			}
+			sysStart := b.runSessionStartIfNeeded(ctx)
 			payload := b.basePayload(ctx, "UserPromptSubmit")
 			payload["prompt"] = e.Text
 			if e.SessionID != "" {
@@ -426,7 +453,11 @@ func (b *bridge) register() {
 			if out.blocked {
 				return ext.UserPromptDecision{}, fmt.Errorf("cmdhook: prompt blocked: %s", out.reason)
 			}
-			return ext.UserPromptDecision{SystemAppend: strings.Join(out.contexts, "\n\n")}, nil
+			appends := out.contexts
+			if sysStart != "" {
+				appends = append([]string{sysStart}, appends...)
+			}
+			return ext.UserPromptDecision{SystemAppend: strings.Join(appends, "\n\n")}, nil
 		})
 	}
 	if len(b.events["SessionStart"]) > 0 {
@@ -434,14 +465,8 @@ func (b *bridge) register() {
 			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return ext.SessionStartDecision{}, nil
 			}
-			payload := map[string]any{
-				"hook_event_name": "SessionStart",
-				"session_id":      e.SessionID,
-				"cwd":             e.Workspace,
-				"source":          "startup",
-			}
-			out := b.run(ctx, "SessionStart", "", payload)
-			return ext.SessionStartDecision{SystemAppend: strings.Join(out.contexts, "\n\n")}, nil
+			sys := b.runSessionStart(ctx)
+			return ext.SessionStartDecision{SystemAppend: sys}, nil
 		})
 	}
 	if len(b.events["Stop"]) > 0 {

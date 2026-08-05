@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/subosito/mow"
+	"github.com/subosito/mow/ext"
 )
 
 // EngineFlags are common flags for any command that constructs a mow.Engine.
@@ -30,6 +31,8 @@ type EngineFlags struct {
 	Continue    bool
 	Stream      bool
 	Verbose     bool
+	EnableExt   []string // repeatable --enable-ext
+	DisableExt  []string // repeatable --disable-ext
 }
 
 // Bind registers flags on fs.
@@ -49,6 +52,8 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.BoolVar(&f.Continue, "continue", false, "resume latest session")
 	fs.BoolVar(&f.Stream, "stream", false, "stream token deltas")
 	fs.BoolVar(&f.Verbose, "verbose", false, "debug lifecycle logs (run/tool) on stderr")
+	fs.Var((*stringList)(&f.EnableExt), "enable-ext", "force enable extension instance by name (repeatable)")
+	fs.Var((*stringList)(&f.DisableExt), "disable-ext", "force disable extension instance by name (repeatable)")
 }
 
 // stringList is a repeatable flag.String-like value (append on each Set).
@@ -137,6 +142,12 @@ func (f *EngineFlags) Options() mow.Options {
 
 // NewEngine runs BeforeNew hooks and constructs an Engine.
 func (f *EngineFlags) NewEngine() (*mow.Engine, error) {
+	for _, name := range f.EnableExt {
+		ext.SetExtensionEnabled(name, true)
+	}
+	for _, name := range f.DisableExt {
+		ext.SetExtensionEnabled(name, false)
+	}
 	return mow.New(f.Options())
 }
 
