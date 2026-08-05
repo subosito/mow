@@ -69,7 +69,9 @@ func TestListModelsParsesFacet(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{"id": "model-x", "wire": "openai-responses", "facet": "chat"},
+				{"id": "model-alias", "wires": []string{"openai-responses"}, "facet": "chat", "models": []string{"model-x"}},
 				{"id": "model-x:search", "wire": "openai-responses", "facet": "search"},
+				{"id": "reviewers", "object": "model_group", "models": []string{"model-x"}},
 			},
 		})
 	}))
@@ -86,10 +88,16 @@ func TestListModelsParsesFacet(t *testing.T) {
 	if byID["model-x"].Facet != "chat" {
 		t.Fatalf("chat facet: %+v", byID["model-x"])
 	}
-	// Non-chat facets (model groups, search facets) are filtered out of the
-	// list and the catalog so pickers never offer a non-callable model.
+	if got := byID["model-alias"].Wire; got != llm.WireOpenAIResponses {
+		t.Fatalf("alias preferred wire=%q want %q", got, llm.WireOpenAIResponses)
+	}
+	// Non-chat facets and discovery-only model groups are filtered out of
+	// the list and catalog so pickers never offer a non-callable model.
 	if _, ok := byID["model-x:search"]; ok {
 		t.Fatalf("search facet should be filtered: %+v", byID["model-x:search"])
+	}
+	if _, ok := byID["reviewers"]; ok {
+		t.Fatalf("model_group should be filtered: %+v", byID["reviewers"])
 	}
 }
 

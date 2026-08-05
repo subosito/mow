@@ -16,9 +16,11 @@ import (
 // ContextWindow / Pricing come from gateway catalogs — not client speculation.
 type ModelInfo struct {
 	ID      string   `json:"id"`
+	Object  string   `json:"object,omitempty"` // "model" or discovery-only "model_group"
 	OwnedBy string   `json:"owned_by,omitempty"`
 	Wire    string   `json:"wire,omitempty"`  // preferred chat wire
 	Wires   []string `json:"wires,omitempty"` // all registered wires
+	Models  []string `json:"models,omitempty"` // composite hops or model_group members
 	// Efforts lists allowed reasoning-effort values when the gateway advertises them.
 	// When non-empty, clients should validate SetEffort against this list instead of
 	// a static none|low|medium|high set.
@@ -129,9 +131,11 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		seen[id] = true
 		info := ModelInfo{
 			ID:              id,
+			Object:          strings.TrimSpace(m.Object),
 			OwnedBy:         m.OwnedBy,
-			Wire:            strings.TrimSpace(m.Wire),
-			Wires:           m.Wires,
+			Wire:            preferredCatalogWire(m.Wire, m.Wires),
+			Wires:           append([]string(nil), m.Wires...),
+			Models:          append([]string(nil), m.Models...),
 			DefaultEffort:   strings.TrimSpace(m.DefaultEffort),
 			Facet:           strings.TrimSpace(m.Facet),
 			ContextWindow:   m.ContextWindow,
@@ -155,11 +159,14 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 
 // filterChatModels drops catalog entries that are not callable chat models
 // (model groups, media-only facets, etc.). A model is callable for chat
-// when its facet is empty/"chat" and its wire (if set) is a known chat wire.
-// Plain catalogs (id only, no facet, no wire) pass through.
+// when object is not "model_group", its facet is empty/"chat", and its wire
+// (if set) is a known chat wire. Plain catalogs (id only) pass through.
 func filterChatModels(list []ModelInfo) []ModelInfo {
 	var out []ModelInfo
 	for _, m := range list {
+		if strings.EqualFold(strings.TrimSpace(m.Object), "model_group") {
+			continue
+		}
 		if f := strings.ToLower(strings.TrimSpace(m.Facet)); f != "" && f != "chat" {
 			continue
 		}
@@ -169,6 +176,23 @@ func filterChatModels(list []ModelInfo) []ModelInfo {
 		out = append(out, m)
 	}
 	return out
+}
+
+// preferredCatalogWire keeps an explicit preferred wire, or derives one from
+// wires metadata for aliases/composites that publish only the supported set.
+// This keeps model picker labels and SetModelWithWire useful for those rows.
+func preferredCatalogWire(wire string, wires []string) string {
+	if wire = strings.TrimSpace(wire); wire != "" {
+		return wire
+	}
+	for _, preferred := range []string{WireOpenAIChat, WireAnthropicMsg, WireOpenAIResponses} {
+		for _, candidate := range wires {
+			if NormalizeWire(candidate) == preferred {
+				return preferred
+			}
+		}
+	}
+	return ""
 }
 
 func modelsURL(baseURL string) string {
