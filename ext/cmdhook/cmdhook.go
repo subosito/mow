@@ -299,6 +299,7 @@ func (b *bridge) run(ctx context.Context, event, matchName string, payload map[s
 				}
 			}
 			if s := strings.TrimSpace(hs.AdditionalContext); s != "" {
+				s = normalizeClaudeToolNames(s, b.name)
 				out.contexts = append(out.contexts, s)
 			}
 			if len(hs.UpdatedInput) > 0 {
@@ -383,6 +384,22 @@ func (b *bridge) runSessionStartIfNeeded(ctx context.Context) string {
 		return ""
 	}
 	return b.runSessionStart(ctx)
+}
+
+func normalizeClaudeToolNames(text, pluginName string) string {
+	if text == "" {
+		return text
+	}
+	replacements := []string{
+		"mcp__plugin_" + pluginName + "_" + pluginName + "__", "mcp_" + pluginName + "_",
+		"mcp__" + pluginName + "__", "mcp_" + pluginName + "_",
+		"mcp__" + pluginName + "_", "mcp_" + pluginName + "_",
+	}
+	res := text
+	for i := 0; i < len(replacements); i += 2 {
+		res = strings.ReplaceAll(res, replacements[i], replacements[i+1])
+	}
+	return res
 }
 
 func (b *bridge) register() {

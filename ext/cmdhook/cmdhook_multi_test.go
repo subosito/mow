@@ -101,3 +101,12 @@ func TestMultiPluginConfigAndMinTurns(t *testing.T) {
 		t.Errorf("hook 0 (p1) should be disabled after manual toggle off, got append=%q", d1_disabled.SystemAppend)
 	}
 }
+
+func TestNormalizeClaudeToolNames(t *testing.T) {
+	in := "Use mcp__plugin_context-mode_context-mode__ctx_execute and mcp__context-mode__ctx_search"
+	got := normalizeClaudeToolNames(in, "context-mode")
+	want := "Use mcp_context-mode_ctx_execute and mcp_context-mode_ctx_search"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
