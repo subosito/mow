@@ -560,7 +560,7 @@ Core:
 		fmt.Fprintln(os.Stderr, "  (each pack: mow <pack> help)")
 		fmt.Fprintln(os.Stderr)
 	}
-	fmt.Fprintf(os.Stderr, `Common flags (also -long):
+	fmt.Fprintf(os.Stderr, `Common flags:
 
   --config --workspace --model --effort --base-url
   --allow-shell --allow-write --max-turns --stream --verbose

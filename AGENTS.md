@@ -171,7 +171,6 @@ Also apply **Public samples (OSS)** above when the commit includes docs or fixtu
 ## Gotchas
 
 - Always `devenv shell --` for go/just when `devenv.nix` is present.
-- CLI help shows `--long` flags; stdlib also accepts `-long`.
 - Engine split: `engine.go` (New), `engine_prompt.go`, `engine_model.go`,
   `engine_control.go`, `engine_adapt.go`, `run.go` (Options/Run).
 - The root module stays headless and lean. Interactive UI code lives in the
