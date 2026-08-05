@@ -560,8 +560,8 @@ func TestHeaderWorkspaceOnLeft(t *testing.T) {
 	}
 }
 
-// The header's true-total chip includes delegated peer spend, marked with the
-// ⇄ peer glyph; /status breaks out the peer share.
+// The header shows one compact reported-usage total; /status carries the
+// transparent host and peer breakdown.
 func TestHeaderShowsPeerTokenShare(t *testing.T) {
 	eng := testEngine(t)
 	m := newModel(eng, false, false)
@@ -582,9 +582,18 @@ func TestHeaderShowsPeerTokenShare(t *testing.T) {
 	}
 
 	hdr := m.renderHeader()
-	// Host and peer usage stay separate because peers may omit usage and their
-	// pricing is not known to this engine.
-	if !strings.Contains(xansi.Strip(hdr), "120.0k ⇄ 35.0k") {
-		t.Fatalf("header missing host total + peer share: %q", xansi.Strip(hdr))
+	plain := xansi.Strip(hdr)
+	if !strings.Contains(plain, "tok 155.0k") {
+		t.Fatalf("header missing combined reported total: %q", plain)
+	}
+	status := m.reportedUsageStatus()
+	for _, want := range []string{
+		"usage reported this run · 155.0k total",
+		"host · 100.0k in · 20.0k out",
+		"peers · 30.0k in · 5.0k out",
+	} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("status missing %q: %q", want, status)
+		}
 	}
 }

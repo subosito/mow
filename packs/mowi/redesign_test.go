@@ -149,6 +149,28 @@ func TestRetryEditRecall(t *testing.T) {
 }
 
 // Without gateway Limits, header shows tokens only (no invented ctx%/cost).
+func TestHeaderFormatsModelEffort(t *testing.T) {
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Model:     "gpt-5-mini",
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(eng, false, false)
+	if err := m.eng.SetEffort("high"); err != nil {
+		t.Fatal(err)
+	}
+	m.width = 120
+	hdr := xansi.Strip(m.renderHeader())
+	if !strings.Contains(hdr, "gpt-5-mini (high)") {
+		t.Fatalf("header should format model (effort): %q", hdr)
+	}
+}
+
 func TestHeaderTokensWithoutGatewayLimits(t *testing.T) {
 	t.Setenv("MOW_HOME", t.TempDir())
 	eng, err := mow.New(mow.Options{
@@ -171,8 +193,8 @@ func TestHeaderTokensWithoutGatewayLimits(t *testing.T) {
 	m.showWelcome = false
 	m.tokIn, m.tokOut = 100_000, 50
 	hdr := xansi.Strip(m.renderHeader())
-	// Token chip is just the number (no 'tok' suffix): 100050 -> 100.0k.
-	if !strings.Contains(hdr, "100.0k") {
+	// Header combines all reported usage and labels the metric explicitly.
+	if !strings.Contains(hdr, "tok 100.0k") {
 		t.Fatalf("header missing token chip: %q", hdr)
 	}
 	// Injected Chat has no /v1/models catalog → no speculative chips.

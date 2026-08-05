@@ -2713,11 +2713,8 @@ func (m *model) handleSlash(cmd string) tea.Cmd {
 		if m.goalLive != nil {
 			line += " · " + goalHeaderChip(m.goalLive)
 		}
-		if m.tokIn+m.tokOut+m.peerTokIn+m.peerTokOut > 0 {
-			line += " · " + formatTokens(m.tokIn) + " in · " + formatTokens(m.tokOut) + " out"
-			if pt := m.peerTokIn + m.peerTokOut; pt > 0 {
-				line += " · " + glyphPeer + " " + formatTokens(pt) + " peer"
-			}
+		if usage := m.reportedUsageStatus(); usage != "" {
+			line += "\n" + usage
 		}
 		m.add(kindStatus, line)
 		m.refreshVP()
@@ -3141,6 +3138,21 @@ func (m *model) welcomeView() string {
 	return lipgloss.Place(max(1, m.width), h, lipgloss.Center, lipgloss.Center, full)
 }
 
+func (m *model) reportedUsageStatus() string {
+	total := m.tokIn + m.tokOut + m.peerTokIn + m.peerTokOut
+	if total <= 0 {
+		return ""
+	}
+	lines := []string{
+		"usage reported this run · " + formatTokens(total) + " total",
+		"  host · " + formatTokens(m.tokIn) + " in · " + formatTokens(m.tokOut) + " out",
+	}
+	if peer := m.peerTokIn + m.peerTokOut; peer > 0 {
+		lines = append(lines, "  peers · "+formatTokens(m.peerTokIn)+" in · "+formatTokens(m.peerTokOut)+" out")
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m *model) renderHeader() string {
 	// Quiet header, exactly 2 rows (clamped so soft-wrap cannot steal a row):
 	//   left  = wordmark + workspace dir + active model/effort (identity, stable)
@@ -3157,7 +3169,7 @@ func (m *model) renderHeader() string {
 	if mdl := short(strings.TrimSpace(m.eng.Model()), 32); mdl != "" {
 		left += dot + th.Text.Render(mdl)
 		if effort := short(strings.TrimSpace(m.eng.Effort()), 12); effort != "" {
-			left += " " + th.Muted.Render(effort)
+			left += " " + th.Muted.Render("("+effort+")")
 		}
 	}
 
@@ -3213,13 +3225,10 @@ func (m *model) renderHeader() string {
 		vanity = append(vanity, chip{th.Accent.Render("focus:transcript"), false})
 	}
 	// Token activity observed this process (provider-reported; not a bill).
-	// Peer share stays separate — peers may omit usage and aren't priced here.
-	if tok := m.tokIn + m.tokOut; tok > 0 {
-		label := formatTokens(tok)
-		if pt := m.peerTokIn + m.peerTokOut; pt > 0 {
-			label += " " + glyphPeer + " " + formatTokens(pt)
-		}
-		vanity = append(vanity, chip{th.Muted.Render(label), false})
+	// The header shows one transparent aggregate; /status carries provenance and
+	// the host/peer input-output breakdown.
+	if tok := m.tokIn + m.tokOut + m.peerTokIn + m.peerTokOut; tok > 0 {
+		vanity = append(vanity, chip{th.Muted.Render("tok " + formatTokens(tok)), false})
 	}
 	if gchip := goalHeaderChip(m.goalLive); gchip != "" {
 		vanity = append(vanity, chip{th.Muted.Render(gchip), false})
