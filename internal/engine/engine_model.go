@@ -65,6 +65,7 @@ func (e *Engine) SetModel(id string) error {
 	e.client.Model = id
 	if strings.TrimSpace(e.client.Effort) == "" && eff != "" {
 		e.client.Effort = eff
+		e.client.EffortPinned = true
 	}
 	// Align effort with catalog efforts for this model (default_effort when needed).
 	e.client.SyncEffortToModel(id)
@@ -328,6 +329,8 @@ func (e *Engine) SetEffort(effort string) error {
 	}
 	if e.client != nil {
 		e.client.Effort = norm
+		// An explicit choice must survive later model switches when allowed.
+		e.client.EffortPinned = norm != ""
 	}
 	if e.cfg != nil {
 		e.cfg.LLM.Effort = norm

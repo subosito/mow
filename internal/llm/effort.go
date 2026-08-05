@@ -364,9 +364,13 @@ func (c *Client) DefaultEffortForModel(model string) string {
 	return ""
 }
 
-// SyncEffortToModel ensures engine effort is allowed for model.
-// If current effort is empty or not in catalog efforts, sets default_effort
-// (or clears when default is empty). No-op when model has no efforts metadata.
+// SyncEffortToModel aligns engine effort with a model's catalog metadata.
+//
+// A model switch adopts that model's default_effort: efforts are per-model, so
+// carrying "max" from the previous pick would silently run the new model at an
+// intensity the operator never chose. An effort the operator pinned explicitly
+// (SetEffort / llm.effort) survives the switch when the new model allows it.
+// No-op when the model has no efforts metadata.
 func (c *Client) SyncEffortToModel(model string) {
 	if c == nil {
 		return
@@ -376,12 +380,27 @@ func (c *Client) SyncEffortToModel(model string) {
 		return
 	}
 	cur := strings.ToLower(strings.TrimSpace(c.Effort))
-	if cur != "" {
+	def := strings.ToLower(strings.TrimSpace(c.DefaultEffortForModel(model)))
+	allows := func(v string) bool {
+		if v == "" {
+			return false
+		}
 		for _, a := range allowed {
-			if strings.EqualFold(a, cur) {
-				return
+			if strings.EqualFold(a, v) {
+				return true
 			}
 		}
+		return false
 	}
-	c.Effort = strings.ToLower(strings.TrimSpace(c.DefaultEffortForModel(model)))
+	if c.EffortPinned && allows(cur) {
+		return
+	}
+	if def != "" {
+		c.Effort = def
+		return
+	}
+	if allows(cur) {
+		return
+	}
+	c.Effort = ""
 }

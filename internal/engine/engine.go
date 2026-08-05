@@ -73,8 +73,8 @@ type Engine struct {
 	life     lifeHooks
 	// readOnlyExt marks ext tools that declared ReadOnly() true; only these
 	// (plus builtin read tools) run under PromptOpts.ReadOnly.
-	readOnlyExt     map[string]bool
-	untrustedNonce  string
+	readOnlyExt    map[string]bool
+	untrustedNonce string
 
 	onTokenMu   sync.Mutex
 	onToken     func(string)
@@ -371,6 +371,7 @@ func New(opt Options) (*Engine, error) {
 			APIKey:       key,
 			Model:        cfg.LLM.Model,
 			Effort:       cfg.LLM.Effort,
+			EffortPinned: strings.TrimSpace(cfg.LLM.Effort) != "",
 			HTTP:         opt.HTTPClient,
 			ExtraHeaders: headers,
 			Stream:       cfg.LLM.Stream || opt.Stream,

@@ -194,6 +194,11 @@ type Client struct {
 	// catalog-advertised values). Empty = provider/gateway default.
 	// Applied via body fields; gateways may map effort to upstream model tiers.
 	Effort string
+	// EffortPinned marks Effort as an explicit operator choice (config
+	// llm.effort or SetEffort) rather than a catalog default. A model switch
+	// keeps a pinned effort when the new model allows it, but otherwise adopts
+	// the new model's default_effort.
+	EffortPinned bool
 	// CatalogModels is the lean model catalog from ListModels (id → efforts metadata).
 	// When the active model has Efforts set, SetEffort / ResolveEffort use that list
 	// instead of the static none|low|medium|high set.
