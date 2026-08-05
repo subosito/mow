@@ -33,9 +33,20 @@ type ResourceContents struct {
 }
 
 // materializePrompt turns ACP content blocks into a text prompt for Engine.Prompt.
-// Images/audio/blobs are written under media/acp/ and referenced by path so tools
-// (understand_*) or the model can use them. Non-text blocks are never silently dropped.
+// Images/audio/blobs are written under <workspace>/media/acp/ and referenced by
+// path so tools (understand_*) or the model can use them. Non-text blocks are
+// never silently dropped.
 func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (string, error) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return "", fmt.Errorf("workspace not set")
+	}
+	abs, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", fmt.Errorf("workspace: %w", err)
+	}
+	workspace = abs
+
 	var parts []string
 	var nMedia int
 	stamp := time.Now().Format("20060102-150405")

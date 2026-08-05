@@ -29,7 +29,8 @@ helpers pass plain `go test`. If you add a CI step, add it to `verify` too.
 a developer box has both, so tests that build an Engine can pass locally and
 fail on CI. `verify-ci` runs the suite with credentials unset and a throwaway
 `MOW_HOME`. Packs whose tests construct an Engine need a `TestMain` that pins
-`MOW_HOME`, `MOW_API_KEY`, and `MOW_MODEL` (see `ext/job`, `ext/lsp`).
+`MOW_HOME`, `MOW_API_KEY`, and `MOW_MODEL` (use `testutil.RunWithProvider`; see
+`packs/job`, `packs/lsp`).
 
 **A test may not assume anything is listening on a port.** CI runs no
 collector, database, or peer; a hard-coded `127.0.0.1:PORT` passes only on a
@@ -42,19 +43,23 @@ No separate lint step. Format with `gofmt`. Do not invent Make/npm scripts.
 
 `Engine.Prompt` / `PromptWith`: load config → tools + hooks → agent loop
 (`internal/agent`) → LLM (`internal/llm`) → tools (`internal/tools`) with
-policy jail (`internal/policy`) → session JSONL. Study **`engine.go`** +
-**`engine_prompt.go`** first, then `internal/agent/loop.go`.
+policy jail (`internal/policy`) → session JSONL. Study
+**`internal/engine/engine.go`** + **`internal/engine/engine_prompt.go`** first,
+then `internal/agent/loop.go`.
 
 **System prompt:** `llm.system_prefix` (optional identity) → optional default
 “You are mow” only if no prefix applies → harness rules (always) → project
 AGENTS/skills. See `internal/contextload/harness.go`.
 
-Events: `OnEvent` / `AddOnEvent` / `Emit` (`event.go`; `tool.end` includes `duration_ms`,
-`run.end` includes token usage). Inline `<think>` CoT is stripped by the loop
-(`internal/agent/think.go`) — committed history/sessions are always tag-free.
-Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool batches: `policy.max_parallel_tools` (default 8).
+Events: `OnEvent` / `AddOnEvent` / `Emit` (`internal/engine/event.go`; `tool.end`
+includes `duration_ms`, `run.end` includes token usage). Inline `<think>` CoT is
+stripped by the loop (`internal/agent/think.go`) — committed history/sessions
+are always tag-free. Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool
+batches: `policy.max_parallel_tools` (default 8).
 
 ## Layout
+
+Source of truth for modules and public/internal: [docs/architecture.md](docs/architecture.md).
 
 | Path | Role |
 |------|------|
@@ -62,7 +67,8 @@ Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool batches: `policy.max_
 | `internal/engine/` | Engine implementation and behavior tests |
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
 | `extcfg/` | Decode `extensions.<name>` (shared by extensions and packs) |
-| `ext/` | Registration (`ext.go`) + core packs: acp, mcp, proc, rpc, cmdhook, eval |
+| `testutil/` | Shared test helpers (e.g. pin `$MOW_HOME` for `TestMain`) |
+| `ext/` | Registration (`ext.go`) + core extensions: acp, mcp, proc, rpc, cmdhook, eval |
 | `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): goal, review, ops, lsp, job |
 | `packs/otel/` | OTLP export (nested submodule `github.com/subosito/mow/packs/otel`; config-driven) |
 | `packs/mowi/` | Interactive TUI (nested submodule `github.com/subosito/mow/packs/mowi`; full binary) |
@@ -171,13 +177,13 @@ Also apply **Public samples (OSS)** above when the commit includes docs or fixtu
 ## Gotchas
 
 - Always `devenv shell --` for go/just when `devenv.nix` is present.
-- Engine split: `engine.go` (New), `engine_prompt.go`, `engine_model.go`,
-  `engine_control.go`, `engine_adapt.go`, `run.go` (Options/Run).
+- Engine split under `internal/engine/`: `engine.go` (New), `engine_prompt.go`,
+  `engine_model.go`, `engine_control.go`, `engine_adapt.go`, `run.go` (Options/Run).
 - The root module stays headless and lean. Interactive UI code lives in the
   nested `packs/mowi` module, which depends on the public root API; never import
   TUI dependencies from the root module.
-- Tests isolate `$MOW_HOME` via `main_test.go` (`TestMain`); do not rely on the
-  developer’s real `~/.mow`.
+- Tests isolate `$MOW_HOME` via `TestMain` + `github.com/subosito/mow/testutil`;
+  do not rely on the developer’s real `~/.mow`.
 
 ## Docs map
 

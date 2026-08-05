@@ -26,19 +26,7 @@ devenv shell -- just verify
 devenv shell -- just build    # → bin/mow
 ```
 
-## Decisions (quick index)
-
-| Decision | Doc |
-|----------|-----|
-| Library first; hosts/packs detachable | architecture |
-| Public `mow` + `ext/*` + `cliutil`; impl under `internal/` | architecture, extensions |
-| Packs own subcommands (`RegisterCommand`); CLI helpers in `cliutil` | extensions |
-| ACP agent + `acp_delegate` as pack, not core | extensions |
-| Media: `generate_*` / `understand_*`, filesystem I/O | extensions |
-| Optional attribution labels: `X-Mow-*` | extensions |
-| Goals / MCP / LSP stay packs, not core | extensions |
-| General and security review share one read-only workflow | review |
-
 ## Name
 
-**mow** — agentic harness product name.
+**mow** — agentic harness product name. Design decisions and the full layout
+table live in [architecture.md](architecture.md) and [extensions.md](extensions.md).

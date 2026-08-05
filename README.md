@@ -93,18 +93,16 @@ itself), and never set credentials, endpoints, or power tools.
 
 ## Modules and layout
 
+Four Go modules (`go.work` wires them for local dev). Full public/internal map:
+[docs/architecture.md](docs/architecture.md).
+
 | Path / module | Role |
 |---|---|
-| `mow.go` | Thin public re-export: `mow.Engine`, `mow.Run`, events, hooks, provider APIs |
-| `internal/engine/` | Engine implementation and behavior tests |
-| `cliutil/` | CLI flags → Engine; not a pack |
-| `extcfg/` | Decode `extensions.*`; shared by extensions and packs |
-| `ext/` | Registration plus core extensions: acp, mcp, proc, rpc, cmdhook, eval |
-| `packs/` | Optional module: goal, review, ops, lsp, job |
-| `packs/otel/` | Optional nested OpenTelemetry module |
-| `packs/mowi/` | Optional nested TUI module and `cmd/mowi` full binary |
-| `cmd/mow/` | CLI binary; links ext + optional packs (including OTEL), excluding TUI |
-| `go.work` | Local workspace wiring all four modules |
+| `mow.go` + `internal/` | Public API re-export and implementation |
+| `ext/` + `cliutil/` + `extcfg/` | Core extensions, CLI helpers, extension config decode |
+| `packs/` | Optional packs: goal, review, ops, lsp, job |
+| `packs/otel/`, `packs/mowi/` | Nested OTLP and TUI modules |
+| `cmd/mow/` | Stock CLI (links ext + optional packs; no TUI) |
 
 ## Pick extensions when embedding
 

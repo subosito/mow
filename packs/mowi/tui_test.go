@@ -414,26 +414,10 @@ func TestRoleBlocksLeftAligned(t *testing.T) {
 	if !strings.Contains(first, "short prompt") {
 		t.Fatalf("user text not on first line (separate stamp row?): %q", userView)
 	}
-	plain := stripAnsiTest(first)
+	plain := xansi.Strip(first)
 	if !strings.Contains(plain, ":") { // HH:MM inline
 		t.Fatalf("expected inline clock on first line: %q", plain)
 	}
-}
-
-func stripAnsiTest(s string) string {
-	out := ""
-	inEsc := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			inEsc = true
-		case inEsc && (r == 'm' || r == 'K'):
-			inEsc = false
-		case !inEsc:
-			out += string(r)
-		}
-	}
-	return out
 }
 
 func TestThinkingIndicatorUsesGutter(t *testing.T) {
@@ -1461,7 +1445,7 @@ func TestLiveStreamSeamNotGlued(t *testing.T) {
 	m.streamBuf = "I found the key files.\nLet me continue"
 	m.streamBodySrc = "I found the key files.\n"
 	m.streamBody = "I found the key files." // glamour trimmed the \n
-	got := stripAnsiTest(m.liveAnswerBody(60))
+	got := xansi.Strip(m.liveAnswerBody(60))
 	if strings.Contains(got, "files.Let") {
 		t.Fatalf("prefix/tail welded: %q", got)
 	}
@@ -1473,7 +1457,7 @@ func TestLiveStreamSeamNotGlued(t *testing.T) {
 	m.streamBuf = "several key files. Let me continue"
 	m.streamBodySrc = "several key files. "
 	m.streamBody = "several key files."
-	got = stripAnsiTest(m.liveAnswerBody(60))
+	got = xansi.Strip(m.liveAnswerBody(60))
 	if strings.Contains(got, "files.Let") {
 		t.Fatalf("space seam welded: %q", got)
 	}
@@ -1482,7 +1466,7 @@ func TestLiveStreamSeamNotGlued(t *testing.T) {
 	m.streamBuf = "key files. more"
 	m.streamBodySrc = "key fi"
 	m.streamBody = "key fi"
-	got = stripAnsiTest(m.liveAnswerBody(60))
+	got = xansi.Strip(m.liveAnswerBody(60))
 	if !strings.Contains(got, "key files. more") {
 		t.Fatalf("mid-word continuation broken: %q", got)
 	}

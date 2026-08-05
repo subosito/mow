@@ -512,7 +512,6 @@ type model struct {
 	toolCurrentArgs string // optional args for smart labels
 	// Tool errors fold into the kindTool tally line (⚠ …) — not a separate
 	// red row per failure (line_hash misses were flooding the transcript).
-	toolErrIdx   int // legacy; kept -1 when errors fold into tool line
 	toolErrCount int
 	toolErrLast  string // short latest error for the tally suffix
 
@@ -1556,7 +1555,7 @@ func (m *model) applyStreamSnap(content, reasoning string) {
 			m.streamDirty = true
 			return
 		}
-		vis, th, unclosed := extractThinking(m.streamRaw)
+		vis, th, unclosed := mow.ExtractThinking(m.streamRaw)
 		if th != "" || unclosed {
 			if !m.reasoningArmed() {
 				m.reasonStartedAt = time.Now()
@@ -2220,7 +2219,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			final = strings.TrimRight(m.streamBuf, " \t\r\n")
 		}
 		// Never commit thinking tags / reasoning into the transcript entry.
-		if vis, th := stripThinkingContent(final); th != "" || vis != final {
+		if vis, th := mow.StripThinking(final); th != "" || vis != final {
 			final = vis
 		}
 		// Reasoning is live-only. Prefer live glamour; else plain + async pretty.
@@ -2867,7 +2866,6 @@ func (m *model) dropLastTurnEntries() {
 	m.prettyWant = nil
 	m.historyDirty = true
 	m.toolLineIdx = -1
-	m.toolErrIdx = -1
 	m.invalidateHistoryCache()
 }
 
@@ -3985,8 +3983,6 @@ func (m *model) renderToolTallyLine(singleLine string) {
 	}
 	m.add(kindTool, text)
 	m.toolLineIdx = len(m.entries) - 1
-	// No separate kindError row — toolErrIdx stays -1.
-	m.toolErrIdx = -1
 }
 
 // addLSPProblems adds a compact post-edit diagnostics transcript group and
@@ -4110,7 +4106,6 @@ func (m *model) resetToolTally() {
 	m.toolTally = nil
 	m.toolLineIdx = -1
 	m.toolCurrent = ""
-	m.toolErrIdx = -1
 	m.toolErrCount = 0
 	m.toolErrLast = ""
 }
@@ -4124,7 +4119,6 @@ func (m *model) clearTranscript() {
 	m.searchHits = nil
 	m.searchIdx = 0
 	m.toolLineIdx = -1
-	m.toolErrIdx = -1
 	m.entryHeights = nil
 	m.entryLineStart = nil
 	m.prettyWant = nil

@@ -18,6 +18,13 @@ func TestMaterializePromptTextDoesNotCreateMediaDir(t *testing.T) {
 	}
 }
 
+func TestMaterializePromptRequiresWorkspace(t *testing.T) {
+	_, err := materializePrompt([]ContentBlock{{Type: "text", Text: "hi"}}, "", "s1")
+	if err == nil {
+		t.Fatal("expected error for empty workspace")
+	}
+}
+
 func TestMaterializePromptImage(t *testing.T) {
 	ws := t.TempDir()
 	png := []byte{0x89, 0x50, 0x4e, 0x47}

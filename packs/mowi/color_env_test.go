@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func TestNoColorStripsSGR(t *testing.T) {
@@ -53,25 +54,9 @@ func TestReducedMotionStaticSpinner(t *testing.T) {
 	t.Setenv("MOW_NO_ANIM", "1")
 	m := newModel(testEngine(t), false, false)
 	// Static glyph, not an animated spinner frame.
-	if got := stripAnsiTest2(m.spinnerView()); got != "◇" {
-		t.Fatalf("reduced-peer-bion spinner=%q want ◇", got)
+	if got := strings.TrimSpace(xansi.Strip(m.spinnerView())); got != "◇" {
+		t.Fatalf("reduced-motion spinner=%q want ◇", got)
 	}
-	// advanceSpinnerFrame is a no-op under reduced peer-bion (does not panic / change).
+	// advanceSpinnerFrame is a no-op under reduced motion (does not panic / change).
 	m.advanceSpinnerFrame()
-}
-
-func stripAnsiTest2(s string) string {
-	out := ""
-	inEsc := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			inEsc = true
-		case inEsc && (r == 'm' || r == 'K'):
-			inEsc = false
-		case !inEsc:
-			out += string(r)
-		}
-	}
-	return strings.TrimSpace(out)
 }

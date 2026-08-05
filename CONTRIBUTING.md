@@ -15,9 +15,10 @@ integrate against; the CLI and every pack are thin shells over it. So:
   `internal/`".
 - Implementation detail → `internal/*`. If an integrator ends up needing it,
   re-export it deliberately rather than leaking the internal path.
-- A frontend, protocol, or heavy optional feature → a **pack** under `ext/`
-  (blank-imported into `cmd/mow`), or an external host that imports mow. Do not
-  grow a TUI or product shell into this repo.
+- A frontend, protocol, or heavy optional feature → a **core extension** under
+  `ext/` or an **optional pack** under `packs/` (blank-imported into `cmd/mow`),
+  or an external host that imports mow. The interactive TUI is
+  `packs/mowi/` (nested module). Do not grow a TUI into the root module.
 
 Read [docs/architecture.md](docs/architecture.md) once for the public/internal
 line, then [docs/embedding.md](docs/embedding.md) to see the API from an
@@ -41,17 +42,24 @@ No separate lint step; format with `gofmt`. Don't invent Make/npm scripts.
 
 ## Where things live
 
+Layout and module boundaries: [docs/architecture.md](docs/architecture.md)
+(source of truth). Quick map for day-to-day edits:
+
 | You're changing… | Look at |
 |------------------|---------|
 | The agent loop, turns, compaction | `internal/agent/loop.go`, `internal/agent/think.go` |
-| The public API surface | `engine*.go`, `run.go`, `hooks.go`, `event.go`, `provider.go` |
+| The public API surface | `mow.go` (aliases) + `internal/engine/` |
 | A built-in tool or the path jail | `internal/tools/`, `internal/policy/` |
 | Config, env, trust | `internal/config/`, `internal/contextload/` |
 | An LLM wire | `internal/llm/` |
-| A pack (acp, rpc, goal, job, mcp, lsp, cmdhook) | `ext/<pack>/` |
+| A core extension (acp, mcp, proc, rpc, cmdhook, eval) | `ext/<name>/` |
+| An optional pack (goal, review, ops, lsp, job) | `packs/<name>/` |
+| OTLP export | `packs/otel/` |
+| Interactive TUI | `packs/mowi/` |
 
-`engine.go` is `New`; the rest of the engine splits across `engine_prompt.go`,
-`engine_model.go`, `engine_control.go`, `engine_adapt.go`.
+Engine construction is `internal/engine/engine.go` (`New`); prompt/model/control
+split across `engine_prompt.go`, `engine_model.go`, `engine_control.go`,
+`engine_adapt.go`, `run.go`.
 
 ## House style
 
@@ -60,23 +68,14 @@ No separate lint step; format with `gofmt`. Don't invent Make/npm scripts.
 - **Match the surrounding code.** mow leans on the stdlib; two runtime deps
   (pty, yaml) is the whole budget. A new dependency needs a clear, stated reason.
 - **Test non-trivial logic**, table-driven in the style of the nearest
-  `*_test.go`. Tests isolate `$MOW_HOME` via `TestMain` — never touch the
-  developer's real `~/.mow`.
+  `*_test.go`. Tests isolate `$MOW_HOME` via `TestMain` + `testutil` — never
+  touch the developer's real `~/.mow`.
 - **Show evidence.** "Done" means test output or observed behavior, not a claim.
 
-## Security invariants (do not regress)
+## Security invariants
 
-These are load-bearing, not preferences — a change that weakens one needs an
-explicit, discussed reason:
-
-- Default tools are **read/glob/grep** only; `write`/`edit`/`bash` require
-  `--allow-write` / `--allow-shell` or config.
-- FS tools stay **workspace-jailed**.
-- Workspace **trust is out-of-band** (`$MOW_HOME/trusted`, `mow trust`) — never
-  a marker inside the workspace, so a cloned repo can't grant itself trust.
-- Trusted **project config still may not** set credentials, `llm.base_url`,
-  headers, `session.dir`, or enable power tools.
-- No secrets in logs.
+Load-bearing rules live in [AGENTS.md § Security invariants](AGENTS.md#security-invariants-do-not-regress)
+— do not regress them without an explicit, discussed reason.
 
 ## Commits
 

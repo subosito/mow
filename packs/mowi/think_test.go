@@ -5,49 +5,8 @@ import (
 	"testing"
 )
 
-func TestExtractThinkingComplete(t *testing.T) {
-	vis, th, unclosed := extractThinking("before <think>secret plan</think> after")
-	if unclosed {
-		t.Fatal("should be closed")
-	}
-	if !strings.Contains(vis, "before") || !strings.Contains(vis, "after") {
-		t.Fatalf("vis=%q", vis)
-	}
-	if strings.Contains(vis, "secret") {
-		t.Fatalf("thinking leaked into visible: %q", vis)
-	}
-	if th != "secret plan" {
-		t.Fatalf("th=%q", th)
-	}
-}
-
-func TestExtractThinkingUnclosed(t *testing.T) {
-	// Streaming: open tag without close hides remainder.
-	vis, th, unclosed := extractThinking("hi <think>still going")
-	if !unclosed {
-		t.Fatal("expected unclosed")
-	}
-	if vis != "hi " {
-		t.Fatalf("vis=%q", vis)
-	}
-	if th != "still going" {
-		t.Fatalf("th=%q", th)
-	}
-}
-
-func TestExtractThinkingCaseInsensitive(t *testing.T) {
-	vis, th, unclosed := extractThinking("<THINK>AbC</Think>done")
-	if unclosed || th != "AbC" || vis != "done" {
-		t.Fatalf("vis=%q th=%q unclosed=%v", vis, th, unclosed)
-	}
-}
-
-func TestExtractThinkingVariants(t *testing.T) {
-	vis, th, unclosed := extractThinking("<thinking>x</thinking>y")
-	if unclosed || vis != "y" || th != "x" {
-		t.Fatalf("vis=%q th=%q unclosed=%v", vis, th, unclosed)
-	}
-}
+// Dialect extraction lives in mow (internal/agent/think.go). These tests only
+// cover mowi live-stream handling that builds on that API.
 
 func TestApplyStreamSnapStripsThinkTags(t *testing.T) {
 	m := &model{}

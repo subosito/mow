@@ -83,22 +83,28 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 
 | Package | Responsibility |
 |---------|----------------|
-| `mow` | `New`, `Engine`, `Run`, options/result types, `Tool`/`Message`/`ChatFunc`, `Engine.Extension` (files: `engine_*.go`, `run.go`) |
+| `mow` | `New`, `Engine`, `Run`, options/result types, `Tool`/`Message`/`ChatFunc`, `Engine.Extension` (`mow.go` re-exports `internal/engine/`) |
 | `ext` | Register tools, hooks, **CLI commands**, BeforeNew (registration only) |
 | `cliutil` | Shared CLI flags / `--long` help / `NewEngine` — **not** a pack |
 | `extcfg` | Decode `extensions.<name>` — shared by extensions and packs |
 | `ext/rpc` | JSON-lines embed protocol + `mow rpc` |
 | `ext/acp` | ACP agent + client + `acp_delegate` + `mow acp` |
+| `ext/mcp` | MCP servers → tools (config opt-in) |
+| `ext/proc` / `ext/cmdhook` / `ext/eval` | Background proc tools, command hooks, eval CLI |
 | `packs/goal` | Outer multi-step goals + `mow goal` |
 | `packs/job` | Interval / cron jobs + `mow job` |
-| `ext/mcp` | MCP servers → tools (config opt-in) |
 | `packs/lsp` | `lsp_hover` / `lsp_definition` via gopls etc. (config opt-in) |
+| `packs/review` | `mow review` / `mow sec` advisory review |
+| `packs/ops` | Ops profiles, health, runbooks |
+| `packs/otel` | Optional OTLP export (nested module) |
+| `packs/mowi` | Interactive TUI + `cmd/mowi` (nested module) |
 | `cmd/mow` | Thin shell: core commands + blank-import packs |
 
 ### Internal
 
 | Package | Responsibility |
 |---------|----------------|
+| `internal/engine` | Engine construction, prompt/control, public re-export surface |
 | `internal/agent` | Loop: messages, tool calls, max turns, abort, compaction |
 | `internal/llm` | OpenAI + Anthropic chat; media HTTP (generate/understand) |
 | `internal/tools` | Built-in FS/shell + media tools |
@@ -106,8 +112,10 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `internal/policy` | Workspace jail, power-tool gates |
 | `internal/session` | JSONL persistence, resume |
 | `internal/contextload` | AGENTS.md / CLAUDE.md, skills, project trust |
+| `internal/proc` | Detached process implementation (shared by `ext/proc` and goal tools) |
 
-Do **not** import `internal/*` from outside the module’s own packages.
+Do **not** import `internal/*` from outside the module’s own packages. Full
+module map: [architecture.md](architecture.md).
 
 ---
 
