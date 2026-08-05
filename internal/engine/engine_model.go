@@ -75,6 +75,16 @@ func (e *Engine) SetModel(id string) error {
 	// Prefer catalog wire for this model when the user did not pin wire
 	// (same as /model catalog pick). Under e.mu — do not call SetWire.
 	e.applyPreferredWireLocked()
+	// Validate against the catalog when available: reject model groups
+	// (facet != "chat") and unknown ids with a clear error instead of
+	// letting the gateway 400 on the next call.
+	if e.client != nil {
+		if info, ok := e.client.CatalogEntry(id); ok {
+			if facet := strings.ToLower(strings.TrimSpace(info.Facet)); facet != "" && facet != "chat" {
+				return fmt.Errorf("mow: model %q is a %s (not callable; pick a chat member from GET /v1/models)", id, info.Facet)
+			}
+		}
+	}
 	return nil
 }
 

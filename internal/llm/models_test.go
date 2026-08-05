@@ -86,8 +86,10 @@ func TestListModelsParsesFacet(t *testing.T) {
 	if byID["model-x"].Facet != "chat" {
 		t.Fatalf("chat facet: %+v", byID["model-x"])
 	}
-	if byID["model-x:search"].Facet != "search" {
-		t.Fatalf("search facet: %+v", byID["model-x:search"])
+	// Non-chat facets (model groups, search facets) are filtered out of the
+	// list and the catalog so pickers never offer a non-callable model.
+	if _, ok := byID["model-x:search"]; ok {
+		t.Fatalf("search facet should be filtered: %+v", byID["model-x:search"])
 	}
 }
 

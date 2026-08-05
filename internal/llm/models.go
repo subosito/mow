@@ -148,8 +148,27 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	collapsed := CollapseEffortTiersInCatalog(out)
-	c.SetCatalogModels(collapsed)
-	return collapsed, nil
+	chat := filterChatModels(collapsed)
+	c.SetCatalogModels(chat)
+	return chat, nil
+}
+
+// filterChatModels drops catalog entries that are not callable chat models
+// (model groups, media-only facets, etc.). A model is callable for chat
+// when its facet is empty/"chat" and its wire (if set) is a known chat wire.
+// Plain catalogs (id only, no facet, no wire) pass through.
+func filterChatModels(list []ModelInfo) []ModelInfo {
+	var out []ModelInfo
+	for _, m := range list {
+		if f := strings.ToLower(strings.TrimSpace(m.Facet)); f != "" && f != "chat" {
+			continue
+		}
+		if w := strings.TrimSpace(m.Wire); w != "" && !IsKnownChatWire(w) {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func modelsURL(baseURL string) string {
