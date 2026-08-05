@@ -28,7 +28,7 @@ workflow splits discovery from judgment:
 | Pass | Input | Allowed output |
 |------|-------|----------------|
 | 1 — discovery | scope briefing (diffs + line-numbered content) | candidate findings as JSON |
-| 2 — verification | rendered candidate digests + the code, **not** pass 1's JSON | confirm / reject / correct severity+confidence |
+| 2 — verification | candidate digests + bounded line-numbered excerpts around each cited location; tools for wider context, **not** pass 1's JSON | confirm / reject / correct severity+confidence |
 
 Both passes run `ReadOnly` **and** `Ephemeral`. Ephemeral matters: pass 1's JSON
 never becomes pass 2's context, so the verifier has to re-derive the evidence
@@ -39,9 +39,13 @@ the evidence.
 Rules that follow from this:
 
 - A candidate with **no verdict** is marked unverified, never an implicit pass.
+- Duplicate, unknown, or empty verdict ids are contract errors.
+- Pass 1 cannot set verification provenance: `verified` is cleared before the
+  workflow and only pass 2 can set it true.
 - Unverified findings are **suppressed by default** (`--include-unverified` keeps them).
-- A reply that is not valid JSON, or violates the contract, is a **hard error** —
-  "looks fine to me" can never render as a clean review.
+- A reply that is not valid JSON, omits/nulls the required `findings` or
+  `verdicts` arrays, or violates the contract is a **hard error** — "looks fine
+  to me" can never render as a clean review.
 - An empty scope is a **successful empty review** that says nothing was reviewed,
   and warns on stderr even under `--quiet`.
 

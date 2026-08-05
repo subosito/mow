@@ -140,7 +140,9 @@ func verifyPrompt(prof *Profile, sc *Scope, cands []Finding) string {
 	for _, q := range prof.verificationQuestions() {
 		b.WriteString("- " + q + "\n")
 	}
-	b.WriteString("\nUse read/glob/grep to check the cited code before ruling. If the cited path or line does not contain what the candidate claims, reject it.\n")
+	b.WriteString("\nUse the bounded source excerpts below to check each cited location. Use read/glob/grep only when callers or wider context are still needed. If the cited path or line does not contain what the candidate claims, reject it.\n")
+	b.WriteString("\n## Candidate source excerpts\n\n")
+	b.WriteString(verificationExcerpts(sc, cands))
 	b.WriteString("\n## Candidates\n\n")
 	for _, f := range cands {
 		b.WriteString(candidateDigest(f))
@@ -191,6 +193,48 @@ func (p *Profile) verificationQuestions() []string {
 		"Does the recommendation fit the project's existing conventions?",
 		"Is the described behaviour actually wrong, or is it intentional design?",
 	}, common...)
+}
+
+// verificationExcerpts renders a small line-numbered window around each
+// candidate location. It avoids repeating the whole scope while giving pass 2
+// direct evidence before it decides whether extra tool reads are needed.
+func verificationExcerpts(sc *Scope, cands []Finding) string {
+	const radius = 20
+	var b strings.Builder
+	for _, f := range cands {
+		fmt.Fprintf(&b, "### %s — %s\n\n", f.ID, f.Path)
+		if sc == nil || sc.index == nil {
+			b.WriteString("(source excerpt unavailable; use read)\n\n")
+			continue
+		}
+		i, ok := sc.index[f.Path]
+		if !ok || i < 0 || i >= len(sc.Files) || sc.Files[i].Content == "" {
+			b.WriteString("(full source not in scope briefing; use read)\n\n")
+			continue
+		}
+		lines := strings.Split(strings.TrimSuffix(sc.Files[i].Content, "\n"), "\n")
+		if len(lines) == 0 {
+			b.WriteString("(empty file)\n\n")
+			continue
+		}
+		start := f.StartLine
+		if start < 1 {
+			start = 1
+		}
+		end := f.EndLine
+		if end < start {
+			end = start
+		}
+		lo := max(1, start-radius)
+		hi := min(len(lines), end+radius)
+		width := len(fmt.Sprint(hi))
+		b.WriteString("```\n")
+		for line := lo; line <= hi; line++ {
+			fmt.Fprintf(&b, "%*d| %s\n", width, line, lines[line-1])
+		}
+		b.WriteString("```\n\n")
+	}
+	return b.String()
 }
 
 // candidateDigest renders one candidate for the verifier.

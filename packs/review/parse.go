@@ -130,6 +130,9 @@ func parseCandidates(reply string) (candidateEnvelope, error) {
 	if err != nil {
 		return env, err
 	}
+	if err := requireArrayField(obj, "findings", "candidate"); err != nil {
+		return env, err
+	}
 	dec := json.NewDecoder(strings.NewReader(obj))
 	if err := dec.Decode(&env); err != nil {
 		return env, fmt.Errorf("review: candidate JSON did not match the contract: %w", err)
@@ -144,8 +147,30 @@ func parseVerdicts(reply string) (verdictEnvelope, error) {
 	if err != nil {
 		return env, err
 	}
+	if err := requireArrayField(obj, "verdicts", "verdict"); err != nil {
+		return env, err
+	}
 	if err := json.Unmarshal([]byte(obj), &env); err != nil {
 		return env, fmt.Errorf("review: verdict JSON did not match the contract: %w", err)
 	}
 	return env, nil
+}
+
+// requireArrayField enforces the distinction between an explicit empty array
+// (a valid clean result) and a missing/null contract field (an incomplete model
+// response that must never be interpreted as clean).
+func requireArrayField(obj, field, pass string) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(obj), &raw); err != nil {
+		return fmt.Errorf("review: %s JSON did not match the contract: %w", pass, err)
+	}
+	v, ok := raw[field]
+	if !ok || string(v) == "null" {
+		return fmt.Errorf("review: %s JSON did not match the contract: %q must be present as an array", pass, field)
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(v, &arr); err != nil {
+		return fmt.Errorf("review: %s JSON did not match the contract: %q must be an array", pass, field)
+	}
+	return nil
 }

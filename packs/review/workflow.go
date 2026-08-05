@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/subosito/mow"
 )
 
 // Reviewer is the minimal engine surface the workflow needs. mow.Engine
@@ -48,6 +50,9 @@ type Result struct {
 // for findings "and then double-check them" lets the model rationalize its own
 // output; a second call that only rules on ids has to re-derive the evidence.
 func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, error) {
+	if rev == nil {
+		return nil, fmt.Errorf("review: nil reviewer")
+	}
 	prof := req.Profile
 	if prof == nil {
 		prof = GeneralProfile()
@@ -64,6 +69,7 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 	rep := NewReport(prof.Name)
 	rep.Run = RunInfo{
 		Tool:             prof.Command,
+		Version:          strings.TrimPrefix(mow.VersionString(), "mow "),
 		Model:            rev.Model(),
 		Commit:           sc.Git.Commit,
 		Branch:           sc.Git.Branch,
@@ -98,6 +104,13 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 		return nil, err
 	}
 	candidates, issues := Validate(cand.Findings, sc.Workspace, valOpt)
+	// Pass 1 is never authoritative about verification provenance. The model
+	// may include a `verified` field despite the contract; only verifyPass may
+	// set it true.
+	for i := range candidates {
+		candidates[i].Verified = false
+		candidates[i].VerificationNotes = ""
+	}
 	dropped := len(issues)
 	for _, is := range issues {
 		rep.Notes = append(rep.Notes, "pass 1: "+is.String())
@@ -158,10 +171,22 @@ func verifyPass(ctx context.Context, rev Reviewer, prof *Profile, sc *Scope, can
 		return nil, nil, err
 	}
 	byID := map[string]Verdict{}
+	want := make(map[string]bool, len(cands))
+	for _, f := range cands {
+		want[f.ID] = true
+	}
 	for _, v := range env.Verdicts {
-		if id := strings.TrimSpace(v.ID); id != "" {
-			byID[id] = v
+		id := strings.TrimSpace(v.ID)
+		if id == "" {
+			return nil, nil, fmt.Errorf("review: verification pass returned a verdict with an empty id")
 		}
+		if !want[id] {
+			return nil, nil, fmt.Errorf("review: verification pass returned unknown candidate id %q", id)
+		}
+		if _, dup := byID[id]; dup {
+			return nil, nil, fmt.Errorf("review: verification pass returned duplicate verdict for %q", id)
+		}
+		byID[id] = v
 	}
 	var notes []string
 	out := make([]Finding, 0, len(cands))

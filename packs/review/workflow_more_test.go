@@ -15,10 +15,23 @@ func TestRunFailsLoudlyOnBadJSON(t *testing.T) {
 	if _, err := Run(context.Background(), rev, sc, Request{Profile: GeneralProfile()}); !errors.Is(err, ErrNoJSON) {
 		t.Fatalf("err = %v want ErrNoJSON", err)
 	}
+	// A candidate envelope must explicitly contain a non-null findings array.
+	for _, reply := range []string{`{"summary":"looks fine"}`, `{"findings":null}`} {
+		rev := &fakeReviewer{replies: []string{reply}}
+		if _, err := Run(context.Background(), rev, sc, Request{Profile: GeneralProfile()}); err == nil || !strings.Contains(err.Error(), "findings") {
+			t.Fatalf("reply=%s err=%v want findings contract error", reply, err)
+		}
+	}
 	// Same for a contract violation in pass 2.
 	rev2 := &fakeReviewer{replies: []string{candidateReply, "looks good, ship it"}}
 	if _, err := Run(context.Background(), rev2, sc, Request{Profile: GeneralProfile()}); err == nil {
 		t.Fatal("want error when the verification pass returns no JSON")
+	}
+	for _, reply := range []string{`{"summary":"confirmed"}`, `{"verdicts":null}`} {
+		rev := &fakeReviewer{replies: []string{candidateReply, reply}}
+		if _, err := Run(context.Background(), rev, sc, Request{Profile: GeneralProfile()}); err == nil || !strings.Contains(err.Error(), "verdicts") {
+			t.Fatalf("reply=%s err=%v want verdicts contract error", reply, err)
+		}
 	}
 }
 
@@ -58,7 +71,8 @@ func TestRunEmptyScopeIsSuccessNotCleanBill(t *testing.T) {
 
 func TestRunSkipVerification(t *testing.T) {
 	sc := testScope(t)
-	rev := &fakeReviewer{replies: []string{candidateReply}}
+	forged := strings.Replace(candidateReply, `"path":"internal/db/query.go"`, `"verified":true,"path":"internal/db/query.go"`, 1)
+	rev := &fakeReviewer{replies: []string{forged}}
 	res, err := Run(context.Background(), rev, sc, Request{
 		Profile: GeneralProfile(), Now: fixedNow(), SkipVerification: true,
 	})
@@ -70,6 +84,11 @@ func TestRunSkipVerification(t *testing.T) {
 	}
 	if len(res.Report.Findings) != 2 {
 		t.Fatalf("findings = %d want 2", len(res.Report.Findings))
+	}
+	for _, f := range res.Report.Findings {
+		if f.Verified {
+			t.Fatalf("skip verification must force verified=false: %+v", f)
+		}
 	}
 	if !hasNote(res.Report.Notes, "Verification pass skipped") {
 		t.Errorf("report must disclose that verification was skipped: %v", res.Report.Notes)
@@ -169,7 +188,7 @@ func TestRunDropsOutOfScopeCandidateWithNote(t *testing.T) {
 
 func TestPromptsCarryContractAndScope(t *testing.T) {
 	sc := testScope(t)
-	verify := `{"verdicts":[{"id":"review-001","status":"confirmed"},{"id":"review-002","status":"confirmed"}]}`
+	verify := `{"verdicts":[{"id":"sec-001","status":"confirmed"},{"id":"sec-002","status":"confirmed"}]}`
 	rev := &fakeReviewer{replies: []string{candidateReply, verify}}
 	if _, err := Run(context.Background(), rev, sc, Request{Profile: SecurityProfile(), Now: fixedNow()}); err != nil {
 		t.Fatalf("run: %v", err)
@@ -192,6 +211,9 @@ func TestPromptsCarryContractAndScope(t *testing.T) {
 	// The verifier must not be handed the raw candidate JSON envelope.
 	if strings.Contains(p2, `"findings"`) {
 		t.Error("verify prompt should present digests, not the candidate JSON contract")
+	}
+	if !strings.Contains(p2, "Candidate source excerpts") || !strings.Contains(p2, "10| // line") {
+		t.Errorf("verify prompt should include bounded line-numbered evidence: %s", p2)
 	}
 	// Security system prompt should set the adversarial persona for both passes.
 	for i, sys := range rev.systems {
@@ -236,8 +258,33 @@ func TestBudgetTurnsAllowExplorationAndAnswer(t *testing.T) {
 	}
 }
 
+func TestVerificationRejectsDuplicateAndUnknownIDs(t *testing.T) {
+	sc := testScope(t)
+	cases := []struct {
+		name, reply, want string
+	}{
+		{"duplicate", `{"verdicts":[{"id":"review-001","status":"confirmed"},{"id":"review-001","status":"rejected"}]}`, "duplicate"},
+		{"unknown", `{"verdicts":[{"id":"review-999","status":"confirmed"}]}`, "unknown"},
+		{"empty", `{"verdicts":[{"id":"","status":"confirmed"}]}`, "empty id"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rev := &fakeReviewer{replies: []string{candidateReply, tc.reply}}
+			if _, err := Run(context.Background(), rev, sc, Request{Profile: GeneralProfile()}); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunNilScope(t *testing.T) {
 	if _, err := Run(context.Background(), &fakeReviewer{}, nil, Request{}); err == nil {
 		t.Fatal("want error for nil scope")
+	}
+}
+
+func TestRunNilReviewer(t *testing.T) {
+	if _, err := Run(context.Background(), nil, testScope(t), Request{}); err == nil || !strings.Contains(err.Error(), "nil reviewer") {
+		t.Fatalf("err=%v want nil reviewer error", err)
 	}
 }
