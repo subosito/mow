@@ -25,16 +25,26 @@ func TestParseRootSpec(t *testing.T) {
 		{"only spaces", "   ", "", false},
 		{"windows drive not a mode", `C:\work`, `C:\work`, false},
 		{"colon but not mode", "/tmp/a:rox", "/tmp/a:rox", false},
-		{"mode only", ":ro", "", true},
+		{"mode only spec drops", ":ro", "", false},
 		{"trailing colon", "/tmp/a:", "/tmp/a:", false},
 		{"unicode path", "/tmp/データ:ro", "/tmp/データ", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			path, ro := parseRootSpec(c.in)
-			if path != c.wantPath || ro != c.wantRO {
-				t.Fatalf("parseRootSpec(%q)=(%q,%v) want (%q,%v)", c.in, path, ro, c.wantPath, c.wantRO)
+			// splitRootSpecs delegates to mow.SplitExtraRootSpec; assert the
+			// suffix contract through the seam the CLI actually uses.
+			rw, ro := splitRootSpecs([]string{c.in})
+			var path string
+			gotRO := len(ro) == 1
+			switch {
+			case gotRO:
+				path = ro[0]
+			case len(rw) == 1:
+				path = rw[0]
+			}
+			if path != c.wantPath || gotRO != c.wantRO {
+				t.Fatalf("splitRootSpecs(%q)=(%q,%v) want (%q,%v)", c.in, path, gotRO, c.wantPath, c.wantRO)
 			}
 		})
 	}

@@ -140,16 +140,16 @@ func (f *EngineFlags) NewEngine() (*mow.Engine, error) {
 	return mow.New(f.Options())
 }
 
-// splitRootSpecs parses --extra-root values. A trailing ":ro" (case-insensitive)
-// marks the root read-only; ":rw" is accepted and treated as read-write.
-// Bare paths are read-write (same as historical --extra-root).
+// splitRootSpecs parses --extra-root values through the same suffix rules as
+// policy.extra_roots (mow.SplitExtraRootSpec), so the CLI and config file can
+// never drift on what ":ro" / ":rw" mean.
 func splitRootSpecs(specs []string) (rw, ro []string) {
 	for _, raw := range specs {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
 		}
-		path, readOnly := parseRootSpec(raw)
+		path, readOnly := mow.SplitExtraRootSpec(raw)
 		if path == "" {
 			continue
 		}
@@ -160,22 +160,4 @@ func splitRootSpecs(specs []string) (rw, ro []string) {
 		}
 	}
 	return rw, ro
-}
-
-func parseRootSpec(raw string) (path string, readOnly bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", false
-	}
-	// Windows drive letters (C:\...) must not be treated as a mode suffix.
-	// Mode is only ":ro" / ":rw" at the end of the string.
-	lower := strings.ToLower(raw)
-	switch {
-	case strings.HasSuffix(lower, ":ro"):
-		return strings.TrimSpace(raw[:len(raw)-3]), true
-	case strings.HasSuffix(lower, ":rw"):
-		return strings.TrimSpace(raw[:len(raw)-3]), false
-	default:
-		return raw, false
-	}
 }

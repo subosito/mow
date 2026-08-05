@@ -69,30 +69,30 @@ type ProcInfo = engine.ProcInfo
 // --- Vars / consts ---
 
 var (
-	ErrAgentDone           = engine.ErrAgentDone
-	ErrAgentMaxTurns       = engine.ErrAgentMaxTurns
-	ErrAgentStuck          = engine.ErrAgentStuck
-	ProcErrAlreadyRunning  = engine.ProcErrAlreadyRunning
+	ErrAgentDone          = engine.ErrAgentDone
+	ErrAgentMaxTurns      = engine.ErrAgentMaxTurns
+	ErrAgentStuck         = engine.ErrAgentStuck
+	ProcErrAlreadyRunning = engine.ProcErrAlreadyRunning
 )
 
 // Event types (loop / harness bus).
 const (
-	EventRunStart        = engine.EventRunStart
-	EventRunEnd          = engine.EventRunEnd
-	EventCompact         = engine.EventCompact
-	EventGoalStart       = engine.EventGoalStart
-	EventGoalStep        = engine.EventGoalStep
-	EventGoalDone        = engine.EventGoalDone
-	EventGoalFail        = engine.EventGoalFail
-	EventGoalPartial     = engine.EventGoalPartial
-	EventGoalBlocked     = engine.EventGoalBlocked
-	EventToolStart       = engine.EventToolStart
-	EventToolEnd         = engine.EventToolEnd
-	EventDelegateChunk   = engine.EventDelegateChunk
+	EventRunStart         = engine.EventRunStart
+	EventRunEnd           = engine.EventRunEnd
+	EventCompact          = engine.EventCompact
+	EventGoalStart        = engine.EventGoalStart
+	EventGoalStep         = engine.EventGoalStep
+	EventGoalDone         = engine.EventGoalDone
+	EventGoalFail         = engine.EventGoalFail
+	EventGoalPartial      = engine.EventGoalPartial
+	EventGoalBlocked      = engine.EventGoalBlocked
+	EventToolStart        = engine.EventToolStart
+	EventToolEnd          = engine.EventToolEnd
+	EventDelegateChunk    = engine.EventDelegateChunk
 	EventDelegateProgress = engine.EventDelegateProgress
-	EventDelegateUsage   = engine.EventDelegateUsage
-	EventLSPDiagnostics = engine.EventLSPDiagnostics
-	EventSteer          = engine.EventSteer
+	EventDelegateUsage    = engine.EventDelegateUsage
+	EventLSPDiagnostics   = engine.EventLSPDiagnostics
+	EventSteer            = engine.EventSteer
 )
 
 // Misc consts.
@@ -127,8 +127,8 @@ func New(opt Options) (*Engine, error) { return engine.New(opt) }
 func Run(ctx context.Context, prompt string, opt Options) (RunResult, error) {
 	return engine.Run(ctx, prompt, opt)
 }
-func Home() string { return engine.Home() }
-func VersionString() string { return engine.VersionString() }
+func Home() string                 { return engine.Home() }
+func VersionString() string        { return engine.VersionString() }
 func IsPowerTool(name string) bool { return engine.IsPowerTool(name) }
 func ExtractThinking(s string) (visible, thinking string, unclosed bool) {
 	return engine.ExtractThinking(s)
@@ -138,19 +138,24 @@ func ContextWithEngine(ctx context.Context, eng *Engine) context.Context {
 	return engine.ContextWithEngine(ctx, eng)
 }
 func EngineFromContext(ctx context.Context) *Engine { return engine.EngineFromContext(ctx) }
-func SeverityRank(s DiagnosticSeverity) int { return engine.SeverityRank(s) }
+func SeverityRank(s DiagnosticSeverity) int         { return engine.SeverityRank(s) }
 func FilterChatModels(list []ModelInfo) []ModelInfo { return engine.FilterChatModels(list) }
-func IsChatModel(m ModelInfo) bool { return engine.IsChatModel(m) }
-func WorkspaceTrusted(workspace string) bool { return engine.WorkspaceTrusted(workspace) }
-func TrustWorkspace(workspace string) error { return engine.TrustWorkspace(workspace) }
-func RevokeWorkspaceTrust(workspace string) error { return engine.RevokeWorkspaceTrust(workspace) }
-func TrustedWorkspaces() []string { return engine.TrustedWorkspaces() }
-func SetOTELAuto(fn OTELAutoFunc) { engine.SetOTELAuto(fn) }
+func IsChatModel(m ModelInfo) bool                  { return engine.IsChatModel(m) }
+func WorkspaceTrusted(workspace string) bool        { return engine.WorkspaceTrusted(workspace) }
+func TrustWorkspace(workspace string) error         { return engine.TrustWorkspace(workspace) }
+func RevokeWorkspaceTrust(workspace string) error   { return engine.RevokeWorkspaceTrust(workspace) }
+func TrustedWorkspaces() []string                   { return engine.TrustedWorkspaces() }
+
+// SplitExtraRootSpec parses an extra-root spec ("PATH", "PATH:ro", "PATH:rw").
+func SplitExtraRootSpec(raw string) (path string, readOnly bool) {
+	return engine.SplitExtraRootSpec(raw)
+}
+func SetOTELAuto(fn OTELAutoFunc)     { engine.SetOTELAuto(fn) }
 func ProcSanitizeID(id string) string { return engine.ProcSanitizeID(id) }
 func ProcStart(dir, id, command, logName, workdir string) (ProcInfo, error) {
 	return engine.ProcStart(dir, id, command, logName, workdir)
 }
-func ProcStatus(dir, id string) (ProcInfo, error) { return engine.ProcStatus(dir, id) }
-func ProcList(dir string) ([]ProcInfo, error) { return engine.ProcList(dir) }
-func ProcStop(dir, id string) (ProcInfo, error) { return engine.ProcStop(dir, id) }
+func ProcStatus(dir, id string) (ProcInfo, error)    { return engine.ProcStatus(dir, id) }
+func ProcList(dir string) ([]ProcInfo, error)        { return engine.ProcList(dir) }
+func ProcStop(dir, id string) (ProcInfo, error)      { return engine.ProcStop(dir, id) }
 func ProcTail(dir, id string, n int) (string, error) { return engine.ProcTail(dir, id, n) }

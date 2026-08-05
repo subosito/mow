@@ -29,3 +29,10 @@ func RevokeWorkspaceTrust(workspace string) error {
 func TrustedWorkspaces() []string {
 	return config.TrustedWorkspaces()
 }
+
+// SplitExtraRootSpec parses an extra-root spec ("PATH", "PATH:ro", "PATH:rw").
+// Hosts parsing --extra-root must use this so CLI and policy.extra_roots agree
+// on one syntax instead of maintaining a second suffix parser.
+func SplitExtraRootSpec(raw string) (path string, readOnly bool) {
+	return config.SplitExtraRootSpec(raw)
+}
