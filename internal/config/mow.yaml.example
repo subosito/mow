@@ -141,6 +141,11 @@ session:
 
 # Optional packs — packages under ext/<name>; config key extensions.<name>
 # extensions:
+#   mcp:
+#     mcpServers:
+#       context-mode:
+#         command: npx
+#         args: ["-y", "@context-mode/mcp-server"]
 #   acp:
 #     # External peers (any ACP command). "Subagent" in other harnesses = named agent here.
 #     agents:
