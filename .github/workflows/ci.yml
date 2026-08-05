@@ -20,11 +20,32 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Vet
+      - name: Vet root
         run: go vet ./...
 
-      - name: Test
+      - name: Vet packs
+        run: cd packs && go vet ./...
+
+      - name: Vet OTEL pack
+        run: cd packs/otel && go vet ./...
+
+      - name: Vet mowi pack
+        run: cd packs/mowi && go vet ./...
+
+      - name: Test root
         run: go test -race ./...
 
-      - name: Build
+      - name: Test packs
+        run: cd packs && go test -race ./...
+
+      - name: Test OTEL pack
+        run: cd packs/otel && go test -race ./...
+
+      - name: Test mowi pack
+        run: cd packs/mowi && go test -race ./...
+
+      - name: Build mow
         run: go build -o bin/mow ./cmd/mow
+
+      - name: Build mowi
+        run: cd packs/mowi && go build -o ../../bin/mowi ./cmd/mowi

@@ -1,144 +1,141 @@
 # Architecture — mow
 
 **Language:** Go  
-**Module:** `github.com/subosito/mow`
-
----
+**Public module:** `github.com/subosito/mow`
 
 ## One-liner
 
-**mow** is a barebone, secure-by-default Go agent harness: tool loop + sessions + config, extended with optional packs (yaml *or* programmatic registration).
+**mow** is a secure-by-default Go agent harness: tool loop + sessions + config,
+extended by detachable protocol extensions, workflow packs, telemetry, and an
+interactive TUI.
 
-**LLM access is pluggable** — OpenAI-compatible or Anthropic-compatible HTTP. Point `llm.base_url` at any provider or any compatible gateway. mow has **no hard dependency** on another product binary or monorepo sibling.
-
----
+LLM access is plain OpenAI-compatible or Anthropic-compatible HTTP. No gateway,
+broker, host UI, or sibling repository is required for `mow.Engine`.
 
 ## Principles
 
-1. **Library first, hosts detached** — public API is `github.com/subosito/mow` (`Engine` / `Run`). Implementation lives under **`internal/`**. Frontends and protocols are packs or separate binaries that import mow.
-2. **Standalone by default** — works with a single API key + base URL. No broker, catalog service, or host UI is required to run `Engine.Prompt` or `mow run`.
-3. **Minimal core, packs in `ext/`** — registration via `ext`; protocols/tools as packs (`acp`, `rpc`, `goal`, …). CLI plumbing is **`cliutil`**, not a pack.
-4. **Packs own their CLI** — subcommands register with `ext.RegisterCommand`; stock binary blank-imports packs. Unlink a pack → subcommand disappears.
-5. **Secure by default** — deny-by-default for shell/write; workspace-scoped FS.
+1. **Library first** — public API is `github.com/subosito/mow` (`Engine` / `Run`).
+2. **Thin public root** — `mow.go` re-exports the API; implementation and behavior tests live in `internal/engine/`.
+3. **Minimal core module** — no TUI or OpenTelemetry dependencies enter a library-only embed.
+4. **Detachable features** — core extensions live in `ext/`; optional/domain packs live in `packs/`.
+5. **Packs own commands** — `ext.RegisterCommand`; blank import controls what a binary ships.
+6. **Secure by default** — read-only default tools, path jail, explicit write/shell trust.
 
----
+## Modules
+
+| Module | Path | Role |
+|---|---|---|
+| `github.com/subosito/mow` | root | Public API, `internal/engine`, registration, core extensions, `cmd/mow` |
+| `github.com/subosito/mow/packs` | `packs/` | Optional workflow/domain packs: goal, review, ops, lsp, job |
+| `github.com/subosito/mow/packs/otel` | `packs/otel/` | Optional OTLP auto-wire/export module |
+| `github.com/subosito/mow/packs/mowi` | `packs/mowi/` | Optional Bubble Tea TUI + `cmd/mowi` full binary |
+
+`go.work` wires all four modules for local development. Import direction is
+one-way: nested modules depend on the root public API, never the reverse.
 
 ## Public vs internal
 
-### Public (stability / integration)
+### Public
 
 | Import | Role |
-|--------|------|
-| **`mow`** | `New`, `Engine`, `Run`, `Options`, `RunResult`, `Tool`/`Message`/`ChatFunc` types, `Engine.Extension` |
-| **`ext`** | Registration only: `RegisterTool`, lifecycle hooks, `RegisterCommand`, `BeforeNew` |
-| **`ext/<pack>`** | Optional feature packs (acp, rpc, goal, …) — blank-import to link |
-| **`cliutil`** | CLI helpers (flags → `Engine`); not a pack, no registration |
-| **`packcfg`** | Decode `extensions.<name>` for packs; not a pack |
-| **`cmd/mow`** | Stock binary (not a library surface) |
+|---|---|
+| `github.com/subosito/mow` | Thin aliases/wrappers: `Engine`, `Run`, options, events, hooks, providers |
+| `github.com/subosito/mow/ext` | Registration API: tools, lifecycle hooks, commands, `BeforeNew` |
+| `github.com/subosito/mow/ext/<name>` | Core protocol/runtime extensions: acp, mcp, proc, rpc, cmdhook, eval |
+| `github.com/subosito/mow/packs/<name>` | Optional packs: goal, review, ops, lsp, job |
+| `github.com/subosito/mow/packs/otel` | Optional OTLP integration |
+| `github.com/subosito/mow/packs/mowi` | Optional TUI host library |
+| `github.com/subosito/mow/cliutil` | CLI flags → Engine |
+| `github.com/subosito/mow/packcfg` | Decode `extensions.<name>` |
 
-### Internal (implementation — not a compatibility surface)
+### Internal
 
 | Package | Role |
-|---------|------|
-| `internal/agent` | Tool-calling loop |
-| `internal/llm` | OpenAI / Anthropic / media HTTP clients |
-| `internal/tools` | Built-in tools + media tools |
-| `internal/config` | yaml + env merge |
-| `internal/policy` | Path jail, power-tool gates |
-| `internal/session` | JSONL sessions |
-| `internal/contextload` | AGENTS.md / CLAUDE.md, skills, trust |
+|---|---|
+| `internal/engine` | Engine implementation + behavior tests |
+| `internal/agent` | Tool-calling loop, compact, steer, stall handling |
+| `internal/llm` | HTTP wires, model catalog/filtering, effort/native tools |
+| `internal/tools` | Built-in and media tools |
+| `internal/config` | YAML/env config and workspace sets |
+| `internal/policy` | Path jail and power-tool gates |
+| `internal/session` | JSONL sessions and context archive |
+| `internal/contextload` | Project instructions and skills |
+| `internal/proc` | Shared detached process implementation |
 
-Integrators should not import `internal/*`. Custom tools use `ext.Tool` / `mow.Tool` and register via `ext.RegisterTool`.
+Integrators never import `internal/*`. If an optional module needs internal
+behavior, the root public package re-exports a narrow API (for example
+`mow.Proc*`).
 
 ```text
-  Embedder / tests     CLI (run/tty + cliutil)   ext packs (acp/rpc/…)
-         │                      │                           │
-         └────────────┬─────────┴───────────────────────────┘
-                      ▼
-            mow.Engine / mow.Run     ← public API
-                      │
-            internal/* (loop, llm, tools, …)
-                      │
-                 LLM HTTP  →  any OpenAI- or Anthropic-compatible endpoint
+Embedder / cmd/mow / cmd/mowi / packs
+                  │
+                  ▼
+        mow.go (public aliases/wrappers)
+                  │
+                  ▼
+        internal/engine + internal/*
+                  │
+                  ▼
+        LLM HTTP (compatible endpoint)
 ```
 
----
+## Extensions and packs
 
-## Frontends and commands
+### Core extensions (`ext/`, root module)
 
-| Surface | How | Owner |
-|---------|-----|--------|
-| **API** | `mow.New` / `Engine.Prompt` / `OnEvent` / `Cancel` / `Status` | public module |
-| **run** | `mow run -p …` / `--allow-write` | **core** CLI |
-| **tty** | `mow tty` | **core** CLI |
-| **rpc** | `mow rpc` | **ext/rpc** JSONL control plane (prompt + event stream + cancel/status) |
-| **acp** | `mow acp` | **ext/acp** (Agent Client Protocol agent) |
-| **goal** | `mow goal` | **ext/goal** (outer multi-step loop) |
-| **job** | `mow job` | **ext/job** (interval / cron jobs) |
+- `ext/acp`: ACP agent + peer delegation (`acp_delegate`)
+- `ext/mcp`: MCP server + configured MCP client tools
+- `ext/proc`: detached process tools/command
+- `ext/rpc`: JSON-lines control plane
+- `ext/cmdhook`: configured command hooks
+- `ext/eval`: eval/replay command
 
-### Integration matrix (hosts / orchestrators)
+### Optional packs (`packs/` module)
 
-| Host need | Use |
-|-----------|-----|
-| In-process Go | `Engine.Prompt` + `Options.OnEvent` / `SetOnEvent` (`tool.end` has `duration_ms`) |
-| Scripts / local tools | `mow rpc` — `prompt`, `cancel`, `status`, `event` notifications |
-| Editors | `mow acp` |
-| Peer harnesses | tool `acp_delegate` (session reused; chunks as `harness.delegate.chunk` events) |
-| Outer multi-step | `ext/goal` / `mow goal` (not a second core loop) |
+- `packs/goal`: durable outer-loop goals
+- `packs/review`: code/security review workflows
+- `packs/ops`: ops profiles, logs, actions, incidents, runbooks
+- `packs/lsp`: opt-in language-server tools and post-edit diagnostics
+- `packs/job`: interval/cron jobs (depends on goal); ops depends on job
 
-Correlate logs and events with `run_id` (per Prompt) and `session_id`.
+### Heavy nested modules
 
-Stock binary (`cmd/mow`) blank-imports packs:
+- `packs/otel`: OpenTelemetry dependencies stay isolated unless imported
+- `packs/mowi`: TUI dependencies stay isolated unless imported
 
-```go
-_ "github.com/subosito/mow/ext/acp"
-_ "github.com/subosito/mow/ext/goal"
-_ "github.com/subosito/mow/ext/lsp"
-_ "github.com/subosito/mow/ext/mcp"
-_ "github.com/subosito/mow/ext/rpc"
-_ "github.com/subosito/mow/ext/job"
-```
+## Binaries
 
-Remove an import → that pack’s subcommand and tools (if any) leave the binary. Help lists linked packs dynamically.
+| Binary | Source | Ships |
+|---|---|---|
+| `mow` | `cmd/mow` | Core CLI + ext + optional packs + OTEL, no TUI |
+| `mowi` | `packs/mowi/cmd/mowi` | Interactive TUI + the same pack command surface |
 
----
+`mowi` dispatches `acp`, `goal`, `review`, `ops`, `mcp`, etc. via the same
+registration surface as `mow`. Native `mow_agents` spawn the current executable
+using `os.Executable()`, so either binary works standalone: `mow` spawns
+`mow acp`, while `mowi` spawns `mowi acp`.
 
-## LLM endpoint (optional gateway)
+## Catalog behavior
 
-mow only needs:
+`GET /v1/models` metadata may include gateway extensions (`object`, `wire`,
+`wires`, `facet`, efforts, pricing, native tools, composite hops). Mow:
 
-| Config | Meaning |
-|--------|---------|
-| `llm.base_url` | Provider or gateway `/v1` (or Anthropic root for messages wire) |
-| `llm.api_key` / env | Auth for that endpoint |
-| `llm.model` | Chat model id |
-| `llm.wire` | `openai-chat-completions` (default), `openai-responses`, or `anthropic-messages` |
+- filters discovery-only `object: "model_group"` entries from callable pickers;
+- filters non-chat facets and unknown chat wires;
+- derives a preferred wire from `wires` when aliases/composites omit `wire`;
+- caches only the callable filtered catalog.
 
-| Without a gateway | With any compatible gateway |
-|-------------------|-----------------------------|
-| mow → provider API | mow → `http://127.0.0.1:…/v1` (or similar) |
-| Operator holds provider keys in mow env | Operator holds whatever key the gateway expects |
-| One API shape per config | Gateway may route/catalog; mow still speaks plain HTTP |
-
-Optional **attribution labels** (headers only; plain providers ignore them): `X-Mow-Actor`, `X-Mow-Session`, `X-Mow-Component`. Gateways can map these into their own observability slots. See [extensions.md](extensions.md).
-
----
+This prevents selectors from offering group ids such as `reviewers` and keeps
+wire labels visible for aliases/model hops.
 
 ## Trust boundary
 
-| Process | May do | Must not |
-|---------|--------|----------|
-| **mow** | Read/write workspace (if allowed), shell (if allowed), call LLM HTTP | Assume another product’s broker, channel store, or UI is present |
-
-mow never opens chat-channel sessions or external product databases. Hosts that want a TUI, desktop shell, or multi-agent dashboard **import mow** — they are not part of this module.
-
----
-
-## North star
-
-*mow is a self-contained harness: config + loop + tools + sessions. Everything else is an optional pack or an external host.*
+Project config cannot grant credentials, endpoints, power tools, session dirs,
+or extra roots. Trust is stored out-of-band under `$MOW_HOME/trusted`. File tools
+use the workspace/extra-root jail; shell is a separate explicit trust decision.
 
 ## See also
 
-- [harness.md](harness.md) — end-to-end design  
-- [extensions.md](extensions.md) — packs, CLI ownership, ACP, media  
+- [embedding.md](embedding.md) — public API and custom integrations
+- [harness.md](harness.md) — loop, tools, config, sessions
+- [extensions.md](extensions.md) — extension and pack details

@@ -89,10 +89,10 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `packcfg` | Decode `extensions.<name>` — **not** a pack |
 | `ext/rpc` | JSON-lines embed protocol + `mow rpc` |
 | `ext/acp` | ACP agent + client + `acp_delegate` + `mow acp` |
-| `ext/goal` | Outer multi-step goals + `mow goal` |
-| `ext/job` | Interval / cron jobs + `mow job` |
+| `packs/goal` | Outer multi-step goals + `mow goal` |
+| `packs/job` | Interval / cron jobs + `mow job` |
 | `ext/mcp` | MCP servers → tools (config opt-in) |
-| `ext/lsp` | `lsp_hover` / `lsp_definition` via gopls etc. (config opt-in) |
+| `packs/lsp` | `lsp_hover` / `lsp_definition` via gopls etc. (config opt-in) |
 | `cmd/mow` | Thin shell: core commands + blank-import packs |
 
 ### Internal

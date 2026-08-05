@@ -1,19 +1,20 @@
 # mow
 
-**Minimal, secure-by-default agentic harness** (Go). The **library is the product API**; wire protocols and optional packs are detachable.
+**Minimal, secure-by-default agentic harness** (Go). The **library is the product API**; protocol extensions, workflow packs, telemetry, and the TUI are detachable modules.
 
 ```text
 Embedder / tests ──┐
 CLI (run/tty) ────┼──▶  mow.Engine  ──▶  LLM HTTP (any compatible endpoint)
-ext packs ─────────┘     (acp · rpc · goal · mcp · …)
+ext + packs ──────┘     (acp · mcp · goal · review · …)
 ```
 
-**Why mow:** two runtime dependencies (pty, yaml) — no SDK, no framework; any
-OpenAI- or Anthropic-compatible endpoint over plain HTTP; packs (acp, rpc,
-goal, mcp, lsp, job) detach by removing a blank import; secure defaults
-(read-only tools, workspace path jail, out-of-band project trust).
+**Why mow:** the core module has two runtime dependencies (pty, yaml) — no SDK,
+no framework; any OpenAI- or Anthropic-compatible endpoint over plain HTTP;
+extensions detach by removing a blank import; secure defaults (read-only tools,
+workspace path jail, out-of-band project trust). Heavy OpenTelemetry and TUI
+dependencies live in nested modules and never enter a library-only embed.
 
-> Pre-1.0: the `mow` and `ext` API may change between minor versions.
+> Pre-1.0: the `mow`, `ext`, and packs APIs may change between minor versions.
 
 ## Library
 
@@ -46,13 +47,17 @@ What the embed gives you beyond a one-liner:
 
 Full walkthrough with code: **[docs/embedding.md](docs/embedding.md)**.
 
-## Try it
+## Build and try
 
 ```bash
 devenv shell -- just verify
 devenv shell -- just build    # → bin/mow
-# or, with plain Go (no devenv/nix needed):
+# Build the full TUI binary:
+devenv shell -- bash -c 'cd packs/mowi && go build -o ../../bin/mowi ./cmd/mowi'
+
+# Or with plain Go:
 go build -o bin/mow ./cmd/mow
+(cd packs/mowi && go build -o ../../bin/mowi ./cmd/mowi)
 
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_API_KEY=sk-…
@@ -63,42 +68,59 @@ export OPENAI_MODEL=gpt-5-mini
 
 ./bin/mow run -p "Reply with exactly: hi"
 ./bin/mow tty
-./bin/mow goal run --goal "Make CI green"   # ext/goal — multi-step
-./bin/mow review                 # ext/review — advisory code review
-./bin/mow sec --format sarif     # security profile, SARIF for code scanning
-./bin/mow job                    # interval jobs (goals/prompts)
-./bin/mow acp                    # ext/acp — editors
-./bin/mow rpc                    # ext/rpc — JSON-lines
-./bin/mow help                   # lists linked packs dynamically
-./bin/mow help run               # command-specific help (also: mow run -h)
-# Help displays --long flags; -long also works.
+./bin/mow goal run --goal "Make CI green"   # packs/goal — multi-step
+./bin/mow review                              # packs/review — advisory review
+./bin/mow sec --format sarif                  # security profile / SARIF
+./bin/mow job                                 # packs/job — interval jobs
+./bin/mow acp                                 # ext/acp — ACP agent
+./bin/mow rpc                                 # ext/rpc — JSON-lines
+./bin/mow help                                # linked commands, dynamically
 
-# Optional: $MOW_HOME/mcp.yaml, $MOW_HOME/lsp.yaml for MCP/LSP tools
-# export MOW_HOME=/tmp/mow-scratch
+./bin/mowi                                    # interactive TUI
+./bin/mowi acp --model gpt-5-mini             # same pack commands as mow
+./bin/mowi help
 ```
 
-**Pack-owned subcommands:** stock `cmd/mow` blank-imports packs. Remove an import (e.g. `_ "…/ext/acp"`) and that subcommand disappears from the binary and help.
+**Pack-owned subcommands:** stock binaries blank-import linked packs. Remove an
+import (for example `_ "github.com/subosito/mow/ext/acp"`) and its tools and
+subcommand disappear from that binary and help.
 
-Secure default tools: **read**, **glob**, **grep**. Power tools need `--allow-write` / `--allow-shell`.
-Project `.mow` config/skills load only after `mow trust` (stored out-of-band under `$MOW_HOME`, so a cloned repo cannot trust itself), and never set credentials, endpoints, or power tools.
+Secure default tools: **read**, **glob**, **grep**. Power tools need
+`--allow-write` / `--allow-shell`. Project `.mow` config/skills load only after
+`mow trust` (stored out-of-band under `$MOW_HOME`, so a cloned repo cannot trust
+itself), and never set credentials, endpoints, or power tools.
 
-## Layout
+## Modules and layout
 
-| Path | Role |
-|------|------|
-| `mow` | Public Engine API |
-| `cliutil/` | CLI helpers (flags → Engine); not a pack |
+| Path / module | Role |
+|---|---|
+| `mow.go` | Thin public re-export: `mow.Engine`, `mow.Run`, events, hooks, provider APIs |
+| `internal/engine/` | Engine implementation and behavior tests |
+| `cliutil/` | CLI flags → Engine; not a pack |
 | `packcfg/` | Decode `extensions.*`; not a pack |
-| `ext/` | Registration + feature packs (acp, rpc, goal, mcp, lsp, …) |
-| `internal/` | Loop, llm, tools, config, policy, session |
-| `cmd/mow` | Thin CLI shell |
+| `ext/` | Registration plus core extensions: acp, mcp, proc, rpc, cmdhook, eval |
+| `packs/` | Optional module: goal, review, ops, lsp, job |
+| `packs/otel/` | Optional nested OpenTelemetry module |
+| `packs/mowi/` | Optional nested TUI module and `cmd/mowi` full binary |
+| `cmd/mow/` | CLI binary; links ext + optional packs (including OTEL), excluding TUI |
+| `go.work` | Local workspace wiring all four modules |
 
-## Extensions
+## Pick extensions when embedding
 
-Blank-import packs into a custom binary, or `ext.RegisterTool` in `init`.  
-Stock `cmd/mow` already links acp/rpc/goal/mcp/lsp/job/cmdhook.
+```go
+import (
+    "github.com/subosito/mow"
+    _ "github.com/subosito/mow/ext/mcp"       // core protocol extension
+    _ "github.com/subosito/mow/packs/lsp"     // optional code integration
+    _ "github.com/subosito/mow/packs/ops"     // optional domain pack
+)
+```
 
-Config: `extensions.<pack>` (see `internal/config/mow.yaml.example`).  
+Import only `github.com/subosito/mow` for the Engine library. Add individual
+`ext/*` or `packs/*` imports as needed. Import
+`github.com/subosito/mow/packs/otel` only when OTLP auto-wiring is wanted.
+
+Config: `extensions.<pack>` (see `internal/config/mow.yaml.example`).
 Docs: [docs/extensions.md](docs/extensions.md).
 
 ## Docs
@@ -106,10 +128,10 @@ Docs: [docs/extensions.md](docs/extensions.md).
 | Doc | Contents |
 |-----|----------|
 | [AGENTS.md](AGENTS.md) | AI agents: build, spine, conventions |
-| [docs/architecture.md](docs/architecture.md) | Public/internal, LLM endpoint model |
+| [docs/architecture.md](docs/architecture.md) | Public/internal and module boundaries |
 | [docs/embedding.md](docs/embedding.md) | Embed in Go: options, events, custom tools/providers, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config |
-| [docs/extensions.md](docs/extensions.md) | Packs, CLI ownership, ACP, media, decisions |
+| [docs/extensions.md](docs/extensions.md) | Core extensions, optional packs, ACP, MCP/LSP, media |
 
 ## License
 

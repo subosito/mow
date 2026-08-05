@@ -1,9 +1,9 @@
 # AGENTS.md — working in the mow repo
 
-**mow** is a headless Go agent harness: secure-by-default tool loop + sessions +
-config. The **library** (`mow.Engine` / `mow.Run`) is the product API. UIs and
-extra protocols live as packs under `ext/` or as **external hosts that import
-this module** — do not re-add a TUI or product shell into this repo.
+mow is a public library plus detachable extensions and optional hosts. The
+interactive TUI is `packs/mowi/`, a nested module whose dependency direction
+is toward the root public API; do not move TUI dependencies into the root
+module or `internal/engine`.
 
 mow is **standalone**: one Go module, OpenAI/Anthropic-compatible HTTP. No other
 repo, gateway product, or host is required to build, test, or run.
@@ -58,7 +58,8 @@ Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool batches: `policy.max_
 
 | Path | Role |
 |------|------|
-| `mow` (root `*.go`) | Public Engine API (`engine_*.go`, `run.go`, `hooks.go`, `event.go`) |
+| `mow.go` | Thin public aliases/wrappers for `Engine`, `Run`, events, hooks, providers |
+| `internal/engine/` | Engine implementation and behavior tests |
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
 | `packcfg/` | Decode `extensions.<name>` (**not** a pack) |
 | `ext/` | Registration (`ext.go`) + core packs: acp, mcp, proc, rpc, cmdhook, eval |
@@ -173,8 +174,9 @@ Also apply **Public samples (OSS)** above when the commit includes docs or fixtu
 - CLI help shows `--long` flags; stdlib also accepts `-long`.
 - Engine split: `engine.go` (New), `engine_prompt.go`, `engine_model.go`,
   `engine_control.go`, `engine_adapt.go`, `run.go` (Options/Run).
-- This repo is headless (library + CLI + packs). Interactive UIs belong in
-  external hosts that depend on `github.com/subosito/mow`.
+- The root module stays headless and lean. Interactive UI code lives in the
+  nested `packs/mowi` module, which depends on the public root API; never import
+  TUI dependencies from the root module.
 - Tests isolate `$MOW_HOME` via `main_test.go` (`TestMain`); do not rely on the
   developer’s real `~/.mow`.
 

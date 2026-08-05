@@ -315,7 +315,7 @@ per-turn; a TUI wires it to Esc.
 
 ### Config / CLI (out of the box)
 
-Stock `mow` blank-imports `github.com/subosito/mow/otel`. When user config
+Stock `mow` blank-imports `github.com/subosito/mow/packs/otel`. When user config
 (or env) sets an OTLP endpoint, `Engine.New` auto-wires the adapter and an
 OTLP/HTTP exporter; `Engine.Close` flushes. Project `.mow/config` cannot set
 this (host/user only).
@@ -335,11 +335,11 @@ Env (wins over file): `MOW_OTEL_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`,
 
 ### Embed
 
-Same auto-wire if the host imports `_ "github.com/subosito/mow/otel"` (or the
+Same auto-wire if the host imports `_ "github.com/subosito/mow/packs/otel"` (or the
 stock binary). Or attach a custom pipeline:
 
 ```go
-import mowotel "github.com/subosito/mow/otel"
+import mowotel "github.com/subosito/mow/packs/otel"
 
 // Config-driven:
 exp, err := mowotel.StartExport(ctx, mowotel.ExportConfig{
