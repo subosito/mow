@@ -174,6 +174,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	opt.thrash = thrash
 
 	for turn := 0; maxTurns <= 0 || turn < maxTurns; turn++ {
+		ctx = context.WithValue(ctx, "mow.turn", turn+1)
 		if err := ctx.Err(); err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}

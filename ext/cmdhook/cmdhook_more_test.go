@@ -27,13 +27,13 @@ func scriptAt(t *testing.T, root, name, body string) string {
 func TestLoadErrors(t *testing.T) {
 	t.Parallel()
 	// Missing hooks file.
-	if _, err := load(Config{Root: t.TempDir()}); err == nil {
+	if _, err := load(PluginConfig{Root: t.TempDir()}); err == nil {
 		t.Fatal("expected error for missing hooks file")
 	}
 	// Invalid JSON.
 	root := t.TempDir()
 	writeHooksJSON(t, root, `{not json`)
-	if _, err := load(Config{Root: root}); err == nil {
+	if _, err := load(PluginConfig{Root: root}); err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
 }
@@ -43,7 +43,7 @@ func TestLoadEmptyAndSkippedEntries(t *testing.T) {
 	// No hooks at all → nil bridge, no error.
 	root := t.TempDir()
 	writeHooksJSON(t, root, `{"hooks":{}}`)
-	b, err := load(Config{Root: root})
+	b, err := load(PluginConfig{Root: root})
 	if err != nil || b != nil {
 		t.Fatalf("want nil bridge, got %v err=%v", b, err)
 	}
@@ -55,7 +55,7 @@ func TestLoadEmptyAndSkippedEntries(t *testing.T) {
 		{"matcher":"","hooks":[{"type":"intercept","command":"echo hi"}]},
 		{"matcher":"","hooks":[{"type":"command","command":"   "}]}
 	]}}`)
-	b, err = load(Config{Root: root})
+	b, err = load(PluginConfig{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestLoadEmptyAndSkippedEntries(t *testing.T) {
 		{"matcher":"(","hooks":[{"type":"command","command":"echo hi"}]},
 		{"matcher":"","hooks":[{"type":"command","command":"`+good+`"}]}
 	]}}`)
-	b, err = load(Config{Root: root})
+	b, err = load(PluginConfig{Root: root})
 	if err != nil || b == nil {
 		t.Fatalf("want loaded bridge, err=%v", err)
 	}
@@ -93,7 +93,7 @@ func TestLoadHooksFilePaths(t *testing.T) {
 	if err := os.WriteFile(other, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if b, err := load(Config{Root: root, HooksFile: "cfg/my.json"}); err != nil || b == nil {
+	if b, err := load(PluginConfig{Root: root, HooksFile: "cfg/my.json"}); err != nil || b == nil {
 		t.Fatalf("relative hooks_file: %v", err)
 	}
 	// Absolute hooks_file outside root.
@@ -101,7 +101,7 @@ func TestLoadHooksFilePaths(t *testing.T) {
 	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if b, err := load(Config{Root: root, HooksFile: abs}); err != nil || b == nil {
+	if b, err := load(PluginConfig{Root: root, HooksFile: abs}); err != nil || b == nil {
 		t.Fatalf("absolute hooks_file: %v", err)
 	}
 }
@@ -112,14 +112,14 @@ func TestLoadTimeoutConfig(t *testing.T) {
 	good := scriptAt(t, root, "ok.sh", "true")
 	writeHooksJSON(t, root, `{"hooks":{"PreToolUse":[{"matcher":"","hooks":[{"type":"command","command":"`+good+`"}]}]}}`)
 
-	b, err := load(Config{Root: root})
+	b, err := load(PluginConfig{Root: root})
 	if err != nil || b == nil {
 		t.Fatal(err)
 	}
 	if b.timeout.Seconds() != 10 {
 		t.Fatalf("default timeout = %v", b.timeout)
 	}
-	b, err = load(Config{Root: root, TimeoutSec: 3})
+	b, err = load(PluginConfig{Root: root, TimeoutSec: 3})
 	if err != nil || b == nil {
 		t.Fatal(err)
 	}

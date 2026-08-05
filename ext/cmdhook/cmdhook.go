@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -41,11 +42,55 @@ import (
 	"unicode/utf8"
 )
 
-// Config is extensions.cmdhook.
-type Config struct {
+// PluginConfig defines one command hook plugin instance.
+type PluginConfig struct {
+	Name       string `yaml:"name"`
 	Root       string `yaml:"root"`
 	HooksFile  string `yaml:"hooks_file"`
 	TimeoutSec int    `yaml:"timeout_sec"`
+	MinTurns   int    `yaml:"min_turns"`
+}
+
+// Config is extensions.cmdhook.
+type Config struct {
+	Root       string                  `yaml:"root"`
+	HooksFile  string                  `yaml:"hooks_file"`
+	TimeoutSec int                     `yaml:"timeout_sec"`
+	MinTurns   int                     `yaml:"min_turns"`
+	Plugins    map[string]PluginConfig `yaml:"plugins"`
+}
+
+func (c Config) resolved() []PluginConfig {
+	var out []PluginConfig
+	if len(c.Plugins) > 0 {
+		names := make([]string, 0, len(c.Plugins))
+		for name := range c.Plugins {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			p := c.Plugins[name]
+			if strings.TrimSpace(p.Name) == "" {
+				p.Name = name
+			}
+			out = append(out, p)
+		}
+		return out
+	}
+	if strings.TrimSpace(c.Root) != "" {
+		name := filepath.Base(c.Root)
+		if name == "" || name == "." {
+			name = "default"
+		}
+		out = append(out, PluginConfig{
+			Name:       name,
+			Root:       c.Root,
+			HooksFile:  c.HooksFile,
+			TimeoutSec: c.TimeoutSec,
+			MinTurns:   c.MinTurns,
+		})
+	}
+	return out
 }
 
 // hooksFile is the Claude Code plugin hooks.json schema (subset).
@@ -84,9 +129,11 @@ type compiled struct {
 }
 
 type bridge struct {
-	root    string
-	timeout time.Duration
-	events  map[string][]compiled
+	name     string
+	root     string
+	timeout  time.Duration
+	minTurns int
+	events   map[string][]compiled
 }
 
 var (
@@ -111,37 +158,42 @@ func setup(configPaths ...string) error {
 	if err != nil {
 		return fmt.Errorf("cmdhook extensions: %w", err)
 	}
-	if !ok || strings.TrimSpace(c.Root) == "" {
+	if !ok || (strings.TrimSpace(c.Root) == "" && len(c.Plugins) == 0) {
 		// fallback file, mirroring mcp.yaml / lsp.yaml
 		raw, rerr := os.ReadFile(filepath.Join(mow.Home(), "cmdhook.yaml"))
-		if rerr != nil {
-			return nil
-		}
-		if err := yaml.Unmarshal(raw, &c); err != nil {
-			return fmt.Errorf("cmdhook: cmdhook.yaml: %w", err)
+		if rerr == nil {
+			if err := yaml.Unmarshal(raw, &c); err != nil {
+				return fmt.Errorf("cmdhook: cmdhook.yaml: %w", err)
+			}
 		}
 	}
-	if strings.TrimSpace(c.Root) == "" {
+	plugins := c.resolved()
+	if len(plugins) == 0 {
 		return nil
 	}
-	b, err := load(c)
-	if err != nil {
-		return err
+	loaded := false
+	for _, p := range plugins {
+		b, err := load(p)
+		if err != nil {
+			return err
+		}
+		if b != nil {
+			b.register()
+			loaded = true
+		}
 	}
-	if b == nil {
-		return nil
+	if loaded {
+		registered = true
 	}
-	b.register()
-	registered = true
 	return nil
 }
 
-func load(c Config) (*bridge, error) {
-	root, err := filepath.Abs(strings.TrimSpace(c.Root))
+func load(p PluginConfig) (*bridge, error) {
+	root, err := filepath.Abs(strings.TrimSpace(p.Root))
 	if err != nil {
 		return nil, fmt.Errorf("cmdhook: root: %w", err)
 	}
-	hf := strings.TrimSpace(c.HooksFile)
+	hf := strings.TrimSpace(p.HooksFile)
 	if hf == "" {
 		hf = filepath.Join("hooks", "hooks.json")
 	}
@@ -156,11 +208,11 @@ func load(c Config) (*bridge, error) {
 	if err := json.Unmarshal(raw, &file); err != nil {
 		return nil, fmt.Errorf("cmdhook: %s: %w", hf, err)
 	}
-	timeout := time.Duration(c.TimeoutSec) * time.Second
+	timeout := time.Duration(p.TimeoutSec) * time.Second
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	b := &bridge{root: root, timeout: timeout, events: map[string][]compiled{}}
+	b := &bridge{name: p.Name, root: root, timeout: timeout, minTurns: p.MinTurns, events: map[string][]compiled{}}
 	n := 0
 	for event, entries := range file.Hooks {
 		for _, me := range entries {
@@ -308,8 +360,14 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 }
 
 func (b *bridge) register() {
+	ext.RegisterExtensionInstance("cmdhook", b.name, b.minTurns)
+	target := "cmdhook:" + b.name
+
 	if len(b.events["PreToolUse"]) > 0 {
 		ext.RegisterPreTool(func(ctx context.Context, e ext.PreToolEvent) (ext.PreToolDecision, error) {
+			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+				return ext.PreToolDecision{}, nil
+			}
 			payload := b.basePayload(ctx, "PreToolUse")
 			payload["tool_name"] = claudeToolName(e.Name)
 			payload["tool_input"] = rawOrEmpty(e.Args)
@@ -328,6 +386,9 @@ func (b *bridge) register() {
 	}
 	if len(b.events["PostToolUse"]) > 0 {
 		ext.RegisterPostTool(func(ctx context.Context, e ext.PostToolEvent) (ext.PostToolDecision, error) {
+			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+				return ext.PostToolDecision{}, nil
+			}
 			payload := b.basePayload(ctx, "PostToolUse")
 			payload["tool_name"] = claudeToolName(e.Name)
 			payload["tool_input"] = rawOrEmpty(e.Args)
@@ -350,6 +411,9 @@ func (b *bridge) register() {
 	}
 	if len(b.events["UserPromptSubmit"]) > 0 {
 		ext.RegisterUserPrompt(func(ctx context.Context, e ext.UserPromptEvent) (ext.UserPromptDecision, error) {
+			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+				return ext.UserPromptDecision{}, nil
+			}
 			payload := b.basePayload(ctx, "UserPromptSubmit")
 			payload["prompt"] = e.Text
 			if e.SessionID != "" {
@@ -367,6 +431,9 @@ func (b *bridge) register() {
 	}
 	if len(b.events["SessionStart"]) > 0 {
 		ext.RegisterSessionStart(func(ctx context.Context, e ext.SessionStartEvent) (ext.SessionStartDecision, error) {
+			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+				return ext.SessionStartDecision{}, nil
+			}
 			payload := map[string]any{
 				"hook_event_name": "SessionStart",
 				"session_id":      e.SessionID,
@@ -379,6 +446,9 @@ func (b *bridge) register() {
 	}
 	if len(b.events["Stop"]) > 0 {
 		ext.RegisterStop(func(ctx context.Context, e ext.StopEvent) {
+			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+				return
+			}
 			payload := b.basePayload(ctx, "Stop")
 			payload["stop_hook_active"] = false
 			if e.SessionID != "" {
@@ -389,6 +459,9 @@ func (b *bridge) register() {
 	}
 	if len(b.events["PreCompact"]) > 0 {
 		ext.RegisterPreCompact(func(ctx context.Context, e ext.PreCompactEvent) (ext.PreCompactDecision, error) {
+			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+				return ext.PreCompactDecision{}, nil
+			}
 			payload := b.basePayload(ctx, "PreCompact")
 			payload["trigger"] = "auto"
 			payload["est_chars"] = e.EstChars

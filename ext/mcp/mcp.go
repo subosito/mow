@@ -31,19 +31,15 @@ import (
 
 // ServerConfig is one MCP server (stdio or streamable HTTP).
 type ServerConfig struct {
-	Name    string            `yaml:"name"`
-	Command string            `yaml:"command"` // stdio
-	Args    []string          `yaml:"args"`
-	Env     map[string]string `yaml:"env"`
-	// URL enables Streamable HTTP (POST JSON-RPC; SSE response optional).
-	// When set, Command is ignored. https is required except for loopback
-	// hosts — set insecure: true to allow plain http elsewhere (tokens go
-	// over the wire in clear text).
+	Name     string            `yaml:"name"`
+	Command  string            `yaml:"command"` // stdio
+	Args     []string          `yaml:"args"`
+	Env      map[string]string `yaml:"env"`
 	URL      string            `yaml:"url"`
 	Insecure bool              `yaml:"insecure"`
 	Headers  map[string]string `yaml:"headers"`
-	// Auth: bearer token or oauth2 client_credentials (HTTP only).
-	Auth AuthConfig `yaml:"auth"`
+	Auth     AuthConfig        `yaml:"auth"`
+	MinTurns int               `yaml:"min_turns"`
 }
 
 // Config is extensions.mcp. It accepts the ecosystem-standard mcpServers map
@@ -140,6 +136,7 @@ func RegisterServers(servers []ServerConfig) error {
 			_ = tr.Close()
 			return fmt.Errorf("mcp %s list: %w", name, err)
 		}
+		ext.RegisterExtensionInstance("mcp", name, s.MinTurns)
 		n := 0
 		for _, t := range tools {
 			ext.RegisterTool(&mcpTool{
@@ -498,6 +495,9 @@ func (t *mcpTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{}}`)
 }
 func (t *mcpTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
+	if !ext.IsExtensionActive("mcp:"+t.prefix, ext.TurnFromContext(ctx)) {
+		return fmt.Sprintf("mcp server %q is dormant (min_turns not reached) or disabled", t.prefix), nil
+	}
 	return t.client.callTool(ctx, t.name, args)
 }
 

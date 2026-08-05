@@ -144,8 +144,15 @@ session:
 #   mcp:
 #     mcpServers:
 #       context-mode:
-#         command: npx
-#         args: ["-y", "@context-mode/mcp-server"]
+#         command: node
+#         args: ["/path/to/start.mjs"]
+#         min_turns: 5       # optional turn activation threshold (default 0)
+#   cmdhook:
+#     plugins:
+#       context-mode:
+#         root: /path/to/plugin
+#         hooks_file: hooks/hooks.json
+#         min_turns: 5
 #   acp:
 #     # External peers (any ACP command). "Subagent" in other harnesses = named agent here.
 #     agents:

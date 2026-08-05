@@ -7,6 +7,7 @@ package ext
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -158,7 +159,151 @@ var (
 	preCompact []PreCompactFunc
 	afterTurn  []AfterTurnFunc
 	stop       []StopFunc
+
+	extInstances map[string]*ExtensionState
 )
+
+// ExtensionState describes a registered extension instance (e.g. MCP server or cmdhook plugin).
+type ExtensionState struct {
+	Name     string // Full name, e.g. "cmdhook:context-mode" or "mcp:context-mode"
+	Kind     string // "cmdhook" or "mcp"
+	MinTurns int    // Activation threshold (0 = always active)
+	Enabled  *bool  // Explicit manual toggle override (nil = use MinTurns rule)
+}
+
+// ExtensionStatus contains the evaluated state of an extension instance.
+type ExtensionStatus struct {
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+	MinTurns int    `json:"min_turns"`
+	Active   bool   `json:"active"`
+	Status   string `json:"status"`
+}
+
+type turnKey struct{}
+
+// WithTurn returns a child context carrying the current agent turn number (1-based or 0-based).
+func WithTurn(ctx context.Context, turn int) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, turnKey{}, turn)
+}
+
+// TurnFromContext extracts the turn number from context (0 if unset).
+func TurnFromContext(ctx context.Context) int {
+	if ctx == nil {
+		return 0
+	}
+	v, _ := ctx.Value(turnKey{}).(int)
+	return v
+}
+
+// RegisterExtensionInstance registers an extension instance (e.g. kind="mcp", name="context-mode").
+func RegisterExtensionInstance(kind, name string, minTurns int) {
+	if name == "" {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if extInstances == nil {
+		extInstances = make(map[string]*ExtensionState)
+	}
+	full := kind + ":" + name
+	if minTurns < 0 {
+		minTurns = 0
+	}
+	extInstances[full] = &ExtensionState{
+		Name:     full,
+		Kind:     kind,
+		MinTurns: minTurns,
+	}
+}
+
+// SetExtensionEnabled sets explicit enabled/disabled state for extension(s) matching target.
+// Target can be full ("mcp:context-mode"), short name ("context-mode"), or kind ("mcp").
+func SetExtensionEnabled(target string, enabled bool) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target == "" {
+		return false
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for k, inst := range extInstances {
+		short := strings.TrimPrefix(k, inst.Kind+":")
+		if strings.EqualFold(k, target) || strings.EqualFold(short, target) || strings.EqualFold(inst.Kind, target) {
+			b := enabled
+			inst.Enabled = &b
+			found = true
+		}
+	}
+	return found
+}
+
+// IsExtensionActive reports whether target extension is active at currentTurn.
+func IsExtensionActive(target string, currentTurn int) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target == "" {
+		return true
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for k, inst := range extInstances {
+		short := strings.TrimPrefix(k, inst.Kind+":")
+		if strings.EqualFold(k, target) || strings.EqualFold(short, target) {
+			if inst.Enabled != nil {
+				return *inst.Enabled
+			}
+			if inst.MinTurns <= 0 {
+				return true
+			}
+			return currentTurn >= inst.MinTurns
+		}
+	}
+	// If unmanaged/unregistered, active by default.
+	return true
+}
+
+// ListExtensions returns evaluated status of all registered extension instances.
+func ListExtensions(currentTurn int) []ExtensionStatus {
+	mu.Lock()
+	defer mu.Unlock()
+	var keys []string
+	for k := range extInstances {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]ExtensionStatus, 0, len(keys))
+	for _, k := range keys {
+		inst := extInstances[k]
+		active := true
+		st := "active"
+		if inst.Enabled != nil {
+			active = *inst.Enabled
+			if active {
+				st = "active (manual)"
+			} else {
+				st = "disabled (manual)"
+			}
+		} else if inst.MinTurns > 0 {
+			if currentTurn < inst.MinTurns {
+				active = false
+				st = fmt.Sprintf("dormant (turn %d/%d)", currentTurn, inst.MinTurns)
+			} else {
+				st = fmt.Sprintf("active (turn %d/%d)", currentTurn, inst.MinTurns)
+			}
+		}
+		out = append(out, ExtensionStatus{
+			Name:     inst.Name,
+			Kind:     inst.Kind,
+			MinTurns: inst.MinTurns,
+			Active:   active,
+			Status:   st,
+		})
+	}
+	return out
+}
 
 // RegisterTool adds a tool available to integrators and the default registry merge.
 // Re-registering a name replaces the earlier tool — BeforeNew may run once per
@@ -396,4 +541,5 @@ func Reset() {
 	preCompact = nil
 	afterTurn = nil
 	stop = nil
+	extInstances = nil
 }

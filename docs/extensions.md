@@ -95,8 +95,34 @@ extensions:
 
 - `ext/proc`: `proc_start`, `proc_status`, `proc_stop` and `mow proc`.
 - `ext/rpc`: JSON-lines prompt/event/cancel/status control plane.
-- `ext/cmdhook`: configured lifecycle shell hooks.
+- `ext/cmdhook`: configured lifecycle shell hooks (supports single `root` or `plugins` map, plus `min_turns`).
 - `ext/eval`: eval/replay fixtures and command.
+
+### Extension lifecycle & turn control (`mow ext` / `/ext`)
+
+Extensions (such as MCP servers and command hook plugins) support optional `min_turns` thresholds and manual runtime activation control:
+
+- **`min_turns: N`**: specifies turn activation threshold (default `0`, active from start). When `turn < N`, hooks/tools remain dormant.
+- **`mow ext` / `/ext`**: inspect or toggle extensions at runtime:
+  - `mow ext list` or `/ext list`: list registered extension instances and status.
+  - `mow ext on <name>` or `/ext on <name>`: manually enable extension `<name>`, overriding `min_turns`.
+  - `mow ext off <name>` or `/ext off <name>`: manually disable extension `<name>`.
+
+```yaml
+extensions:
+  cmdhook:
+    plugins:
+      context-mode:
+        root: /path/to/context-mode
+        hooks_file: hooks/hooks.json
+        min_turns: 5
+  mcp:
+    mcpServers:
+      filesystem:
+        command: npx
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+        min_turns: 0
+```
 
 ## Optional packs (`packs/`)
 

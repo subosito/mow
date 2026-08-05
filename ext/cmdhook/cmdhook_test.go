@@ -22,7 +22,11 @@ func writeHooksJSON(t *testing.T, root, body string) {
 
 func mustLoad(t *testing.T, c Config) *bridge {
 	t.Helper()
-	b, err := load(c)
+	res := c.resolved()
+	if len(res) == 0 {
+		t.Fatal("no resolved plugins in config")
+	}
+	b, err := load(res[0])
 	if err != nil {
 		t.Fatal(err)
 	}

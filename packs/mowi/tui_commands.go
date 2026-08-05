@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/subosito/mow"
+	"github.com/subosito/mow/ext"
 )
 
 func statusBits(eng *mow.Engine, perm PermissionMode, stream bool) string {
@@ -220,6 +221,8 @@ func (m *model) handleSlash(cmd string) tea.Cmd {
 		m.add(kindStatus, line)
 		m.refreshVP()
 		return nil
+	case "/ext":
+		return m.handleExtSlash(parts)
 	case "/goal":
 		return m.handleGoalSlash(parts)
 	case "/lsp":
@@ -536,4 +539,54 @@ type effortMsg struct {
 	setTo   string
 	current string
 	err     error
+}
+
+func (m *model) handleExtSlash(parts []string) tea.Cmd {
+	if len(parts) == 1 || parts[1] == "list" || parts[1] == "status" {
+		list := ext.ListExtensions(0)
+		if len(list) == 0 {
+			m.add(kindStatus, "ext · no extensions registered")
+			m.refreshVP()
+			return nil
+		}
+		var b strings.Builder
+		b.WriteString("extensions:\n")
+		for _, info := range list {
+			fmt.Fprintf(&b, "  • %-20s  %-8s  %s\n", info.Name, info.Kind, info.Status)
+		}
+		m.add(kindStatus, strings.TrimRight(b.String(), "\n"))
+		m.refreshVP()
+		return nil
+	}
+	action := strings.ToLower(parts[1])
+	switch action {
+	case "on", "enable":
+		if len(parts) < 3 {
+			m.add(kindError, "usage: /ext on <name>")
+			m.refreshVP()
+			return nil
+		}
+		target := parts[2]
+		if ext.SetExtensionEnabled(target, true) {
+			m.add(kindStatus, "ext "+glyphArrow+" enabled "+target)
+		} else {
+			m.add(kindError, "ext · no extension matching "+target)
+		}
+	case "off", "disable":
+		if len(parts) < 3 {
+			m.add(kindError, "usage: /ext off <name>")
+			m.refreshVP()
+			return nil
+		}
+		target := parts[2]
+		if ext.SetExtensionEnabled(target, false) {
+			m.add(kindStatus, "ext "+glyphArrow+" disabled "+target)
+		} else {
+			m.add(kindError, "ext · no extension matching "+target)
+		}
+	default:
+		m.add(kindError, "usage: /ext [list|on|off <name>]")
+	}
+	m.refreshVP()
+	return nil
 }
