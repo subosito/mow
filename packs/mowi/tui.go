@@ -4190,8 +4190,10 @@ func (m *model) renderEntry(e entry, width int) string {
 	switch e.kind {
 	case kindUser:
 		// Soft left bar + fill — prompt block in a document, not a chat bubble.
-		// -2 for horizontal pad inside RoleUserBg.
-		body := m.renderUser(e.text, max(12, inner-2))
+		// -2 for horizontal pad inside RoleUserBg; the inline timestamp shares
+		// the first row, so reserve its cells too or that row overflows the
+		// viewport and userBlock truncates the text away.
+		body := m.renderUser(e.text, max(12, inner-2-userStampWidth(e.at)))
 		return gcNote + m.renderTurn(true, body, e.at, width)
 	case kindAssistant:
 		// Accent gutter + content. Never glamour here — pretty is async.
@@ -4218,6 +4220,15 @@ func (m *model) renderEntry(e entry, width int) string {
 	default:
 		return m.theme.Muted.Render(e.text)
 	}
+}
+
+// userStampWidth is the cell cost of the inline timestamp on a user block's
+// first row (" 15:04  "), or 0 when the entry carries no time.
+func userStampWidth(at time.Time) int {
+	if at.IsZero() {
+		return 0
+	}
+	return lipgloss.Width(" "+formatTurnTime(at, time.Now())) + 2
 }
 
 func (m *model) renderTurn(user bool, body string, at time.Time, width int) string {
