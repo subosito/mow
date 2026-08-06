@@ -3,6 +3,7 @@ package mowi
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -212,6 +213,87 @@ func resolveLexer(lang, code string) chroma.Lexer {
 	return chroma.Coalesce(lexer)
 }
 
+// diffGutter is the geometry of the line-number gutter for one diff.
+//
+// The number column used to be a fixed 4 cells with two-space gaps, costing 17
+// columns before any code appeared. Inside the transcript's own indent that is
+// a large fraction of an 80-column terminal spent on whitespace, and most
+// diffs never reach four digits. Sizing the column to the largest line number
+// the diff actually mentions gives those columns back to the code.
+type diffGutter struct {
+	numW int // width of each line-number column
+}
+
+// newDiffGutter measures a unified diff and returns the gutter geometry.
+//
+// Width comes from the hunk headers rather than from counting rendered rows,
+// because the numbers shown are the file's, not the diff's: a hunk starting at
+// line 1200 needs four cells even if it only shows three lines.
+func newDiffGutter(lines []string) diffGutter {
+	maxLn := 0
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "@@") {
+			continue
+		}
+		oh, nh, ok := parseHunkHeader(line)
+		if !ok {
+			continue
+		}
+		for _, end := range []int{oh.start + oh.count, nh.start + nh.count} {
+			if end > maxLn {
+				maxLn = end
+			}
+		}
+	}
+	w := len(strconv.Itoa(maxLn))
+	// Two cells minimum: a single-column gutter reads as noise next to the
+	// separator, and almost every real file passes line 9 anyway.
+	if w < diffNumMinWidth {
+		w = diffNumMinWidth
+	}
+	if w > diffNumMaxWidth {
+		w = diffNumMaxWidth
+	}
+	return diffGutter{numW: w}
+}
+
+// blank is an empty number cell (the row this side of the diff does not have).
+func (g diffGutter) blank() string { return strings.Repeat(" ", g.numW) }
+
+// num formats a line number into its column.
+func (g diffGutter) num(n int) string { return fmt.Sprintf("%*d", g.numW, n) }
+
+// ellipsis is the elided-lines marker, right-aligned like a number.
+func (g diffGutter) ellipsis() string {
+	if g.numW <= 2 {
+		return "··"
+	}
+	return strings.Repeat(" ", g.numW-2) + "··"
+}
+
+// prefix renders the two number cells and the separator, up to (not including)
+// the change glyph. One leading space, one between the columns: the old layout
+// used two of each, which read as a margin rather than as structure.
+func (g diffGutter) prefix(oldN, newN string) string {
+	return fmt.Sprintf(" %s %s │ ", oldN, newN)
+}
+
+// width is the total cells the gutter occupies, glyph and its trailing space
+// included. Used by layout code that needs to know where the body starts.
+func (g diffGutter) width() int {
+	return 1 + g.numW + 1 + g.numW + 1 + 1 + 1 + 1 + 1
+}
+
+const (
+	// diffNumMinWidth keeps a one-digit file from rendering a cramped gutter.
+	diffNumMinWidth = 2
+	// diffNumMaxWidth caps the column so a generated file with a six-digit
+	// line count cannot eat the body. Numbers past this overflow their cell
+	// and push the row right, which is still better than reserving the space
+	// on every diff.
+	diffNumMaxWidth = 5
+)
+
 // colorDiffLines paints a unified diff for permission previews / legacy callers.
 func colorDiffLines(th theme, code string) string {
 	return renderPrettyDiff(th, code, 0)
@@ -240,6 +322,10 @@ func renderPrettyDiff(th theme, code string, width int) string {
 		return ""
 	}
 	var b strings.Builder
+	lines := strings.Split(code, "\n")
+	// Measure the gutter before rendering: every row must share one geometry,
+	// so the width cannot be discovered as rows are emitted.
+	g := newDiffGutter(lines)
 	oldLn, newLn := 1, 1
 	haveNums := false
 	first := true
@@ -258,15 +344,15 @@ func renderPrettyDiff(th theme, code string, width int) string {
 		}
 		pre := 0
 		for pre < len(dels) && pre < len(adds) && dels[pre] == adds[pre] {
-			on, nn := "    ", "    "
+			on, nn := g.blank(), g.blank()
 			if haveNums {
-				on = fmt.Sprintf("%4d", oldLn)
-				nn = fmt.Sprintf("%4d", newLn)
+				on = g.num(oldLn)
+				nn = g.num(newLn)
 				oldLn++
 				newLn++
 			}
 			nl()
-			gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", on, nn)) +
+			gutter := th.DiffNum.Render(g.prefix(on, nn)) +
 				th.DiffCtx.Render(diffSignCtx+" ")
 			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(dels[pre]), width))
 			pre++
@@ -292,43 +378,43 @@ func renderPrettyDiff(th theme, code string, width int) string {
 		}
 
 		for i, body := range midDels {
-			on, nn := "    ", "    "
+			on, nn := g.blank(), g.blank()
 			if haveNums {
-				on = fmt.Sprintf("%4d", oldLn)
+				on = g.num(oldLn)
 				oldLn++
 			}
 			nl()
 			if oldStyled != nil {
-				b.WriteString(formatDiffRowPre(th, th.DiffDel, on, nn, diffSignDel, oldStyled[i], width))
+				b.WriteString(formatDiffRowPre(th, g, th.DiffDel, on, nn, diffSignDel, oldStyled[i], width))
 			} else {
-				b.WriteString(formatDiffRow(th, th.DiffDel, on, nn, diffSignDel, body, width))
+				b.WriteString(formatDiffRow(th, g, th.DiffDel, on, nn, diffSignDel, body, width))
 			}
 		}
 
 		for i, body := range midAdds {
-			on, nn := "    ", "    "
+			on, nn := g.blank(), g.blank()
 			if haveNums {
-				nn = fmt.Sprintf("%4d", newLn)
+				nn = g.num(newLn)
 				newLn++
 			}
 			nl()
 			if newStyled != nil {
-				b.WriteString(formatDiffRowPre(th, th.DiffAdd, on, nn, diffSignAdd, newStyled[i], width))
+				b.WriteString(formatDiffRowPre(th, g, th.DiffAdd, on, nn, diffSignAdd, newStyled[i], width))
 			} else {
-				b.WriteString(formatDiffRow(th, th.DiffAdd, on, nn, diffSignAdd, body, width))
+				b.WriteString(formatDiffRow(th, g, th.DiffAdd, on, nn, diffSignAdd, body, width))
 			}
 		}
 
 		for i := 0; i < suf; i++ {
-			on, nn := "    ", "    "
+			on, nn := g.blank(), g.blank()
 			if haveNums {
-				on = fmt.Sprintf("%4d", oldLn)
-				nn = fmt.Sprintf("%4d", newLn)
+				on = g.num(oldLn)
+				nn = g.num(newLn)
 				oldLn++
 				newLn++
 			}
 			nl()
-			gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", on, nn)) +
+			gutter := th.DiffNum.Render(g.prefix(on, nn)) +
 				th.DiffCtx.Render(diffSignCtx+" ")
 			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(sufDels[i]), width))
 		}
@@ -337,7 +423,6 @@ func renderPrettyDiff(th theme, code string, width int) string {
 		adds = nil
 	}
 
-	lines := strings.Split(code, "\n")
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") ||
@@ -380,27 +465,27 @@ func renderPrettyDiff(th theme, code string, width int) string {
 		case strings.HasPrefix(line, "\\"): // "\ No newline at end of file"
 			flushRun()
 			nl()
-			b.WriteString(th.Muted.Render(fmt.Sprintf("  %s  %s │ %s %s", "    ", "    ", diffSignCtx, "no newline at end of file")))
+			b.WriteString(th.Muted.Render(g.prefix(g.blank(), g.blank()) + diffSignCtx + " no newline at end of file"))
 		case strings.HasPrefix(line, "…"):
 			flushRun()
 			nl()
-			b.WriteString(th.Muted.Render(fmt.Sprintf("  %s  %s │ %s %s", "  ··", "  ··", diffSignCtx, strings.TrimSpace(line))))
+			b.WriteString(th.Muted.Render(g.prefix(g.ellipsis(), g.ellipsis()) + diffSignCtx + " " + strings.TrimSpace(line)))
 		default:
 			flushRun()
 			body := line
 			if strings.HasPrefix(body, " ") {
 				body = body[1:]
 			}
-			on, nn := "    ", "    "
+			on, nn := g.blank(), g.blank()
 			if haveNums {
-				on = fmt.Sprintf("%4d", oldLn)
-				nn = fmt.Sprintf("%4d", newLn)
+				on = g.num(oldLn)
+				nn = g.num(newLn)
 				oldLn++
 				newLn++
 			}
 			// Context: muted numbers, normal text — no tint.
 			nl()
-			gutter := th.DiffNum.Render(fmt.Sprintf("  %s  %s │ ", on, nn)) +
+			gutter := th.DiffNum.Render(g.prefix(on, nn)) +
 				th.DiffCtx.Render(diffSignCtx+" ")
 			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(body), width))
 		}
@@ -424,11 +509,11 @@ const (
 )
 
 // formatDiffRow builds "  old  new │ S body" with a tinted body (add/del).
-func formatDiffRow(th theme, bodyStyle lipgloss.Style, oldN, newN, sign, body string, width int) string {
+func formatDiffRow(th theme, g diffGutter, bodyStyle lipgloss.Style, oldN, newN, sign, body string, width int) string {
 	if body == "" {
 		body = " "
 	}
-	return formatDiffRowPre(th, bodyStyle, oldN, newN, sign, bodyStyle.Render(body), width)
+	return formatDiffRowPre(th, g, bodyStyle, oldN, newN, sign, bodyStyle.Render(body), width)
 }
 
 // diffNumOnBand is the line-number ink for a changed row.
@@ -457,10 +542,9 @@ func diffNumOnBand(th theme, bodyStyle lipgloss.Style) lipgloss.Style {
 // changed block reads as one rectangle. Washing only the body left a 15-cell
 // notch on the left and the block read as stripes. Padding is skipped when
 // width is unknown (colorDiffLines passes 0): there is no column to pad to.
-func formatDiffRowPre(th theme, bodyStyle lipgloss.Style, oldN, newN, sign, styledBody string, width int) string {
+func formatDiffRowPre(th theme, g diffGutter, bodyStyle lipgloss.Style, oldN, newN, sign, styledBody string, width int) string {
 	numStyle := diffNumOnBand(th, bodyStyle)
-	gutter := numStyle.Render(fmt.Sprintf("  %s  %s ", oldN, newN)) +
-		numStyle.Render("\u2502 ") + bodyStyle.Render(sign+" ")
+	gutter := numStyle.Render(g.prefix(oldN, newN)) + bodyStyle.Render(sign+" ")
 	if width > 0 {
 		if pad := width - lipgloss.Width(gutter) - lipgloss.Width(styledBody); pad > 0 {
 			styledBody += bodyStyle.Render(strings.Repeat(" ", pad))
