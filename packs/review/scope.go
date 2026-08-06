@@ -20,7 +20,8 @@ type Budget struct {
 	MaxTurns int
 }
 
-// Budgets are the named sizes accepted by --budget.
+// Budgets are the named sizes accepted by --budget, after any
+// extensions.review.budgets overrides.
 //
 // MaxTurns has to cover exploration *and* the final JSON answer. Dogfooding
 // calibrated both ends: left uncapped, a capable model spends 20+ turns
@@ -28,6 +29,22 @@ type Budget struct {
 // budget exploring and never emits its report, which surfaces as a failed run.
 // These values leave room to answer after a normal amount of looking around.
 func Budgets() map[string]Budget {
+	budgetMu.RLock()
+	ov := budgetOverride
+	budgetMu.RUnlock()
+	if ov != nil {
+		out := make(map[string]Budget, len(ov))
+		for k, v := range ov {
+			out[k] = v
+		}
+		return out
+	}
+	return builtinBudgets()
+}
+
+// builtinBudgets is the shipped table, ignoring config. Overrides are folded
+// onto this, so a partial override cannot lose a cap it did not mention.
+func builtinBudgets() map[string]Budget {
 	return map[string]Budget{
 		"small":  {Name: "small", MaxFiles: 15, MaxBytes: 120_000, MaxFileBytes: 40_000, MaxTurns: 30},
 		"medium": {Name: "medium", MaxFiles: 40, MaxBytes: 400_000, MaxFileBytes: 80_000, MaxTurns: 45},

@@ -208,6 +208,41 @@ pass spends its whole budget exploring and never emits a report. If a pass does
 exhaust its turns, the run fails with exit `2` and says so, rather than
 reporting a partial result — or an empty one — as a finished review.
 
+### Tuning budgets (`extensions.review`)
+
+The built-in sizes cannot fit every repository — a tree larger than the large
+budget's 120-file cap truncates no matter which size you pick. Budget caps are
+therefore configurable under `extensions.review` in `-config` or
+`$MOW_HOME/config.yaml`:
+
+```yaml
+extensions:
+  review:
+    budgets:
+      large:
+        max_files: 200        # default 120
+        max_bytes: 2000000    # default 1_200_000
+        max_file_bytes: 200000
+        max_turns: 90
+```
+
+Only the keys you set change; the rest keep their built-in values, so raising
+`max_files` alone does not quietly remove the byte or turn caps. An unknown
+budget name or a non-positive cap is a hard error rather than a silent
+fallback: a user who raised a cap and got the built-in one instead would
+believe more had been reviewed than was.
+
+Nothing else is configurable. Personas, taxonomies, severity floors, and the
+two-pass workflow are the product — if a project could weaken them, a reader
+could no longer tell what `mow sec` actually did from the fact that it ran.
+Because the section is read from `$MOW_HOME` and explicit `-config` paths only,
+project config cannot reach it.
+
+Raising a cap is usually the wrong first move. A single review of a very large
+scope is a weaker review than several narrow ones: attention spreads thin, and
+the verification pass has more to hold. Prefer `--diff`, a path, or `--exclude`
+first, and raise the budget when the scope is genuinely irreducible.
+
 ### Does it depend on the model?
 
 Yes, but less than you would expect, and the failure mode is safe. Against a

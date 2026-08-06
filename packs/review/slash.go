@@ -79,6 +79,9 @@ func runSlash(ctx context.Context, req slash.Request) (slash.Result, error) {
 		return slash.Result{}, fmt.Errorf("/%s: %w", cmd, err)
 	}
 
+	// Budget overrides are already installed by BeforeNew when the host built
+	// its engine, so unlike the CLI path this does not reload config — the
+	// session's engine and this scope see the same caps either way.
 	sc, err := ResolveScope(ctx, rq.Scope)
 	if err != nil {
 		return slash.Result{}, fmt.Errorf("/%s: %w", cmd, err)

@@ -107,6 +107,15 @@ func runCommand(cmd string, args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Load extensions.review before resolving scope. Budgets are config-
+	// tunable, and ResolveScope enforces them — deferring this to mow.New
+	// (which runs BeforeNew) would resolve the scope against the built-in
+	// caps and then build an engine with the configured ones, so a raised
+	// max_files would silently do nothing and the run would truncate anyway.
+	if err := loadConfig(ef.ConfigPaths()...); err != nil {
+		return fail(cmd, err)
+	}
+
 	// Resolve scope before building an engine: a bad selector or an empty
 	// scope should not cost a model connection.
 	sc, err := ResolveScope(ctx, req.Scope)
