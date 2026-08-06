@@ -261,6 +261,23 @@ func paletteFromChroma(name string) (p palette, dark, ok bool) {
 		fg = "#24292e"
 	}
 	dimFg := mixHex(fg, background, 0.45) // muted text when the style has no comment color
+	// Diff accents: some styles (monokai, nord) colour the *text* of an
+	// inserted line, others (gruvbox) colour its *background* and leave the
+	// text at the page background. Reading only .Colour on the latter yields
+	// the page background for both add and del — two identical, invisible
+	// bands. Prefer whichever channel the style actually used.
+	addAccent := diffAccentFrom(s, chroma.GenericInserted, background,
+		tok(chroma.NameFunction, fg))
+	delAccent := diffAccentFrom(s, chroma.GenericDeleted, background,
+		tok(chroma.Error, fg))
+	// Some styles genuinely do not distinguish insertions from deletions
+	// (xcode and bw paint both in the body colour; solarized-light uses one
+	// magenta for each). Honouring that literally would render add and del as
+	// the same band, so a diff would show that something changed but not
+	// which way. Fall back to conventional green/red, tuned to the page.
+	if !distinctAccents(addAccent, delAccent) {
+		addAccent, delAccent = fallbackDiffAccents(dark)
+	}
 	p = palette{
 		fg:     fg,
 		muted:  tok(chroma.Comment, dimFg),
@@ -270,12 +287,86 @@ func paletteFromChroma(name string) (p palette, dark, ok bool) {
 		err:    tok(chroma.GenericDeleted, tok(chroma.Error, fg)),
 		warn:   tok(chroma.NameDecorator, tok(chroma.LiteralString, fg)),
 		border: borderForChrome(background, fg),
-		add:    tok(chroma.GenericInserted, tok(chroma.NameFunction, fg)),
-		del:    tok(chroma.GenericDeleted, tok(chroma.Error, fg)),
+		add:    addAccent,
+		del:    delAccent,
 		meta:   tok(chroma.LiteralNumber, tok(chroma.KeywordType, fg)),
 		slash:  tok(chroma.LiteralString, tok(chroma.NameDecorator, fg)),
 	}
 	return p, dark, true
+}
+
+// diffAccentFrom extracts a usable diff accent from a chroma style entry.
+//
+// Styles disagree about which channel carries the signal. monokai and nord set
+// the foreground of an inserted line and leave its background at the page
+// colour; gruvbox does the reverse, painting a green background with text in
+// the page colour. Taking .Colour unconditionally makes gruvbox report the
+// page background for both add and del, so the rows render identical and
+// invisible — a diff with no visible sign of what changed.
+//
+// Prefer the channel that actually differs from the page background, fall back
+// to the other, then to the caller's token fallback.
+func diffAccentFrom(s *chroma.Style, tt chroma.TokenType, background, fallback string) string {
+	e := s.Get(tt)
+	fgSet, bgSet := e.Colour.IsSet(), e.Background.IsSet()
+	fgc, bgc := e.Colour.String(), e.Background.String()
+
+	// A channel is informative only when it is distinguishable from the page.
+	informative := func(set bool, hex string) bool {
+		return set && contrastRatio(hex, background) >= minChromaAccentContrast
+	}
+	if informative(fgSet, fgc) {
+		return fgc
+	}
+	if informative(bgSet, bgc) {
+		return bgc
+	}
+	// Neither channel says anything useful; let the caller's fallback decide
+	// rather than returning a colour equal to the surface.
+	return fallback
+}
+
+// distinctAccents reports whether two diff accents are far enough apart to
+// tell an insertion from a deletion at a glance.
+//
+// The metric is deliberately not WCAG contrast. Contrast is a luminance ratio
+// and is blind to hue: github-dark's green #56d364 and salmon #ffa198 score
+// 1.009 against each other — indistinguishable by that measure, obviously
+// different to a reader. Judging diff colours by contrast would throw away
+// perfectly good palettes. Channel distance is crude but it sees hue, which is
+// the thing that actually separates "added" from "removed".
+func distinctAccents(add, del string) bool {
+	if strings.TrimSpace(add) == "" || strings.TrimSpace(del) == "" {
+		return false
+	}
+	return colorDistance(add, del) >= minDiffAccentSeparation
+}
+
+// colorDistance is Euclidean distance in RGB (0 = identical, ~441 = black to
+// white). Not perceptually uniform, but it is monotonic in the way that
+// matters here and needs no colour-space conversion.
+func colorDistance(a, b string) float64 {
+	ar, ag, ab := parseHexRGB(a)
+	br, bg, bb := parseHexRGB(b)
+	dr := float64(ar - br)
+	dg := float64(ag - bg)
+	db := float64(ab - bb)
+	return math.Sqrt(dr*dr + dg*dg + db*db)
+}
+
+// fallbackDiffAccents is the green/red pair used when a style declines to
+// distinguish insertions from deletions.
+//
+// Convention wins here over palette coherence. A user who picks a theme with
+// no diff colours still expects green to mean added and red to mean removed;
+// inventing two arbitrary hues from the style would be prettier and less
+// readable. These match the shipped default palette so the fallback looks
+// deliberate rather than bolted on.
+func fallbackDiffAccents(dark bool) (add, del string) {
+	if dark {
+		return "#4ADE80", "#F87171"
+	}
+	return "#047857", "#B91C1C"
 }
 
 // parseHexRGB parses #rgb / #rrggbb into 0-255 components (0,0,0 on garbage).
@@ -604,6 +695,18 @@ const (
 	// diffNumHeadroom is aimed for above the hard floor so a later palette or
 	// band tweak degrades toward the minimum instead of straight through it.
 	diffNumHeadroom = 0.35
+	// minChromaAccentContrast decides whether a chroma style's diff colour
+	// carries information. A value this close to the page background is the
+	// style saying "no colour here" (gruvbox paints inserted text in the page
+	// colour and puts the signal on the background instead), not a deliberate
+	// near-invisible accent.
+	minChromaAccentContrast = 1.20
+	// minDiffAccentSeparation is how far apart the add and del accents must
+	// sit, as RGB channel distance (0 = identical, ~441 = black to white).
+	// Styles that fail this are ones with literally equal diff colours, not
+	// merely close ones — 40 catches those without rejecting palettes whose
+	// green and red are subtle.
+	minDiffAccentSeparation = 40.0
 )
 
 // resolveDiffBg prefers an explicit override; otherwise washes accent into the
