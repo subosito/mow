@@ -221,7 +221,10 @@ func TestDiffNumbersLegibleOnBands(t *testing.T) {
 	}
 
 	p := defaultPalette(true)
-	num := mixHex(p.muted, p.fg, 0.8)
+	// Ask the production code for the ink rather than recomputing the mix
+	// here: a copy of the formula silently keeps passing when the real one
+	// changes, which is exactly how this drifted when the bands got stronger.
+	num := diffNumInk(p, true)
 	for _, band := range []struct {
 		name, bg string
 	}{

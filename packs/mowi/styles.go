@@ -549,7 +549,7 @@ func buildTheme(name string, p palette, mdDark bool, chroma string) theme {
 		DiffDel:       diffDelStyle(c, p, mdDark),
 		DiffMeta:      lipgloss.NewStyle().Foreground(c(p.meta)),
 		DiffNum:       lipgloss.NewStyle().Foreground(c(p.muted)).Faint(true),
-		DiffNumOnBand: c(mixHex(p.muted, p.fg, 0.8)),
+		DiffNumOnBand: c(diffNumInk(p, mdDark)),
 		DiffCtx:       lipgloss.NewStyle().Foreground(c(p.fg)),
 		Sep:           lipgloss.NewStyle().Foreground(c(p.border)),
 		SlashCmd:      lipgloss.NewStyle().Foreground(c(p.slash)).Bold(true),
@@ -559,10 +559,11 @@ func buildTheme(name string, p palette, mdDark bool, chroma string) theme {
 // Soft row backgrounds from the theme palette (not fixed green/red hex).
 func diffAddStyle(c func(string) color.Color, p palette, dark bool) lipgloss.Style {
 	st := lipgloss.NewStyle()
+	bg := resolveDiffBg(p.addBg, p.add, p, dark)
 	if p.add != "" {
-		st = st.Foreground(c(p.add))
+		st = st.Foreground(c(diffFgOn(p.add, bg, dark)))
 	}
-	if bg := resolveDiffBg(p.addBg, p.add, p, dark); bg != "" {
+	if bg != "" {
 		st = st.Background(c(bg))
 	}
 	return st
@@ -570,17 +571,50 @@ func diffAddStyle(c func(string) color.Color, p palette, dark bool) lipgloss.Sty
 
 func diffDelStyle(c func(string) color.Color, p palette, dark bool) lipgloss.Style {
 	st := lipgloss.NewStyle()
+	bg := resolveDiffBg(p.delBg, p.del, p, dark)
 	if p.del != "" {
-		st = st.Foreground(c(p.del))
+		st = st.Foreground(c(diffFgOn(p.del, bg, dark)))
 	}
-	if bg := resolveDiffBg(p.delBg, p.del, p, dark); bg != "" {
+	if bg != "" {
 		st = st.Background(c(bg))
 	}
 	return st
 }
 
+// Diff row banding thresholds, in WCAG contrast ratio (1.0 = identical).
+//
+// These are the numbers that decide whether a diff reads as a band or as
+// plain text. They are deliberately expressed as contrast against the
+// surrounding surface rather than as a mix ratio, because a fixed ratio
+// produces wildly different results per theme.
+const (
+	// minDiffBandContrast is how far the row background must sit from the
+	// surface behind it. Below roughly 1.5 the band stops registering as a
+	// block on most displays, especially light themes.
+	minDiffBandContrast = 1.75
+	// minDiffTextContrast is the floor for the row's own text against its new
+	// background. The band must never be strengthened to the point where the
+	// +/− line itself becomes hard to read.
+	minDiffTextContrast = 2.6
+	// minDiffNumContrast is the floor for gutter line numbers on a band. It is
+	// the strictest of the three (WCAG AA for normal text): numbers are small,
+	// dense, and the thing you navigate by, so "technically visible" is not
+	// enough.
+	minDiffNumContrast = 4.5
+	// diffNumHeadroom is aimed for above the hard floor so a later palette or
+	// band tweak degrades toward the minimum instead of straight through it.
+	diffNumHeadroom = 0.35
+)
+
 // resolveDiffBg prefers an explicit override; otherwise washes accent into the
 // theme surface (user_bg / border) so monokai/catppuccin/custom stay coherent.
+//
+// A fixed mix ratio is not enough on its own. How far a wash actually travels
+// depends on how far apart the accent and the surface already are, so the same
+// t lands very differently per theme: on the default light palette a 0.24 wash
+// of green into #E9E9EC produced only 1.38 contrast against the surface —
+// technically a tint, visually nothing. The ratio is therefore a starting
+// point, and the loop below pushes further until the row reads as a band.
 func resolveDiffBg(override, accent string, p palette, dark bool) string {
 	if strings.TrimSpace(override) != "" {
 		return override
@@ -600,13 +634,117 @@ func resolveDiffBg(override, accent string, p palette, dark bool) string {
 		}
 	}
 	// Dark themes need a stronger wash to stay visible on near-black surfaces.
-	t := 0.35
+	//
+	// These sit at a measured ceiling, not a taste judgement. The gutter line
+	// numbers are painted on this band and must clear 4.5:1, and the band is a
+	// wash of a mid-tone accent, so pushing t higher darkens the ceiling on
+	// the ink faster than it strengthens the band: at t=0.52 the best possible
+	// white ink on the default dark add band is only ~4.4:1. t=0.45 keeps the
+	// band clearly stronger than the old 0.35 while leaving the gutter ~5.1:1.
+	t := 0.45
 	if !dark {
-		t = 0.24
+		t = 0.42
 	}
-	return mixHex(base, accent, t)
+	bg := mixHex(base, accent, t)
+	// Guarantee the band is actually visible against the surface it sits on,
+	// whatever the theme's colors happen to be. Without this floor a palette
+	// whose accent sits close to its surface (light themes, low-contrast
+	// chroma styles) renders diff rows as plain text.
+	for i := 0; i < 8 && contrastRatio(bg, base) < minDiffBandContrast; i++ {
+		t += 0.08
+		if t > 0.92 {
+			break
+		}
+		bg = mixHex(base, accent, t)
+	}
+	// When the accent is itself close to the surface, mixing the two can never
+	// escape the surface — a fully saturated wash still lands on top of it.
+	// Custom themes do hit this. Step the band toward the opposite luminance
+	// pole instead so the row separates even from a palette that gives us
+	// nothing to work with; the hue is already lost in that case, so keeping
+	// the row *findable* matters more than keeping it tinted.
+	if contrastRatio(bg, base) < minDiffBandContrast {
+		pole := "#ffffff"
+		if !dark {
+			pole = "#000000"
+		}
+		for i := 0; i < 10 && contrastRatio(bg, base) < minDiffBandContrast; i++ {
+			bg = mixHex(bg, pole, 0.10)
+		}
+	}
+	return bg
 }
 
-// markdownStyle is the glamour StyleConfig for this theme — same hex tokens as
+// diffFgOn returns a readable foreground for a diff row painted on bg.
+//
+// The band strength and the text legibility used to fight each other: pushing
+// the wash far enough to read as a block left the accent-colored text sitting
+// on a near-identical background, and backing the wash off to fix that undid
+// the banding. Adapting the *text* instead settles it — the row keeps its
+// full-strength band, and the glyphs move toward the surface's light or dark
+// pole until they read cleanly.
+func diffFgOn(accent, bg string, dark bool) string {
+	if strings.TrimSpace(accent) == "" || strings.TrimSpace(bg) == "" {
+		return accent
+	}
+	if contrastRatio(accent, bg) >= minDiffTextContrast {
+		return accent
+	}
+	// Move away from the background: lighten on dark themes, darken on light.
+	pole := "#ffffff"
+	if !dark {
+		pole = "#000000"
+	}
+	fg := accent
+	for i := 0; i < 8; i++ {
+		fg = mixHex(fg, pole, 0.18)
+		if contrastRatio(fg, bg) >= minDiffTextContrast {
+			break
+		}
+	}
+	return fg
+}
+
+// diffNumInk is the line-number ink for rows carrying an add/del wash.
+//
+// One ink is painted on both bands, so it has to clear the legibility floor on
+// whichever band is worse — tuning it against a single band leaves the other
+// unreadable. A fixed mix cannot do that: it was previously mixHex(muted, fg,
+// 0.8), which was measured against the old, weaker washes and fell to 3.06:1
+// once the bands were strengthened. Deriving it from the actual bands keeps
+// the gutter legible no matter how the palette or the band strength moves.
+func diffNumInk(p palette, dark bool) string {
+	ink := mixHex(p.muted, p.fg, 0.8)
+	addBg := resolveDiffBg(p.addBg, p.add, p, dark)
+	delBg := resolveDiffBg(p.delBg, p.del, p, dark)
+
+	worst := func(c string) float64 {
+		r := math.Inf(1)
+		for _, bg := range []string{addBg, delBg} {
+			if strings.TrimSpace(bg) == "" {
+				continue
+			}
+			if v := contrastRatio(c, bg); v < r {
+				r = v
+			}
+		}
+		return r
+	}
+	if math.IsInf(worst(ink), 1) {
+		return ink // no bands to satisfy
+	}
+	// Push toward the pole that moves away from the bands. Bands are washes of
+	// a mid-tone accent, so on dark themes the readable direction is lighter
+	// and on light themes it is darker — same reasoning as diffFgOn.
+	pole := "#ffffff"
+	if !dark {
+		pole = "#000000"
+	}
+	for i := 0; i < 10 && worst(ink) < minDiffNumContrast+diffNumHeadroom; i++ {
+		ink = mixHex(ink, pole, 0.12)
+	}
+	return ink
+}
+
 // chrome (accent, muted, fg, …) so transcript markdown does not look like a
 // different app inside the TUI.
