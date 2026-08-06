@@ -40,13 +40,14 @@ func TestDiffGutterSizesToLineNumbers(t *testing.T) {
 		diff    string
 		wantBar int // column of the separator
 	}{
-		// Two-digit numbers need two cells, not four.
-		{"two digit", "@@ -10,3 +10,3 @@\n ctx\n-old\n+new\n", 7},
+		// One number column plus a glyph cell on each side: "+", the digits,
+		// then "−". Two digits therefore put the separator at column 5.
+		{"two digit", "@@ -10,3 +10,3 @@\n ctx\n-old\n+new\n", 5},
 		// Four-digit numbers widen the column rather than overflowing it.
-		{"four digit", "@@ -1200,3 +1200,3 @@\n ctx\n-old\n+new\n", 11},
+		{"four digit", "@@ -1200,3 +1200,3 @@\n ctx\n-old\n+new\n", 7},
 		// A diff with no hunk header has no numbers to show, and must not
 		// reserve space as if it did.
-		{"no hunk header", "-old\n+new\n", 7},
+		{"no hunk header", "-old\n+new\n", 5},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -147,9 +148,10 @@ func TestDiffGutterNumbersStillCorrect(t *testing.T) {
 	th := newTheme()
 	out := xansi.Strip(renderPrettyDiff(th, "@@ -10,3 +10,3 @@\n ctx\n-old\n+new\n ctx2\n", 100))
 
-	// Context rows carry both numbers; a deletion carries only the old, an
-	// addition only the new.
-	wants := []string{"10 10", "11   ", "   11", "12 12"}
+	// One number per row: context and additions show the new side, a deletion
+	// shows where the line used to be. The glyph follows the number in a
+	// single shared column, so a replace pair stacks "−" above "+".
+	wants := []string{"10", "11 −", "11 +", "12"}
 	lines := strings.Split(out, "\n")
 	var rows []string
 	for _, l := range lines {
@@ -161,9 +163,11 @@ func TestDiffGutterNumbersStillCorrect(t *testing.T) {
 		t.Fatalf("got %d rows, want %d:\n%s", len(rows), len(wants), out)
 	}
 	for i, want := range wants {
-		got := rows[i][:strings.Index(rows[i], "│")]
-		if strings.TrimRight(got, " ") != strings.TrimRight(" "+want, " ") {
-			t.Errorf("row %d numbers = %q, want %q", i, got, " "+want)
+		got := strings.TrimSpace(rows[i][:strings.Index(rows[i], "│")])
+		// Compare on visible content: interior padding tracks the number
+		// width, which this test is not about.
+		if strings.Join(strings.Fields(got), " ") != strings.Join(strings.Fields(want), " ") {
+			t.Errorf("row %d gutter = %q, want %q", i, got, want)
 		}
 	}
 }

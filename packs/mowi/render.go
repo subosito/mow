@@ -271,17 +271,56 @@ func (g diffGutter) ellipsis() string {
 	return strings.Repeat(" ", g.numW-2) + "··"
 }
 
-// prefix renders the two number cells and the separator, up to (not including)
-// the change glyph. One leading space, one between the columns: the old layout
-// used two of each, which read as a margin rather than as structure.
-func (g diffGutter) prefix(oldN, newN string) string {
-	return fmt.Sprintf(" %s %s │ ", oldN, newN)
+// prefix renders the line-number cell, one glyph cell, and the separator.
+//
+//	 8   │ context
+//	 9 − │ removed
+//	 9 + │ added
+//	10   │ context
+//
+// One number column, not two. A side-by-side old/new pair spends a whole
+// column restating what the row already says: a deletion has no new number and
+// an addition has no old one, so half the pair is blank on every changed row.
+// Showing the line the row actually refers to says the same thing in half the
+// width.
+//
+// The glyph sits in ONE column right of the number, the same column for both
+// directions. Bracketing the number instead — "+" before, "−" after — reads
+// well on a single row but puts the two signs in different columns, so the eye
+// zigzags down a replace run and the glyph fails at the one job it has:
+// signalling direction where colour cannot. A shared column means "−" and "+"
+// stack directly above one another on a replace pair.
+//
+// Colour carries direction for most readers; the glyph is what survives
+// NO_COLOR, a colour-blind reading, and a copied-out transcript.
+//
+// Context rows leave the glyph cell blank, so every row's separator lands in
+// the same column and the numbers stay right-aligned against each other.
+func (g diffGutter) prefix(n, glyph string) string {
+	return fmt.Sprintf("%s %s │ ", n, glyph)
 }
 
-// width is the total cells the gutter occupies, glyph and its trailing space
+// numPrefix is prefix for rows with no change glyph (context, markers).
+func (g diffGutter) numPrefix(n string) string {
+	return g.prefix(n, " ")
+}
+
+// pick chooses the number a row displays: the new side when the row exists
+// there, the old side otherwise. Context and additions therefore show the
+// current file's numbering, which is what a reader navigates by; a deletion
+// shows where the line used to be, because it has nowhere else to point.
+func (g diffGutter) pick(oldN, newN string) string {
+	if strings.TrimSpace(newN) != "" {
+		return newN
+	}
+	return oldN
+}
+
+// width is the total cells the gutter occupies, glyph cells and the separator
 // included. Used by layout code that needs to know where the body starts.
 func (g diffGutter) width() int {
-	return 1 + g.numW + 1 + g.numW + 1 + 1 + 1 + 1 + 1
+	// num + " " + glyph + " " + "│" + " "
+	return g.numW + 1 + 1 + 1 + 1 + 1
 }
 
 const (
@@ -352,8 +391,7 @@ func renderPrettyDiff(th theme, code string, width int) string {
 				newLn++
 			}
 			nl()
-			gutter := th.DiffNum.Render(g.prefix(on, nn)) +
-				th.DiffCtx.Render(diffSignCtx+" ")
+			gutter := th.DiffNum.Render(g.numPrefix(g.pick(on, nn)))
 			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(dels[pre]), width))
 			pre++
 		}
@@ -414,8 +452,7 @@ func renderPrettyDiff(th theme, code string, width int) string {
 				newLn++
 			}
 			nl()
-			gutter := th.DiffNum.Render(g.prefix(on, nn)) +
-				th.DiffCtx.Render(diffSignCtx+" ")
+			gutter := th.DiffNum.Render(g.numPrefix(g.pick(on, nn)))
 			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(sufDels[i]), width))
 		}
 
@@ -465,11 +502,11 @@ func renderPrettyDiff(th theme, code string, width int) string {
 		case strings.HasPrefix(line, "\\"): // "\ No newline at end of file"
 			flushRun()
 			nl()
-			b.WriteString(th.Muted.Render(g.prefix(g.blank(), g.blank()) + diffSignCtx + " no newline at end of file"))
+			b.WriteString(th.Muted.Render(g.numPrefix(g.blank()) + "no newline at end of file"))
 		case strings.HasPrefix(line, "…"):
 			flushRun()
 			nl()
-			b.WriteString(th.Muted.Render(g.prefix(g.ellipsis(), g.ellipsis()) + diffSignCtx + " " + strings.TrimSpace(line)))
+			b.WriteString(th.Muted.Render(g.numPrefix(g.ellipsis()) + strings.TrimSpace(line)))
 		default:
 			flushRun()
 			body := line
@@ -485,8 +522,7 @@ func renderPrettyDiff(th theme, code string, width int) string {
 			}
 			// Context: muted numbers, normal text — no tint.
 			nl()
-			gutter := th.DiffNum.Render(g.prefix(on, nn)) +
-				th.DiffCtx.Render(diffSignCtx+" ")
+			gutter := th.DiffNum.Render(g.numPrefix(g.pick(on, nn)))
 			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(body), width))
 		}
 	}
@@ -549,17 +585,13 @@ func diffNumTint(th theme, bodyStyle lipgloss.Style) lipgloss.Style {
 // diff spans), so the caller's per-word emphasis is not flattened by a single
 // Render over the whole line.
 //
-// The band covers the body only; the number gutter and the change glyph are
-// tinted rather than washed, so the eye reads "which lines" from colour and
-// "what changed" from the block. Padding is skipped when width is unknown
-// (colorDiffLines passes 0): there is no column to pad to.
+// The band covers the body only; the line number is tinted rather than washed,
+// so the eye reads "which lines" from colour and "what changed" from the
+// block. Padding is skipped when width is unknown (colorDiffLines passes 0):
+// there is no column to pad to.
 func formatDiffRowPre(th theme, g diffGutter, bodyStyle lipgloss.Style, oldN, newN, sign, styledBody string, width int) string {
 	numStyle := diffNumTint(th, bodyStyle)
-	// The glyph is tinted, not banded: it belongs to the gutter's "which
-	// lines" job, and starting the block at the glyph would put a one-cell
-	// stub of band ahead of the content it marks.
-	signStyle := numStyle.Bold(true)
-	gutter := numStyle.Render(g.prefix(oldN, newN)) + signStyle.Render(sign+" ")
+	gutter := numStyle.Render(g.prefix(g.pick(oldN, newN), sign))
 	if width > 0 {
 		if pad := width - lipgloss.Width(gutter) - lipgloss.Width(styledBody); pad > 0 {
 			styledBody += bodyStyle.Render(strings.Repeat(" ", pad))

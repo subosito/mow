@@ -29,10 +29,12 @@ func rowIndex(rows []string, sub string) int {
 	return -1
 }
 
-// The change glyph must sit at ONE column for every row kind. Right-aligning
-// it inside the number cells put "+" six columns from "−", so the eye zigzagged
-// down a replace pair and the glyph failed at the only job it has: signalling
-// direction where colour cannot.
+// The change glyph must sit at ONE column for every row kind. Two layouts have
+// broken this: right-aligning the sign inside the number cells put "+" six
+// columns from "−", and bracketing the number ("+11" vs "11−") put them on
+// opposite sides of it. Both make the eye zigzag down a replace pair, and both
+// fail the glyph at the one job it has — signalling direction where colour
+// cannot.
 func TestDiffSignsShareOneColumn(t *testing.T) {
 	th := newTheme()
 	src := "@@ -10,4 +10,4 @@\n ctx\n-was\n+now\n ctx2\n"
@@ -47,12 +49,12 @@ func TestDiffSignsShareOneColumn(t *testing.T) {
 	}
 	var delCol, addCol, barCols []int
 	for _, ln := range strings.Split(out, "\n") {
-		if i := col(ln, "│"); i >= 0 {
+		if i := col(ln, "\u2502"); i >= 0 {
 			barCols = append(barCols, i)
 		}
 		switch {
 		case strings.Contains(ln, "was"):
-			delCol = append(delCol, col(ln, "−"))
+			delCol = append(delCol, col(ln, "\u2212"))
 		case strings.Contains(ln, "now"):
 			addCol = append(addCol, col(ln, "+"))
 		}
@@ -60,11 +62,14 @@ func TestDiffSignsShareOneColumn(t *testing.T) {
 	if len(delCol) != 1 || len(addCol) != 1 {
 		t.Fatalf("expected one del and one add row:\n%s", out)
 	}
+	if delCol[0] < 0 || addCol[0] < 0 {
+		t.Fatalf("a glyph is missing (del=%d add=%d):\n%s", delCol[0], addCol[0], out)
+	}
 	if delCol[0] != addCol[0] {
-		t.Fatalf("− at col %d but + at col %d — signs must share a column:\n%s",
+		t.Fatalf("\u2212 at col %d but + at col %d — signs must share a column:\n%s",
 			delCol[0], addCol[0], out)
 	}
-	// Every row's separator lines up too, so the body starts at one column.
+	// Every row's separator lines up, so the body starts at one column.
 	for _, c := range barCols {
 		if c != barCols[0] {
 			t.Fatalf("separator column drifts (%v):\n%s", barCols, out)
@@ -72,21 +77,55 @@ func TestDiffSignsShareOneColumn(t *testing.T) {
 	}
 }
 
-// Numbers stay numeric: the sign no longer squats in a line-number cell.
-func TestDiffNumberColumnsHoldOnlyNumbers(t *testing.T) {
+// A glyph must never displace a digit: numbers keep their full cell and the
+// glyph occupies its own, so a wide line number cannot push the sign out or
+// be truncated by it.
+func TestDiffGlyphDoesNotDisplaceDigits(t *testing.T) {
 	th := newTheme()
-	out := xansi.Strip(renderPrettyDiff(th, "@@ -1,2 +1,2 @@\n-was\n+now\n", 50))
+	out := xansi.Strip(renderPrettyDiff(th, "@@ -1198,2 +1198,2 @@\n-was\n+now\n", 50))
 	for _, ln := range strings.Split(out, "\n") {
 		if !strings.Contains(ln, "was") && !strings.Contains(ln, "now") {
 			continue
 		}
-		bar := strings.Index(ln, "│")
+		bar := strings.Index(ln, "\u2502")
 		if bar < 0 {
 			t.Fatalf("row has no separator: %q", ln)
 		}
-		nums := ln[:bar]
-		if strings.ContainsAny(nums, "+−") {
-			t.Fatalf("sign leaked into the number gutter: %q", nums)
+		gutter := ln[:bar]
+		if !strings.Contains(gutter, "1198") && !strings.Contains(gutter, "1199") {
+			t.Errorf("line number lost to the glyph: %q", gutter)
+		}
+		// Exactly one glyph per changed row.
+		if n := strings.Count(gutter, "+") + strings.Count(gutter, "\u2212"); n != 1 {
+			t.Errorf("expected one glyph, got %d: %q", n, gutter)
+		}
+	}
+}
+
+// Context rows carry no glyph, and their body must still start where a changed
+// row's body does — the glyph cells are reserved on every row.
+func TestDiffContextRowsAlignWithChangedRows(t *testing.T) {
+	th := newTheme()
+	out := xansi.Strip(renderPrettyDiff(th, "@@ -10,3 +10,3 @@\n ctx\n-was\n+now\n", 50))
+	var bodyCols []int
+	for _, ln := range strings.Split(out, "\n") {
+		i := strings.Index(ln, "\u2502")
+		if i < 0 {
+			continue
+		}
+		bodyCols = append(bodyCols, len([]rune(ln[:i])))
+		if strings.ContainsAny(ln[:i], "+\u2212") {
+			continue
+		}
+		// A context row must not spend a cell on an absent glyph beyond the
+		// reserved column pair.
+		if strings.Contains(ln, "ctx") && strings.Count(ln[:i], "  ") == 0 {
+			t.Errorf("context gutter looks malformed: %q", ln[:i])
+		}
+	}
+	for _, c := range bodyCols {
+		if c != bodyCols[0] {
+			t.Fatalf("body column drifts across row kinds (%v):\n%s", bodyCols, out)
 		}
 	}
 }

@@ -107,7 +107,9 @@ def check(label, cond):
     print(("PASS  " if cond else "FAIL  ") + label)
     ok = ok and cond
 
-# The bug a string test cannot see: signs must share one column.
+# The bug a string test cannot see: signs must share one column. Two layouts
+# have broken this -- right-aligning the sign inside the number cells, and
+# bracketing the number ("+11" vs "11-"). Both zigzag down a replace pair.
 check("change glyphs share a column (%d vs %d)" % (info["del"]["sign"], info["add"]["sign"]),
       info["del"]["sign"] == info["add"]["sign"] and info["del"]["sign"] > 0)
 
@@ -137,10 +139,16 @@ def contrast(fg, bg):
 # them forced legible text onto a mid-tone background, which needed a chain of
 # contrast machinery to keep readable; tinting says the same thing (green =
 # inserted, red = removed) against the terminal's own background.
-for kind, y in rows.items():
+def gutter_cells(y):
+    """Cells left of the separator: numbers and their glyphs live here."""
     cs = cells(0, y, 80)
-    gutter = cs[:info[kind]["sign"]]
-    nums = [c for c in gutter if c["char"].isdigit()]
+    for i, c in enumerate(cs):
+        if c["char"] == "\u2502":
+            return cs[:i]
+    return cs
+
+for kind, y in rows.items():
+    nums = [c for c in gutter_cells(y) if c["char"].isdigit()]
     if not nums:
         check("%s row: line numbers present in the gutter" % kind, False)
         continue
@@ -156,14 +164,13 @@ for kind, y in rows.items():
 # Add and del numbers must not share a tint, or the gutter says "changed"
 # without saying which way.
 if len(rows) == 2:
-    def num_fg(y, sign_col):
-        cs = cells(0, y, 80)
-        for c in cs[:sign_col]:
+    def num_fg(y):
+        for c in gutter_cells(y):
             if c["char"].isdigit():
                 return c["fg"]
         return None
-    del_fg = num_fg(rows["del"], info["del"]["sign"])
-    add_fg = num_fg(rows["add"], info["add"]["sign"])
+    del_fg = num_fg(rows["del"])
+    add_fg = num_fg(rows["add"])
     check("add and del line numbers differ in tint (%s vs %s)" % (del_fg, add_fg),
           del_fg is not None and add_fg is not None and del_fg != add_fg)
 
