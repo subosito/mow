@@ -8,6 +8,7 @@
 - **Operating the CLI?** [../README.md](../README.md) to run it → [harness.md](harness.md) for config, tools, sessions, and the token/policy knobs.
 - **Writing or wiring a pack?** [extensions.md](extensions.md) — core-vs-pack boundary, CLI ownership, hooks table, ACP, media, cmdhook.
 - **Running or scripting code review?** [review.md](review.md) — `mow review` / `mow sec`, the report schema, exit codes, CI.
+- **Large tool results / context window pressure?** [context.md](context.md) — design note: native tool-result side-channel.
 - **Contributing / an AI agent working here?** [../CONTRIBUTING.md](../CONTRIBUTING.md) and [../AGENTS.md](../AGENTS.md).
 
 | Doc | Audience | Contents |
@@ -17,6 +18,7 @@
 | [embedding.md](embedding.md) | Go integrators | Options, events, custom tools/providers, hooks, sessions — with code |
 | [harness.md](harness.md) | Implementers | Loop, tools, config, sessions, policy |
 | [extensions.md](extensions.md) | Integrators | `ext/` packs, CLI ownership, ACP, media, decisions |
+| [context.md](context.md) | Implementers | Design: tool-result side-channel store + search (sink in the loop, per-session archive) |
 | [review.md](review.md) | CI + reviewers | `mow review` / `mow sec`: two-pass workflow, schema, formats, exit codes |
 
 ## Dev shell

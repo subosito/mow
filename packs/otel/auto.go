@@ -12,7 +12,7 @@ import (
 
 func init() {
 	// Stock CLI and any host that blank-imports this package get config-driven
-	// OTLP for free. Empty otel.endpoint → hook no-ops (default).
+	// OTLP when explicitly enabled. Missing/false otel.enabled → no-op.
 	mow.SetOTELAuto(autoWire)
 }
 
@@ -22,7 +22,7 @@ func autoWire(eng *mow.Engine, raw map[string]any) error {
 		return nil
 	}
 	cfg := exportConfigFromMap(raw)
-	if strings.TrimSpace(cfg.Endpoint) == "" {
+	if !cfg.Enabled || strings.TrimSpace(cfg.Endpoint) == "" {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -51,6 +51,7 @@ func exportConfigFromMap(raw map[string]any) ExportConfig {
 		return ExportConfig{}
 	}
 	cfg := ExportConfig{
+		Enabled:     boolVal(raw["enabled"]),
 		Endpoint:    strVal(raw["endpoint"]),
 		Protocol:    strVal(raw["protocol"]),
 		ServiceName: strVal(raw["service_name"]),
@@ -74,5 +75,16 @@ func strVal(v any) string {
 		return ""
 	default:
 		return strings.TrimSpace(fmt.Sprint(x))
+	}
+}
+
+func boolVal(v any) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case string:
+		return strings.EqualFold(strings.TrimSpace(x), "true")
+	default:
+		return false
 	}
 }

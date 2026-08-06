@@ -204,22 +204,22 @@ func TestStartExportErrors(t *testing.T) {
 	}{
 		{
 			name:    "grpc not supported yet",
-			cfg:     ExportConfig{Endpoint: "http://127.0.0.1:4317", Protocol: "grpc"},
+			cfg:     ExportConfig{Enabled: true, Endpoint: "http://127.0.0.1:4317", Protocol: "grpc"},
 			wantErr: "not supported yet",
 		},
 		{
 			name:    "unknown protocol",
-			cfg:     ExportConfig{Endpoint: "http://127.0.0.1:4318", Protocol: "carrier-pigeon"},
+			cfg:     ExportConfig{Enabled: true, Endpoint: "http://127.0.0.1:4318", Protocol: "carrier-pigeon"},
 			wantErr: "not supported yet",
 		},
 		{
 			name:    "bad endpoint scheme",
-			cfg:     ExportConfig{Endpoint: "ftp://127.0.0.1:4318"},
+			cfg:     ExportConfig{Enabled: true, Endpoint: "ftp://127.0.0.1:4318"},
 			wantErr: "scheme",
 		},
 		{
 			name:    "endpoint without host",
-			cfg:     ExportConfig{Endpoint: "http://"},
+			cfg:     ExportConfig{Enabled: true, Endpoint: "http://"},
 			wantErr: "missing host",
 		},
 	}
@@ -247,6 +247,7 @@ func TestStartExportProtocolAliases(t *testing.T) {
 	t.Parallel()
 	for _, proto := range []string{"", "http", "HTTP", "  http  ", "http/protobuf"} {
 		exp, err := StartExport(context.Background(), ExportConfig{
+			Enabled:  true,
 			Endpoint: "http://127.0.0.1:4318",
 			Protocol: proto,
 		})
@@ -265,7 +266,7 @@ func TestStartExportProtocolAliases(t *testing.T) {
 func TestStartExportBlankEndpointVariants(t *testing.T) {
 	t.Parallel()
 	for _, ep := range []string{"", "   ", "\t\n"} {
-		exp, err := StartExport(context.Background(), ExportConfig{Endpoint: ep})
+		exp, err := StartExport(context.Background(), ExportConfig{Enabled: true, Endpoint: ep})
 		if err != nil || exp != nil {
 			t.Fatalf("endpoint %q: exp=%v err=%v want nil,nil", ep, exp, err)
 		}
@@ -275,7 +276,7 @@ func TestStartExportBlankEndpointVariants(t *testing.T) {
 func TestStartExportNilContext(t *testing.T) {
 	t.Parallel()
 	//nolint:staticcheck // StartExport documents nil ctx → context.Background.
-	exp, err := StartExport(nil, ExportConfig{Endpoint: "http://127.0.0.1:4318"})
+	exp, err := StartExport(nil, ExportConfig{Enabled: true, Endpoint: "http://127.0.0.1:4318"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,6 +291,7 @@ func TestStartExportServiceNameDefault(t *testing.T) {
 	// Blank service name must not error; the exporter defaults it to "mow".
 	for _, svc := range []string{"", "   ", "custom-svc"} {
 		exp, err := StartExport(context.Background(), ExportConfig{
+			Enabled:     true,
 			Endpoint:    "http://127.0.0.1:4318",
 			ServiceName: svc,
 		})
@@ -336,7 +338,7 @@ func TestExportShutdown(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		exp, err := StartExport(context.Background(), ExportConfig{Endpoint: srv.URL})
+		exp, err := StartExport(context.Background(), ExportConfig{Enabled: true, Endpoint: srv.URL})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -454,5 +456,15 @@ func TestAutoWireRegisteredGlobally(t *testing.T) {
 	var fn any = autoWire
 	if fn == nil {
 		t.Fatal("autoWire is nil")
+	}
+}
+
+func TestExportConfigEnabledIsExplicit(t *testing.T) {
+	if cfg := exportConfigFromMap(map[string]any{"endpoint": "http://127.0.0.1:4318"}); cfg.Enabled {
+		t.Fatal("endpoint alone must not enable OTEL")
+	}
+	cfg := exportConfigFromMap(map[string]any{"enabled": true, "endpoint": "http://127.0.0.1:4318"})
+	if !cfg.Enabled {
+		t.Fatal("enabled: true was not decoded")
 	}
 }

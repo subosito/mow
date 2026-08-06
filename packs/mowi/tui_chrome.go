@@ -358,11 +358,13 @@ func (m *model) welcomeView() string {
 		// Respect a configured splash verbatim (soft, no chrome).
 		block = th.Muted.Render(m.cfg.WelcomeText())
 	} else {
-		// Branded but quiet: wordmark, one-line tagline, live context.
+		// Branded but quiet: wordmark, one-line tagline, live context (model
+		// only — the workspace dir already sits in the header above; a bare
+		// basename like "mow" read as a brand here, not a workspace).
 		brand := th.Title.Render(glyphWelcome + " mowi")
 		tagline := th.Muted.Render("agentic coding in your terminal")
 		ctx := th.Muted.Faint(true).Render(
-			short(m.eng.Model(), 32) + "  " + glyphBullet + "  " + filepath.Base(m.eng.Workspace()),
+			short(m.eng.Model(), 32),
 		)
 		block = lipgloss.JoinVertical(lipgloss.Center, brand, "", tagline, "", ctx)
 	}

@@ -14,6 +14,7 @@ workspace: .
 # Host/user config only — not honored from project .mow/config.
 # Env: MOW_OTEL_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT
 # otel:
+#   enabled: true
 #   endpoint: http://127.0.0.1:4318   # OTLP/HTTP collector
 #   protocol: http                    # http (default); grpc reserved
 #   service_name: mow
@@ -141,6 +142,13 @@ session:
 
 # Optional packs — packages under ext/<name>; config key extensions.<name>
 # extensions:
+#   # Tool-result side channel (optional pack packs/contextsink; stock
+#   # binaries link it): store oversized tool results per session and show the
+#   # model a short stub (full body recoverable via context_search id=…).
+#   # Off by default even when the pack is linked; opt in explicitly.
+#   contextsink:
+#     enabled: true
+#     max_inline_bytes: 8000    # above this → store + stub (default)
 #   mcp:
 #     mcpServers:
 #       context-mode:

@@ -18,17 +18,20 @@ import (
 )
 
 // ExportConfig is the host/user knob for the optional OTLP exporter.
-// Zero value (empty Endpoint) means disabled — no SDK, no network.
+// Zero value means disabled — no SDK, no network. Both Enabled and Endpoint
+// are required to start the exporter.
 //
 // Typical YAML ($MOW_HOME/config.yaml, not project .mow/config):
 //
 //	otel:
+//	  enabled: true
 //	  endpoint: http://127.0.0.1:4318   # empty = off
 //	  protocol: http                    # http (default) | grpc (reserved)
 //	  service_name: mow
 //	  headers:
 //	    authorization: Bearer …
 type ExportConfig struct {
+	Enabled     bool
 	Endpoint    string
 	Protocol    string // "http" (default) or "grpc"
 	ServiceName string
@@ -44,11 +47,11 @@ type Export struct {
 }
 
 // StartExport builds Tracer/Meter providers that push to the OTLP endpoint and
-// an Adapter bound to them. Returns (nil, nil) when cfg.Endpoint is empty so
-// callers can treat "not configured" as a soft no-op.
+// an Adapter bound to them. Returns (nil, nil) unless cfg.Enabled is true and
+// cfg.Endpoint is non-empty, so callers can treat disabled as a soft no-op.
 func StartExport(ctx context.Context, cfg ExportConfig) (*Export, error) {
 	endpoint := strings.TrimSpace(cfg.Endpoint)
-	if endpoint == "" {
+	if !cfg.Enabled || endpoint == "" {
 		return nil, nil
 	}
 	if ctx == nil {

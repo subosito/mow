@@ -42,7 +42,7 @@ one-way: nested modules depend on the root public API, never the reverse.
 | `github.com/subosito/mow` | Thin aliases/wrappers: `Engine`, `Run`, options, events, hooks, providers |
 | `github.com/subosito/mow/ext` | Registration API: tools, lifecycle hooks, commands, `BeforeNew` |
 | `github.com/subosito/mow/ext/<name>` | Core protocol/runtime extensions: acp, mcp, proc, rpc, cmdhook, eval |
-| `github.com/subosito/mow/packs/<name>` | Optional packs: goal, review, ops, lsp, job |
+| `github.com/subosito/mow/packs/<name>` | Optional packs: goal, review, ops, lsp, job, contextsink |
 | `github.com/subosito/mow/packs/otel` | Optional OTLP integration |
 | `github.com/subosito/mow/packs/mowi` | Optional TUI host library |
 | `github.com/subosito/mow/cliutil` | CLI flags → Engine |
@@ -97,6 +97,8 @@ Embedder / cmd/mow / cmd/mowi / packs
 - `packs/ops`: ops profiles, logs, actions, incidents, runbooks
 - `packs/lsp`: opt-in language-server tools and post-edit diagnostics
 - `packs/job`: interval/cron jobs (depends on goal); ops depends on job
+- `packs/contextsink`: per-session store + stub for oversized tool results
+  (recovery via the core `context_search` tool)
 
 ### Heavy nested modules
 

@@ -130,7 +130,9 @@ func nextArchiveName(dir string) string {
 	return fmt.Sprintf("%04d-%s.md", maxSeq+1, time.Now().UTC().Format("20060102T150405.000"))
 }
 
-// pruneArchive deletes the oldest files beyond keep (best-effort).
+// pruneArchive deletes the oldest compact-archive files beyond keep (best-effort).
+// Only NNNN-*.md sequence files (from ArchiveCompact) are pruned so other
+// sidecar files in the archive dir are not swept by compact churn.
 func pruneArchive(dir string, keep int) {
 	if keep <= 0 {
 		return
@@ -141,7 +143,7 @@ func pruneArchive(dir string, keep int) {
 	}
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+		if e.IsDir() || !isCompactArchiveName(e.Name()) {
 			continue
 		}
 		names = append(names, e.Name())
@@ -150,6 +152,19 @@ func pruneArchive(dir string, keep int) {
 	for _, n := range names[:max(0, len(names)-keep)] {
 		_ = os.Remove(filepath.Join(dir, n))
 	}
+}
+
+// isCompactArchiveName reports names written by ArchiveCompact (NNNN-….md).
+func isCompactArchiveName(name string) bool {
+	if len(name) < 5 || name[4] != '-' || !strings.HasSuffix(name, ".md") {
+		return false
+	}
+	for _, r := range name[:4] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // writeArchiveMessage renders one message with a role header. Tool-call

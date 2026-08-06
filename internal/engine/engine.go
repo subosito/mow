@@ -438,6 +438,10 @@ func New(opt Options) (*Engine, error) {
 	var final []agent.Tool
 	for _, t := range toolList {
 		name := strings.ToLower(t.Name())
+		// Optional extension tools may make availability engine/config-specific.
+		if conditional, ok := t.(interface{ Enabled(*Engine) bool }); ok && !conditional.Enabled(e) {
+			continue
+		}
 		// Builtins need tools.enable; registered ext tools are always included.
 		if isBuiltin(name) && !enableSet[name] {
 			continue
@@ -552,16 +556,10 @@ func New(opt Options) (*Engine, error) {
 		}
 		e.sid = sid
 		e.sess = &session.Store{Dir: sessDir, ID: sid}
-		// context_search recovers text dropped by compaction (session archive).
-		if ct := tools.NewContextSearch(e.sess.Dir); ct != nil {
-			e.tools = append(e.tools, ct)
-			if e.readOnlyExt == nil {
-				e.readOnlyExt = map[string]bool{}
-			}
-			e.readOnlyExt["context_search"] = true
-			// Let the compact stub tell the model the archive is searchable.
-			agent.SetArchiveAvailable(true)
-		}
+		// context_search (recovery for compaction archives and stored tool
+		// results) is provided by the optional packs/contextsink pack, which
+		// registers it via ext.RegisterTool; the tool resolves the session
+		// dir from the engine at call time.
 		if mediaClient != nil && sid != "" {
 			if mediaClient.ExtraHeaders == nil {
 				mediaClient.ExtraHeaders = map[string]string{}

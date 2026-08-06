@@ -3,7 +3,7 @@
 **Binary:** `mow`  
 **Module:** `github.com/subosito/mow`  
 
-Stack context: [architecture.md](architecture.md). Embedding in Go: [embedding.md](embedding.md). Packs: [extensions.md](extensions.md).
+Stack context: [architecture.md](architecture.md). Embedding in Go: [embedding.md](embedding.md). Packs: [extensions.md](extensions.md). Large tool results / side-channel store (design): [context.md](context.md).
 
 ---
 
@@ -502,9 +502,12 @@ writes a plain-text archive under the session dir:
 \$MOW_HOME/sessions/<project>/<session-id>.archive/0001-….md
 ```
 
-Sessions enable a read-only `context_search` tool (patterns only — no path arg)
-so the agent can recover details dropped from the live window. No embeddings
-or vector DB; fixed-string scan over a bounded set of newest archive files.
+Sessions enable a read-only `context_search` tool (patterns only — no path arg,
+plus get-by-id for stored tool results) so the agent can recover details
+dropped from the live window. The tool ships with the optional
+`packs/contextsink` pack (stock binaries link it) and resolves the session
+from the engine at call time. No embeddings or vector DB; fixed-string scan
+over a bounded set of newest archive files.
 
 Args: `pattern` (a string, or a list of strings — a line matching **any** of
 them hits), optional `max_results` and `context_lines`. Both budgets are
@@ -529,7 +532,7 @@ tool with `Untrusted() bool` so the agent loop frames results in
 
 ## OpenTelemetry export
 
-Optional. **Default off** (empty `otel.endpoint`). When set in `$MOW_HOME/config.yaml`
+Optional. **Default off**. Both `otel.enabled: true` and a non-empty `otel.endpoint` are required. When set in `$MOW_HOME/config.yaml`
 or `MOW_OTEL_ENDPOINT`, the stock CLI exports spans/metrics via OTLP/HTTP to that
 collector. See [embedding.md](embedding.md) § OpenTelemetry.
 

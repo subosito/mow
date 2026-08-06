@@ -14,10 +14,10 @@ import (
 
 func TestSplitOTLPEndpoint(t *testing.T) {
 	cases := []struct {
-		in              string
-		host, path      string
-		insecure        bool
-		wantErr         bool
+		in         string
+		host, path string
+		insecure   bool
+		wantErr    bool
 	}{
 		{"http://127.0.0.1:4318", "127.0.0.1:4318", "", true, false},
 		{"https://otlp.example.com:4318", "otlp.example.com:4318", "", false, false},
@@ -57,6 +57,7 @@ func TestStartExportHTTPSmoke(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	exp, err := StartExport(context.Background(), ExportConfig{
+		Enabled:     true,
 		Endpoint:    srv.URL,
 		ServiceName: "mow-test",
 	})
@@ -103,5 +104,15 @@ func TestExportConfigFromMap(t *testing.T) {
 	}
 	if !strings.HasPrefix(cfg.Endpoint, "http") {
 		t.Fatal(cfg.Endpoint)
+	}
+}
+
+func TestStartExportRequiresEnabled(t *testing.T) {
+	exp, err := StartExport(context.Background(), ExportConfig{Endpoint: "http://127.0.0.1:4318"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exp != nil {
+		t.Fatal("endpoint without enabled=true started an exporter")
 	}
 }

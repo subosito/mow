@@ -79,7 +79,7 @@ Source of truth for modules and public/internal: [docs/architecture.md](docs/arc
 | `extcfg/` | Decode `extensions.<name>` (shared by extensions and packs) |
 | `testutil/` | Shared test helpers (e.g. pin `$MOW_HOME` for `TestMain`) |
 | `ext/` | Registration (`ext.go`) + core extensions: acp, mcp, proc, rpc, cmdhook, eval |
-| `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): goal, review, ops, lsp, job |
+| `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): goal, review, ops, lsp, job, contextsink |
 | `packs/otel/` | OTLP export (nested submodule `github.com/subosito/mow/packs/otel`; config-driven) |
 | `packs/mowi/` | Interactive TUI (nested submodule `github.com/subosito/mow/packs/mowi`; full binary) |
 | `internal/` | Implementation — **not** an integrator import surface |

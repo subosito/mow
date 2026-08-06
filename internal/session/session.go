@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -40,6 +41,10 @@ type Event struct {
 type Store struct {
 	Dir string
 	ID  string
+
+	// mu serializes tool-result writes and prunes: parallel tool batches must
+	// not collide on sequence numbers or prune a just-written file.
+	mu sync.Mutex
 }
 
 // Path returns the session file path. ID must pass ValidateID so Join cannot
@@ -427,4 +432,3 @@ func LatestID(dir string) (string, error) {
 	}
 	return best, nil
 }
-

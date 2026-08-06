@@ -38,10 +38,7 @@ func TestToolMetadataAndRegistry(t *testing.T) {
 	p.ExtraRoots = []string{t.TempDir()}
 
 	allTools := Registry(p, []string{"read", "write", "edit", "glob", "grep", "bash"})
-	csTool := NewContextSearch(tmpDir)
-	if csTool != nil {
-		allTools = append(allTools, csTool)
-	}
+	// context_search moved to packs/contextsink (covered by its own tests).
 	mediaOpts := MediaOptions{
 		Client:          &llm.MediaClient{},
 		GenerateImage:   "img-model",

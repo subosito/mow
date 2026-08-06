@@ -7,10 +7,11 @@
 //
 //  1. Config/env (stock CLI blank-imports this package): set otel.endpoint
 //     (or MOW_OTEL_ENDPOINT). Engine.New auto-wires OTLP/HTTP via StartExport.
+//
 //  2. Embed with a custom provider:
 //
-//	adapter, err := otel.New(otel.Options{Tracer: tp.Tracer("mow"), Meter: mp.Meter("mow")})
-//	eng.AddOnEvent(adapter.OnEvent)
+//     adapter, err := otel.New(otel.Options{Tracer: tp.Tracer("mow"), Meter: mp.Meter("mow")})
+//     eng.AddOnEvent(adapter.OnEvent)
 //
 // Empty endpoint keeps telemetry off (default). Pass your own Tracer/Meter for
 // Datadog/Honeycomb/etc.; or use StartExport for the built-in OTLP/HTTP path.
@@ -57,9 +58,12 @@ type Adapter struct {
 	tracer trace.Tracer
 	meter  metric.Meter
 
-	inputTokens  metric.Int64Counter
-	outputTokens metric.Int64Counter
-	toolDuration metric.Int64Histogram
+	inputTokens               metric.Int64Counter
+	outputTokens              metric.Int64Counter
+	toolDuration              metric.Int64Histogram
+	contextSinkStoredResults  metric.Int64Counter
+	contextSinkSavedBytes     metric.Int64Counter
+	contextSinkRecoveredBytes metric.Int64Counter
 
 	mu    sync.Mutex
 	runs  map[string]*runSpan // by RunID
@@ -102,6 +106,21 @@ func New(opts Options) (*Adapter, error) {
 			metric.WithUnit("ms")); err == nil {
 			a.toolDuration = h
 		}
+		if c, err := opts.Meter.Int64Counter("mow.contextsink.stored_results",
+			metric.WithDescription("Oversized tool results moved out of live context"),
+			metric.WithUnit("{result}")); err == nil {
+			a.contextSinkStoredResults = c
+		}
+		if c, err := opts.Meter.Int64Counter("mow.contextsink.saved_bytes",
+			metric.WithDescription("Tool-result bytes removed from live context after stub replacement"),
+			metric.WithUnit("By")); err == nil {
+			a.contextSinkSavedBytes = c
+		}
+		if c, err := opts.Meter.Int64Counter("mow.contextsink.recovered_bytes",
+			metric.WithDescription("Bytes returned to live context by context_search"),
+			metric.WithUnit("By")); err == nil {
+			a.contextSinkRecoveredBytes = c
+		}
 	}
 	return a, nil
 }
@@ -121,6 +140,8 @@ func (a *Adapter) OnEvent(ev mow.Event) {
 		a.startTool(ev)
 	case mow.EventToolEnd:
 		a.endTool(ev)
+	case mow.EventContextSinkStore, mow.EventContextSinkRecover:
+		a.recordContextSink(ev)
 	case mow.EventGoalStart:
 		a.startGoal(ev)
 	case mow.EventGoalStep:
@@ -361,4 +382,32 @@ func stopStatus(stopReason, errMsg string) (codes.Code, string) {
 		desc = stopReason + ": " + errMsg
 	}
 	return codes.Error, desc
+}
+
+func (a *Adapter) recordContextSink(ev mow.Event) {
+	ctx := a.runCtx(ev.RunID)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	attrs := []attribute.KeyValue{}
+	if ev.Tool != "" {
+		attrs = append(attrs, attribute.String("mow.tool", ev.Tool))
+	}
+	switch ev.Type {
+	case mow.EventContextSinkStore:
+		if a.contextSinkStoredResults != nil {
+			a.contextSinkStoredResults.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		saved := ev.OriginalBytes - ev.InlineBytes
+		if saved > 0 && a.contextSinkSavedBytes != nil {
+			a.contextSinkSavedBytes.Add(ctx, int64(saved), metric.WithAttributes(attrs...))
+		}
+	case mow.EventContextSinkRecover:
+		if ev.RecoveryMode != "" {
+			attrs = append(attrs, attribute.String("mow.contextsink.recovery_mode", ev.RecoveryMode))
+		}
+		if ev.RecoveredBytes > 0 && a.contextSinkRecoveredBytes != nil {
+			a.contextSinkRecoveredBytes.Add(ctx, int64(ev.RecoveredBytes), metric.WithAttributes(attrs...))
+		}
+	}
 }

@@ -78,22 +78,24 @@ var (
 
 // Event types (loop / harness bus).
 const (
-	EventRunStart         = engine.EventRunStart
-	EventRunEnd           = engine.EventRunEnd
-	EventCompact          = engine.EventCompact
-	EventGoalStart        = engine.EventGoalStart
-	EventGoalStep         = engine.EventGoalStep
-	EventGoalDone         = engine.EventGoalDone
-	EventGoalFail         = engine.EventGoalFail
-	EventGoalPartial      = engine.EventGoalPartial
-	EventGoalBlocked      = engine.EventGoalBlocked
-	EventToolStart        = engine.EventToolStart
-	EventToolEnd          = engine.EventToolEnd
-	EventDelegateChunk    = engine.EventDelegateChunk
-	EventDelegateProgress = engine.EventDelegateProgress
-	EventDelegateUsage    = engine.EventDelegateUsage
-	EventLSPDiagnostics   = engine.EventLSPDiagnostics
-	EventSteer            = engine.EventSteer
+	EventRunStart           = engine.EventRunStart
+	EventRunEnd             = engine.EventRunEnd
+	EventCompact            = engine.EventCompact
+	EventGoalStart          = engine.EventGoalStart
+	EventGoalStep           = engine.EventGoalStep
+	EventGoalDone           = engine.EventGoalDone
+	EventGoalFail           = engine.EventGoalFail
+	EventGoalPartial        = engine.EventGoalPartial
+	EventGoalBlocked        = engine.EventGoalBlocked
+	EventToolStart          = engine.EventToolStart
+	EventToolEnd            = engine.EventToolEnd
+	EventContextSinkStore   = engine.EventContextSinkStore
+	EventContextSinkRecover = engine.EventContextSinkRecover
+	EventDelegateChunk      = engine.EventDelegateChunk
+	EventDelegateProgress   = engine.EventDelegateProgress
+	EventDelegateUsage      = engine.EventDelegateUsage
+	EventLSPDiagnostics     = engine.EventLSPDiagnostics
+	EventSteer              = engine.EventSteer
 )
 
 // Misc consts.

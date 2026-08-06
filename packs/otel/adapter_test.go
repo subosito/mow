@@ -108,3 +108,49 @@ func TestAdapterGoalSpanLifecycle(t *testing.T) {
 		t.Fatal("missing mow.goal span")
 	}
 }
+
+func TestAdapterContextSinkMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = mp.Shutdown(t.Context()) })
+	ad, err := mowotel.New(mowotel.Options{Meter: mp.Meter("test")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ad.OnEvent(mow.Event{Type: mow.EventRunStart, RunID: "r-context"})
+	ad.OnEvent(mow.Event{
+		Type: mow.EventContextSinkStore, RunID: "r-context", Tool: "bash",
+		OriginalBytes: 10_000, InlineBytes: 400,
+	})
+	ad.OnEvent(mow.Event{
+		Type: mow.EventContextSinkRecover, RunID: "r-context", Tool: "context_search",
+		RecoveredBytes: 1_500, RecoveryMode: "id",
+	})
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(t.Context(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int64{
+		"mow.contextsink.stored_results":  1,
+		"mow.contextsink.saved_bytes":     9_600,
+		"mow.contextsink.recovered_bytes": 1_500,
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			sum, ok := m.Data.(metricdata.Sum[int64])
+			if !ok || len(sum.DataPoints) == 0 {
+				continue
+			}
+			if expected, exists := want[m.Name]; exists {
+				if got := sum.DataPoints[0].Value; got != expected {
+					t.Fatalf("%s = %d, want %d", m.Name, got, expected)
+				}
+				delete(want, m.Name)
+			}
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing context sink metrics: %v", want)
+	}
+}

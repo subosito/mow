@@ -90,7 +90,7 @@ func stubEntryText(kind entryKind, text string) string {
 	case kindUser:
 		label = "you"
 	case kindAssistant:
-		label = "mow"
+		label = "mowi"
 	case kindDiff:
 		label = "diff"
 	}

@@ -27,7 +27,7 @@ func TestStubEntryText(t *testing.T) {
 	}
 
 	s2 := stubEntryText(kindAssistant, "assistant reply body")
-	if !strings.Contains(s2, "mow") || !strings.Contains(s2, "assistant reply") {
+	if !strings.Contains(s2, "mowi") || !strings.Contains(s2, "assistant reply") {
 		t.Fatalf("%q", s2)
 	}
 
@@ -48,8 +48,8 @@ func TestStubEntryText(t *testing.T) {
 		t.Fatalf("expected ellipsis: %q", s4)
 	}
 	// Body after prefix should not exceed stub runes + "…".
-	// Format: "…(mow gc) " + truncated
-	const prefix = "…(mow gc) "
+	// Format: "…(mowi gc) " + truncated
+	const prefix = "…(mowi gc) "
 	if !strings.HasPrefix(s4, prefix) {
 		t.Fatalf("prefix: %q", s4)
 	}
@@ -317,7 +317,7 @@ func TestAddAtTriggersGC(t *testing.T) {
 func TestCopyLastAnswerSkipsGC(t *testing.T) {
 	// Mirrors copyLastAnswer walk: skip gc stubs.
 	entries := []entry{
-		{kind: kindAssistant, text: "…(mow gc) old", gc: true},
+		{kind: kindAssistant, text: "…(mowi gc) old", gc: true},
 		{kind: kindAssistant, text: "live answer body"},
 	}
 	text := ""
@@ -331,7 +331,7 @@ func TestCopyLastAnswerSkipsGC(t *testing.T) {
 		t.Fatalf("got %q", text)
 	}
 
-	entries = []entry{{kind: kindAssistant, text: "…(mow gc) only", gc: true}}
+	entries = []entry{{kind: kindAssistant, text: "…(mowi gc) only", gc: true}}
 	text = ""
 	for i := len(entries) - 1; i >= 0; i-- {
 		if entries[i].kind == kindAssistant && !entries[i].gc {
@@ -378,7 +378,7 @@ func TestShouldPrettyFalseForGC(t *testing.T) {
 	// afterScrollPretty skips e.gc; entryViewVirtual never glamours gc.
 	m := gcTestModel(t)
 	m.entries = []entry{
-		{kind: kindAssistant, text: "…(mow gc) x", gc: true},
+		{kind: kindAssistant, text: "…(mowi gc) x", gc: true},
 	}
 	// Single entry is inside prettyWindow positionally…
 	if !m.shouldPretty(0) {

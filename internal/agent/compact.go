@@ -481,13 +481,15 @@ func formatTaskAnchor(pins []string) string {
 }
 
 // archiveAvailable reports whether compaction has a searchable session archive
-// behind it. The engine sets this when it wires context_search; without it the
-// compact stub must not promise recoverable history.
+// behind it. The engine sets it per run from the pack-linked flag ANDed with
+// an active session (see engine_prompt.go); without it the compact stub must
+// not promise recoverable history.
 var archiveAvailable atomic.Bool
 
 // SetArchiveAvailable records whether dropped turns are archived and searchable
 // via context_search. Hosts embedding the Engine do not call this directly —
-// mow.New sets it when a session archive and context_search are in play.
+// the engine derives it per run from the actual context_search tool set plus
+// session presence.
 func SetArchiveAvailable(v bool) { archiveAvailable.Store(v) }
 
 // ArchiveAvailable reports the flag set by SetArchiveAvailable.

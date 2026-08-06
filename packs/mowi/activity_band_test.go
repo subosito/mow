@@ -142,7 +142,7 @@ func TestErrorRankStrongerThanStatus(t *testing.T) {
 func TestGCMarkerInRender(t *testing.T) {
 	m := freshModel(t)
 	m.width = 80
-	line := m.renderEntry(entry{kind: kindAssistant, text: "…(mow gc) old", gc: true}, 80)
+	line := m.renderEntry(entry{kind: kindAssistant, text: "…(mowi gc) old", gc: true}, 80)
 	if !strings.Contains(xansi.Strip(line), "trimmed") {
 		t.Fatalf("gc marker missing: %q", line)
 	}

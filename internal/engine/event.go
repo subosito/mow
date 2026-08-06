@@ -57,16 +57,22 @@ const (
 	EventRunEnd EventType = "loop.run.end"
 
 	// graph.* — orchestration (ext/goal pack): state transitions and node progress.
-	EventGoalStart        EventType = "graph.goal.start"
-	EventGoalStep         EventType = "graph.goal.step"
-	EventGoalDone         EventType = "graph.goal.done"
-	EventGoalFail         EventType = "graph.goal.fail"
-	EventGoalPartial      EventType = "graph.goal.partial"
-	EventGoalBlocked      EventType = "graph.goal.blocked"
-	EventToolStart        EventType = "harness.tool.start"
-	EventToolEnd          EventType = "harness.tool.end"
-	EventDelegateChunk    EventType = "harness.delegate.chunk"    // peer ACP answer text delta
-	EventDelegateProgress EventType = "harness.delegate.progress" // peer tool/thought status (not final answer)
+	EventGoalStart   EventType = "graph.goal.start"
+	EventGoalStep    EventType = "graph.goal.step"
+	EventGoalDone    EventType = "graph.goal.done"
+	EventGoalFail    EventType = "graph.goal.fail"
+	EventGoalPartial EventType = "graph.goal.partial"
+	EventGoalBlocked EventType = "graph.goal.blocked"
+	EventToolStart   EventType = "harness.tool.start"
+	EventToolEnd     EventType = "harness.tool.end"
+	// EventContextSinkStore reports that a large successful tool result was
+	// moved out of live history into the session-scoped result store.
+	EventContextSinkStore EventType = "harness.contextsink.store"
+	// EventContextSinkRecover reports bytes returned to live context by
+	// context_search, either by stored-result ID or archive pattern search.
+	EventContextSinkRecover EventType = "harness.contextsink.recover"
+	EventDelegateChunk      EventType = "harness.delegate.chunk"    // peer ACP answer text delta
+	EventDelegateProgress   EventType = "harness.delegate.progress" // peer tool/thought status (not final answer)
 	// EventDelegateUsage: provider-reported tokens for one completed delegated
 	// call (InputTokens/OutputTokens + Agent). Lets hosts show true spend
 	// including native mow peers.
@@ -252,6 +258,14 @@ type Event struct {
 	Path        string       `json:"path,omitempty"`
 	Count       int          `json:"count,omitempty"`
 	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
+
+	// Context sink (harness.contextsink.store/recover). These fields contain
+	// sizes and stable IDs only, never the stored tool-result body.
+	StoredID       string `json:"stored_id,omitempty"`
+	OriginalBytes  int    `json:"original_bytes,omitempty"`
+	InlineBytes    int    `json:"inline_bytes,omitempty"`
+	RecoveredBytes int    `json:"recovered_bytes,omitempty"`
+	RecoveryMode   string `json:"recovery_mode,omitempty"` // "id" or "pattern"
 }
 
 // EventFunc receives lifecycle events. Must not block long.
