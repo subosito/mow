@@ -18,8 +18,8 @@ type ModelInfo struct {
 	ID      string   `json:"id"`
 	Object  string   `json:"object,omitempty"` // "model" or discovery-only "model_group"
 	OwnedBy string   `json:"owned_by,omitempty"`
-	Wire    string   `json:"wire,omitempty"`  // preferred chat wire
-	Wires   []string `json:"wires,omitempty"` // all registered wires
+	Wire    string   `json:"wire,omitempty"`   // preferred chat wire
+	Wires   []string `json:"wires,omitempty"`  // all registered wires
 	Models  []string `json:"models,omitempty"` // composite hops or model_group members
 	// Efforts lists allowed reasoning-effort values when the gateway advertises them.
 	// When non-empty, clients should validate SetEffort against this list instead of

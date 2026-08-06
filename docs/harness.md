@@ -455,6 +455,29 @@ Embedders build a session picker with **`Engine.Sessions()`** → `[]SessionInfo
 | Pre-New setup | `ext.RegisterBeforeNew` (e.g. register config-driven tools) |
 | Custom binary | `mow.New` + choose which packs to import |
 
+**Tool parameter schemas are sanitized before they reach a provider.** Tools
+arriving from MCP servers, ACP peers, or integrators carry ordinary JSON
+Schema, document metadata included. OpenAI-compatible endpoints ignore the
+extra keys; stricter validators reject the entire request over one of them —
+so a single third-party tool takes every other tool down with it, with an error
+that names an array index rather than a tool:
+
+```
+HTTP 400: Invalid JSON payload received. Unknown name "$schema" at
+'request.tools[0].function_declarations[17].parameters': Cannot find field.
+```
+
+The agent loop strips `$schema`, `$id`, `$comment`, `$anchor`, `$dynamicAnchor`,
+and `$vocabulary` recursively. These describe the schema document rather than
+the parameters, so removing them cannot change how a model calls the tool.
+`$ref` and `$defs` are kept: dropping a reference would silently widen a
+parameter from a fixed shape to anything, which is worse than the 400 it would
+avoid. Schemas with nothing to remove pass through byte-identical.
+
+The pass is unconditional rather than gated on a provider id — mow cannot see
+what is behind an OpenAI-compatible base URL, and the endpoint that produced
+the error above presented itself as one.
+
 See [extensions.md](extensions.md) for ACP, media, and pack decisions.
 
 ---

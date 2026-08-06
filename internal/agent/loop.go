@@ -153,6 +153,11 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		if len(params) == 0 {
 			params = json.RawMessage(`{"type":"object","properties":{}}`)
 		}
+		// Tools arrive from MCP servers, peers, and integrators, which emit
+		// ordinary JSON Schema. Strict providers reject its metadata keys and
+		// fail the whole request, so clean them here — one place every tool
+		// passes through, whatever registered it.
+		params = llm.SanitizeToolSchema(params)
 		toolSpecs = append(toolSpecs, llm.ToolSpec{
 			Type: "function",
 			Function: llm.ToolSpecFunction{
@@ -619,7 +624,6 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 		},
 	}
 }
-
 
 // frameUntrustedResult wraps external tool bodies when the tool opts in via
 // UntrustedSource (or is a known external builtin name).
