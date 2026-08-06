@@ -396,6 +396,11 @@ func New(opt Options) (*Engine, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_, _ = client.ListModels(ctx)
 			cancel()
+			// The model may have come from --model before the catalog was
+			// available. Apply its advertised default_effort now, just as
+			// SetModel does for subsequent switches.
+			client.SyncEffortToModel(client.Model)
+			cfg.LLM.Effort = client.Effort
 			e.applyPreferredWireFromCatalog()
 		}
 		e.chat = func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
