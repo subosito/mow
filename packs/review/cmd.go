@@ -236,9 +236,33 @@ func emit(rep *Report, format Format, rf CLIFlags, verbose bool) error {
 		return fmt.Errorf("write --output: %w", err)
 	}
 	if !rf.Quiet {
-		fmt.Fprintf(os.Stderr, "report written to %s (%d finding(s))\n", path, rep.Counts.Total)
+		fmt.Fprintf(os.Stderr, "report written to %s (%s)\n", path, outcomeSummary(rep))
 	}
 	return nil
+}
+
+// outcomeSummary describes a finished report in one line.
+//
+// "0 finding(s)" is ambiguous in the one way that matters: it reads as a clean
+// review whether the model found nothing, found things that verification
+// rejected, or found things filtered out by --min-severity. Those call for
+// completely different next steps, and with --format sarif the operator never
+// sees the report body that would have explained it. Say which one happened.
+func outcomeSummary(rep *Report) string {
+	if rep == nil {
+		return "no report"
+	}
+	out := fmt.Sprintf("%d finding(s)", rep.Counts.Total)
+	if rep.Suppressed > 0 {
+		out += fmt.Sprintf(", %d suppressed", rep.Suppressed)
+	}
+	if rep.Counts.Total == 0 && rep.Suppressed == 0 && rep.Scope.FilesReviewed > 0 {
+		// Nothing found and nothing dropped: the passes genuinely reported a
+		// clean read. Worth stating, because it is the only case where "0"
+		// means what it appears to mean.
+		out += " — nothing reported by either pass"
+	}
+	return out
 }
 
 // resolveWorkspace defaults to the current directory.
