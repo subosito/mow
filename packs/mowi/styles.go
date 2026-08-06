@@ -44,12 +44,7 @@ type theme struct {
 	DiffMeta lipgloss.Style // hunk headers / stats
 	DiffNum  lipgloss.Style // line-number gutter
 	DiffCtx  lipgloss.Style // unchanged context line
-	// DiffNumOnBand is the line-number ink once a row carries an add/del wash.
-	// The muted+dim gutter tone measures ~1.7:1 against those backgrounds, so
-	// numbers vanish exactly where you navigate by them; this is derived to
-	// clear AA on both bands while staying below body-text weight.
-	DiffNumOnBand color.Color
-	Sep           lipgloss.Style
+	Sep      lipgloss.Style
 	// SlashCmd colors /commands in the input field.
 	SlashCmd lipgloss.Style
 	// palette is the hex token set shared by chrome and glamour markdown.
@@ -618,19 +613,18 @@ func buildTheme(name string, p palette, mdDark bool, chroma string) theme {
 			Border(square).
 			BorderForeground(c(p.border)).
 			Padding(0, 1),
-		Title:         lipgloss.NewStyle().Bold(true).Foreground(c(p.accent)),
-		RoleUserBar:   lipgloss.NewStyle().Foreground(c(p.user)),
-		RoleAsstBar:   lipgloss.NewStyle().Foreground(c(p.accent)),
-		RoleUserBg:    lipgloss.NewStyle().Background(c(p.userBg)).Foreground(c(p.fg)),
-		StampUser:     lipgloss.NewStyle().Background(c(p.userBg)).Foreground(c(p.muted)),
-		DiffAdd:       diffAddStyle(c, p, mdDark),
-		DiffDel:       diffDelStyle(c, p, mdDark),
-		DiffMeta:      lipgloss.NewStyle().Foreground(c(p.meta)),
-		DiffNum:       lipgloss.NewStyle().Foreground(c(p.muted)).Faint(true),
-		DiffNumOnBand: c(diffNumInk(p, mdDark)),
-		DiffCtx:       lipgloss.NewStyle().Foreground(c(p.fg)),
-		Sep:           lipgloss.NewStyle().Foreground(c(p.border)),
-		SlashCmd:      lipgloss.NewStyle().Foreground(c(p.slash)).Bold(true),
+		Title:       lipgloss.NewStyle().Bold(true).Foreground(c(p.accent)),
+		RoleUserBar: lipgloss.NewStyle().Foreground(c(p.user)),
+		RoleAsstBar: lipgloss.NewStyle().Foreground(c(p.accent)),
+		RoleUserBg:  lipgloss.NewStyle().Background(c(p.userBg)).Foreground(c(p.fg)),
+		StampUser:   lipgloss.NewStyle().Background(c(p.userBg)).Foreground(c(p.muted)),
+		DiffAdd:     diffAddStyle(c, p, mdDark),
+		DiffDel:     diffDelStyle(c, p, mdDark),
+		DiffMeta:    lipgloss.NewStyle().Foreground(c(p.meta)),
+		DiffNum:     lipgloss.NewStyle().Foreground(c(p.muted)).Faint(true),
+		DiffCtx:     lipgloss.NewStyle().Foreground(c(p.fg)),
+		Sep:         lipgloss.NewStyle().Foreground(c(p.border)),
+		SlashCmd:    lipgloss.NewStyle().Foreground(c(p.slash)).Bold(true),
 	}
 }
 
@@ -694,6 +688,13 @@ const (
 	// merely close ones — 40 catches those without rejecting palettes whose
 	// green and red are subtle.
 	minDiffAccentSeparation = 40.0
+	// minDiffBandSeparation is the same idea for the derived backgrounds.
+	// Bands are washes, so they converge toward the surface and sit closer
+	// together than the accents they came from; holding them to the accent
+	// threshold would reject palettes that render perfectly well. The band
+	// only has to avoid reading as one block — direction is carried by the
+	// tinted line numbers and the +/− glyph, not by the wash alone.
+	minDiffBandSeparation = 15.0
 )
 
 // resolveDiffBg prefers an explicit override; otherwise washes accent into the
@@ -723,17 +724,15 @@ func resolveDiffBg(override, accent string, p palette, dark bool) string {
 			base = "#f3f4f6"
 		}
 	}
-	// Dark themes need a stronger wash to stay visible on near-black surfaces.
-	//
-	// These sit at a measured ceiling, not a taste judgement. The gutter line
-	// numbers are painted on this band and must clear 4.5:1, and the band is a
-	// wash of a mid-tone accent, so pushing t higher darkens the ceiling on
-	// the ink faster than it strengthens the band: at t=0.52 the best possible
-	// white ink on the default dark add band is only ~4.4:1. t=0.45 keeps the
-	// band clearly stronger than the old 0.35 while leaving the gutter ~5.1:1.
-	t := 0.45
+	// The band backs the content only: line numbers and the change glyph are
+	// tinted, not washed. Nothing legible sits on this colour any more, which
+	// removes the ceiling an earlier version had to respect (numbers needed
+	// 4.5:1 against the band, capping how dark it could go) and lets the wash
+	// be a quiet backing rather than a compromise between two jobs. Deeper and
+	// duller reads better behind syntax-coloured code.
+	t := 0.30
 	if !dark {
-		t = 0.42
+		t = 0.26
 	}
 	bg := mixHex(base, accent, t)
 	// Guarantee the band is actually visible against the surface it sits on,
@@ -793,47 +792,6 @@ func diffFgOn(accent, bg string, dark bool) string {
 		}
 	}
 	return fg
-}
-
-// diffNumInk is the line-number ink for rows carrying an add/del wash.
-//
-// One ink is painted on both bands, so it has to clear the legibility floor on
-// whichever band is worse — tuning it against a single band leaves the other
-// unreadable. A fixed mix cannot do that: it was previously mixHex(muted, fg,
-// 0.8), which was measured against the old, weaker washes and fell to 3.06:1
-// once the bands were strengthened. Deriving it from the actual bands keeps
-// the gutter legible no matter how the palette or the band strength moves.
-func diffNumInk(p palette, dark bool) string {
-	ink := mixHex(p.muted, p.fg, 0.8)
-	addBg := resolveDiffBg(p.addBg, p.add, p, dark)
-	delBg := resolveDiffBg(p.delBg, p.del, p, dark)
-
-	worst := func(c string) float64 {
-		r := math.Inf(1)
-		for _, bg := range []string{addBg, delBg} {
-			if strings.TrimSpace(bg) == "" {
-				continue
-			}
-			if v := contrastRatio(c, bg); v < r {
-				r = v
-			}
-		}
-		return r
-	}
-	if math.IsInf(worst(ink), 1) {
-		return ink // no bands to satisfy
-	}
-	// Push toward the pole that moves away from the bands. Bands are washes of
-	// a mid-tone accent, so on dark themes the readable direction is lighter
-	// and on light themes it is darker — same reasoning as diffFgOn.
-	pole := "#ffffff"
-	if !dark {
-		pole = "#000000"
-	}
-	for i := 0; i < 10 && worst(ink) < minDiffNumContrast+diffNumHeadroom; i++ {
-		ink = mixHex(ink, pole, 0.12)
-	}
-	return ink
 }
 
 // chrome (accent, muted, fg, …) so transcript markdown does not look like a

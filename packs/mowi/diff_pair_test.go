@@ -1,7 +1,6 @@
 package mowi
 
 import (
-	"math"
 	"regexp"
 	"strings"
 	"testing"
@@ -112,28 +111,6 @@ func TestDiffHunkLabelUsesChangedSide(t *testing.T) {
 	}
 }
 
-// The wash covers the number gutter too, so a changed block is one rectangle
-// rather than a body-only stripe with a notch on the left.
-func TestDiffBandCoversGutter(t *testing.T) {
-	t.Setenv("MOW_FORCE_COLOR", "1")
-	th := newTheme()
-	out := renderPrettyDiff(th, "@@ -10,2 +10,2 @@\n-was\n+now\n", 44)
-	for _, ln := range strings.Split(out, "\n") {
-		plain := xansi.Strip(ln)
-		if !strings.Contains(plain, "was") && !strings.Contains(plain, "now") {
-			continue
-		}
-		// The styled span covering the line number must carry a background.
-		bar := strings.Index(ln, "│")
-		if bar < 0 {
-			t.Fatalf("no separator: %q", plain)
-		}
-		if !strings.Contains(ln[:bar], "48;2;") {
-			t.Fatalf("number gutter is unwashed — block reads as a stripe: %q", plain)
-		}
-	}
-}
-
 // An edit can hand the renderer a whole rewritten block: every line arrives as
 // −old/+new even where the text never changed. Pairing on run length alone then
 // paints a two-token edit as twelve banded rows, and the real change gets a
@@ -193,55 +170,33 @@ func TestDiffMixedRunKeepsRealChangePaired(t *testing.T) {
 	}
 }
 
-// Line numbers must stay legible once a row carries an add/del wash. The muted
-// gutter tone measured 1.65:1 on the add band and 1.90:1 on the del band — the
-// numbers effectively vanished in the one surface you navigate by them.
-func TestDiffNumbersLegibleOnBands(t *testing.T) {
+// The line-number gutter carries no band: numbers are tinted with the row's
+// own accent instead. Banding them forced legible text onto a mid-tone
+// background, which is what drove a chain of contrast machinery; tinting says
+// the same thing (green = inserted, red = removed) with none of it.
+func TestDiffNumbersAreTintedNotBanded(t *testing.T) {
 	t.Setenv("MOW_FORCE_COLOR", "1")
 	th := newTheme()
+	out := renderPrettyDiff(th, "@@ -10,2 +10,2 @@\n-was\n+now\n", 44)
 
-	// Contrast of the number ink against each band, per WCAG.
-	lum := func(hex string) float64 {
-		r, g, b := hexRGB(hex)
-		ch := func(v int) float64 {
-			f := float64(v) / 255
-			if f <= 0.03928 {
-				return f / 12.92
-			}
-			return math.Pow((f+0.055)/1.055, 2.4)
-		}
-		return 0.2126*ch(r) + 0.7152*ch(g) + 0.0722*ch(b)
-	}
-	ratio := func(fg, bg string) float64 {
-		a, b := lum(fg), lum(bg)
-		if a < b {
-			a, b = b, a
-		}
-		return (a + 0.05) / (b + 0.05)
-	}
-
-	p := defaultPalette(true)
-	// Ask the production code for the ink rather than recomputing the mix
-	// here: a copy of the formula silently keeps passing when the real one
-	// changes, which is exactly how this drifted when the bands got stronger.
-	num := diffNumInk(p, true)
-	for _, band := range []struct {
-		name, bg string
-	}{
-		{"add", resolveDiffBg(p.addBg, p.add, p, true)},
-		{"del", resolveDiffBg(p.delBg, p.del, p, true)},
-	} {
-		if band.bg == "" {
+	for _, ln := range strings.Split(out, "\n") {
+		plain := xansi.Strip(ln)
+		if !strings.Contains(plain, "was") && !strings.Contains(plain, "now") {
 			continue
 		}
-		if got := ratio(num, band.bg); got < 4.5 {
-			t.Errorf("line numbers on the %s band: %.2f:1, want >= 4.5:1 (ink %s on %s)",
-				band.name, got, num, band.bg)
+		bar := strings.Index(ln, "\u2502")
+		if bar < 0 {
+			t.Fatalf("no separator: %q", plain)
 		}
-	}
-	// And the style really is used, not just defined.
-	if th.DiffNumOnBand == nil {
-		t.Fatal("DiffNumOnBand not set on the theme")
+		gutter := ln[:bar]
+		if strings.Contains(gutter, "48;2;") {
+			t.Errorf("gutter carries a background; it should be tinted only: %q", plain)
+		}
+		// Tinted, not merely uncoloured: the digits must still say which
+		// direction the change went on a no-color-blind reading.
+		if !strings.Contains(gutter, "38;2;") {
+			t.Errorf("gutter has no foreground tint: %q", plain)
+		}
 	}
 }
 

@@ -39,9 +39,15 @@ func TestChromaDiffBandsAlwaysDiffer(t *testing.T) {
 			if addBg == delBg {
 				t.Errorf("add and del bands identical (%s); direction of change is invisible", addBg)
 			}
-			if d := colorDistance(addBg, delBg); d < minDiffAccentSeparation {
+			// Bands are washes of the accents, so they sit closer together
+			// than the accents themselves — measuring them against the accent
+			// threshold would reject palettes whose colours are fine. What
+			// matters is that the two backgrounds are separable at all; the
+			// tinted line numbers and the +/− glyph carry the direction
+			// unambiguously, so the band only has to not read as one block.
+			if d := colorDistance(addBg, delBg); d < minDiffBandSeparation {
 				t.Errorf("bands too close: distance %.1f < %.1f (%s vs %s)",
-					d, minDiffAccentSeparation, addBg, delBg)
+					d, minDiffBandSeparation, addBg, delBg)
 			}
 		})
 	}

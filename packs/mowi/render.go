@@ -525,26 +525,41 @@ func formatDiffRow(th theme, g diffGutter, bodyStyle lipgloss.Style, oldN, newN,
 // where you navigate by them. This tone clears 4.5:1 on both bands while
 // staying quieter than body text, and drops `dim` because terminals implement
 // faint inconsistently.
-func diffNumOnBand(th theme, bodyStyle lipgloss.Style) lipgloss.Style {
-	st := th.DiffNum
-	bg := bodyStyle.GetBackground()
-	if bg == nil {
-		return st
+// diffNumTint is the line-number style for a changed row: the row's own accent
+// colour on no background.
+//
+// The gutter deliberately carries no wash. Banding it too made a changed block
+// one rectangle, but it forced the numbers to compete with a mid-tone
+// background — which is what drove a whole chain of contrast machinery (seat
+// the band so an ink is legible, pick an ink that is legible but not stark).
+// Tinting the digits instead says the same thing with none of that: green
+// numbers mean an inserted line, red mean a removed one, and the band is left
+// to mark the content that actually changed.
+func diffNumTint(th theme, bodyStyle lipgloss.Style) lipgloss.Style {
+	fg := bodyStyle.GetForeground()
+	if fg == nil {
+		return th.DiffNum
 	}
-	return st.Background(bg).Faint(false).Foreground(th.DiffNumOnBand)
+	// Faint off: terminals implement it inconsistently, and a tinted number is
+	// already quiet enough without it.
+	return lipgloss.NewStyle().Foreground(fg).Faint(false)
 }
 
 // formatDiffRowPre is formatDiffRow for a body that is already styled (word
 // diff spans), so the caller's per-word emphasis is not flattened by a single
 // Render over the whole line.
 //
-// The whole row — number gutter included — carries the add/del wash, so a
-// changed block reads as one rectangle. Washing only the body left a 15-cell
-// notch on the left and the block read as stripes. Padding is skipped when
-// width is unknown (colorDiffLines passes 0): there is no column to pad to.
+// The band covers the body only; the number gutter and the change glyph are
+// tinted rather than washed, so the eye reads "which lines" from colour and
+// "what changed" from the block. Padding is skipped when width is unknown
+// (colorDiffLines passes 0): there is no column to pad to.
 func formatDiffRowPre(th theme, g diffGutter, bodyStyle lipgloss.Style, oldN, newN, sign, styledBody string, width int) string {
-	numStyle := diffNumOnBand(th, bodyStyle)
-	gutter := numStyle.Render(g.prefix(oldN, newN)) + bodyStyle.Render(sign+" ")
+	numStyle := diffNumTint(th, bodyStyle)
+	// The glyph is tinted, not banded: it belongs to the gutter's "which
+	// lines" job, and starting the block at the glyph would put a one-cell
+	// stub of band ahead of the content it marks.
+	signStyle := numStyle.Bold(true)
+	gutter := numStyle.Render(g.prefix(oldN, newN)) + signStyle.Render(sign+" ")
 	if width > 0 {
 		if pad := width - lipgloss.Width(gutter) - lipgloss.Width(styledBody); pad > 0 {
 			styledBody += bodyStyle.Render(strings.Repeat(" ", pad))

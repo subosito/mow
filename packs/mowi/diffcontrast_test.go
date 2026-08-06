@@ -117,30 +117,6 @@ func TestDiffAddAndDelDiffer(t *testing.T) {
 	}
 }
 
-// The gutter line numbers are painted on the band too. One ink serves both
-// bands, so it must clear the floor on whichever is worse — this is the
-// constraint that actually caps how strong the bands can get, and it broke
-// when the bands were first strengthened.
-func TestDiffGutterInkLegibleOnBothBands(t *testing.T) {
-	for _, c := range diffPalettes() {
-		t.Run(c.name, func(t *testing.T) {
-			ink := diffNumInk(c.p, c.dark)
-			for _, d := range []struct{ kind, accent string }{
-				{"add", c.p.add}, {"del", c.p.del},
-			} {
-				bg := resolveDiffBg("", d.accent, c.p, c.dark)
-				if bg == "" {
-					continue
-				}
-				if got := contrastRatio(ink, bg); got < minDiffNumContrast {
-					t.Errorf("%s band: gutter ink %s on %s = %.2f, want >= %.2f",
-						d.kind, ink, bg, got, minDiffNumContrast)
-				}
-			}
-		})
-	}
-}
-
 // diffFgOn must leave a already-legible accent alone: rewriting a color that
 // was fine would drift every theme's palette for no reason.
 func TestDiffFgUnchangedWhenLegible(t *testing.T) {
