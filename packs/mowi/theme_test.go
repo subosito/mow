@@ -12,18 +12,23 @@ import (
 )
 
 func TestNormalizeThemeName(t *testing.T) {
+	// "default" is the sole curated preset; every other accepted name is a
+	// chroma style, resolved by the generic path.
 	cases := map[string]string{
 		"":            "default",
 		"  ":          "default",
 		"DEFAULT":     "default",
 		"Default":     "default",
-		"Monokai":     "monokai",
-		"monokai":     "monokai",
-		" MONOKAI ":   "monokai",
-		"dracula":     "default", // unknown → default
-		"nord":        "default",
-		"nope-theme":  "default",
-		"monokai-pro": "default", // only exact "monokai"
+		"nope-theme":  "default", // unknown → default
+		"monokai-pro": "default", // not a chroma style
+		// monokai is no longer a hand-written preset, but chroma ships one,
+		// so an existing config keeps working through the generic path.
+		"Monokai":   "monokai",
+		"monokai":   "monokai",
+		" MONOKAI ": "monokai",
+		// Other chroma styles resolve to themselves.
+		"dracula": "dracula",
+		"nord":    "nord",
 	}
 	for in, want := range cases {
 		if got := NormalizeThemeName(in); got != want {
@@ -48,7 +53,7 @@ func TestIsHexColor(t *testing.T) {
 }
 
 func TestNamedThemePalettes(t *testing.T) {
-	// Shipped names: default (adaptive) + monokai (forced dark).
+	// The curated preset plus a chroma style that used to be a second preset.
 	for _, name := range []string{"default", "monokai"} {
 		th := newThemeFrom(ThemeConfig{Name: name}, true)
 		p := th.palette
@@ -456,7 +461,7 @@ func TestStatusBarUsesTheme(t *testing.T) {
 }
 
 func TestApplyColorOverridesEmpty(t *testing.T) {
-	p := monokaiProPalette()
+	p := defaultPalette(true)
 	got := applyColorOverrides(p, nil)
 	if got != p {
 		t.Fatal("nil colors should be identity")
@@ -480,33 +485,6 @@ func TestDefaultPaletteLightDarkDistinct(t *testing.T) {
 	}
 	if d.userBg == l.userBg || d.fg == l.fg {
 		t.Fatalf("expected distinct fg/userBg dark=%+v light=%+v", d, l)
-	}
-}
-
-func TestMonokaiProPaletteTokens(t *testing.T) {
-	p := monokaiProPalette()
-	// Spot-check published Monokai Pro swatches.
-	want := map[string]string{
-		"fg":     "#FCFCFA",
-		"muted":  "#727072",
-		"accent": "#AB9DF2",
-		"user":   "#A9DC76",
-		"err":    "#FF6188",
-		"warn":   "#FFD866",
-		"add":    "#A9DC76",
-		"del":    "#FF6188",
-		"meta":   "#78DCE8",
-		"slash":  "#FC9867",
-	}
-	got := map[string]string{
-		"fg": p.fg, "muted": p.muted, "accent": p.accent, "user": p.user,
-		"err": p.err, "warn": p.warn, "add": p.add, "del": p.del,
-		"meta": p.meta, "slash": p.slash,
-	}
-	for k, w := range want {
-		if !strings.EqualFold(got[k], w) {
-			t.Errorf("%s=%q want %q", k, got[k], w)
-		}
 	}
 }
 

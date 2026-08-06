@@ -16,7 +16,7 @@ import (
 //	      custom splash
 //	    prompt: "❯"
 //	    theme:
-//	      name: monokai          # default or monokai
+//	      name: catppuccin-mocha # default, or any chroma style name
 //	      colors:
 //	        accent: "#FFD866"   # optional hex overrides
 //	    keys:

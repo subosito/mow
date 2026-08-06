@@ -16,7 +16,7 @@ import (
 
 // Theme is intentionally quiet: readable transcript first, chrome second.
 type theme struct {
-	name   string // resolved name: default | monokai
+	name   string // resolved name: default, or a chroma style name
 	Accent lipgloss.Style
 	Muted  lipgloss.Style
 	Error  lipgloss.Style
@@ -54,7 +54,7 @@ type theme struct {
 	SlashCmd lipgloss.Style
 	// palette is the hex token set shared by chrome and glamour markdown.
 	palette palette
-	// mdDark: dark document base (monokai always dark).
+	// mdDark: dark document base (a dark chroma style forces this).
 	mdDark bool
 	// chromaStyle is the chroma theme name for fenced code (e.g. monokai).
 	// Empty → chroma colors derived from palette.
@@ -90,7 +90,7 @@ type palette struct {
 	fg, muted, accent, user, userBg          string
 	err, warn, border, add, del, meta, slash string
 	// Optional soft row washes for review-style diffs. Empty → derived from
-	// add/del mixed into userBg so every theme (chroma name, monokai, custom
+	// add/del mixed into userBg so every theme (chroma name, custom
 	// colors) keeps a uniform look without hardcoded green/red panels.
 	addBg, delBg string
 }
@@ -129,35 +129,12 @@ func defaultPalette(dark bool) palette {
 	}
 }
 
-// monokaiProPalette is Monokai Pro (Filter Spectrum / classic dark).
-// Source: monokai.pro contribute swatches.
-//
-//	bg #2D2A2E  fg #FCFCFA  dim #727072
-//	red #FF6188  orange #FC9867  yellow #FFD866
-//	green #A9DC76  cyan #78DCE8  purple #AB9DF2
-func monokaiProPalette() palette {
-	return palette{
-		fg:     "#FCFCFA",
-		muted:  "#727072",
-		accent: "#AB9DF2", // purple — chrome / assistant gutter
-		user:   "#A9DC76", // green — user gutter
-		userBg: "#221F22", // slightly darker than #2D2A2E
-		err:    "#FF6188",
-		warn:   "#FFD866",
-		border: "#5B595C",
-		add:    "#A9DC76",
-		del:    "#FF6188",
-		meta:   "#78DCE8",
-		slash:  "#FC9867", // orange for /commands
-	}
-}
-
 // ThemeConfig is extensions.tui.theme (YAML). One theme drives both the frame
 // (chrome) and the markdown renderer — the palette is the single source of
 // truth, so a full custom theme is just `colors` with every token set.
 //
 //	theme:
-//	  name: catppuccin-mocha  # default | monokai | any chroma style name
+//	  name: catppuccin-mocha  # default | any chroma style name
 //	                          # (catppuccin-mocha, dracula, nord, gruvbox, …):
 //	                          # a chroma name derives the whole palette from it
 //	                          # and light/dark is auto-detected.
@@ -176,11 +153,25 @@ type ThemeConfig struct {
 	Code   string            `yaml:"code"`
 }
 
-// NormalizeThemeName returns "default" or "monokai".
+// NormalizeThemeName resolves a configured theme name to what will actually be
+// used: the literal preset "default", or a recognized chroma style name.
+// Unknown values resolve to "default" — the same fallback newThemeFrom takes,
+// so callers can report the effective theme without duplicating that logic.
+//
+// Note this is the *preset* name, not DefaultThemeName: an unconfigured theme
+// resolves to DefaultThemeName elsewhere, while an explicitly bad value falls
+// back to the built-in palette.
+//
+// There is one curated preset now. monokai used to be a second, hand-written
+// palette, but chroma ships a monokai style, so the special case was a second
+// implementation of a name the generic path already handles.
 func NormalizeThemeName(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
-	if s == "monokai" {
-		return "monokai"
+	if s == "" || s == "default" {
+		return "default"
+	}
+	if knownChromaStyle(s) {
+		return s
 	}
 	return "default"
 }
@@ -460,7 +451,7 @@ const DefaultThemeName = "catppuccin-mocha"
 
 // newThemeFrom builds a theme from config + pinned terminal dark/light.
 //
-// theme.name accepts a curated preset (default | monokai) OR any chroma style
+// theme.name accepts the curated preset (default) OR any chroma style
 // name (catppuccin-mocha, dracula, nord, …): a chroma name derives the whole
 // palette from that style and defaults code highlighting to the same style, so
 // one name themes the entire UI. theme.code overrides code highlighting only.
@@ -478,10 +469,6 @@ func newThemeFrom(cfg ThemeConfig, termDark bool) theme {
 	case "default":
 		name = "default"
 		p = defaultPalette(termDark)
-	case "monokai":
-		name = "monokai"
-		p = monokaiProPalette()
-		mdDark = true
 	default:
 		if cp, dark, ok := paletteFromChroma(raw); ok {
 			p = cp
@@ -490,7 +477,7 @@ func newThemeFrom(cfg ThemeConfig, termDark bool) theme {
 			// theme.code: catppuccin-mocha (etc.) when you want splash fidelity.
 			codeDefault = ""
 		} else {
-			slog.Warn("mowi: theme.name unknown (want default, monokai, or a chroma style like catppuccin-mocha)", "value", cfg.Name)
+			slog.Warn("mowi: theme.name unknown (want default, or a chroma style like catppuccin-mocha, dracula, nord)", "value", cfg.Name)
 			name = "default"
 			p = defaultPalette(termDark)
 		}
@@ -710,7 +697,7 @@ const (
 )
 
 // resolveDiffBg prefers an explicit override; otherwise washes accent into the
-// theme surface (user_bg / border) so monokai/catppuccin/custom stay coherent.
+// theme surface (user_bg / border) so chroma-derived and custom stay coherent.
 //
 // A fixed mix ratio is not enough on its own. How far a wash actually travels
 // depends on how far apart the accent and the surface already are, so the same
