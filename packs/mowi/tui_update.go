@@ -533,8 +533,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case goalDoneMsg:
 		return m, m.handleGoalDone(msg)
 
-	case reviewDoneMsg:
-		return m, m.applyReviewDone(msg)
+	case packSlashDoneMsg:
+		return m, m.applyPackSlashDone(msg)
 
 	case recallConfirmMsg:
 		// Mouse-off wheel guard: the up-arrow recall was held for the confirm

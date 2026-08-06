@@ -146,6 +146,20 @@ func (m *model) doSteer(text string) tea.Cmd {
 	return nil
 }
 
+// builtinSlash reports whether a token is owned by the TUI itself. Built-ins
+// are checked first so a pack cannot capture /quit or /clear by registering
+// that name — a wedged session must always be exitable.
+func builtinSlash(token string) bool {
+	switch token {
+	case "/help", "/?", "/clear", "/quit", "/exit", "/perm", "/compact",
+		"/status", "/ext", "/goal", "/lsp", "/model", "/effort", "/copy",
+		"/yank", "/sessions", "/search", "/find", "/retry", "/regen",
+		"/edit", "/steer", "/btw":
+		return true
+	}
+	return false
+}
+
 func (m *model) handleSlash(cmd string) tea.Cmd {
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {
@@ -153,6 +167,14 @@ func (m *model) handleSlash(cmd string) tea.Cmd {
 	}
 	if parts[0] != "/help" && parts[0] != "/?" {
 		m.showWelcome = false
+	}
+	// Pack-registered commands win over the built-in switch only for tokens
+	// no built-in owns: Lookup misses everything below, so a pack cannot
+	// shadow /quit or /clear by registering that name.
+	if !builtinSlash(parts[0]) {
+		if cmd, handled := m.handlePackSlash(parts); handled {
+			return cmd
+		}
 	}
 	switch parts[0] {
 	case "/help", "/?":
@@ -229,8 +251,9 @@ func (m *model) handleSlash(cmd string) tea.Cmd {
 		m.showLSPProblems()
 		m.refreshVP()
 		return nil
-	case "/review", "/sec":
-		return m.handleReviewSlash(parts)
+	// Pack-registered commands (/review, /sec, …) are not named here: they
+	// dispatch through the slash registry, so linking a pack adds them and
+	// dropping its import removes them, in this host and in mow tty alike.
 	case "/model":
 		filter := ""
 		if len(parts) > 1 {

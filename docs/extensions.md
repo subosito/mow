@@ -142,8 +142,56 @@ mowi goal run --goal "Make CI green"
 ### Review (`packs/review`)
 
 Read-only two-pass code/security review (`review` and `sec` commands), with
-text/JSON/JSONL/SARIF output and validated finding scope. See
+text/JSON/JSONL/SARIF output and validated finding scope. Also registers
+`/review` and `/sec` as interactive slash commands (see below). See
 [review.md](review.md).
+
+## Interactive slash commands (`slash`)
+
+A pack can own a command a user types into an interactive session. Registering
+one in `init` is all it takes: every host that dispatches through the registry
+— `mow tty` and the mowi TUI — gains the command because the pack is linked,
+and loses it when the blank import is dropped. No host names a pack.
+
+```go
+import "github.com/subosito/mow/slash"
+
+func init() {
+    slash.Register(slash.Command{
+        Name:      "review",
+        Summary:   "AI-assisted code review of a diff or paths (advisory)",
+        Usage:     "…shown for /review help…",
+        Exclusive: true, // drives the session engine; hosts refuse it mid-turn
+        Run: func(ctx context.Context, req slash.Request) (slash.Result, error) {
+            // req.Engine is the session's live engine: the command runs
+            // against the model the user is already talking to, rather than
+            // starting a child process.
+            return slash.Result{Title: "…one line…", Body: "…full output…"}, nil
+        },
+    })
+}
+```
+
+The contract is presentation-free on purpose. `Run` returns text; the host
+decides how to paint it — `mow tty` prints the title on stderr and the body on
+stdout (so a piped stdout stays the report), while mowi paints a status chip
+and a framed transcript section and sets `Color: false` so raw ANSI does not
+fight its layout. One behavior, two presentations, no duplicated flag parsing.
+
+Rules worth knowing:
+
+- **Built-ins win.** A pack cannot capture `/quit`, `/clear`, `/model`, … — a
+  wedged session must always be exitable.
+- **Unregistered tokens are not commands.** They fall through to the model, so
+  a line like `/tmp is full` is still a sentence.
+- **Help is free.** `/<name> help` (also `-h`, `--help`, `?`) prints `Usage`
+  without invoking `Run`, so it works with no engine and costs no tokens. A
+  bare `/<name>` runs the command's default behavior, and a path argument that
+  merely contains "help" is not a help request.
+- **Slash ≠ tool ≠ subcommand.** A slash command is host-side and user-typed:
+  the model cannot call it, and it has no process exit code. Commands that need
+  a CI contract keep a `ext.RegisterCommand` subcommand as well; `packs/review`
+  registers both and shares the middle.
 
 ### Ops (`packs/ops`)
 

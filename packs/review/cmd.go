@@ -69,14 +69,9 @@ func runCommand(cmd string, args []string) int {
 	// The command name is the product surface, so map it to a persona
 	// explicitly: a future subcommand that forgets to register one must fail
 	// loudly rather than silently inherit the general review.
-	var prof *Profile
-	switch cmd {
-	case "review":
-		prof = GeneralProfile()
-	case "sec":
-		prof = SecurityProfile()
-	default:
-		fmt.Fprintf(os.Stderr, "mow %s: no review profile registered for this command\n", cmd)
+	prof, profErr := profileFor(cmd)
+	if profErr != nil {
+		fmt.Fprintf(os.Stderr, "mow %s: %v\n", cmd, profErr)
 		return ExitError
 	}
 	if wantsHelp(args) {

@@ -13,6 +13,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
+
+	"github.com/subosito/mow/slash"
 )
 
 // spinnerView is the busy spinner, or a static glyph under reduced peer-bion.
@@ -787,8 +789,6 @@ func (m *model) helpCard() string {
 		{"/model", "picker · /model <id> to jump"},
 		{"/goal", "list · status · new · run"},
 		{"/lsp", "recent post-edit diagnostics"},
-		{"/review", "code review (same as mow review)"},
-		{"/sec", "security review (same as mow sec)"},
 		{"/btw", "aside — not added to context"},
 		{"/steer", "guide the running turn (while busy)"},
 		{"/search", "find in transcript (repeat to cycle)"},
@@ -800,6 +800,12 @@ func (m *model) helpCard() string {
 		{"/perm", "auto | ask"},
 	} {
 		b.WriteString(row(th.SlashCmd, c.cmd, c.desc) + "\n")
+	}
+	// Pack-registered commands are listed from the registry rather than typed
+	// out here, so help cannot claim a command that is not linked (or omit one
+	// that is).
+	for _, c := range slash.Commands() {
+		b.WriteString(row(th.SlashCmd, "/"+c.Name, c.Summary) + "\n")
 	}
 	// Trivial commands share one quiet row (keeps /help /clear /quit discoverable).
 	b.WriteString("  " + th.SlashCmd.Render("/help") + th.Muted.Render("   ") +

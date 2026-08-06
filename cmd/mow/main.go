@@ -18,6 +18,7 @@ import (
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/ext"
+	"github.com/subosito/mow/slash"
 
 	// Linked packs — each registers tools/commands in init.
 	// Remove an import to drop that pack (and its subcommand) from this binary.
@@ -291,11 +292,62 @@ func handleTtySlash(ctx context.Context, eng *mow.Engine, line string) (handled 
 		}
 		return true, ttyModel(ctx, eng, filter)
 	case "/help", "/?":
-		fmt.Fprintln(os.Stderr, "commands: /model [id]  /btw <q>  /quit (or /exit)")
+		fmt.Fprintln(os.Stderr, ttyHelp())
 		return true, nil
 	default:
-		return false, nil
+		// Pack-registered commands. Anything not registered is not a command:
+		// fall through so the line reaches the model as a prompt, because a
+		// user who types "/tmp is full" means it as a sentence.
+		c, ok := slash.Lookup(parts[0])
+		if !ok {
+			return false, nil
+		}
+		return true, ttyRunSlash(ctx, eng, c, parts)
 	}
+}
+
+// ttyRunSlash executes a pack-registered slash command and prints it for a
+// plain terminal: status line on stderr (so a piped stdout stays the report),
+// body on stdout. The same command in mowi paints a chip and a transcript
+// entry — one behavior, two presentations.
+func ttyRunSlash(ctx context.Context, eng *mow.Engine, c slash.Command, parts []string) error {
+	ws := ""
+	if eng != nil {
+		ws = eng.Workspace()
+	}
+	req := slash.Request{
+		Name:      c.Name,
+		Invoked:   strings.TrimPrefix(parts[0], "/"),
+		Args:      parts[1:],
+		Engine:    eng,
+		Workspace: ws,
+		// A plain terminal is exactly where ANSI belongs; the TUI is the one
+		// that turns this off.
+		Color: true,
+	}
+	res, err := c.Run(ctx, req)
+	if err != nil {
+		return err
+	}
+	if t := strings.TrimSpace(res.Title); t != "" {
+		fmt.Fprintln(os.Stderr, t)
+	}
+	if b := strings.TrimRight(res.Body, "\n"); b != "" {
+		fmt.Println(b)
+	}
+	return nil
+}
+
+// ttyHelp lists built-in commands plus whatever packs are linked, so the help
+// text cannot drift from what actually dispatches.
+func ttyHelp() string {
+	var b strings.Builder
+	b.WriteString("commands: /model [id]  /btw <q>  /help  /quit (or /exit)")
+	for _, line := range slash.HelpLines() {
+		b.WriteString("\n  ")
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 // ttyModel lists GET /models or switches. Catalog wire is applied when present;

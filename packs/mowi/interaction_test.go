@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/subosito/mow"
+	"github.com/subosito/mow/slash"
 )
 
 func seedTurn(m *model, q string) {
@@ -431,10 +432,31 @@ func TestTranscriptSearch(t *testing.T) {
 func TestHelpCardGrouped(t *testing.T) {
 	m := freshModel(t)
 	card := m.helpCard()
-	for _, want := range []string{"KEYS", "COMMANDS", "/model", "/sessions", "/goal", "/review", "/sec"} {
+	for _, want := range []string{"KEYS", "COMMANDS", "/model", "/sessions", "/goal"} {
 		if !strings.Contains(card, want) {
 			t.Fatalf("help card missing %q", want)
 		}
+	}
+}
+
+// Pack commands reach the help card through the registry, so help lists
+// exactly what is linked. Asserting a pack name here instead (/review) would
+// only test this test binary's imports, and would go stale the moment a pack
+// is added or dropped.
+func TestHelpCardListsRegisteredPackCommands(t *testing.T) {
+	slash.Register(slash.Command{
+		Name:    "helpcardprobe",
+		Summary: "probe summary",
+		Run: func(context.Context, slash.Request) (slash.Result, error) {
+			return slash.Result{}, nil
+		},
+	})
+	card := freshModel(t).helpCard()
+	if !strings.Contains(card, "/helpcardprobe") {
+		t.Error("help card omits a registered pack command")
+	}
+	if !strings.Contains(card, "probe summary") {
+		t.Error("help card omits the registered summary")
 	}
 }
 

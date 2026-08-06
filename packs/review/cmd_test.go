@@ -23,12 +23,17 @@ func parseFlags(t *testing.T, cmd string, args ...string) (CLIFlags, []string, e
 	return rf, fs.Args(), err
 }
 
-// profileFor mirrors runCommand's command→persona mapping.
-func profileFor(cmd string) *Profile {
-	if cmd == "sec" {
-		return SecurityProfile()
+// mustProfileFor wraps the production command→persona mapping for tests that
+// only care about the happy path. Using the real profileFor (rather than a
+// mirror of it) is deliberate: a mirror silently keeps passing when the
+// production mapping gains a command.
+func mustProfileFor(t *testing.T, cmd string) *Profile {
+	t.Helper()
+	prof, err := profileFor(cmd)
+	if err != nil {
+		t.Fatalf("profileFor(%q): %v", cmd, err)
 	}
-	return GeneralProfile()
+	return prof
 }
 
 func resolveFlags(t *testing.T, cmd string, args ...string) (Request, Format, ExitPolicy) {
@@ -37,7 +42,7 @@ func resolveFlags(t *testing.T, cmd string, args ...string) (Request, Format, Ex
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	req, format, policy, err := rf.Resolve(profileFor(cmd), "/ws", paths)
+	req, format, policy, err := rf.Resolve(mustProfileFor(t, cmd), "/ws", paths)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -76,11 +81,11 @@ func TestCommandsRejectProfileFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	gen, _, _, err := rf.Resolve(profileFor("review"), "/ws", paths)
+	gen, _, _, err := rf.Resolve(mustProfileFor(t, "review"), "/ws", paths)
 	if err != nil {
 		t.Fatalf("resolve review: %v", err)
 	}
-	sec, _, _, err := rf.Resolve(profileFor("sec"), "/ws", paths)
+	sec, _, _, err := rf.Resolve(mustProfileFor(t, "sec"), "/ws", paths)
 	if err != nil {
 		t.Fatalf("resolve sec: %v", err)
 	}
@@ -141,7 +146,7 @@ func TestResolveRejectsBadValues(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			_, _, _, err = rf.Resolve(profileFor("review"), "/ws", paths)
+			_, _, _, err = rf.Resolve(mustProfileFor(t, "review"), "/ws", paths)
 			if err == nil {
 				t.Fatalf("expected error for %v", tc.args)
 			}
@@ -159,7 +164,7 @@ func TestResolveRejectsPathsWithSelector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if _, _, _, err := rf.Resolve(profileFor("review"), "/ws", []string{"./internal"}); err == nil {
+	if _, _, _, err := rf.Resolve(mustProfileFor(t, "review"), "/ws", []string{"./internal"}); err == nil {
 		t.Fatal("paths + --staged should be rejected")
 	}
 }
