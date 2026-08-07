@@ -440,6 +440,8 @@ Embedders build a session picker with **`Engine.Sessions()`** → `[]SessionInfo
 
 **Cancel mid tool batch:** hard-abort fails fast (siblings cancelled). Soft results already finished still append to history in call order; incomplete tools are omitted. Session prior keeps whatever was appended before cancel (`StopReason=cancelled`).
 
+**Steer mid turn:** `Engine.Steer(text)` interrupts only the in-flight LLM call and reissues it with the steer appended as a user message — finished tool results stay in history (no cancel/restart). Delivered while a run is live (from `EventRunStart` / `Status().Busy` until run end); sent before a run starts it is dropped rather than leaking into the next turn. Drained at turn boundaries, so several steers arrive together in order. See [embedding.md §9](embedding.md).
+
 **LLM HTTP:** chat/stream requests retry up to 3 times on 429 / 5xx / transient network errors (honours `Retry-After` when present).
 
 ---

@@ -293,13 +293,34 @@ model alone.
 
 ---
 
-## 9. Cancellation
+## 9. Cancellation and steering
 
 `Prompt` honours its `ctx`. For a UI cancel button, either cancel the context
 you passed, or call `eng.Cancel()` — it fail-fasts mid tool-batch (siblings
 cancelled), and whatever soft results already finished still append to history
 in call order (`StopReason=cancelled`). The REPL wires this to Ctrl+C
 per-turn; a TUI wires it to Esc.
+
+**Steering** is the softer sibling: `eng.Steer(text)` injects guidance into a
+turn that is already running, without losing the work done so far. The loop
+interrupts only the in-flight LLM call and reissues it with the steer appended
+as a user message, so completed tool results stay in history.
+
+```go
+eng.AddOnEvent(func(ev mow.Event) {
+    if ev.Type == mow.EventRunStart {
+        // Safe: the run is live, so this steer lands in this turn.
+        eng.Steer("prefer the stdlib here")
+    }
+})
+```
+
+Timing is the thing to get right. A steer is delivered when a run is live —
+that is, from `EventRunStart` (equivalently once `Status().Busy` is true) until
+the run ends. A steer sent *before* a run starts is intentionally dropped
+rather than leaking into the next turn: stale guidance aimed at an old prompt
+would otherwise resurface at the wrong moment. Steers are drained at turn
+boundaries, so several sent during one turn arrive together, in order.
 
 ---
 
