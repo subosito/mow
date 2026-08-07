@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -200,6 +201,52 @@ func (m *model) maybeCtxPressureStatus() {
 	m.ctxPressureBand = level
 	label, _ := formatContextPct(ct, limits.ContextWindow)
 	m.add(kindStatus, label+" — consider a new session or shorter context")
+}
+
+// ctxGaugeWidth is the cell width of the context-pressure bar (excluding the
+// numeric label). Small on purpose: the header is a priority-dropped chip line,
+// so the gauge must read at a glance without competing for width with the
+// safety chips it sits beside.
+const ctxGaugeWidth = 6
+
+// ctxGaugeMinWidth is the terminal width below which the gauge is suppressed
+// entirely. Narrow terminals need every column for the identity group and the
+// safety chips; the numeric percentage alone carries the signal there.
+const ctxGaugeMinWidth = 100
+
+// ctxGauge renders a compact fill bar for context-window pressure, matched to
+// the level thresholds used by formatContextPctLevel (muted <50%, attention
+// ≥50%, warn ≥80%). Rendered with ViewAs so it is a pure function of the ratio:
+// no animation state, no Update wiring, and no frame Cmds to schedule.
+//
+// Returns "" when the ratio is unusable, so callers fall back to the numeric
+// label alone. The bar is additive — the percentage stays the source of truth.
+func (m *model) ctxGauge(used, window int) string {
+	if used <= 0 || window <= 0 || ctxGaugeWidth <= 0 {
+		return ""
+	}
+	ratio := float64(used) / float64(window)
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+	}
+	_, level := formatContextPctLevel(used, window)
+	fill := m.theme.Muted.GetForeground()
+	switch level {
+	case 2:
+		fill = m.theme.Warn.GetForeground()
+	case 1:
+		fill = m.theme.Accent.GetForeground()
+	}
+	p := progress.New(
+		progress.WithWidth(ctxGaugeWidth),
+		progress.WithoutPercentage(),
+		progress.WithFillCharacters(glyphGaugeFull, glyphGaugeEmpty),
+		progress.WithColors(fill),
+	)
+	return p.ViewAs(ratio)
 }
 
 func (m *model) View() tea.View {
@@ -471,7 +518,17 @@ func (m *model) renderHeader() string {
 			default:
 				cs = th.Muted
 			}
-			c := chip{cs.Render(label), level >= 2}
+			text := cs.Render(label)
+			// Gauge is additive and width-gated: only on roomy terminals, and
+			// only alongside the number, which stays the source of truth. The
+			// chip line is priority-dropped, so the bar must never be the
+			// reason a safety chip loses its place.
+			if m.width >= ctxGaugeMinWidth {
+				if bar := m.ctxGauge(ct, limits.ContextWindow); bar != "" {
+					text = bar + " " + text
+				}
+			}
+			c := chip{text, level >= 2}
 			ctxChip = &c
 		}
 	}
