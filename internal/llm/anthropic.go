@@ -180,10 +180,12 @@ func anthropicSystemField(prefix []string, system string, cache bool) any {
 		return blocks[0]["text"]
 	}
 	if cache {
-		// Stable system prefix — cache every block (Anthropic allows ≤4 breakpoints).
-		for i := range blocks {
-			blocks[i]["cache_control"] = ephemeralCacheControl()
-		}
+		// A breakpoint caches everything up to and including the marked block,
+		// so only the last system block needs the marker. Marking every block
+		// would waste breakpoint slots and — with two or more system_prefix
+		// entries — exceed Anthropic's 4-breakpoint limit shared with the tool
+		// and last-message markers, failing the request outright.
+		blocks[len(blocks)-1]["cache_control"] = ephemeralCacheControl()
 	}
 	return blocks
 }

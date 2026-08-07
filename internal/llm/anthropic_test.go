@@ -31,13 +31,17 @@ func TestAnthropicSystemFieldPrefixBlocks(t *testing.T) {
 	if _, isStr := got.(string); isStr {
 		t.Fatal("prefix must not collapse to a string")
 	}
-	// Cache marks every block.
+	// Cache marks only the last block: a breakpoint caches the whole prefix up
+	// to it, so extra markers just waste the 4-breakpoint budget.
 	cached := anthropicSystemField([]string{"pre"}, "body", true)
 	cblocks := cached.([]map[string]any)
-	for i, b := range cblocks {
-		if b["cache_control"] == nil {
-			t.Fatalf("block %d missing cache_control", i)
+	for i, b := range cblocks[:len(cblocks)-1] {
+		if b["cache_control"] != nil {
+			t.Fatalf("prefix block %d should not carry cache_control", i)
 		}
+	}
+	if cblocks[len(cblocks)-1]["cache_control"] == nil {
+		t.Fatal("last system block missing cache_control")
 	}
 }
 
