@@ -45,7 +45,7 @@ func TestNativeToolsWarnOnChatCompletionsLocalOnly(t *testing.T) {
 }
 
 // Gateway models that advertise native_tools on chat-completions (Gemini via
-// a gateway, etc.) must not warn — the catalog is the capability claim.
+// an OpenAI-compatible gateway, etc.) must not warn — the catalog is the capability claim.
 func TestNativeToolsNoWarnWhenCatalogAdvertisesOnChat(t *testing.T) {
 	var buf bytes.Buffer
 	prev := slog.Default()

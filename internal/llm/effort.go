@@ -272,7 +272,7 @@ func (c *Client) finalizeChatBody(raw []byte) ([]byte, error) {
 	}
 	if needTools {
 		// chat-completions is mixed: raw OpenAI gpt drops web_search silently,
-		// but gateways (a gateway Gemini → googleSearch, Qwen enable_search) publish
+		// but gateways (Gemini → googleSearch, Qwen enable_search) publish
 		// native_tools on GET /models when the path works. Trust the catalog;
 		// only warn when local config forces tools the catalog does not claim.
 		if NormalizeWire(c.Wire) == WireOpenAIChat && len(c.catalogNativeTools()) == 0 {
