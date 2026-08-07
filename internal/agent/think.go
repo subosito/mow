@@ -78,9 +78,9 @@ func isSpaceByte(b byte) bool {
 
 func earliestThinkOpen(s string) (idx int, open, close string) {
 	idx = -1
-	lower := strings.ToLower(s)
+	lower := asciiLower(s)
 	for _, p := range thinkTagPairs {
-		i := strings.Index(lower, strings.ToLower(p.open))
+		i := strings.Index(lower, asciiLower(p.open))
 		if i < 0 {
 			continue
 		}
@@ -94,12 +94,65 @@ func earliestThinkOpen(s string) (idx int, open, close string) {
 	return idx, open, close
 }
 
+// asciiLower lowercases only ASCII letters, leaving every other byte untouched.
+// strings.ToLower cannot be used for index-then-slice: it is Unicode-aware and
+// some runes change byte length when folded (U+212A K→k shrinks 3→1, U+023A
+// Ⱥ→ⱥ grows 2→3), which desynchronizes an index taken on the folded string
+// from the original. Think tags are ASCII, so ASCII folding is sufficient and
+// guarantees len(asciiLower(s)) == len(s), keeping every index valid on s.
+func asciiLower(s string) string {
+	hasUpper := false
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c >= 'A' && c <= 'Z' {
+			hasUpper = true
+			break
+		}
+	}
+	if !hasUpper {
+		return s
+	}
+	b := []byte(s)
+	for i := 0; i < len(b); i++ {
+		if c := b[i]; c >= 'A' && c <= 'Z' {
+			b[i] = c + ('a' - 'A')
+		}
+	}
+	return string(b)
+}
+
 func indexCloseTag(s, closeTag string) int {
 	if closeTag == "```" {
-		// Fence close: first ``` that starts a line or appears after content.
-		return strings.Index(s, "```")
+		// Fence close: models routinely quote code inside their reasoning, so
+		// the first ``` may open a nested block rather than close the CoT.
+		// Walk fences in pairs — an opening fence with an info string (```go)
+		// is matched to its own closing fence — and return the first fence
+		// that actually terminates the thinking block.
+		for i := 0; i < len(s); {
+			j := strings.Index(s[i:], "```")
+			if j < 0 {
+				return -1
+			}
+			j += i
+			rest := s[j+3:]
+			// A bare fence (nothing but spaces before the newline) closes the
+			// thinking block; one carrying an info string opens a nested block.
+			line := rest
+			if nl := strings.IndexByte(line, '\n'); nl >= 0 {
+				line = line[:nl]
+			}
+			if strings.TrimSpace(line) == "" {
+				return j
+			}
+			// Nested block: skip past its closing fence.
+			k := strings.Index(rest, "```")
+			if k < 0 {
+				return -1
+			}
+			i = j + 3 + k + 3
+		}
+		return -1
 	}
-	return strings.Index(strings.ToLower(s), strings.ToLower(closeTag))
+	return strings.Index(asciiLower(s), asciiLower(closeTag))
 }
 
 // stripThinkingContent is extractThinking for a finished answer (trim outer junk).

@@ -90,3 +90,60 @@ func TestExtractThinkingSeamNotGlued(t *testing.T) {
 		}
 	}
 }
+
+// Non-ASCII text before a think tag must not corrupt the strip. earliestThinkOpen
+// once indexed into strings.ToLower(s) but sliced the original s; runes whose
+// lowercase differs in byte length (U+212A K→k shrinks, U+023A Ⱥ→ⱥ grows) then
+// misaligned the two, corrupting adjacent content — and a grow case could slice
+// past end-of-string and panic, killing Run for the whole turn.
+func TestExtractThinkingNonASCIIPrefix(t *testing.T) {
+	cases := []struct {
+		name string
+		lead string
+	}{
+		{"kelvin_sign", strings.Repeat("\u212A", 8)},       // lower is SHORTER
+		{"latin_a_bar", strings.Repeat("\u023A", 8)},       // lower is LONGER (panic risk)
+		{"latin_t_bar", strings.Repeat("\u023E", 200)},     // lower is LONGER, past-end risk
+		{"turkish_dotted_I", strings.Repeat("\u0130", 40)}, // 2->3 bytes
+		{"mixed", "\u212A\u023A caf\u00e9 na\u00efve \u0130"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := tc.lead + " <think>secret</think> answer"
+			vis, think, unclosed := extractThinking(in)
+			if unclosed {
+				t.Fatalf("unclosed=true for closed tag")
+			}
+			if strings.Contains(vis, "secret") {
+				t.Fatalf("CoT leaked into visible: %q", vis)
+			}
+			if think != "secret" {
+				t.Fatalf("thinking=%q want %q", think, "secret")
+			}
+			// The lead text must survive byte-for-byte.
+			if !strings.HasPrefix(vis, tc.lead) {
+				t.Fatalf("lead text corrupted:\n got %q\nwant prefix %q", vis, tc.lead)
+			}
+			if !strings.Contains(vis, "answer") {
+				t.Fatalf("trailing content lost: %q", vis)
+			}
+		})
+	}
+}
+
+// A fenced CoT block that quotes code must not end at the nested fence: models
+// routinely include ```go ... ``` inside their reasoning, and closing early
+// leaks the rest of the chain-of-thought into committed history.
+func TestExtractThinkingFencedNestedCodeFence(t *testing.T) {
+	in := "```thinking\nplan it:\n```go\nfoo()\n```\nthe secret plan is X.\n```\nHere is the answer."
+	vis, think, _ := extractThinking(in)
+	if strings.Contains(vis, "secret plan") {
+		t.Fatalf("CoT leaked into committed history: %q", vis)
+	}
+	if !strings.Contains(think, "secret plan") {
+		t.Fatalf("CoT not captured as thinking: %q", think)
+	}
+	if !strings.Contains(vis, "Here is the answer.") {
+		t.Fatalf("answer lost: %q", vis)
+	}
+}
