@@ -111,6 +111,12 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	}
 
 	// Cancellable run context + stable id for hosts/orchestrators.
+	// Clear stale guidance BEFORE the run is observable: once beginRun marks
+	// the engine busy (and EventRunStart fires), a host may legitimately steer,
+	// and a later reset would wipe a steer aimed at this very turn.
+	e.mu.Lock()
+	e.steer = nil
+	e.mu.Unlock()
 	ctx, runID := e.beginRun(ctx)
 	defer e.endRun()
 	// Tools (e.g. acp_delegate) can Emit via EngineFromContext without a stored pointer.
@@ -205,11 +211,6 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 
 	// Inject tool lifecycle events as outer hooks (do not mutate e.hooks permanently).
 	hooks = hooksWithEvents(hooks, e, runID, sid)
-
-	// Fresh steer buffer per run — stale guidance must not leak into this turn.
-	e.mu.Lock()
-	e.steer = nil
-	e.mu.Unlock()
 
 	// Mid-turn steer: the loop registers the current LLM call's cancel func
 	// here; Engine.Steer calls it to interrupt ONLY the in-flight call (the
