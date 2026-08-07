@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 )
@@ -437,26 +439,87 @@ func (m *model) listSessions() tea.Cmd {
 		m.refreshVP()
 		return nil
 	}
-	var b strings.Builder
-	b.WriteString("sessions (newest first)\n")
-	cur := m.eng.SessionID()
-	const maxShow = 20
-	for i, s := range infos {
-		if i >= maxShow {
-			fmt.Fprintf(&b, "… %d more\n", len(infos)-maxShow)
-			break
-		}
-		mark := "  "
-		if s.ID == cur {
-			mark = "• "
-		}
-		when := formatTurnTime(s.Updated, time.Now())
-		fmt.Fprintf(&b, "%s%-16s  %-12s  %s\n", mark, s.ID, when, short(s.Preview, 44))
-	}
-	b.WriteString("resume: relaunch with --session <id> (or --continue for the latest)")
-	m.add(kindStatus, strings.TrimRight(b.String(), "\n"))
+	m.add(kindStatus, m.sessionsTable(infos, m.eng.SessionID(), time.Now()))
 	m.refreshVP()
 	return nil
+}
+
+// sessionsMaxShow caps the listing so a long history cannot flood the
+// transcript; the remainder is reported as a count.
+const sessionsMaxShow = 20
+
+// sessionsTable renders the session listing as a bordered table.
+//
+// This is static transcript content, not an interactive widget: bubbles/table
+// is used purely as a column-layout engine (headers + per-column widths +
+// truncation) so the alignment cannot drift the way hand-rolled %-16s padding
+// does when an id or preview runs long. Height is set to the row count so the
+// table renders whole rather than scrolling inside its own viewport.
+func (m *model) sessionsTable(infos []mow.SessionInfo, current string, now time.Time) string {
+	th := m.theme
+	shown := min(len(infos), sessionsMaxShow)
+
+	// Budget: fit the terminal, never overflow it. The table adds cell padding
+	// per column on top of the declared widths, so the fixed columns shrink
+	// (and the preview absorbs the rest) rather than letting the row soft-wrap,
+	// which would destroy the alignment the table exists to provide.
+	const cellPad = 2 // bubbles/table pads each cell by 1 on each side
+	const cols = 4
+	total := min(max(minTermWidth, m.width)-2, 96)
+	avail := total - cols*cellPad
+	markW := 1
+	idW := min(18, max(8, avail/3))
+	whenW := min(13, max(6, avail/4))
+	prevW := max(8, avail-markW-idW-whenW)
+
+	rows := make([]table.Row, 0, shown)
+	for _, s := range infos[:shown] {
+		mark := ""
+		if s.ID == current {
+			mark = glyphBullet
+		}
+		rows = append(rows, table.Row{
+			mark,
+			short(s.ID, idW),
+			short(formatTurnTime(s.Updated, now), whenW),
+			short(strings.TrimSpace(s.Preview), prevW),
+		})
+	}
+
+	st := table.DefaultStyles()
+	st.Header = st.Header.BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(th.Sep.GetForeground()).
+		BorderBottom(true).Bold(false).Foreground(th.Muted.GetForeground())
+	st.Cell = st.Cell.Foreground(th.Text.GetForeground())
+	// Static listing: no cursor row, so selection styling must not paint one.
+	st.Selected = lipgloss.NewStyle()
+
+	t := table.New(
+		table.WithColumns([]table.Column{
+			{Title: "", Width: markW},
+			{Title: "session", Width: idW},
+			{Title: "updated", Width: whenW},
+			{Title: "preview", Width: prevW},
+		}),
+		table.WithRows(rows),
+		table.WithStyles(st),
+	)
+	// The table's inner viewport defaults to width 0 and height 20: without an
+	// explicit width no row renders at all, and an over-tall height pads the
+	// listing with blank rows. Size it exactly — width to the column budget,
+	// height to the row count (SetHeight subtracts the header itself).
+	t.SetWidth(markW + idW + whenW + prevW + cols*cellPad)
+	t.SetHeight(len(rows) + 2)
+	t.Blur()
+
+	var b strings.Builder
+	b.WriteString("sessions (newest first)\n")
+	b.WriteString(t.View())
+	if rest := len(infos) - shown; rest > 0 {
+		fmt.Fprintf(&b, "\n… %d more", rest)
+	}
+	b.WriteString("\nresume: relaunch with --session <id> (or --continue for the latest)")
+	return b.String()
 }
 
 func (m *model) applyModelList(msg modelListMsg) {
