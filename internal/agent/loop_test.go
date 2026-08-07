@@ -861,3 +861,77 @@ func TestRunRealChatErrorNotSwallowedBySteer(t *testing.T) {
 		t.Fatalf("want the original error, got %v", err)
 	}
 }
+
+// bigSpecTool simulates a large registered tool (MCP-style schema).
+type bigSpecTool struct{ name string }
+
+func (t bigSpecTool) Name() string        { return t.name }
+func (t bigSpecTool) Description() string { return strings.Repeat("d", 2000) }
+func (t bigSpecTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"blob":{"type":"string","description":"` + strings.Repeat("s", 2000) + `"}}}`)
+}
+func (t bigSpecTool) Exec(_ context.Context, _ json.RawMessage) (string, error) { return "ok", nil }
+
+// TestCalibrationCountsToolOverhead guards the chars/token calibrator scope:
+// the provider bills tool definitions + system alongside history in
+// InputTokens (Anthropic sums cache reads/creation into the total), so
+// observing history-only chars against that total drives the ratio to the
+// floor and makes applyCompact compact well under budget. With tool
+// definitions counted, the observed ratio stays near the true density and a
+// history that fits the budget is left alone.
+func TestCalibrationCountsToolOverhead(t *testing.T) {
+	tools := make([]agent.Tool, 0, 10)
+	for i := 0; i < 10; i++ {
+		tools = append(tools, bigSpecTool{name: fmt.Sprintf("big%d", i)})
+	}
+	// ~63K chars of history, under the 85K budget. ~41K chars of tool
+	// definitions ride along; billed at the same density the request totals
+	// ~26K tokens (history + tools together).
+	prior := []llm.Message{llm.Message{Role: "system", Content: "sys"}}
+	for i := 0; i < 100; i++ {
+		prior = append(prior,
+			llm.Message{Role: "user", Content: strings.Repeat("u", 300)},
+			llm.Message{Role: "assistant", Content: strings.Repeat("a", 300)},
+		)
+	}
+	var compacted int32
+	turn := 0
+	chat := func(ctx context.Context, messages []llm.Message, specs []llm.ToolSpec) (llm.Message, error) {
+		turn++
+		// Three tool-call turns so the EWMA calibrator settles (alpha 0.3,
+		// seeded at 4 chars/token): a history-only numerator converges toward
+		// the clamped floor and estimates the history over budget, triggering
+		// compaction; a numerator that includes the ~41K of tool definitions
+		// converges to the true density and stays under budget.
+		if turn <= 3 {
+			return llm.Message{
+				Role: "assistant",
+				ToolCalls: []llm.ToolCall{{
+					ID: "c1", Type: "function",
+					Function: llm.FunctionCall{Name: "big0", Arguments: "{}"},
+				}},
+				Usage: llm.Usage{InputTokens: 26000, OutputTokens: 1},
+			}, nil
+		}
+		return llm.Message{Role: "assistant", Content: "done", Usage: llm.Usage{InputTokens: 26000, OutputTokens: 1}}, nil
+	}
+	_, err := agent.Run(context.Background(), chat, "hello", agent.Options{
+		System:             "sys",
+		Tools:              tools,
+		PriorMessages:      prior,
+		MaxContextChars:    85_000,
+		MaxToolResultChars: 24_000,
+		Hooks: agent.Hooks{PreCompact: []agent.PreCompactFunc{
+			func(ctx context.Context, e agent.PreCompactEvent) (agent.PreCompactDecision, error) {
+				atomic.AddInt32(&compacted, 1)
+				return agent.PreCompactDecision{}, nil
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := atomic.LoadInt32(&compacted); n > 0 {
+		t.Fatalf("compaction ran %d time(s) on an under-budget history — tool overhead not counted in calibration", n)
+	}
+}

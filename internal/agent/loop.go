@@ -176,6 +176,17 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		evidence   = newEvidenceSet()
 		barrenRuns int
 	)
+	// Stable per-call overhead outside message history: the serialized tool
+	// definitions ride along on every request and the provider bills them in
+	// InputTokens, so the chars/token calibrator must count them too —
+	// otherwise a large toolset inflates tokens against history-only chars
+	// and applyCompact shrinks history earlier than the budget requires.
+	// (The system prefix lives in send via the system message when present;
+	// hosts that inject an out-of-band prefix accept the small skew.)
+	toolChars := 0
+	for _, ts := range toolSpecs {
+		toolChars += len(ts.Function.Name) + len(ts.Function.Description) + len(ts.Function.Parameters) + 16
+	}
 	opt.thrash = thrash
 
 	for turn := 0; maxTurns <= 0 || turn < maxTurns; turn++ {
@@ -200,7 +211,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		if compacted {
 			messages = send
 		}
-		sentChars := EstChars(send)
+		sentChars := EstChars(send) + toolChars
 		// Per-call LLM ctx: a mid-turn steer cancels ONLY this call (via
 		// opt.SetLLMCancel), never the run — the outer ctx stays alive so the
 		// loop can reissue with the steer appended.
@@ -240,7 +251,8 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			return Result{Messages: messages, Usage: usage}, err
 		}
 		// Calibrate chars/token from what the provider actually billed for the
-		// history we just sent, so the next pre-call budget check is empirical.
+		// request we just sent (history + tool definitions), so the next
+		// pre-call budget check is empirical.
 		calib.Observe(sentChars, msg.Usage.InputTokens)
 		// Inline CoT normalization: models that wrap thinking in <think>-style
 		// tags (instead of the reasoning channel) must never leak it into
