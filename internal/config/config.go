@@ -17,12 +17,12 @@ import (
 // Core fields stay lean. UI packs and other optional features put their knobs
 // under Extensions (e.g. extensions.acp) and decode with Extension().
 type File struct {
-	Workspace  string               `yaml:"workspace"`
-	LLM        LLMConfig            `yaml:"llm"`
-	Tools      ToolsConfig          `yaml:"tools"`
-	Policy     PolicyConfig         `yaml:"policy"`
-	Session    SessionConfig        `yaml:"session"`
-	Skills     SkillsConfig         `yaml:"skills"`
+	Workspace string        `yaml:"workspace"`
+	LLM       LLMConfig     `yaml:"llm"`
+	Tools     ToolsConfig   `yaml:"tools"`
+	Policy    PolicyConfig  `yaml:"policy"`
+	Session   SessionConfig `yaml:"session"`
+	Skills    SkillsConfig  `yaml:"skills"`
 	// OTEL is optional OpenTelemetry export. Empty Endpoint disables export
 	// (default). Host/user config only — stripped from project .mow/config.
 	OTEL       OTELConfig           `yaml:"otel"`
@@ -64,7 +64,13 @@ type LLMConfig struct {
 	// PromptCache toggles provider prompt caching (anthropic-messages: cache
 	// system/tools/history). Nil = enabled (pure win for repeated prefixes);
 	// set false for gateways that reject cache_control fields.
-	PromptCache *bool `yaml:"prompt_cache"`
+	//
+	// Accepts a bool or one of short|long|none:
+	//   short (= true, default) — provider default TTL (~5 min)
+	//   long                    — 1h ephemeral TTL, for interactive sessions
+	//                             whose think-time gaps exceed the short window
+	//   none  (= false)         — no cache_control at all
+	PromptCache *CacheMode `yaml:"prompt_cache"`
 	// NativeTools are provider-executed tools declared in the request, given
 	// as wire-shaped entries (e.g. [{type: web_search}]). The provider runs
 	// them: no local network call, no path jail, no tool.start/tool.end event.
@@ -154,6 +160,15 @@ type PolicyConfig struct {
 	// MaxToolResultChars caps each tool result stored in history (default 24k).
 	// Protects the model from huge read/bash dumps.
 	MaxToolResultChars int `yaml:"max_tool_result_chars"`
+	// CompactSummary replaces the deterministic compaction stub with a
+	// structured summary produced by one extra LLM call (goal, constraints,
+	// progress, decisions, next steps, critical context).
+	//
+	// Off by default: it spends real tokens on a path that currently spends
+	// none. It pays when the model would otherwise re-explore after every
+	// compaction — long single-task sessions — and may not on short scattered
+	// ones. The call is one-shot, so it never writes a prompt-cache entry.
+	CompactSummary bool `yaml:"compact_summary"`
 	// MaxParallelTools caps concurrent tool Exec in one assistant batch (default 8).
 	// Set to 1 for sequential execution.
 	MaxParallelTools int `yaml:"max_parallel_tools"`

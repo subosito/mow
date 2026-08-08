@@ -89,6 +89,7 @@ const (
 	EventGoalBlocked        = engine.EventGoalBlocked
 	EventToolStart          = engine.EventToolStart
 	EventToolEnd            = engine.EventToolEnd
+	EventCompactSummary     = engine.EventCompactSummary
 	EventContextSinkStore   = engine.EventContextSinkStore
 	EventContextSinkRecover = engine.EventContextSinkRecover
 	EventDelegateChunk      = engine.EventDelegateChunk

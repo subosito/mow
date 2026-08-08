@@ -375,8 +375,9 @@ func New(opt Options) (*Engine, error) {
 			HTTP:         opt.HTTPClient,
 			ExtraHeaders: headers,
 			Stream:       cfg.LLM.Stream || opt.Stream,
-			// Prompt caching on by default (nil); explicit false disables it.
-			PromptCache:        cfg.LLM.PromptCache == nil || *cfg.LLM.PromptCache,
+			// Prompt caching on by default (nil); "none"/false disables it.
+			PromptCache:        cfg.LLM.PromptCache == nil || cfg.LLM.PromptCache.Enabled(),
+			CacheTTL:           cacheTTL(cfg.LLM.PromptCache),
 			NativeTools:        cfg.LLM.NativeTools,
 			SystemPrefix:       append([]string(nil), cfg.LLM.SystemPrefix...),
 			SystemPrefixModels: append([]string(nil), cfg.LLM.SystemPrefixModels...),
@@ -729,4 +730,13 @@ func (e *Engine) AllowWrite() bool {
 // AllowShell reports whether bash is enabled.
 func (e *Engine) AllowShell() bool {
 	return e != nil && e.pol != nil && e.pol.AllowShell
+}
+
+// cacheTTL maps the configured prompt-cache mode to a wire ttl. Unset means
+// the provider default.
+func cacheTTL(m *config.CacheMode) string {
+	if m == nil {
+		return ""
+	}
+	return m.TTL()
 }

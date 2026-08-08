@@ -117,6 +117,11 @@ type Options struct {
 	// MaxContextChars overrides config soft history compaction (0 = use config).
 	// Config default is ~100k chars; set policy max_context_chars: -1 to disable.
 	MaxContextChars int
+
+	// CompactSummary replaces the deterministic compaction stub with a
+	// structured LLM summary (one extra call per compaction). Off by default;
+	// see policy.compact_summary.
+	CompactSummary bool
 	// MaxToolResultChars overrides config cap on tool results in history (0 = config).
 	MaxToolResultChars int
 }

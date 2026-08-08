@@ -404,6 +404,13 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 				e.log().Warn("context archive", "err", err)
 			}
 		}
+		// Opt-in LLM summary. Runs last so a host-supplied PreCompact hook
+		// still wins: an explicit Summary from the host is not overwritten.
+		if e.cfg.Policy.CompactSummary || e.opt.CompactSummary {
+			if s := e.summarizeHistory(ctx, ev); s != "" {
+				return agent.PreCompactDecision{Summary: s}, nil
+			}
+		}
 		return agent.PreCompactDecision{}, nil
 	})
 	h.PreCompact = preC

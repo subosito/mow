@@ -66,6 +66,9 @@ llm:
   #   # Gemini-family → body thinking_budget; other OpenAI wires → reasoning_effort
   #   # Gateways map lean model ids to upstream tiers themselves
   # stream: true
+  # prompt_cache: short             # short (default) | long (1h TTL) | none; bools still accepted.
+  #                                 # long pays off when think-time gaps exceed the ~5min default
+  #                                 # window: every lapsed window re-bills the whole prefix.
   #
   # Optional system segments prepended *before* the compiled system prompt.
   # Use for product identity / provider preambles (e.g. "You are …").
@@ -126,6 +129,10 @@ policy:
   max_context_chars: 100000       # soft history floor (default); auto-scales from context_window; -1 disables
   compact_ratio: 0.5              # of gateway context_window when auto-scaling (1M → ~500k tok-eq history, hard-capped)
   max_tool_result_chars: 24000    # cap each tool result in model history (default)
+  # compact_summary: false          # replace the deterministic compaction stub with a
+  #                                 # structured LLM summary (goal/decisions/next steps).
+  #                                 # Costs one extra call per compaction; pays for itself
+  #                                 # only if it stops the model re-exploring afterwards.
   max_parallel_tools: 8           # concurrent tools per assistant batch; 1 = sequential
   # extra_roots:                  # PATH or PATH:ro (read-only)
   #   - /abs/shared:ro            # more FS trees for read/write/edit/glob/grep

@@ -68,6 +68,12 @@ const (
 	// EventContextSinkStore reports that a large successful tool result was
 	// moved out of live history into the session-scoped result store.
 	EventContextSinkStore EventType = "harness.contextsink.store"
+
+	// EventCompactSummary reports the cost of one opt-in compaction summary
+	// call (policy.compact_summary). Surfaced separately from run totals so
+	// the extra spend is attributable — this call is the whole reason the
+	// feature is opt-in.
+	EventCompactSummary EventType = "harness.compact.summary"
 	// EventContextSinkRecover reports bytes returned to live context by
 	// context_search, either by stored-result ID or archive pattern search.
 	EventContextSinkRecover EventType = "harness.contextsink.recover"
