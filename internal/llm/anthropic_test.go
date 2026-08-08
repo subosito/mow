@@ -10,14 +10,14 @@ import (
 
 func TestAnthropicSystemFieldPrefixBlocks(t *testing.T) {
 	// No prefix, no cache → plain string (third-party hosts).
-	if got := anthropicSystemField(nil, "persona", false); got != "persona" {
+	if got := anthropicSystemField(nil, "persona", false, ""); got != "persona" {
 		t.Fatalf("plain=%v", got)
 	}
 	// Prefix + persona → separate blocks (not one concatenated string).
 	got := anthropicSystemField([]string{
 		"prefix-block-a",
 		"", // dropped
-	}, "main-system", false)
+	}, "main-system", false, "")
 	blocks, ok := got.([]map[string]any)
 	if !ok || len(blocks) != 2 {
 		t.Fatalf("blocks=%T %#v", got, got)
@@ -33,7 +33,7 @@ func TestAnthropicSystemFieldPrefixBlocks(t *testing.T) {
 	}
 	// Cache marks only the last block: a breakpoint caches the whole prefix up
 	// to it, so extra markers just waste the 4-breakpoint budget.
-	cached := anthropicSystemField([]string{"pre"}, "body", true)
+	cached := anthropicSystemField([]string{"pre"}, "body", true, "")
 	cblocks := cached.([]map[string]any)
 	for i, b := range cblocks[:len(cblocks)-1] {
 		if b["cache_control"] != nil {

@@ -27,7 +27,7 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 
 	system, anthMsgs := toAnthropicMessages(messages)
 	if c.PromptCache {
-		cacheLastMessage(anthMsgs)
+		cacheLastMessage(anthMsgs, c.CacheTTL)
 	}
 	body := map[string]any{
 		"model":      c.requestModel(),
@@ -35,12 +35,12 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 		"messages":   anthMsgs,
 		"stream":     true,
 	}
-	if sys := anthropicSystemField(c.activeSystemPrefix(), system, c.PromptCache); sys != nil {
+	if sys := anthropicSystemField(c.activeSystemPrefix(), system, c.PromptCache, c.CacheTTL); sys != nil {
 		body["system"] = sys
 	}
 	if atools := toAnthropicTools(tools); len(atools) > 0 {
 		if c.PromptCache {
-			cacheLastTool(atools)
+			cacheLastTool(atools, c.CacheTTL)
 		}
 		body["tools"] = atools
 	}

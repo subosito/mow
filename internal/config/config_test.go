@@ -316,8 +316,6 @@ func TestExtraRootSpecROSuffixInExtraRoots(t *testing.T) {
 	}
 }
 
-
-
 func TestOTELConfigFromUserFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(config.EnvHome, dir)

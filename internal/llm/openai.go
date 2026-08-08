@@ -180,6 +180,13 @@ type Client struct {
 	// explicit breakpoint (anthropic-messages: cache_control on system, tools,
 	// and the last message). OpenAI caches automatically and ignores this.
 	PromptCache bool
+
+	// CacheTTL selects the ephemeral cache lifetime for anthropic-messages.
+	// Empty means the provider default (5 minutes); "1h" buys the longer
+	// window, which pays off in interactive sessions whose think-time gaps
+	// routinely exceed 5 minutes — every lapsed window re-charges the whole
+	// prefix as fresh input.
+	CacheTTL string
 	// SystemPrefix is optional text segments prepended before the compiled
 	// system prompt (harness + AGENTS.md / skills). Each entry is a separate
 	// segment. Typical use: product identity / provider preambles. May override
@@ -349,4 +356,22 @@ func truncate(s string, n int) string {
 		n--
 	}
 	return s[:n] + "…"
+}
+
+// OneShot returns a copy of c with prompt caching off, for a call whose prefix
+// will never be sent again: a compaction summary, a single review pass, a
+// delegated sub-task.
+//
+// Such a call writes a cache entry nothing will read, and providers bill a
+// cache write above plain input (Anthropic ~1.25x). Marking breakpoints on a
+// prefix with no second call is therefore a pure surcharge — small per call,
+// but these fire on a schedule for the life of a session.
+func (c *Client) OneShot() *Client {
+	if c == nil {
+		return nil
+	}
+	cp := *c
+	cp.PromptCache = false
+	cp.CacheTTL = ""
+	return &cp
 }

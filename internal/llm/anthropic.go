@@ -29,19 +29,19 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 
 	system, anthMsgs := toAnthropicMessages(messages)
 	if c.PromptCache {
-		cacheLastMessage(anthMsgs)
+		cacheLastMessage(anthMsgs, c.CacheTTL)
 	}
 	body := map[string]any{
 		"model":      c.requestModel(),
 		"max_tokens": c.anthropicMaxTokens(),
 		"messages":   anthMsgs,
 	}
-	if sys := anthropicSystemField(c.activeSystemPrefix(), system, c.PromptCache); sys != nil {
+	if sys := anthropicSystemField(c.activeSystemPrefix(), system, c.PromptCache, c.CacheTTL); sys != nil {
 		body["system"] = sys
 	}
 	if atools := toAnthropicTools(tools); len(atools) > 0 {
 		if c.PromptCache {
-			cacheLastTool(atools)
+			cacheLastTool(atools, c.CacheTTL)
 		}
 		body["tools"] = atools
 	}
@@ -148,8 +148,12 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 // message — so repeated turns (and the many LLM calls inside one agent loop)
 // re-read the cached prefix (~90% cheaper input) instead of re-sending it. Max
 // four breakpoints are allowed; we use at most three.
-func ephemeralCacheControl() map[string]any {
-	return map[string]any{"type": "ephemeral"}
+func ephemeralCacheControl(ttl string) map[string]any {
+	cc := map[string]any{"type": "ephemeral"}
+	if ttl != "" {
+		cc["ttl"] = ttl
+	}
+	return cc
 }
 
 // anthropicSystemField returns the request "system" value.
@@ -161,7 +165,7 @@ func ephemeralCacheControl() map[string]any {
 //   - no prefix, no cache → plain string
 //   - no prefix, cache → one text block with cache_control
 //   - prefix set → block array
-func anthropicSystemField(prefix []string, system string, cache bool) any {
+func anthropicSystemField(prefix []string, system string, cache bool, ttl string) any {
 	var blocks []map[string]any
 	for _, p := range prefix {
 		p = strings.TrimSpace(p)
@@ -185,25 +189,25 @@ func anthropicSystemField(prefix []string, system string, cache bool) any {
 		// would waste breakpoint slots and — with two or more system_prefix
 		// entries — exceed Anthropic's 4-breakpoint limit shared with the tool
 		// and last-message markers, failing the request outright.
-		blocks[len(blocks)-1]["cache_control"] = ephemeralCacheControl()
+		blocks[len(blocks)-1]["cache_control"] = ephemeralCacheControl(ttl)
 	}
 	return blocks
 }
 
 // cacheLastTool marks the final tool so the (stable) tool definitions cache
 // alongside the system prompt.
-func cacheLastTool(tools []map[string]any) {
+func cacheLastTool(tools []map[string]any, ttl string) {
 	if len(tools) == 0 {
 		return
 	}
-	tools[len(tools)-1]["cache_control"] = ephemeralCacheControl()
+	tools[len(tools)-1]["cache_control"] = ephemeralCacheControl(ttl)
 }
 
 // cacheLastMessage marks the last content block of the last message, so a
 // growing multi-turn history caches incrementally (each turn's tail is a cache
 // hit on the next call). Promotes a plain string body to a block to carry the
 // marker.
-func cacheLastMessage(msgs []map[string]any) {
+func cacheLastMessage(msgs []map[string]any, ttl string) {
 	if len(msgs) == 0 {
 		return
 	}
@@ -213,11 +217,11 @@ func cacheLastMessage(msgs []map[string]any) {
 		last["content"] = []map[string]any{{
 			"type":          "text",
 			"text":          c,
-			"cache_control": ephemeralCacheControl(),
+			"cache_control": ephemeralCacheControl(ttl),
 		}}
 	case []map[string]any:
 		if len(c) > 0 {
-			c[len(c)-1]["cache_control"] = ephemeralCacheControl()
+			c[len(c)-1]["cache_control"] = ephemeralCacheControl(ttl)
 		}
 	}
 }
