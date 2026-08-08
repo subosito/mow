@@ -86,8 +86,41 @@ func Start(dir, id, command, logName, workdir string) (Info, error) {
 		_ = syscall.Kill(pid, syscall.SIGTERM)
 		return Info{}, err
 	}
-	time.Sleep(200 * time.Millisecond) // brief settle so callers can connect
+	waitStarted(logPath, pid)
 	return Info{ID: id, PID: pid, Log: logPath, Alive: pidAlive(pid)}, nil
+}
+
+// startSettleTimeout bounds the wait for a freshly spawned process to produce
+// its first output. Short on purpose: it only has to cover fork+exec of
+// `bash -lc`, not the process becoming useful. Plenty of legitimate processes
+// (servers, `sleep`) print nothing for a long time, and they must not pay this
+// cost on every start.
+const startSettleTimeout = 750 * time.Millisecond
+
+// waitStarted gives a just-spawned process a moment to get going, so callers
+// that immediately read the log or the status tail see output rather than an
+// empty file.
+//
+// This replaces a fixed 200ms sleep, which was simultaneously too long on an
+// idle machine and too short on a loaded one: CI runners fork `bash -lc` far
+// slower than a developer box, so an immediate log read raced the child and
+// TestLogWritingAndTail failed only on CI. Poll instead — return the moment the
+// log has bytes or the process is gone, and cap the wait so a deliberately
+// silent process still starts promptly.
+func waitStarted(logPath string, pid int) {
+	deadline := time.Now().Add(startSettleTimeout)
+	for {
+		if fi, err := os.Stat(logPath); err == nil && fi.Size() > 0 {
+			return // produced output: definitely running
+		}
+		if !pidAlive(pid) {
+			return // exited already; caller reports it via Alive
+		}
+		if time.Now().After(deadline) {
+			return // silent but alive (e.g. a server with no banner)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 // Status returns the info for one id (error if unknown).

@@ -17,8 +17,7 @@ func TestStartStatusTailStop(t *testing.T) {
 	if info.PID <= 0 {
 		t.Fatalf("bad pid: %+v", info)
 	}
-	// Give it a moment to write + exit.
-	time.Sleep(150 * time.Millisecond)
+	// Start already waits for first output, so the tail is readable now.
 	if out, _ := Tail(dir, "hello", 10); !strings.Contains(out, "hi from proc") {
 		t.Fatalf("tail missing output: %q", out)
 	}
@@ -42,9 +41,18 @@ func TestStartStatusTailStop(t *testing.T) {
 	if _, err := Stop(dir, "server"); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	time.Sleep(150 * time.Millisecond)
-	if st, _ := Status(dir, "server"); st.Alive {
-		t.Fatal("server should be dead after stop")
+	// SIGTERM delivery and reaping are asynchronous: poll rather than betting a
+	// fixed sleep is long enough (that bet is what made CI flaky).
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		st, _ := Status(dir, "server")
+		if !st.Alive {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("server should be dead after stop")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	// Already-running guard.
 	a, _ := Start(dir, "dup", "sleep 30", "", "")

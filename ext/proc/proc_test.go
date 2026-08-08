@@ -50,11 +50,7 @@ func TestProcLifecycle(t *testing.T) {
 	if !strings.Contains(sp, "stopped id=srv") {
 		t.Fatalf("stop: %q", sp)
 	}
-	time.Sleep(150 * time.Millisecond)
-	st2, _ := statusTool{}.Exec(ctx, json.RawMessage(`{"id":"srv"}`))
-	if !strings.Contains(st2, "not found") {
-		t.Fatalf("after stop (want not found): %q", st2)
-	}
+	waitStatus(t, ctx, `{"id":"srv"}`, "not found")
 }
 
 func TestAutoKillOnClose(t *testing.T) {
@@ -67,10 +63,7 @@ func TestAutoKillOnClose(t *testing.T) {
 	}
 	// Closing the engine must kill the auto process.
 	eng.Close()
-	time.Sleep(200 * time.Millisecond)
-	if st, _ := (statusTool{}).Exec(ctx, json.RawMessage(`{"id":"auto"}`)); !strings.Contains(st, "not found") {
-		t.Fatalf("auto proc should be gone after Close: %q", st)
-	}
+	waitStatus(t, ctx, `{"id":"auto"}`, "not found")
 
 	// keep=true survives Close.
 	ctx2, eng2 := engCtx(t, true)
@@ -78,9 +71,28 @@ func TestAutoKillOnClose(t *testing.T) {
 		t.Fatalf("keep start: %q", out)
 	}
 	eng2.Close()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond) // give a (wrong) kill time to land
 	if st, _ := (statusTool{}).Exec(ctx2, json.RawMessage(`{"id":"kept"}`)); !strings.Contains(st, "status=running") {
 		t.Fatalf("kept proc should survive Close: %q", st)
 	}
 	_, _ = (stopTool{}).Exec(ctx2, json.RawMessage(`{"id":"kept"}`)) // cleanup
+}
+
+// waitStatus polls proc_status until its output contains want, instead of
+// betting a fixed sleep outlasts signal delivery + reaping. That bet is what
+// made TestLogWritingAndTail fail only on loaded CI runners.
+func waitStatus(t *testing.T, ctx context.Context, args, want string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	var last string
+	for {
+		last, _ = statusTool{}.Exec(ctx, json.RawMessage(args))
+		if strings.Contains(last, want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status never contained %q: %q", want, last)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }

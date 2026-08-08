@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/subosito/mow/ext"
 	iproc "github.com/subosito/mow/internal/proc"
@@ -302,11 +301,7 @@ func TestConcurrentLifecycle(t *testing.T) {
 	}
 	wg.Wait()
 
-	time.Sleep(150 * time.Millisecond)
-	all, _ := statusTool{}.Exec(ctx, json.RawMessage(`{}`))
-	if all != "(no background processes)" {
-		t.Fatalf("leftover processes: %q", all)
-	}
+	waitStatus(t, ctx, `{}`, "(no background processes)")
 }
 
 // --- `mow proc` CLI -------------------------------------------------------
