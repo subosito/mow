@@ -175,6 +175,9 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		calib      = newRatioCalibrator()
 		evidence   = newEvidenceSet()
 		barrenRuns int
+		// truncatedBatches counts consecutive turns where the provider cut
+		// the tool-call arguments at its output limit.
+		truncatedBatches int
 	)
 	// Stable per-call overhead outside message history: the serialized tool
 	// definitions ride along on every request and the provider bills them in
@@ -284,6 +287,28 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			return res, nil
 		}
 
+		// The provider hit its output limit while emitting this batch, so the
+		// last call's arguments are cut mid-value. Syntactically broken JSON
+		// is already rejected in the llm layer, but truncation can also yield
+		// *valid* JSON holding a truncated value — a half file body for write,
+		// a partial path for edit. Executing that is worse than not executing:
+		// it silently corrupts the workspace. Answer every call with an error
+		// so history stays replayable, and let the model re-issue.
+		if msg.Truncated() {
+			truncatedBatches++
+			messages = append(messages, repairToolResults(msg.ToolCalls, nil, errTruncatedArgs)...)
+			if truncatedBatches >= maxTruncatedBatches {
+				return Result{
+						Text:       strings.TrimSpace(msg.Content),
+						Messages:   messages,
+						Usage:      usage,
+						StopReason: msg.StopReason,
+					}, fmt.Errorf("%w: provider truncated tool arguments %d turns running (raise llm.max_tokens)",
+						ErrTruncated, truncatedBatches)
+			}
+			continue
+		}
+
 		// Soft: track identical batches for a hint only (never hard-stop).
 		fp := toolCallFingerprint(msg.ToolCalls)
 		if fp != "" && fp == lastToolFP {
@@ -369,6 +394,19 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 // package-level backstop, not a tuning knob — a run that legitimately needs
 // more turns should raise max_turns, not loosen the stall floor.
 const stallBarrenBatches = 3
+
+// maxTruncatedBatches bounds the retry of a batch whose tool arguments the
+// provider cut at its output limit. Retrying once or twice is worthwhile — the
+// model usually re-issues a smaller call — but a model that keeps emitting
+// oversized arguments will do so forever, and each attempt is a full-context
+// request. Stop and tell the operator to raise llm.max_tokens.
+const maxTruncatedBatches = 2
+
+// errTruncatedArgs is the tool-result content handed back for every call in a
+// batch the provider truncated. It names the cause and the remedy so the model
+// re-issues a smaller call instead of retrying the identical one.
+var errTruncatedArgs = errors.New(
+	"provider cut this tool call at its output limit; the arguments are incomplete and were NOT executed — re-issue with smaller arguments (e.g. edit a hunk instead of writing the whole file)")
 
 // evidenceSet is the loop's novelty signal. The goal pack has a real evidence
 // ledger; the plain loop does not, so "new evidence" here means "a (tool, args,
