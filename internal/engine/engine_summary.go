@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -115,7 +116,12 @@ func (e *Engine) summarizeHistory(ctx context.Context, ev agent.PreCompactEvent)
 		{Role: "user", Content: body},
 	}, nil)
 	if err != nil {
-		e.log().Warn("compaction summary", "err", err)
+		// Cancellation is not a summarizer failure: Ctrl+C tears down the
+		// context and this call dies with it. Warning here would paint over
+		// the TUI at the moment the user asked to stop.
+		if ctx.Err() == nil && !errors.Is(err, context.Canceled) {
+			e.log().Warn("compaction summary", "err", err)
+		}
 		return ""
 	}
 	out := strings.TrimSpace(msg.Content)

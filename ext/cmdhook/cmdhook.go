@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -32,6 +33,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -259,6 +261,11 @@ type outcome struct {
 
 func (b *bridge) run(ctx context.Context, event, matchName string, payload map[string]any) outcome {
 	var out outcome
+	// Already cancelled: do not start subprocesses that can only fail. Stop
+	// hooks in particular fire during teardown, when ctx is usually dead.
+	if ctx.Err() != nil {
+		return out
+	}
 	entries := b.events[event]
 	for _, ent := range entries {
 		if ent.re != nil && matchName != "" && !ent.re.MatchString(matchName) {
@@ -267,6 +274,9 @@ func (b *bridge) run(ctx context.Context, event, matchName string, payload map[s
 		// Non-tool events (empty matchName) ignore the matcher entirely:
 		// Claude treats it as always-true there, so the entry still runs.
 		for _, ce := range ent.cmds {
+			if ctx.Err() != nil {
+				return out
+			}
 			ho, blocked, reason, ok := b.execOne(ctx, ce, payload)
 			if !ok {
 				continue
@@ -322,6 +332,25 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 
 	cmdStr := strings.ReplaceAll(ce.Command, "${CLAUDE_PLUGIN_ROOT}", b.root)
 	cmd := exec.CommandContext(tctx, "sh", "-c", cmdStr)
+	// Own process group, and kill the whole group on cancel/timeout.
+	//
+	// CommandContext only signals the direct child (`sh`). A hook that spawns
+	// anything — and `sh -c` almost always does — leaves grandchildren holding
+	// the inherited stdout/stderr pipes, and cmd.Run blocks until those close.
+	// Ctrl+C would then appear to hang for the hook's full remaining runtime
+	// instead of returning immediately. WaitDelay bounds that wait even if a
+	// process survives the signal.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
+	cmd.WaitDelay = 2 * time.Second
 	cwd, _ := payload["cwd"].(string)
 	if cwd != "" {
 		cmd.Dir = cwd
@@ -344,6 +373,25 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 		if ee, isExit := runErr.(*exec.ExitError); isExit && ee.ExitCode() == 2 {
 			// Claude contract: exit 2 blocks; stderr is the reason for the model.
 			return ho, true, strings.TrimSpace(stderr.String()), true
+		}
+		// Cancellation is not a hook failure. On Ctrl+C the whole context is
+		// torn down and every in-flight hook dies with "context canceled" —
+		// warning about it is noise at the exact moment the user asked to
+		// stop, and in the TUI (which keeps Warn+) it paints over the
+		// alt-screen. Stay silent and let the caller unwind.
+		//
+		// Distinguish the caller's cancel from this hook's own timeout:
+		// a hook that exceeded its budget is a real problem worth reporting,
+		// so only ctx.Err() (not tctx.Err()) suppresses the warning.
+		if ctx.Err() != nil || errors.Is(runErr, context.Canceled) {
+			return ho, false, "", false
+		}
+		if errors.Is(runErr, context.DeadlineExceeded) || tctx.Err() != nil {
+			slog.Warn("cmdhook: hook timed out (non-blocking)",
+				"command", firstNonEmpty(truncate(cmdStr, 80), cmdStr),
+				"timeout", timeout,
+				"stderr", truncate(stderr.String(), 200))
+			return ho, false, "", false
 		}
 		slog.Warn("cmdhook: hook failed (non-blocking)",
 			"command", firstNonEmpty(truncate(cmdStr, 80), cmdStr), "err", runErr,
