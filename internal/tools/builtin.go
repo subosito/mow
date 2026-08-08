@@ -403,7 +403,7 @@ func (b *cappedBuffer) Truncated() bool { return b.truncated }
 
 type bashTool struct{ p *policy.Policy }
 
-func (t *bashTool) Name() string { return "bash" }
+func (t *bashTool) Name() string    { return "bash" }
 func (t *bashTool) Untrusted() bool { return true }
 func (t *bashTool) Description() string {
 	return "Run a shell command with cwd=workspace (default timeout 300s). Args: command, " +
