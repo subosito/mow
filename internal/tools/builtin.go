@@ -185,7 +185,7 @@ const globMaxMatches = 500
 
 func (t *globTool) Name() string { return "glob" }
 func (t *globTool) Description() string {
-	return "List files matching a glob " + pathJailHint(t.p) + ". Args: pattern (e.g. **/*.go; absolute under jail OK)."
+	return "List files matching a glob " + pathJailHint(t.p) + ". Supports ** (recursive, matches zero or more directories). Args: pattern (e.g. **/*.go; absolute under jail OK)."
 }
 func (t *globTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}`)
@@ -207,7 +207,16 @@ func (t *globTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if !filepath.IsAbs(pat) {
 		full = filepath.Join(root, pat)
 	}
-	matches, err := filepath.Glob(full)
+	var matches []string
+	var err error
+	if hasDoublestar(full) {
+		// filepath.Glob has no recursive wildcard: it treats ** as a single
+		// path segment, so "**/x.go" matches only one level down and never a
+		// file at the root. The tool advertises **/*.go, so implement it.
+		matches, err = globRecursive(root, full)
+	} else {
+		matches, err = filepath.Glob(full)
+	}
 	if err != nil {
 		return "", err
 	}
