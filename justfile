@@ -27,11 +27,16 @@ vet:
     cd packs/otel && go vet ./...
     cd packs/mowi && go vet ./...
 
-build:
+build: build-mow build-mowi
+
+build-mow:
     mkdir -p bin
     go build -o bin/mow ./cmd/mow
 
-# mowi lives in a nested module, so it is not covered by `just build`.
+# mowi lives in a nested module. It depends on the root module, so a root
+# change can silently leave bin/mowi stale — `just build` builds both to keep
+# the two binaries from drifting apart. CI builds mowi too (ci.yml), so this
+# keeps `verify` mirroring CI step for step.
 build-mowi:
     mkdir -p bin
     cd packs/mowi && go build -o ../../bin/mowi ./cmd/mowi
