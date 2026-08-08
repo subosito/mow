@@ -113,7 +113,7 @@ func TestReadToolExtra(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(res, "…(truncated)") {
+		if !strings.Contains(res, "…(truncated") {
 			t.Errorf("expected truncated output, got %q", res)
 		}
 	})
@@ -129,7 +129,7 @@ func TestReadToolExtra(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(res, "…(truncated)") {
+		if !strings.Contains(res, "…(truncated") {
 			t.Errorf("expected truncated output, got %q", res)
 		}
 	})
@@ -450,8 +450,10 @@ func TestBashToolExtra(t *testing.T) {
 		if !buf.Truncated() {
 			t.Fatal("expected cappedBuffer to be truncated")
 		}
-		if len(buf.String()) != maxBashOutputBytes {
-			t.Errorf("got buffer length %d, want %d", len(buf.String()), maxBashOutputBytes)
+		// String() now carries an elision notice alongside the retained
+		// head+tail, so assert the retained payload stays at the cap.
+		if got := len(buf.head.String()) + len(buf.tail()); got != maxBashOutputBytes {
+			t.Errorf("got retained length %d, want %d", got, maxBashOutputBytes)
 		}
 	})
 }

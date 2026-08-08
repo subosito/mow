@@ -1,0 +1,155 @@
+package tools
+
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
+
+// A bash command whose output exceeds the cap must keep the TAIL: shell output
+// puts the answer at the end (failing assertion, stack trace, exit summary).
+// Head-only capping discards exactly the part worth paying for, and the model
+// re-runs the command — charging us twice for the same work.
+func TestCappedBufferKeepsHeadAndTail(t *testing.T) {
+	t.Parallel()
+	var buf cappedBuffer
+	// Distinguishable start and end around a large filler middle.
+	buf.Write([]byte("FIRST-LINE\n"))
+	buf.Write([]byte(strings.Repeat("x", maxBashOutputBytes*2)))
+	buf.Write([]byte("\nFAILED: the answer is here"))
+
+	out := buf.String()
+	if !buf.Truncated() {
+		t.Fatal("want truncated")
+	}
+	if !strings.Contains(out, "FIRST-LINE") {
+		t.Error("head was dropped; want the command's opening context kept")
+	}
+	if !strings.Contains(out, "FAILED: the answer is here") {
+		t.Error("tail was dropped; that is the regression this guards")
+	}
+	if !strings.Contains(out, "elided from the middle") {
+		t.Errorf("want an elision notice naming what was lost, got %.120q", out)
+	}
+	// The notice adds a little; the payload must still respect the cap.
+	if len(out) > maxBashOutputBytes+500 {
+		t.Errorf("output grew past cap: %d", len(out))
+	}
+}
+
+// Exactly-at-cap output is not truncated and must survive byte-for-byte.
+func TestCappedBufferUnderCapIsExact(t *testing.T) {
+	t.Parallel()
+	var buf cappedBuffer
+	want := strings.Repeat("ab", 100)
+	buf.Write([]byte(want))
+	if buf.Truncated() {
+		t.Fatal("small output must not be marked truncated")
+	}
+	if got := buf.String(); got != want {
+		t.Errorf("content changed: got %d bytes, want %d", len(got), len(want))
+	}
+}
+
+// Byte-at-a-time writers (the common case for a streaming child process) must
+// still produce the correct tail — this is what the ring buffer is for.
+func TestCappedBufferSingleByteWrites(t *testing.T) {
+	t.Parallel()
+	var buf cappedBuffer
+	for i := 0; i < maxBashOutputBytes+64; i++ {
+		buf.Write([]byte{'a'})
+	}
+	buf.Write([]byte("ZZEND"))
+	if !strings.HasSuffix(buf.String(), "ZZEND") {
+		t.Error("ring buffer lost the tail under single-byte writes")
+	}
+}
+
+func TestClampGrepLine(t *testing.T) {
+	t.Parallel()
+	// A match inside a minified bundle must not eat the whole result budget.
+	long := strings.Repeat("m", grepMaxLineChars*10)
+	got := clampGrepLine(long)
+	if len(got) > grepMaxLineChars+32 {
+		t.Errorf("line not clamped: %d chars", len(got))
+	}
+	if !strings.HasSuffix(got, "…(line clipped)") {
+		t.Error("want an explicit clip marker")
+	}
+	// Short lines pass through untouched.
+	if got := clampGrepLine("func main() {}"); got != "func main() {}" {
+		t.Errorf("short line altered: %q", got)
+	}
+	// Multi-byte runes must not be split mid-encoding.
+	multi := strings.Repeat("é", grepMaxLineChars)
+	if c := clampGrepLine(multi); strings.Contains(c, "\uFFFD") || !utf8.ValidString(c) {
+		t.Error("clamp split a rune")
+	}
+}
+
+func TestRenderReadPaging(t *testing.T) {
+	t.Parallel()
+	var b strings.Builder
+	for i := 1; i <= 50; i++ {
+		b.WriteString("line")
+		b.WriteByte(byte('0' + i%10))
+		b.WriteByte('\n')
+	}
+	content := b.String()
+
+	t.Run("window and continuation hint", func(t *testing.T) {
+		out := renderRead(content, 10, 5, false, false, 1<<20)
+		body, notice, ok := strings.Cut(out, "\n…")
+		if !ok {
+			t.Fatalf("want body + notice, got:\n%s", out)
+		}
+		if n := len(strings.Split(body, "\n")); n != 5 {
+			t.Errorf("want exactly 5 lines in the window, got %d:\n%s", n, body)
+		}
+		out = "…" + notice
+		// The notice must name the exact next call, or the model guesses.
+		if !strings.Contains(out, "offset=15") {
+			t.Errorf("want a continuation offset, got %q", out)
+		}
+		if !strings.Contains(out, "of 50") {
+			t.Errorf("want the total line count, got %q", out)
+		}
+	})
+
+	t.Run("last page says end of file", func(t *testing.T) {
+		out := renderRead(content, 46, 10, false, false, 1<<20)
+		if !strings.Contains(out, "end of file") {
+			t.Errorf("want an end-of-file marker, got %q", out)
+		}
+		if strings.Contains(out, "offset=") {
+			t.Error("must not offer a continuation past EOF")
+		}
+	})
+
+	t.Run("whole small file has no notice", func(t *testing.T) {
+		out := renderRead("a\nb\nc\n", 0, 0, false, false, 1<<20)
+		if strings.Contains(out, "…") {
+			t.Errorf("unpaged small read must be clean, got %q", out)
+		}
+	})
+
+	t.Run("hashline numbers stay absolute", func(t *testing.T) {
+		// An edit made from a paged read addresses real file lines; window
+		// -relative numbering would silently target the wrong line.
+		out := renderRead(content, 10, 3, true, false, 1<<20)
+		if !strings.Contains(out, "    10:") {
+			t.Errorf("want absolute line 10 in a paged hashline read, got %q", out)
+		}
+	})
+
+	t.Run("byte cap is reported honestly", func(t *testing.T) {
+		out := renderRead(content, 0, 0, false, true, 4096)
+		if !strings.Contains(out, "read cap") {
+			t.Errorf("want the byte-cap cause named, got %q", out)
+		}
+		// No offset may be offered: we do not know the real total.
+		if strings.Contains(out, "offset=") {
+			t.Error("must not name an offset when the byte cap hid the tail")
+		}
+	})
+}

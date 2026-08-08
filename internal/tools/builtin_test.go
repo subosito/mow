@@ -128,8 +128,8 @@ func TestBashOutputIsBoundedWhileRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out, "…(truncated)") {
-		t.Fatalf("expected truncation marker, len=%d", len(out))
+	if !strings.Contains(out, "elided from the middle") {
+		t.Fatalf("expected head+tail elision marker, len=%d", len(out))
 	}
 	if len(out) > 101_000 {
 		t.Fatalf("bash output grew past cap: %d", len(out))

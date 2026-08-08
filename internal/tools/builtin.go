@@ -17,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/policy"
@@ -63,17 +64,27 @@ type readTool struct{ p *policy.Policy }
 func (t *readTool) Name() string { return "read" }
 func (t *readTool) Description() string {
 	jail := pathJailHint(t.p)
+	paging := " Args: path, optional offset (1-based first line) and limit (max lines) to page through a large file."
 	if t.p != nil && t.p.Hashline {
-		return "Read a UTF-8 text file " + jail + ". Lines are numbered with short hashes (N:hash|text) for hashline edit. Args: path."
+		return "Read a UTF-8 text file " + jail + ". Lines are numbered with short hashes (N:hash|text) for hashline edit." + paging
 	}
-	return "Read a UTF-8 text file " + jail + ". Args: path (relative → workspace; absolute → must be in jail)."
+	return "Read a UTF-8 text file " + jail + " (relative → workspace; absolute → must be in jail)." + paging
 }
 func (t *readTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"1-based first line to return (default 1)"},"limit":{"type":"integer","description":"max lines to return; omit for the whole file"}},"required":["path"]}`)
 }
+
+// defaultReadLines caps an unpaged read. A model asking for a 6000-line file
+// almost always wants a region, and shipping the whole thing costs the same
+// tokens on every later turn. The notice below tells it how to continue, so
+// the cap is a paging hint rather than a dead end.
+const defaultReadLines = 2000
+
 func (t *readTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
-		Path string `json:"path"`
+		Path   string `json:"path"`
+		Offset int    `json:"offset"`
+		Limit  int    `json:"limit"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
@@ -96,20 +107,81 @@ func (t *readTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if err != nil {
 		return "", err
 	}
+	byteCut := false
 	if len(data) > lim {
 		data = data[:lim]
-		if t.p != nil && t.p.Hashline {
-			return formatHashline(string(data)) + "\n…(truncated)", nil
+		byteCut = true
+	}
+	hashline := t.p != nil && t.p.Hashline
+	return renderRead(string(data), a.Offset, a.Limit, hashline, byteCut, lim), nil
+}
+
+// renderRead slices content to the requested line window and appends a notice
+// that names the exact next call when there is more to read.
+//
+// Line numbers stay absolute (file lines, not window-relative) so a hashline
+// edit made from a paged read still addresses the right line.
+func renderRead(content string, offset, limit int, hashline, byteCut bool, byteLim int) string {
+	lines := strings.Split(content, "\n")
+	// A trailing newline yields a final empty element that is not a line;
+	// remember it so a whole-file read returns the file's exact bytes.
+	trailingNL := false
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1]
+		trailingNL = true
+	}
+	total := len(lines)
+
+	start := offset - 1
+	if offset <= 0 {
+		start = 0
+	}
+	if start > total {
+		start = total
+	}
+	n := limit
+	if n <= 0 {
+		n = defaultReadLines
+	}
+	end := start + n
+	if end > total {
+		end = total
+	}
+
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		if i > start {
+			b.WriteByte('\n')
 		}
-		return string(data) + "\n…(truncated)", nil
+		if hashline {
+			fmt.Fprintf(&b, "%6d:%s|%s", i+1, lineHash(lines[i]), lines[i])
+		} else {
+			b.WriteString(lines[i])
+		}
 	}
-	if t.p != nil && t.p.Hashline {
-		return formatHashline(string(data)), nil
+	// Preserve the file's own trailing newline on a whole-file read so byte
+	// -exact round-trips (and existing callers) are unaffected by paging.
+	if trailingNL && end == total && end > start {
+		b.WriteByte('\n')
 	}
-	return string(data), nil
+
+	switch {
+	case end < total:
+		fmt.Fprintf(&b, "\n…(showing lines %d-%d of %d; continue with offset=%d)", start+1, end, total, end+1)
+	case byteCut:
+		// The byte cap hit before the line window ran out: there are more
+		// lines on disk than we read, so no honest offset can be named.
+		fmt.Fprintf(&b, "\n…(truncated at the %d-byte read cap; use bash with sed/tail to inspect the rest)", byteLim)
+	case start > 0:
+		fmt.Fprintf(&b, "\n…(showing lines %d-%d of %d; end of file)", start+1, end, total)
+	}
+	return b.String()
 }
 
 type globTool struct{ p *policy.Policy }
+
+// globMaxMatches bounds one glob result.
+const globMaxMatches = 500
 
 func (t *globTool) Name() string { return "glob" }
 func (t *globTool) Description() string {
@@ -160,8 +232,8 @@ func (t *globTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		} else {
 			lines = append(lines, rel)
 		}
-		if len(lines) >= 500 {
-			lines = append(lines, "…(truncated)")
+		if len(lines) >= globMaxMatches {
+			lines = append(lines, fmt.Sprintf("…(%d-match limit reached; use a narrower pattern to see the rest)", globMaxMatches))
 			break
 		}
 	}
@@ -172,6 +244,29 @@ func (t *globTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 }
 
 type grepTool struct{ p *policy.Policy }
+
+const (
+	// grepMaxMatches bounds total hits in one grep result.
+	grepMaxMatches = 100
+	// grepMaxLineChars bounds ONE hit. Without it a single match inside a
+	// minified bundle, a base64 blob, or a one-line JSON fixture can consume
+	// most of the tool-result budget by itself — the match is what matters,
+	// not the 40 KB of noise around it.
+	grepMaxLineChars = 500
+)
+
+// clampGrepLine keeps a matched line readable without letting it dominate the
+// result. Cuts on a rune boundary so the output stays valid UTF-8.
+func clampGrepLine(s string) string {
+	if len(s) <= grepMaxLineChars {
+		return s
+	}
+	cut := grepMaxLineChars
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…(line clipped)"
+}
 
 func (t *grepTool) Name() string { return "grep" }
 func (t *grepTool) Description() string {
@@ -234,10 +329,10 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		relp, _ := filepath.Rel(t.p.Workspace, path)
 		for i, line := range lines {
 			if strings.Contains(line, a.Pattern) {
-				fmt.Fprintf(&out, "%s:%d:%s\n", relp, i+1, line)
+				fmt.Fprintf(&out, "%s:%d:%s\n", relp, i+1, clampGrepLine(line))
 				n++
-				if n >= 100 {
-					out.WriteString("…(truncated)\n")
+				if n >= grepMaxMatches {
+					fmt.Fprintf(&out, "…(%d-match limit reached; narrow the pattern or pass a path to see the rest)\n", grepMaxMatches)
 					return filepath.SkipAll
 				}
 			}
@@ -372,34 +467,100 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	return formatEditDiff(rel, oldSnippet, a.NewString), nil
 }
 
-const maxBashOutputBytes = 100_000
+const (
+	maxBashOutputBytes = 100_000
+	// bashHeadBytes is the share of the cap kept from the *start* of the
+	// output; the rest is a rolling window over the most recent bytes.
+	//
+	// Shell output puts the answer at the end: the failing assertion, the
+	// stack trace, the test summary, the exit diagnostic. Head-only capping
+	// discards exactly the part that mattered, so the model re-runs the
+	// command with `| tail` and we pay for the same work twice. Keep a small
+	// head for the command's opening context and spend the rest on the tail.
+	bashHeadBytes = maxBashOutputBytes / 4
+	bashTailBytes = maxBashOutputBytes - bashHeadBytes
+)
 
-// cappedBuffer keeps command output bounded while the process is running.
-// Returning len(p) after dropping the tail preserves io.Writer semantics so
+// cappedBuffer keeps command output bounded while the process is running,
+// retaining a head prefix and a rolling tail and eliding the middle.
+// Returning len(p) after dropping bytes preserves io.Writer semantics so
 // os/exec does not turn an output cap into a broken-pipe command failure.
+//
+// The tail is a fixed ring: a program that writes one byte at a time must not
+// cost O(n·bashTailBytes) in memmoves.
 type cappedBuffer struct {
-	buf       bytes.Buffer
-	truncated bool
+	head  bytes.Buffer
+	ring  []byte
+	pos   int  // next write index into ring
+	wrap  bool // ring has wrapped at least once
+	total int  // bytes written, including elided ones
 }
 
 func (b *cappedBuffer) Write(p []byte) (int, error) {
 	n := len(p)
-	remaining := maxBashOutputBytes - b.buf.Len()
-	if remaining > 0 {
-		keep := p
-		if len(keep) > remaining {
-			keep = keep[:remaining]
+	b.total += n
+	if b.head.Len() < bashHeadBytes {
+		room := bashHeadBytes - b.head.Len()
+		if room > len(p) {
+			room = len(p)
 		}
-		_, _ = b.buf.Write(keep)
+		_, _ = b.head.Write(p[:room])
+		p = p[room:]
 	}
-	if n > remaining {
-		b.truncated = true
+	if len(p) == 0 {
+		return n, nil
+	}
+	if b.ring == nil {
+		b.ring = make([]byte, bashTailBytes)
+	}
+	if len(p) >= bashTailBytes {
+		copy(b.ring, p[len(p)-bashTailBytes:])
+		b.pos = 0
+		b.wrap = true
+		return n, nil
+	}
+	c := copy(b.ring[b.pos:], p)
+	if c < len(p) {
+		copy(b.ring, p[c:])
+		b.pos = len(p) - c
+		b.wrap = true
+	} else {
+		b.pos += c
+		if b.pos == bashTailBytes {
+			b.pos = 0
+			b.wrap = true
+		}
 	}
 	return n, nil
 }
 
-func (b *cappedBuffer) String() string  { return b.buf.String() }
-func (b *cappedBuffer) Truncated() bool { return b.truncated }
+// tail returns the retained trailing bytes in write order.
+func (b *cappedBuffer) tail() []byte {
+	if b.ring == nil {
+		return nil
+	}
+	if !b.wrap {
+		return b.ring[:b.pos]
+	}
+	out := make([]byte, 0, bashTailBytes)
+	out = append(out, b.ring[b.pos:]...)
+	return append(out, b.ring[:b.pos]...)
+}
+
+func (b *cappedBuffer) String() string {
+	head := b.head.String()
+	tail := b.tail()
+	if !b.Truncated() {
+		return head + string(tail)
+	}
+	// Tell the model what it lost and how to get it: an unqualified
+	// "truncated" makes it guess, usually by re-running the command.
+	return fmt.Sprintf(
+		"%s\n…(%d bytes elided from the middle; head and tail kept — narrow the command or pipe through grep/tail/sed to see the rest)…\n%s",
+		head, b.total-maxBashOutputBytes, tail)
+}
+
+func (b *cappedBuffer) Truncated() bool { return b.total > maxBashOutputBytes }
 
 type bashTool struct{ p *policy.Policy }
 
@@ -484,9 +645,6 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	}
 
 	out := buf.String()
-	if buf.Truncated() {
-		out += "\n…(truncated)"
-	}
 	if err != nil {
 		if cctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
 			msg := fmt.Sprintf(
