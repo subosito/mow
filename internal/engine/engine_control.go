@@ -233,9 +233,10 @@ func newRunID() string {
 
 // Steer injects guidance into a running turn: the text is appended as a user
 // message at the next turn boundary (after the current tool batch), so the model
-// course-corrects without a cancel/restart. No-op-safe when idle — the message
-// is delivered if a run consumes it before finishing, else dropped at the next
-// run start. Safe to call from any goroutine.
+// course-corrects without a cancel/restart. Delivered while a run is live (from
+// EventRunStart / Status().Busy until the run ends); a steer sent before a run
+// starts is dropped at run start rather than leaking into the next turn.
+// Safe to call from any goroutine.
 func (e *Engine) Steer(text string) {
 	if e == nil {
 		return
