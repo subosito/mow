@@ -209,6 +209,9 @@ func (r *reconnectingClient) listTools(ctx context.Context) ([]toolInfo, error) 
 	r.mu.Lock()
 	c := r.c
 	r.mu.Unlock()
+	if c == nil {
+		return nil, fmt.Errorf("mcp: client unavailable (server restarting)")
+	}
 	return c.listTools(ctx)
 }
 
@@ -219,6 +222,13 @@ func (r *reconnectingClient) callTool(ctx context.Context, name string, args jso
 	r.mu.Lock()
 	c := r.c
 	r.mu.Unlock()
+	// ensure() above should have populated r.c, but a concurrent reset (another
+	// tool in the same batch failing and reconnecting) can clear it between the
+	// two locks. Dereferencing nil here panics the whole run from inside a tool
+	// goroutine, which is a far worse outcome than one failed tool call.
+	if c == nil {
+		return "", fmt.Errorf("mcp: %s: client unavailable (server restarting)", name)
+	}
 	out, err := c.callTool(ctx, name, args)
 	if err == nil {
 		return out, nil
@@ -231,6 +241,9 @@ func (r *reconnectingClient) callTool(ctx context.Context, name string, args jso
 	r.mu.Lock()
 	c = r.c
 	r.mu.Unlock()
+	if c == nil {
+		return "", fmt.Errorf("mcp: %s: client unavailable after reconnect", name)
+	}
 	return c.callTool(ctx, name, args)
 }
 
