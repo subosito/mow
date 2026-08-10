@@ -66,6 +66,8 @@ llm:
   #   # Gemini-family → body thinking_budget; other OpenAI wires → reasoning_effort
   #   # Gateways map lean model ids to upstream tiers themselves
   # stream: true
+  # max_tokens: 32000               # reply cap for wires that require it (anthropic-messages).
+  #                                 # Default: the model's published max_output_tokens, else 8192.
   # prompt_cache: short             # short (default) | long (1h TTL) | none; bools still accepted.
   #                                 # long pays off when think-time gaps exceed the ~5min default
   #                                 # window: every lapsed window re-bills the whole prefix.

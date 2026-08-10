@@ -15,16 +15,26 @@ var ErrBudget = agent.ErrBudget
 // prices. Keeping the two apart means a host embedding the loop directly can
 // install its own gate without inheriting mow's config shape.
 
-// maxOutputTokens reports the configured reply cap, or 0 when unset. A budget
-// gate uses it to bound the call it is about to authorize instead of guessing.
+// maxOutputTokens reports the reply cap that will actually apply, or 0 when
+// nothing bounds it. A budget gate uses it to bound the call it is about to
+// authorize instead of guessing.
+//
+// Mirrors the wire's own resolution order — explicit config, then the model's
+// published cap — so the projection matches what the request will really carry.
 func (e *Engine) maxOutputTokens() int {
 	if e == nil {
 		return 0
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.client != nil && e.client.MaxTokens > 0 {
+	if e.client == nil {
+		return 0
+	}
+	if e.client.MaxTokens > 0 {
 		return e.client.MaxTokens
+	}
+	if info, ok := e.client.CatalogEntry(e.client.Model); ok && info.MaxOutputTokens > 0 {
+		return info.MaxOutputTokens
 	}
 	return 0
 }

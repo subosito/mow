@@ -61,6 +61,12 @@ type LLMConfig struct {
 	Effort  string            `yaml:"effort"`
 	Headers map[string]string `yaml:"headers"`
 	Stream  bool              `yaml:"stream"`
+	// MaxTokens caps the reply on wires that require the field
+	// (anthropic-messages). 0 = use the model's published generation cap from
+	// GET /v1/models, falling back to a conservative floor. Raise it when a
+	// model can write more than the gateway advertises; a cut reply that was
+	// mid tool-call costs a retry and can fail the run.
+	MaxTokens int `yaml:"max_tokens"`
 	// PromptCache toggles provider prompt caching (anthropic-messages: cache
 	// system/tools/history). Nil = enabled (pure win for repeated prefixes);
 	// set false for gateways that reject cache_control fields.

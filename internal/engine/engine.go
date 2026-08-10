@@ -378,6 +378,7 @@ func New(opt Options) (*Engine, error) {
 			// Prompt caching on by default (nil); "none"/false disables it.
 			PromptCache:        cfg.LLM.PromptCache == nil || cfg.LLM.PromptCache.Enabled(),
 			CacheTTL:           cacheTTL(cfg.LLM.PromptCache),
+			MaxTokens:          cfg.LLM.MaxTokens,
 			NativeTools:        cfg.LLM.NativeTools,
 			SystemPrefix:       append([]string(nil), cfg.LLM.SystemPrefix...),
 			SystemPrefixModels: append([]string(nil), cfg.LLM.SystemPrefixModels...),

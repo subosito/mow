@@ -8,14 +8,31 @@ import (
 	"strings"
 )
 
-// anthropicMaxTokens is c.MaxTokens with the historical 8192 default, so
-// zero-value Clients keep working.
+// anthropicMaxTokens resolves the reply cap the anthropic-messages wire
+// requires in every request.
+//
+// Priority: explicit llm.max_tokens → the model's published generation cap →
+// a conservative floor. The catalog step matters: the historical hard-coded
+// 8192 is a 2023-era number, and a current model advertising 128000 was being
+// cut at 6% of its capacity. A truncated reply is not just a short answer — if
+// it cuts a tool call the loop refuses the batch and, after a couple of
+// retries, fails the run.
 func (c *Client) anthropicMaxTokens() int {
 	if c.MaxTokens > 0 {
 		return c.MaxTokens
 	}
-	return 8192
+	if info, ok := c.CatalogEntry(c.Model); ok && info.MaxOutputTokens > 0 {
+		return info.MaxOutputTokens
+	}
+	return defaultAnthropicMaxTokens
 }
+
+// defaultAnthropicMaxTokens is the last-resort reply cap when neither config
+// nor the catalog says anything. The wire requires the field, so there is no
+// "omit and let the provider decide" option here. Kept at the historical value
+// because raising it blind risks a 400 from a model that cannot honour it —
+// gateways that publish max_output_tokens get their real cap above.
+const defaultAnthropicMaxTokens = 8192
 
 // chatAnthropic maps OpenAI-shaped messages/tools to Anthropic Messages API.
 func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []ToolSpec) (Message, error) {
