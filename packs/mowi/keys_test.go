@@ -367,6 +367,70 @@ func TestHelpDismissedByKeys(t *testing.T) {
 	}
 }
 
+// Regression: opening help while busy trapped the user — the first Esc/Ctrl+C
+// dismissed the overlay but the turn kept running because the help-dismiss
+// block returned before reaching the busy cancel/quit handlers. Now those
+// keys must close help AND cancel the run in one press.
+
+func TestCancelBusyWithHelpOpenCancelsTurn(t *testing.T) {
+	m := freshModel(t)
+	m.busy = true
+	m.showHelp = true
+	cancelled := false
+	m.cancel = func() { cancelled = true }
+	m.queued = append(m.queued, "pending")
+	mod, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	mm := mod.(*model)
+	if !cancelled {
+		t.Fatal("esc should call cancel when help open and busy")
+	}
+	if len(mm.queued) != 0 {
+		t.Fatal("esc should drop queue when help open and busy")
+	}
+	if mm.showHelp {
+		t.Fatal("esc should close help when busy")
+	}
+}
+
+func TestQuitBusyWithHelpOpenCancelsTurn(t *testing.T) {
+	m := freshModel(t)
+	m.busy = true
+	m.showHelp = true
+	cancelled := false
+	m.cancel = func() { cancelled = true }
+	m.queued = append(m.queued, "pending")
+	mod, _ := m.Update(tea.KeyPressMsg{Mod: tea.ModCtrl, Code: 'c'})
+	mm := mod.(*model)
+	if !cancelled {
+		t.Fatal("ctrl+c should call cancel when help open and busy")
+	}
+	if len(mm.queued) != 0 {
+		t.Fatal("ctrl+c should drop queue when help open and busy")
+	}
+	if mm.showHelp {
+		t.Fatal("ctrl+c should close help when busy")
+	}
+	if mm.quitting {
+		t.Fatal("ctrl+c busy with help open should not set quitting")
+	}
+}
+
+// Guard: idle help dismissal must not cancel — only the busy path should.
+func TestHelpDismissIdleDoesNotCancel(t *testing.T) {
+	m := freshModel(t)
+	m.showHelp = true
+	cancelled := false
+	m.cancel = func() { cancelled = true }
+	mod, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	mm := mod.(*model)
+	if mm.showHelp {
+		t.Fatal("esc should close help when idle")
+	}
+	if cancelled {
+		t.Fatal("esc should not call cancel when idle and help open")
+	}
+}
+
 // ---------- PermCycle (shift+tab) ----------
 
 func TestPermCycleToggles(t *testing.T) {

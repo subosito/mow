@@ -98,6 +98,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ks.Matches(ks.Send, keyStr) || keyStr == "q" || keyStr == "?" || keyStr == "/" {
 				m.showHelp = false
 			}
+			// While busy, Esc (cancel) and the configured Quit key must stop
+			// the running turn, not just dismiss the overlay — otherwise
+			// opening help traps the user: the first Esc closes help and the
+			// turn looks unstoppable. Mirror the normal busy cancel/quit path
+			// (drop queued messages, surface peer teardown, cancel the run
+			// ctx). Never quit the app here; the idle Quit path owns that.
+			if m.busy && (ks.Matches(ks.Cancel, keyStr) || ks.Matches(ks.Quit, keyStr)) {
+				m.dropQueue()
+				m.noteCancelPeers()
+				if m.cancel != nil {
+					m.cancel()
+				}
+				return m, nil
+			}
 			return m, nil
 		}
 		if m.permWait != nil {
