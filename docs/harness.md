@@ -167,15 +167,19 @@ edit; three is a loop.
 
 This is a **backstop, not a knob** — it is a package-level constant with no
 config surface, on purpose. It exists to stop pathological spin, not to tune
-how persistent an agent is. A run that legitimately needs more work should get
-more turns (`--max-turns` / `policy.max_turns`), not a looser stall floor.
+how persistent an agent is.
+
+Since `max_turns` is unlimited by default, this is the primary liveness guard.
+It keys on *evidence* rather than elapsed turns, so it catches a spinning loop
+in three batches while never cutting short work that is still making progress.
 
 Note that repeating the *same tool calls* is a separate, softer signal: the
 loop injects a nudge message after several identical batches but never stops
 for it. Only the evidence signal hard-stops.
 
 **Hosts:** surface `StopStuck` distinctly from `StopMaxTurns`. They mean
-opposite things — out of budget vs. out of ideas — and a user who sees "stuck"
+opposite things — out of an explicitly configured budget vs. out of ideas —
+and a user who sees "stuck"
 should be prompted to add information or change the task, not to raise a limit.
 
 ### Abort / cancel
@@ -195,7 +199,7 @@ Lifecycle slog (`mow run/tool start|end`) is **Debug** by default. Stock CLI pri
 
 | Knob | Default | Effect |
 |------|---------|--------|
-| `policy.max_turns` | `120` | Optional budget: LLM round-trips per Prompt (a turn may batch up to 8 tools). Default 120 for casual use. `0` / CLI `--max-turns 0` / yaml `-1` = **no turn limit** (hours/days OK; stop with Ctrl+C). Only enforced when > 0 — no hidden safety cap on unlimited |
+| `policy.max_turns` | *(unlimited)* | Optional budget: LLM round-trips per Prompt (a turn may batch up to 8 tools). **Unset by default** — a run ends when it is done, stuck, cancelled, or over an explicit spend budget, never merely because it was long. Set a positive value to opt in to a ceiling; yaml `-1` / CLI `--max-turns 0` also mean unlimited. Only enforced when > 0 |
 | `policy.max_context_chars` | `100000` | Soft history budget (chars). When still on this default, auto-scales from `GET /v1/models` `context_window` × `compact_ratio`. Explicit positive value = absolute budget. Set `-1` to disable. Compaction pins user task anchors + tools used so the goal is not lost |
 | `policy.compact_ratio` | `0.5` | Fraction of gateway `context_window` used as history budget when auto-scaling (1M → ~500k tok-eq ≈ 2M chars, **hard-capped at `MaxContextCharsHardCap` ≈ 400k tok-eq / 1.6M chars**). Clamped to 0.3–0.95. Ignored when `max_context_chars` is an explicit non-default absolute |
 | `llm.context_window` / `input_price` / `output_price` | (optional) | Override metering; otherwise `Engine.Limits()` uses `GET /v1/models` fields (`context_window`, `pricing.input_per_mtok` / `output_per_mtok`) — no client-side price table |

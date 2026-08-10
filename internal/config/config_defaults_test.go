@@ -25,10 +25,14 @@ func TestAgenticDefaults(t *testing.T) {
 	if p.MaxBashTimeoutSec < p.BashTimeoutSec {
 		t.Errorf("max_bash_timeout_sec=%d below bash_timeout_sec=%d", p.MaxBashTimeoutSec, p.BashTimeoutSec)
 	}
-	// High enough that multi-file work does not die mid-stream, low enough to
-	// stop a runaway loop.
-	if p.MaxTurns < 60 || p.MaxTurns > 400 {
-		t.Errorf("max_turns = %d, outside the sane agentic range", p.MaxTurns)
+	// Unlimited. A turn count is a poor proxy for either cost or progress —
+	// the same number is wasteful for a one-line fix and far too small for a
+	// large refactor — so a default ceiling ends healthy long-running work
+	// with nothing actually wrong. Runaway loops are caught by ErrStuck
+	// (evidence-based, fires in three batches); cost is bounded by
+	// max_run_tokens / max_run_usd when the operator sets one.
+	if p.MaxTurns != 0 {
+		t.Errorf("max_turns = %d, want 0 (unlimited by default)", p.MaxTurns)
 	}
 	if p.MaxParallelTools < 1 || p.MaxParallelTools > 16 {
 		t.Errorf("max_parallel_tools = %d", p.MaxParallelTools)

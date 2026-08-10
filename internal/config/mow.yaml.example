@@ -122,7 +122,9 @@ tools:
   #   - understand_video
 
 policy:
-  max_turns: 120                  # LLM round-trips per Prompt; -1 = unlimited
+  # max_turns: 200                # cap LLM round-trips per Prompt. Default: unlimited —
+  #                               # a run ends when done/stuck/cancelled or over an
+  #                               # explicit budget, not merely because it was long.
   bash_timeout_sec: 300           # per bash call (default); builds/test suites need minutes
   max_bash_timeout_sec: 900       # ceiling a single call may request via timeout_sec
   max_read_bytes: 524288          # 512 KiB per read (default)

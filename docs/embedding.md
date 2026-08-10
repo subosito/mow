@@ -74,7 +74,7 @@ you reach for most:
 | `AllowWrite` / `AllowShell` | Enable power tools from code instead of `--allow-*`. |
 | `SessionID` / `Continue` / `NoSession` | Resume a specific session, resume the latest, or don't persist. |
 | `Workspace` / `Model` / `BaseURL` | Point overrides that win over config/env. |
-| `MaxTurns` | Loop budget: positive = N turns, `-1` = unlimited, `0` = leave config (default 120). |
+| `MaxTurns` | Loop budget: positive = N turns, `-1` = unlimited, `0` = leave config (config default: unlimited). |
 
 `HTTPClient` and `Logger` are the two knobs an embedder almost always wants and
 a config file can't give you:

@@ -18,8 +18,13 @@ import (
 // retried. One blip must not kill a multi-hour feature-test goal.
 const maxTransientSteps = 5
 
-// maxTurnBudgetSteps soft-continues when a step hits a user-set MaxTurns budget.
-// After this many consecutive budget hits, fail.
+// maxTurnBudgetSteps soft-continues when a step hits a user-set MaxTurns
+// budget. After this many consecutive budget hits, fail.
+//
+// "User-set" is now literal: max_turns defaults to unlimited, so reaching this
+// path means the operator asked for a ceiling. It used to fire on the stock
+// 120-turn default, which ended healthy multi-hour goals that had nothing
+// wrong with them.
 const maxTurnBudgetSteps = 5
 
 // transientBackoff waits before the next step after an upstream blip.

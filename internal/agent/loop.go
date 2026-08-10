@@ -438,8 +438,10 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 // stallBarrenBatches is how many consecutive barren tool batches end the run
 // with ErrStuck. Three, not two: two identical batches are a plausible retry
 // (a flaky command, a re-read after a failed edit), three is a loop. This is a
-// package-level backstop, not a tuning knob — a run that legitimately needs
-// more turns should raise max_turns, not loosen the stall floor.
+// package-level backstop, not a tuning knob. With max_turns unlimited by
+// default this is the primary liveness guard: it catches a spinning loop in
+// three batches rather than after a hundred, and it keys on evidence rather
+// than on elapsed turns, so legitimately long work is never cut short.
 const stallBarrenBatches = 3
 
 // maxTruncatedBatches bounds the retry of a batch whose tool arguments the

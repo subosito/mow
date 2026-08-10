@@ -133,9 +133,13 @@ type ToolsConfig struct {
 }
 
 type PolicyConfig struct {
-	// MaxTurns caps LLM round-trips per Prompt (default 120). 0 = unlimited
-	// after load. In YAML use max_turns: -1 for unlimited (0 is indistinguishable
-	// from "omit" in overlays). CLI: --max-turns 0.
+	// MaxTurns caps LLM round-trips per Prompt. Default 0 = unlimited: a run
+	// ends when it is done, stuck (ErrStuck), cancelled, or over an explicitly
+	// configured budget — never merely because it was long.
+	//
+	// Set a positive value to opt in to a ceiling. In YAML, -1 also means
+	// unlimited (kept for configs written when 120 was the default; 0 is
+	// indistinguishable from "omit" in overlays). CLI: --max-turns N.
 	MaxTurns int `yaml:"max_turns"`
 	// BashTimeoutSec is the default per-call bash timeout (default 300).
 	// A coding agent runs builds and test suites, so this is minutes, not
@@ -249,7 +253,12 @@ func defaults() *File {
 			Enable: []string{"read", "glob", "grep"},
 		},
 		Policy: PolicyConfig{
-			MaxTurns: 120,
+			// MaxTurns: 0 (unlimited). A turn cap is a poor proxy for cost or
+			// progress — 120 turns is trivial for small edits and nowhere near
+			// enough for a large refactor — and a default one ends healthy
+			// long-running work with nothing wrong. Cost is bounded by
+			// max_run_tokens/max_run_usd, spinning by ErrStuck; neither needs
+			// a turn ceiling. Set max_turns explicitly to opt back in.
 			// 300s: a coding agent runs test suites and builds, not one-liners.
 			// A cold `go test ./...` or a nested harness subcommand routinely
 			// needs minutes; 60s forced agents into background-process
@@ -710,8 +719,9 @@ func (f *File) normalize() error {
 	if f.LLM.APIKey == "" && f.LLM.APIKeyEnv != "" {
 		f.LLM.APIKey = strings.TrimSpace(os.Getenv(f.LLM.APIKeyEnv))
 	}
-	// MaxTurns: defaults() sets 120. Negative values (yaml -1) mean unlimited → 0.
-	// Do not rewrite 0 to 120 — 0 is the unlimited sentinel for the agent loop.
+	// MaxTurns: 0 (default/omitted) is the unlimited sentinel for the agent
+	// loop. Negative values (yaml -1, written when 120 was the default) also
+	// mean unlimited — normalize them to the same 0.
 	if f.Policy.MaxTurns < 0 {
 		f.Policy.MaxTurns = 0
 	}
