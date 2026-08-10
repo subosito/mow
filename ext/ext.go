@@ -111,6 +111,28 @@ type PreCompactDecision struct {
 	Summary string
 }
 
+// PreModelEvent is emitted immediately before each LLM call — the only seam
+// where a policy can refuse to spend. Carries running usage and the size of
+// the pending request; deliberately not the history (compaction owns that).
+type PreModelEvent struct {
+	Turn            int
+	InputTokens     int
+	OutputTokens    int
+	SentChars       int
+	CharsPerToken   float64
+	MaxOutputTokens int
+}
+
+// PreModelDecision may stop the run before the call is made.
+type PreModelDecision struct {
+	Stop   bool
+	Reason string
+}
+
+// PreModelFunc runs before each LLM call. First Stop wins; returning an error
+// aborts the Run (a spend gate that cannot evaluate must fail closed).
+type PreModelFunc func(ctx context.Context, e PreModelEvent) (PreModelDecision, error)
+
 // PreCompactFunc runs before Compact when MaxContextChars is set and history is over budget.
 type PreCompactFunc func(ctx context.Context, e PreCompactEvent) (PreCompactDecision, error)
 
@@ -157,6 +179,7 @@ var (
 	userPrompt []UserPromptFunc
 	sessStart  []SessionStartFunc
 	preCompact []PreCompactFunc
+	preModel   []PreModelFunc
 	afterTurn  []AfterTurnFunc
 	stop       []StopFunc
 
@@ -431,6 +454,23 @@ func SessionStartHooks() []SessionStartFunc {
 	return append([]SessionStartFunc(nil), sessStart...)
 }
 
+// RegisterPreModel appends a global pre-model hook (spend gate, kill switch).
+func RegisterPreModel(fn PreModelFunc) {
+	if fn == nil {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	preModel = append(preModel, fn)
+}
+
+// PreModelHooks returns a copy of registered pre-model hooks.
+func PreModelHooks() []PreModelFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return append([]PreModelFunc(nil), preModel...)
+}
+
 // PreCompactHooks returns a copy of registered pre-compact hooks.
 func PreCompactHooks() []PreCompactFunc {
 	mu.Lock()
@@ -539,6 +579,7 @@ func Reset() {
 	userPrompt = nil
 	sessStart = nil
 	preCompact = nil
+	preModel = nil
 	afterTurn = nil
 	stop = nil
 	extInstances = nil

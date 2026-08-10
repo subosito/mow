@@ -129,6 +129,11 @@ policy:
   max_context_chars: 100000       # soft history floor (default); auto-scales from context_window; -1 disables
   compact_ratio: 0.5              # of gateway context_window when auto-scaling (1M → ~500k tok-eq history, hard-capped)
   max_tool_result_chars: 24000    # cap each tool result in model history (default)
+  # max_run_tokens: 2000000       # hard ceiling on input+output tokens for ONE prompt.
+  #                               # max_turns bounds round-trips; this bounds spend.
+  # max_run_usd: 5.00             # same ceiling in USD. Needs published pricing:
+  #                               # mow refuses to start if the model has no price,
+  #                               # rather than offering a limit that never fires.
   # compact_summary: false          # replace the deterministic compaction stub with a
   #                                 # structured LLM summary (goal/decisions/next steps).
   #                                 # Costs one extra call per compaction; pays for itself

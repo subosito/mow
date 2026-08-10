@@ -169,6 +169,14 @@ type PolicyConfig struct {
 	// compaction — long single-task sessions — and may not on short scattered
 	// ones. The call is one-shot, so it never writes a prompt-cache entry.
 	CompactSummary bool `yaml:"compact_summary"`
+	// MaxRunTokens caps InputTokens+OutputTokens for one Prompt. 0 = no limit.
+	// The honest spend primitive: works whether or not the gateway publishes
+	// prices, unlike MaxRunUSD. MaxTurns bounds round-trips; this bounds cost.
+	MaxRunTokens int `yaml:"max_run_tokens"`
+	// MaxRunUSD caps projected cost for one Prompt. 0 = no limit. Requires
+	// published pricing — mow refuses to start when it is set and the model
+	// has no price, rather than pretending to enforce a ceiling it cannot.
+	MaxRunUSD float64 `yaml:"max_run_usd"`
 	// MaxParallelTools caps concurrent tool Exec in one assistant batch (default 8).
 	// Set to 1 for sequential execution.
 	MaxParallelTools int `yaml:"max_parallel_tools"`

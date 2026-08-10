@@ -245,6 +245,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		OnToken:            onTok,
 		MaxContextChars:    maxCtx,
 		MaxToolResultChars: maxToolRes,
+		MaxOutputTokens:    e.maxOutputTokens(),
 		MaxParallelTools:   maxPar,
 		Workspace:          ws,
 		UntrustedNonce:     e.untrustedNonce,
@@ -416,12 +417,21 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 	h.PreCompact = preC
 	h.AfterCompact = compact
 	h.AfterTurn = after
+	// Spend ceiling first in the PreModel chain: a run that is out of budget
+	// must not reach any other gate's side effects.
+	// A gate error here is impossible: mow.New already refused to construct an
+	// Engine with an unenforceable ceiling.
+	if gate, gerr := e.budgetGate(); gerr == nil && gate != nil {
+		h.PreModel = append([]agent.PreModelFunc{gate}, h.PreModel...)
+	}
 	return h
 }
-
 func stopReasonFrom(err error) string {
 	if err == nil {
 		return StopCompleted
+	}
+	if errors.Is(err, agent.ErrBudget) {
+		return StopBudget
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return StopCancelled

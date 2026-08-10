@@ -82,6 +82,10 @@ func mergeHooks(opt Hooks) (agent.Hooks, lifeHooks) {
 		fn := fn
 		h.PostTool = append(h.PostTool, adaptPostTool(fn))
 	}
+	for _, fn := range ext.PreModelHooks() {
+		fn := fn
+		h.PreModel = append(h.PreModel, adaptPreModelExt(fn))
+	}
 	for _, fn := range ext.PreCompactHooks() {
 		fn := fn
 		h.PreCompact = append(h.PreCompact, adaptPreCompactExt(fn))
@@ -194,6 +198,23 @@ func adaptPreCompact(fn PreCompactFunc) agent.PreCompactFunc {
 			return agent.PreCompactDecision{}, err
 		}
 		return agent.PreCompactDecision{Skip: d.Skip, Summary: d.Summary}, nil
+	}
+}
+
+func adaptPreModelExt(fn ext.PreModelFunc) agent.PreModelFunc {
+	return func(ctx context.Context, e agent.PreModelEvent) (agent.PreModelDecision, error) {
+		d, err := fn(ctx, ext.PreModelEvent{
+			Turn:            e.Turn,
+			InputTokens:     e.Usage.InputTokens,
+			OutputTokens:    e.Usage.OutputTokens,
+			SentChars:       e.SentChars,
+			CharsPerToken:   e.CharsPerToken,
+			MaxOutputTokens: e.MaxOutputTokens,
+		})
+		if err != nil {
+			return agent.PreModelDecision{}, err
+		}
+		return agent.PreModelDecision{Stop: d.Stop, Reason: d.Reason}, nil
 	}
 }
 

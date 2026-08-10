@@ -605,6 +605,14 @@ func New(opt Options) (*Engine, error) {
 		return nil, err
 	}
 
+	// Fail closed on an unenforceable spend ceiling. policy.max_run_usd on a
+	// model with no published price cannot fire; starting anyway would hand
+	// the operator a limit that silently never triggers, which is worse than
+	// having none. Refuse at construction, where the message is actionable.
+	if _, err := e.budgetGate(); err != nil {
+		return nil, err
+	}
+
 	return e, nil
 }
 

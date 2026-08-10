@@ -122,6 +122,14 @@ type Options struct {
 	// structured LLM summary (one extra call per compaction). Off by default;
 	// see policy.compact_summary.
 	CompactSummary bool
+
+	// MaxRunTokens caps InputTokens+OutputTokens for one Prompt (0 = config).
+	// Bounds spend, where MaxTurns only bounds round-trips.
+	MaxRunTokens int
+	// MaxRunUSD caps projected cost for one Prompt (0 = config). Requires
+	// published pricing; New fails when the model has no price rather than
+	// offering a ceiling that can never fire.
+	MaxRunUSD float64
 	// MaxToolResultChars overrides config cap on tool results in history (0 = config).
 	MaxToolResultChars int
 }

@@ -107,8 +107,16 @@ const (
 	StopCancelled     = engine.StopCancelled
 	StopMaxTurns      = engine.StopMaxTurns
 	StopStuck         = engine.StopStuck
-	StopTruncated     = engine.StopTruncated
-	StopError         = engine.StopError
+	StopBudget        = engine.StopBudget
+)
+
+// ErrBudget ends a run that hit its spend ceiling (policy.max_run_tokens /
+// max_run_usd). Partial history is preserved; this is NOT task completion.
+var ErrBudget = engine.ErrBudget
+
+var (
+	StopTruncated = engine.StopTruncated
+	StopError     = engine.StopError
 )
 
 // Diagnostic severities.

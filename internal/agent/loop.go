@@ -37,6 +37,16 @@ var ErrStuck = errors.New("agent: stuck repeating tool calls")
 // Result.Messages still holds the partial history.
 var ErrTruncated = errors.New("agent: response truncated at token limit")
 
+// ErrBudget ends a run that a PreModel hook refused to continue — in practice,
+// a spend ceiling. Result.Messages holds the partial history and Result.Usage
+// the tokens actually consumed.
+//
+// A sentinel rather than a silent clean stop: budget exhaustion is expected
+// control flow, but it is NOT task completion, and a caller that cannot tell
+// the two apart will report a half-finished job as done. An outer loop that
+// wants to continue can errors.Is this, raise the limit, and re-prompt.
+var ErrBudget = errors.New("agent: run budget exhausted")
+
 // DefaultMaxParallelTools is used when Options.MaxParallelTools is unset (0).
 const DefaultMaxParallelTools = 8
 
@@ -74,6 +84,11 @@ type Options struct {
 	MaxContextChars int
 	// MaxToolResultChars caps each tool result in history (0 = DefaultMaxToolResultChars).
 	MaxToolResultChars int
+	// MaxOutputTokens mirrors the provider's reply cap (llm.max_tokens) so a
+	// PreModel gate can bound the call it is about to authorize. 0 = unknown;
+	// a spend ceiling must then treat the reply as unbounded and refuse to
+	// promise a hard limit. Informational only — the loop does not enforce it.
+	MaxOutputTokens int
 	// MaxParallelTools caps concurrent Exec in one assistant tool batch.
 	// 0 → DefaultMaxParallelTools; 1 → sequential (legacy).
 	MaxParallelTools int
@@ -215,6 +230,38 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			messages = send
 		}
 		sentChars := EstChars(send) + toolChars
+		// Gate the call itself. This is the only point where a policy can
+		// refuse to spend: everything below commits to a round trip.
+		if len(opt.Hooks.PreModel) > 0 {
+			ev := PreModelEvent{
+				Turn:            turn + 1,
+				Usage:           usage,
+				SentChars:       sentChars,
+				CharsPerToken:   calib.Ratio(),
+				MaxOutputTokens: opt.MaxOutputTokens,
+			}
+			for _, h := range opt.Hooks.PreModel {
+				if h == nil {
+					continue
+				}
+				d, herr := h(ctx, ev)
+				if herr != nil {
+					return Result{Messages: messages, Usage: usage}, herr
+				}
+				// First stop wins; a second opinion cannot un-stop a run.
+				if d.Stop {
+					reason := strings.TrimSpace(d.Reason)
+					if reason == "" {
+						reason = "stopped before the LLM call"
+					}
+					return Result{
+						Messages:   messages,
+						Usage:      usage,
+						StopReason: "budget",
+					}, fmt.Errorf("%w: %s", ErrBudget, reason)
+				}
+			}
+		}
 		// Per-call LLM ctx: a mid-turn steer cancels ONLY this call (via
 		// opt.SetLLMCancel), never the run — the outer ctx stays alive so the
 		// loop can reissue with the steer appended.

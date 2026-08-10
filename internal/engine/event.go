@@ -167,6 +167,10 @@ const (
 	StopCancelled = "cancelled"
 	StopMaxTurns  = "max_turns"
 	StopStuck     = "stuck"
+	// StopBudget: a PreModel gate refused another LLM call — in practice the
+	// spend ceiling (policy.max_run_tokens / max_run_usd). Partial work is in
+	// the session; this is NOT task completion.
+	StopBudget = "budget"
 	// StopTruncated: the provider cut the final reply at its token limit and
 	// left no usable text (raise llm.max_tokens).
 	StopTruncated = "truncated"
