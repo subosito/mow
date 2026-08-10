@@ -37,6 +37,24 @@ func testEngine(t *testing.T) *mow.Engine {
 	return eng
 }
 
+// elevatedTestEngine returns an Engine with AllowWrite and AllowShell enabled,
+// so the welcome trust line describes capabilities rather than "read-only".
+func elevatedTestEngine(t *testing.T) *mow.Engine {
+	t.Helper()
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		AllowWrite: true,
+		AllowShell: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return eng
+}
+
 func joined(m *model) string {
 	return strings.Join(m.lines(), "\n")
 }

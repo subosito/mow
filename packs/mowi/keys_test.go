@@ -306,13 +306,13 @@ func TestHelpQuestionMarkNonEmptyInputTypes(t *testing.T) {
 	}
 }
 
-func TestHelpWhileBusyDoesNotOpen(t *testing.T) {
+func TestHelpWhileBusyOpens(t *testing.T) {
 	m := freshModel(t)
 	m.busy = true
 	mod, _ := m.Update(tea.KeyPressMsg{Mod: tea.ModCtrl, Code: '/'})
 	mm := mod.(*model)
-	if mm.showHelp {
-		t.Fatal("ctrl+/ should not open help while busy")
+	if !mm.showHelp {
+		t.Fatal("ctrl+/ should open help while busy (help is read-only)")
 	}
 }
 

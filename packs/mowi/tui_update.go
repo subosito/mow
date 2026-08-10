@@ -191,12 +191,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clearTranscript()
 			return m, nil
 		case ks.Matches(ks.Help, keyStr):
-			if !m.busy && m.modelPick == nil {
+			if m.modelPick == nil {
+				// Help is allowed while busy: a user is most likely to need it
+				// when something unfamiliar is happening during a turn. The
+				// overlay is read-only and dismissible (see the showHelp block
+				// above), so it never interferes with the running turn.
 				m.showHelp = true
 			}
 			return m, nil
-		case keyStr == "?" && !m.busy && m.modelPick == nil && strings.TrimSpace(m.ta.Value()) == "":
+		case keyStr == "?" && m.modelPick == nil && strings.TrimSpace(m.ta.Value()) == "":
 			// Soft help when input empty (not configurable — avoids stealing typing).
+			// Allowed while busy for the same reason as the Help key above.
 			m.showHelp = true
 			return m, nil
 		case ks.Matches(ks.Send, keyStr):

@@ -280,6 +280,211 @@ func TestWelcomeShowsTaglineAndContext(t *testing.T) {
 	}
 }
 
+func TestWelcomeTrustReadOnlyCapabilities(t *testing.T) {
+	// Default test engine: AllowWrite=false, AllowShell=false → "read-only".
+	m := freshModel(t)
+	m.showWelcome = true
+	v := xansi.Strip(m.welcomeView())
+	if !strings.Contains(v, "read-only") {
+		t.Fatalf("read-only welcome missing trust copy: %q", short(v, 200))
+	}
+	// When no capability is on, approval behavior must not appear (it is
+	// irrelevant — editing/commands are disabled, not merely gated).
+	if strings.Contains(v, "asking") || strings.Contains(v, "automatically") {
+		t.Fatalf("read-only welcome should not mention approval: %q", short(v, 200))
+	}
+	// The inaccurate old phrasing must be gone.
+	if strings.Contains(v, "need approval") {
+		t.Fatalf("stale 'need approval' phrasing present: %q", short(v, 200))
+	}
+}
+
+func TestWelcomeTrustElevatedCapabilities(t *testing.T) {
+	// Engine with AllowWrite+AllowShell: capability line states edit+commands.
+	m := newModel(elevatedTestEngine(t), false, false)
+	m.width, m.height = 80, 24
+	m.layout()
+	m.ready = true
+	m.showWelcome = true
+	v := xansi.Strip(m.welcomeView())
+	if strings.Contains(v, "read-only") {
+		t.Fatalf("elevated welcome should not say read-only: %q", short(v, 200))
+	}
+	if !strings.Contains(v, "can read, edit, and run commands") {
+		t.Fatalf("elevated welcome missing capability copy: %q", short(v, 200))
+	}
+}
+
+func TestWelcomeTrustPermAskApproval(t *testing.T) {
+	// Capabilities on + PermAsk: approval line says "asks before each change".
+	m := newModel(elevatedTestEngine(t), false, false)
+	m.width, m.height = 80, 24
+	m.layout()
+	m.ready = true
+	m.showWelcome = true
+	m.permMode.Store(int32(PermAsk))
+	v := xansi.Strip(m.welcomeView())
+	if !strings.Contains(v, "asks before each change") {
+		t.Fatalf("PermAsk welcome missing approval copy: %q", short(v, 200))
+	}
+}
+
+func TestWelcomeTrustAutoPowerApproval(t *testing.T) {
+	// Capabilities on + autoPower ("always allow"): approval says "without asking".
+	m := newModel(elevatedTestEngine(t), false, false)
+	m.width, m.height = 80, 24
+	m.layout()
+	m.ready = true
+	m.showWelcome = true
+	m.autoPower.Store(true)
+	v := xansi.Strip(m.welcomeView())
+	if !strings.Contains(v, "without asking") {
+		t.Fatalf("autoPower welcome missing approval copy: %q", short(v, 200))
+	}
+	if strings.Contains(v, "asks before") {
+		t.Fatalf("autoPower should not say 'asks before': %q", short(v, 200))
+	}
+}
+
+func TestWelcomeTrustAutoPowerReadOnlyNoApproval(t *testing.T) {
+	// autoPower on read-only engine (no capability): approval line must be
+	// absent — autoPower is an approval override, not a capability.
+	m := freshModel(t)
+	m.showWelcome = true
+	m.autoPower.Store(true)
+	v := xansi.Strip(m.welcomeView())
+	if !strings.Contains(v, "read-only") {
+		t.Fatalf("autoPower+read-only should still say read-only: %q", short(v, 200))
+	}
+	if strings.Contains(v, "asking") || strings.Contains(v, "automatically") {
+		t.Fatalf("autoPower+read-only should not mention approval: %q", short(v, 200))
+	}
+}
+
+func TestWelcomeShowsExamples(t *testing.T) {
+	m := freshModel(t)
+	m.showWelcome = true
+	v := xansi.Strip(m.welcomeView())
+	for _, want := range []string{"Explain this repository", "Find why a test is failing", "Plan a safe refactor"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("welcome missing example %q: %q", want, short(v, 200))
+		}
+	}
+}
+
+func TestWelcomeNoOverflow80x24(t *testing.T) {
+	m := freshModel(t)
+	m.width, m.height = 80, 24
+	m.layout()
+	m.showWelcome = true
+	v := m.welcomeView()
+	for i, line := range strings.Split(v, "\n") {
+		if w := lipgloss.Width(line); w > 80 {
+			t.Fatalf("welcome line %d width %d > 80: %q", i, w, short(line, 80))
+		}
+	}
+}
+
+func TestWelcomeNoOverflowMinTerm(t *testing.T) {
+	// 40×10 is the minimum usable terminal; examples must not overflow it.
+	m := freshModel(t)
+	m.width, m.height = 40, 10
+	m.layout()
+	m.showWelcome = true
+	v := m.welcomeView()
+	for i, line := range strings.Split(v, "\n") {
+		if w := lipgloss.Width(line); w > 40 {
+			t.Fatalf("welcome line %d width %d > 40 at min term: %q", i, w, short(line, 40))
+		}
+	}
+}
+
+func TestWelcomeFitsMinTermViewport(t *testing.T) {
+	// At 40×10 the welcome content (placed in the viewport) must not exceed
+	// the available viewport height, so nothing is clipped.
+	m := freshModel(t)
+	m.width, m.height = 40, 10
+	m.layout()
+	m.showWelcome = true
+	v := m.welcomeView()
+	lines := strings.Split(strings.TrimRight(v, "\n"), "\n")
+	vh := m.vp.Height()
+	if len(lines) > vh {
+		t.Fatalf("welcome has %d lines but viewport is %d at 40×10: %q", len(lines), vh, short(v, 80))
+	}
+}
+
+func TestEmptyStateNoOverflowMinTerm(t *testing.T) {
+	m := freshModel(t)
+	m.width, m.height = 40, 10
+	m.layout()
+	m.showWelcome = false
+	v := m.emptyStateView()
+	for i, line := range strings.Split(v, "\n") {
+		if w := lipgloss.Width(line); w > 40 {
+			t.Fatalf("empty state line %d width %d > 40: %q", i, w, short(line, 40))
+		}
+	}
+}
+
+func TestEmptyStateAfterDismiss(t *testing.T) {
+	m := freshModel(t)
+	m.showWelcome = false
+	if !m.showEmptyState() {
+		t.Fatal("idle empty transcript should show empty state")
+	}
+	v := xansi.Strip(m.emptyStateView())
+	if !strings.Contains(v, "type a question") {
+		t.Fatalf("empty state missing hint: %q", short(v, 200))
+	}
+	for _, want := range []string{"Explain this repository", "Find why a test is failing", "Plan a safe refactor"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("empty state missing example %q: %q", want, short(v, 200))
+		}
+	}
+}
+
+func TestEmptyStateClearedOnFirstEntry(t *testing.T) {
+	m := freshModel(t)
+	m.showWelcome = false
+	if !m.showEmptyState() {
+		t.Fatal("precondition: empty state visible")
+	}
+	m.add(kindStatus, "hello")
+	if m.showEmptyState() {
+		t.Fatal("empty state should clear after first entry")
+	}
+}
+
+func TestEmptyStateClearedWhileBusy(t *testing.T) {
+	m := freshModel(t)
+	m.showWelcome = false
+	if !m.showEmptyState() {
+		t.Fatal("precondition: empty state visible")
+	}
+	m.busy = true
+	if m.showEmptyState() {
+		t.Fatal("empty state should not show while busy")
+	}
+}
+
+func TestEmptyStateSuppressedByWelcome(t *testing.T) {
+	m := freshModel(t)
+	m.showWelcome = true
+	if m.showEmptyState() {
+		t.Fatal("welcome should suppress empty state")
+	}
+}
+
+func TestEmptyStateInMainFrame(t *testing.T) {
+	m := freshModel(t)
+	m.showWelcome = false
+	frame := xansi.Strip(m.mainFrame())
+	if !strings.Contains(frame, "type a question") {
+		t.Fatalf("mainFrame should show empty state: %q", short(frame, 200))
+	}
+}
+
 // theme.name accepts a chroma style (splash catalog): the frame palette derives
 // from it, light/dark is detected, and code defaults to the same style.
 func TestThemeNameFromChromaStyle(t *testing.T) {

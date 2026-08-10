@@ -323,16 +323,28 @@ func (m *model) sizeWarnView() string {
 	return lipgloss.Place(max(1, m.width), max(1, m.height), lipgloss.Center, lipgloss.Center, msg)
 }
 
+// showEmptyState reports whether the faint placeholder should occupy the
+// viewport: welcome dismissed, idle, and no transcript entries yet. The first
+// entry (user prompt, status, error…) clears it naturally.
+func (m *model) showEmptyState() bool {
+	return !m.showWelcome && !m.busy && len(m.entries) == 0
+}
+
 // mainFrame is header | transcript | [activity] | [permission] | input.
 func (m *model) mainFrame() string {
 	main := m.vp.View()
 	if m.showWelcome {
 		main = m.welcomeView()
+	} else if m.showEmptyState() {
+		// After the splash is dismissed but before the first turn, keep a faint
+		// placeholder so the viewport is not a blank void. Disappears as soon
+		// as any entry lands (submit, status, error, …).
+		main = m.emptyStateView()
 	}
 	// Scroll indicators are overlays inside the viewport's fixed height.
 	// Appending a row here made mainFrame one line taller than layout() budgeted,
 	// pushing the first transcript/user-prompt row above the terminal frame.
-	if !m.showWelcome {
+	if !m.showWelcome && !m.showEmptyState() {
 		indicator := ""
 		if !m.followBottom && m.busy && (m.streamBuf != "" || m.toolCurrent != "") {
 			indicator = m.theme.Muted.Render("↓ new output · end/pgdn to follow")
@@ -402,23 +414,75 @@ func (m *model) compensateBandScroll(nowOn bool) {
 
 func (m *model) welcomeView() string {
 	th := m.theme
-	var block string
+	var full string
 	if strings.TrimSpace(m.cfg.WelcomeMessage) != "" {
 		// Respect a configured splash verbatim (soft, no chrome).
-		block = th.Muted.Render(m.cfg.WelcomeText())
+		block := th.Muted.Render(m.cfg.WelcomeText())
+		full = m.welcomeHints(block)
 	} else {
-		// Branded but quiet: wordmark, one-line tagline, live context (model
-		// only — the workspace dir already sits in the header above; a bare
-		// basename like "mow" read as a brand here, not a workspace).
+		// Branded welcome: wordmark + plain-language trust/value copy + live
+		// model context + a few useful example prompts. The header carries
+		// workspace and safety posture; the welcome explains what mowi can do
+		// and how to begin, so a cold user has a path on the first screen.
 		brand := th.Title.Render(glyphWelcome + " mowi")
 		tagline := th.Muted.Render("agentic coding in your terminal")
 		ctx := th.Muted.Faint(true).Render(
 			short(m.eng.Model(), 32),
 		)
-		block = lipgloss.JoinVertical(lipgloss.Center, brand, "", tagline, "", ctx)
+		// Start compact: brand + tagline. Model context, trust, and examples
+		// are added progressively when the viewport has room.
+		block := lipgloss.JoinVertical(lipgloss.Center, brand, "", tagline)
+
+		// Trust line + examples are progressive: they need viewport room. At a
+		// minimum-size terminal (40×10 → ~6 viewport rows) the full block would
+		// overflow, so only the brand/tagline + hints fit. Show the model
+		// context, trust, and examples only when there is enough vertical room.
+		vh := m.vp.Height()
+		if vh <= 0 {
+			vh = max(1, m.height-5)
+		}
+		if vh >= 9 {
+			block = lipgloss.JoinVertical(lipgloss.Center, block, "", ctx)
+		}
+		if vh >= 12 {
+			trust := m.welcomeTrustLine()
+			block = lipgloss.JoinVertical(lipgloss.Center, block, "", trust)
+
+			// Examples: short, repo-shaped prompts a new user can adapt. These are
+			// static (not workspace-probed) so they stay generic and OSS-clean.
+			// One per line so they never overflow at minTermWidth (40 cols).
+			examples := []string{
+				"Explain this repository",
+				"Find why a test is failing",
+				"Plan a safe refactor",
+			}
+			var ex strings.Builder
+			for i, e := range examples {
+				if i > 0 {
+					ex.WriteString("\n")
+				}
+				ex.WriteString(th.Muted.Render(glyphBullet + " " + e))
+			}
+			block = lipgloss.JoinVertical(lipgloss.Center, block, "", "", ex.String())
+		}
+
+		full = m.welcomeHints(block)
 	}
-	// Single discoverability line from the *resolved* keymap (not hardcoded
-	// esc/? — config overrides must stay accurate, same as helpCard).
+	h := m.vp.Height()
+	if h < 1 {
+		h = max(1, m.height-5)
+	}
+	// Clamp content width to the viewport so lipgloss.Place never produces a
+	// line wider than the terminal (which would soft-wrap and break chrome).
+	full = clampFrameLines(full, max(1, m.width))
+	return lipgloss.Place(max(1, m.width), h, lipgloss.Center, lipgloss.Center, full)
+}
+
+// welcomeHints renders the discoverability footer line (keys + dismiss).
+// Keys come from the *resolved* keymap so config overrides stay accurate
+// (same contract as helpCard).
+func (m *model) welcomeHints(block string) string {
+	th := m.theme
 	helpKey := m.cfg.Keys.Primary(m.cfg.Keys.Help)
 	if helpKey == "" {
 		helpKey = "?"
@@ -430,12 +494,75 @@ func (m *model) welcomeView() string {
 	hint := th.Muted.Faint(true).Render(
 		"type a message to start  " + glyphBullet + "  " + helpKey + " help  " + glyphBullet + "  " + cancelKey + " dismiss",
 	)
-	full := lipgloss.JoinVertical(lipgloss.Center, block, "", "", hint)
+	return lipgloss.JoinVertical(lipgloss.Center, block, "", "", hint)
+}
+
+// welcomeTrustLine renders the one-line trust/capability summary for the
+// branded welcome. It distinguishes:
+//   - Capability (AllowWrite/AllowShell): whether edit/bash tools exist at all.
+//     False = tool disabled entirely (not merely gated). Default read-only
+//     engine has both off, so the model cannot edit or run commands — period.
+//   - Approval mode (perm() == PermAsk or autoPower): when a capability is on,
+//     whether each use prompts the user before running. autoPower ("always
+//     allow") means prompts are skipped.
+//
+// Plain, concise language; no jargon like "auto" or "ask".
+func (m *model) welcomeTrustLine() string {
+	th := m.theme
+	w, s := m.eng.AllowWrite(), m.eng.AllowShell()
+	var cap string
+	switch {
+	case w && s:
+		cap = "can read, edit, and run commands"
+	case w:
+		cap = "can read and edit files"
+	case s:
+		cap = "can read files and run commands"
+	default:
+		cap = "read-only — editing and commands are off"
+	}
+	// Approval behavior, only when a capability is on. PermAsk = prompts before
+	// each use; autoPower = "always allow" override (no prompts). When neither
+	// capability is on, approval is irrelevant and omitted.
+	var approval string
+	if w || s {
+		switch {
+		case m.autoPower.Load():
+			approval = " · changes run without asking"
+		case m.perm() == PermAsk:
+			approval = " · asks before each change"
+		default:
+			approval = " · changes run automatically"
+		}
+	}
+	return th.Muted.Faint(true).Render(cap + approval)
+}
+
+// emptyStateView is the faint placeholder shown in the viewport when the
+// welcome splash has been dismissed but no turns have happened yet. It keeps
+// the first screen from reading as a blank void, then disappears on the first
+// input. Plain + static so it never competes with real transcript content.
+func (m *model) emptyStateView() string {
+	th := m.theme
+	helpKey := m.cfg.Keys.Primary(m.cfg.Keys.Help)
+	if helpKey == "" {
+		helpKey = "?"
+	}
+	examples := []string{
+		"Explain this repository",
+		"Find why a test is failing",
+		"Plan a safe refactor",
+	}
+	var b strings.Builder
+	b.WriteString(th.Muted.Faint(true).Render("type a question, or " + helpKey + " for help") + "\n\n")
+	for _, e := range examples {
+		b.WriteString(th.Muted.Faint(true).Render(glyphBullet+" "+e) + "\n")
+	}
 	h := m.vp.Height()
 	if h < 1 {
 		h = max(1, m.height-5)
 	}
-	return lipgloss.Place(max(1, m.width), h, lipgloss.Center, lipgloss.Center, full)
+	return lipgloss.Place(max(1, m.width), h, lipgloss.Center, lipgloss.Center, strings.TrimRight(b.String(), "\n"))
 }
 
 func (m *model) reportedUsageStatus() string {
