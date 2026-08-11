@@ -38,8 +38,16 @@ func toolActivityState(name string) string {
 	if name == "" {
 		return ""
 	}
-	if agent, _, ok := strings.Cut(name, ":"); ok && strings.TrimSpace(agent) != "" {
-		return "connecting"
+	// acp_delegate is an active delegation: once the peer is working it is
+	// delegating, not merely connecting. This holds for the delegate start
+	// ("acp_delegate" / "claude: acp_delegate"); live progress labels the peer
+	// emits while armed ("claude: read engine.go") keep the "connecting" phase
+	// below — they describe the peer's own sub-tool, not the delegation whole.
+	// Peer-prefixed live tool/thought progress is still part of the active
+	// delegation. Keep its concrete detail in toolLabel, but use the truthful
+	// delegation phase instead of reverting the band to "connecting".
+	if isDelegateName(name) || strings.Contains(name, ":") {
+		return "delegating"
 	}
 	if i := strings.LastIndex(name, "/"); i >= 0 {
 		name = name[i+1:]
@@ -50,7 +58,7 @@ func toolActivityState(name string) string {
 		return "searching"
 	case "write", "edit":
 		return "shaping"
-	case "acp_delegate", "mcp", "lsp":
+	case "mcp", "lsp":
 		return "connecting"
 	case "generate_image", "generate_speech", "generate_video":
 		return "creating"
@@ -61,6 +69,20 @@ func toolActivityState(name string) string {
 	default:
 		return "working"
 	}
+}
+
+// isDelegateName reports whether name (already lowercased/sanitized) refers to
+// an acp_delegate tool call, with or without a peer agent prefix. The peer is
+// actively working once delegation starts, so its phase is "delegating", not
+// the generic "connecting" a cold peer/mcp/lsp connection uses.
+func isDelegateName(name string) bool {
+	if name == "acp_delegate" {
+		return true
+	}
+	if _, rest, ok := strings.Cut(name, ":"); ok {
+		return strings.TrimSpace(rest) == "acp_delegate"
+	}
+	return false
 }
 
 func toolLabel(name, args string, maxWidth int) string {
@@ -103,7 +125,15 @@ func toolLabel(name, args string, maxWidth int) string {
 		}
 	}
 
-	detail := argsDetail(verb, args)
+	var detail string
+	if verb == "acp_delegate" {
+		// The agent id alone is not useful activity detail. Show the delegated
+		// task so the band reads "delegating · acp_delegate · review …".
+		detail = delegatePromptDetail(args)
+	}
+	if detail == "" {
+		detail = argsDetail(verb, args)
+	}
 	if detail == "" {
 		return clampLabel(verb, maxWidth)
 	}
@@ -117,6 +147,16 @@ func peerDetailLabel(rest, args string) string {
 	}
 	verb := strings.ToLower(fields[0])
 	if len(fields) == 1 {
+		// acp_delegate's real detail is the task prompt, not the agent id
+		// (which the peer form already prefixes). Surface a short word window
+		// of the prompt so the activity band shows what the peer is doing
+		// ("→ claude · summarize the loop spine") instead of a redundant
+		// "→ claude · acp_delegate · claude".
+		if verb == "acp_delegate" {
+			if d := delegatePromptDetail(args); d != "" {
+				return verb + " · " + d
+			}
+		}
 		if d := argsDetail(verb, args); d != "" {
 			return verb + " · " + d
 		}
@@ -134,6 +174,40 @@ func peerDetailLabel(rest, args string) string {
 	// instead of one token so the activity band shows the task, not just
 	// its verb. The band clamp still bounds the final label (tail-safe "…").
 	return verb + " · " + joinFew(fields[1:], 8)
+}
+
+// delegatePromptDetail extracts a short word window from an acp_delegate call's
+// prompt argument so the activity band shows the task the peer is working on
+// (e.g. "summarize the loop spine") rather than the bare tool name or a
+// redundant agent id. Returns "" when there is no usable prompt.
+func delegatePromptDetail(args string) string {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return ""
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(args), &raw); err != nil {
+		return ""
+	}
+	for _, key := range []string{"prompt", "task", "query"} {
+		v, ok := raw[key]
+		if !ok {
+			continue
+		}
+		var s string
+		if json.Unmarshal(v, &s) != nil {
+			continue
+		}
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		// A few leading words carry the intent without flooding the one-row
+		// band; clampLabel bounds the final label (tail-safe "…").
+		toks := strings.Fields(s)
+		return joinFew(toks, 6)
+	}
+	return ""
 }
 
 func argsDetail(verb, args string) string {

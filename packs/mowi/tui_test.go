@@ -42,7 +42,7 @@ func testEngine(t *testing.T) *mow.Engine {
 func elevatedTestEngine(t *testing.T) *mow.Engine {
 	t.Helper()
 	eng, err := mow.New(mow.Options{
-		NoSession: true,
+		NoSession:  true,
 		AllowWrite: true,
 		AllowShell: true,
 		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
@@ -1636,6 +1636,82 @@ func TestDelegateChunksViaToolUI(t *testing.T) {
 	}
 	if m.streamBuf != "" {
 		t.Fatalf("host streamBuf should stay empty for peer chunks: %q", m.streamBuf)
+	}
+}
+
+func TestDelegatePhaseStartLiveEnd(t *testing.T) {
+	m := newModel(testEngine(t), true, false)
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.busy = true
+	m.resetToolTally()
+
+	// START: acp_delegate PreTool sets the peer-prefixed tool name.
+	m.Update(toolUIMsg{name: "claude: acp_delegate", start: true, clearStream: true,
+		args: `{"agent":"claude","prompt":"summarize the loop spine"}`})
+	if m.toolCurrent != "claude: acp_delegate" {
+		t.Fatalf("start: toolCurrent=%q", m.toolCurrent)
+	}
+	band := xansi.Strip(m.renderActivityBand())
+	if !strings.Contains(band, "delegating") {
+		t.Fatalf("start band missing 'delegating' phase: %q", band)
+	}
+	if !strings.Contains(band, "claude") {
+		t.Fatalf("start band missing peer agent 'claude': %q", band)
+	}
+	// The peer's task (prompt) must surface as live detail, not a redundant
+	// agent id repeated after the verb.
+	if !strings.Contains(band, "summarize") || !strings.Contains(band, "loop") {
+		t.Fatalf("start band missing peer task detail: %q", band)
+	}
+
+	// LIVE: peer progress chunks arrive; phase must stay 'delegating'.
+	m.Update(toolUIMsg{streamDelta: "working on it", peerAgent: "claude"})
+	if !m.peerLive.Load() {
+		t.Fatal("peerLive should be set during live delegate chunks")
+	}
+	band = xansi.Strip(m.renderActivityBand())
+	if !strings.Contains(band, "delegating") {
+		t.Fatalf("live band missing 'delegating' phase: %q", band)
+	}
+
+	// END: endPeer commits the peer answer; host synthesizes ('writing').
+	m.Update(toolUIMsg{endPeer: true, peerAgent: "claude", line: "acp_delegate · 0.1s"})
+	if m.peerLive.Load() || m.peerActive.Load() != 0 {
+		t.Fatalf("after endPeer: live=%v active=%d", m.peerLive.Load(), m.peerActive.Load())
+	}
+	if m.toolCurrent != "writing" {
+		t.Fatalf("after endPeer want 'writing', got %q", m.toolCurrent)
+	}
+	band = xansi.Strip(m.renderActivityBand())
+	// 'writing' phase is 'composing', not 'delegating' — the delegate is done.
+	if strings.Contains(band, "delegating") {
+		t.Fatalf("end band should not show 'delegating' after peer done: %q", band)
+	}
+	if !strings.Contains(band, "composing") {
+		t.Fatalf("end band missing 'composing' phase: %q", band)
+	}
+}
+
+// Non-delegate peer tools keep the genuine 'connecting' phase so the initial
+// network/model wait is not mislabeled as delegation. A peer read only
+// reaches the activity band while a peer window is open (peerLive); a bare
+// "name:" start with no window is a straggler and is correctly ignored.
+func TestPeerReadStaysDelegating(t *testing.T) {
+	m := newModel(testEngine(t), true, false)
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.busy = true
+	m.resetToolTally()
+	// Open a peer window first so a non-delegate peer progress event is not
+	// treated as a straggler.
+	m.peerLive.Store(true)
+	m.peerActive.Add(1)
+
+	m.Update(toolUIMsg{name: "gemini: read internal/agent/loop.go", start: true})
+	band := xansi.Strip(m.renderActivityBand())
+	for _, want := range []string{"delegating", "gemini", "read", "loop.go"} {
+		if !strings.Contains(band, want) {
+			t.Fatalf("peer activity missing %q: %q", want, band)
+		}
 	}
 }
 

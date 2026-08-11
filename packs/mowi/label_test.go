@@ -16,7 +16,9 @@ func TestActivityToolLabelKeepsStateAndDetails(t *testing.T) {
 		{"grep", `{"pattern":"activityState"}`, []string{"searching", "grep", "activityState"}},
 		{"edit", `{"path":"/work/repo/tui.go"}`, []string{"shaping", "edit", "tui.go"}},
 		{"bash", `{"command":"just verify"}`, []string{"running", "bash", "just verify"}},
-		{"gemini: read internal/agent/loop.go", "", []string{"connecting", "gemini", "read", "loop.go"}},
+		{"gemini: read internal/agent/loop.go", "", []string{"delegating", "gemini", "read", "loop.go"}},
+		{"acp_delegate", `{"agent":"claude","prompt":"summarize loop.go"}`, []string{"delegating", "acp_delegate", "summarize", "loop.go"}},
+		{"claude: acp_delegate", `{"prompt":"review the diff"}`, []string{"delegating", "claude", "review", "diff"}},
 	}
 	for _, tc := range tests {
 		got := activityToolLabel(tc.name, tc.args, 72)
@@ -30,13 +32,17 @@ func TestActivityToolLabelKeepsStateAndDetails(t *testing.T) {
 
 func TestToolActivityState(t *testing.T) {
 	tests := map[string]string{
-		"read":             "searching",
-		"write":            "shaping",
-		"acp_delegate":     "connecting",
-		"generate_image":   "creating",
-		"understand_video": "inspecting",
-		"proc_start":       "running",
-		"custom_tool":      "working",
+		"read":                 "searching",
+		"write":                "shaping",
+		"acp_delegate":         "delegating",
+		"claude: acp_delegate": "delegating",
+		"mcp":                  "connecting",
+		"lsp":                  "connecting",
+		"generate_image":       "creating",
+		"understand_video":     "inspecting",
+		"proc_start":           "running",
+		"custom_tool":          "working",
+		"gemini: read":         "delegating",
 	}
 	for name, want := range tests {
 		if got := toolActivityState(name); got != want {
@@ -171,5 +177,65 @@ func TestToolLabelGenericSmallBudgetUnchanged(t *testing.T) {
 	got := toolLabel("bash", `{"command":"just verify"}`, 10)
 	if xansi.StringWidth(got) > 10 {
 		t.Fatalf("generic label exceeded its small budget: %q", got)
+	}
+}
+
+// The delegate start label must surface the peer's task (prompt), not a
+// redundant agent id — the agent is already prefixed by the peer form. This is
+// the live "what is the ACP peer doing" detail the activity band owes.
+func TestDelegateStartLabelShowsPromptTask(t *testing.T) {
+	args := `{"agent":"claude","prompt":"summarize the loop spine in internal/agent/loop.go and report"}`
+	got := toolLabel("claude: acp_delegate", args, 80)
+	if !strings.HasPrefix(got, glyphArrow+" claude") {
+		t.Fatalf("want peer arrow + agent prefix, got %q", got)
+	}
+	if !strings.Contains(got, "acp_delegate") {
+		t.Fatalf("missing tool verb: %q", got)
+	}
+	if !strings.Contains(got, "summarize") || !strings.Contains(got, "loop") {
+		t.Fatalf("missing prompt task detail: %q", got)
+	}
+	// The redundant agent id must not appear as the detail after the verb.
+	if strings.Count(strings.ToLower(got), "claude") > 1 {
+		t.Fatalf("agent id leaked as detail (redundant): %q", got)
+	}
+}
+
+// A bare acp_delegate (no peer prefix) also surfaces the prompt task.
+func TestDelegateLabelBareNameShowsPrompt(t *testing.T) {
+	got := toolLabel("acp_delegate", `{"agent":"gemini","prompt":"grep the spine"}`, 60)
+	if !strings.Contains(got, "acp_delegate") {
+		t.Fatalf("missing verb: %q", got)
+	}
+	if !strings.Contains(got, "grep") || !strings.Contains(got, "spine") {
+		t.Fatalf("missing prompt task: %q", got)
+	}
+}
+
+func TestDelegatePromptDetail(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{"prompt", `{"agent":"claude","prompt":"summarize the loop"}`, "summarize the loop"},
+		{"task", `{"task":"grep spine"}`, "grep spine"},
+		{"query", `{"query":"review the diff"}`, "review the diff"},
+		{"empty prompt", `{"agent":"claude","prompt":"   "}`, ""},
+		{"no prompt key", `{"agent":"claude"}`, ""},
+		{"garbage", `not-json`, ""},
+		{"long prompt clamps to word window", `{"prompt":"` + strings.Repeat("word ", 40) + `"}`, "word word word word word word"},
+	}
+	for _, tc := range tests {
+		got := delegatePromptDetail(tc.args)
+		if tc.want == "" {
+			if got != "" {
+				t.Errorf("%q: want empty, got %q", tc.name, got)
+			}
+			continue
+		}
+		if !strings.HasPrefix(got, tc.want) && !strings.Contains(got, tc.want) {
+			t.Errorf("%q: want %q in %q", tc.name, tc.want, got)
+		}
 	}
 }
