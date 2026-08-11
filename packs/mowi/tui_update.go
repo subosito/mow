@@ -273,7 +273,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.drainPeerIngest()
 		m.syncInputChrome()
 		// Refresh thinking indicator elapsed (one line — cheap).
-		if m.reasonBuf != "" && m.streamBuf == "" {
+		// Also tick collapsed peer pre-answer summaries ("thinking · 1.2s").
+		if (m.reasonBuf != "" && m.streamBuf == "") || m.peerNeedsElapsedPaint() {
 			m.paintLiveStream()
 		}
 		// Activity band owns spinner/elapsed; View re-reads state each frame.
@@ -477,6 +478,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.start {
 			// Live indicator only — painted by the busy heartbeat.
 			// Also used for peer progress labels ("claude: read …").
+			agent := msg.peerAgent
+			if agent == "" {
+				if v, ok := m.peerAgent.Load().(string); ok {
+					agent = v
+				}
+			}
+			if agent == "" && strings.Contains(msg.name, ":") {
+				agent = strings.TrimSpace(strings.Split(msg.name, ":")[0])
+			}
 			if msg.clearStream {
 				// acp_delegate about to run: host narration is committed;
 				// wipe host live buffers so peer text starts clean.
@@ -488,26 +498,34 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.peerActive.Add(1)
 				}
 				m.peerLive.Store(true)
-				agent := msg.peerAgent
-				if agent == "" {
-					if v, ok := m.peerAgent.Load().(string); ok {
-						agent = v
-					}
-				}
-				if agent == "" && strings.Contains(msg.name, ":") {
-					agent = strings.TrimSpace(strings.Split(msg.name, ":")[0])
+				if agent != "" {
 					m.peerAgent.Store(agent)
 				}
 				m.ensurePeerBuf(agent)
 				m.paintLiveStream()
+			} else if msg.peerProgress != "" {
+				// Operational phase from EventDelegateProgress.
+				if !m.peerLive.Load() {
+					// Straggler after endPeer — do not re-arm summary/spinner.
+					return m, m.pollToolUI()
+				}
+				m.notePeerProgress(agent, msg.peerProgress)
+				m.paintLiveStream()
+				if msg.name == "" {
+					// Phase-only (activity band throttled) — skip toolCurrent.
+					m.lastActivityAt = time.Now()
+					return m, m.pollToolUI()
+				}
 			} else if m.peerLive.Load() {
 				// Progress label while peer window is open only.
 			} else if strings.Contains(msg.name, ":") {
 				// Straggler peer progress after endPeer — ignore spinner update.
 				return m, m.pollToolUI()
 			}
-			m.toolCurrent = msg.name
-			m.toolCurrentArgs = msg.args
+			if msg.name != "" {
+				m.toolCurrent = msg.name
+				m.toolCurrentArgs = msg.args
+			}
 			m.lastActivityAt = time.Now()
 			m.syncInputChrome()
 			m.layout()

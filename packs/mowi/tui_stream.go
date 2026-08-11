@@ -76,15 +76,26 @@ type peerDelta struct {
 	text  string
 }
 
+// peerPhase is operational state for a collapsed peer summary line.
+// Never holds chain-of-thought text — only what the peer is doing.
+type peerPhase int
+
+const (
+	peerPhaseWaiting  peerPhase = iota // armed, no thought/tool signal yet
+	peerPhaseThinking                  // agent_thought_chunk / thought progress
+	peerPhaseTool                      // tool_call / tool progress
+)
+
 // peerLiveBuf is one in-flight acp_delegate answer, keyed by agent name.
 type peerLiveBuf struct {
-	agent    string
-	buf      string   // bounded display buffer; full is committed
-	full     string   // complete sanitized answer, never trimmed for live paint
-	body     string   // last markdown-rendered answer body
-	bodySrc  string   // source snapshot for body
-	dirty    bool     // answer needs a markdown render
-	progress []string // bounded recent thought/tool progress, never committed as the answer
+	agent     string
+	buf       string    // bounded display buffer; full is committed
+	full      string    // complete sanitized answer, never trimmed for live paint
+	body      string    // last markdown-rendered answer body
+	bodySrc   string    // source snapshot for body
+	dirty     bool      // answer needs a markdown render
+	startedAt time.Time // when the peer slot opened (elapsed in pre-answer notes)
+	phase     peerPhase // operational state before answer text arrives
 }
 
 // streamIngest collects SSE tokens from the LLM goroutine without blocking it.

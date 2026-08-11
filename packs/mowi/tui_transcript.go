@@ -94,6 +94,10 @@ type (
 		peerArmed bool
 		// endPeer: acp_delegate finished — commit that peer's live text only.
 		endPeer bool
+		// peerProgress is EventDelegateProgress kind ("thought", "tool",
+		// "prompt", …). Update records operational phase on the peer buffer;
+		// never CoT text. Empty means this message is not a progress signal.
+		peerProgress string
 		// lsp carries post-edit diagnostics from the engine event hook.
 		lsp *lspProblemsEvent
 		// peerUsage carries one delegated peer's provider-reported tokens

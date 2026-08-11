@@ -583,12 +583,22 @@ func newModel(eng *mow.Engine, stream, ask bool) *model {
 			m.peerAgent.Store(agent)
 			tool := strings.TrimSpace(ev.Tool)
 			delta := strings.TrimSpace(ev.Delta)
+			// Operational kind for collapsed peer summary (thought/tool/prompt).
+			// Always forward even when the activity-band label is empty/throttled
+			// so the summary does not stick on "waiting" while the peer works.
+			progressKind := tool
+			if progressKind == "" && delta != "" {
+				progressKind = "thought" // bare delta without kind → thinking
+			}
 			var line string
 			switch {
-			case tool == "tool" || tool == "thought":
+			case tool == "thought":
+				// Activity band: operational label only — never paint CoT text.
+				line = "thinking"
+			case tool == "tool":
 				line = delta
 				if line == "" {
-					line = tool
+					line = "tool"
 				}
 			case tool != "" && delta != "":
 				line = tool + " " + delta
@@ -597,19 +607,29 @@ func newModel(eng *mow.Engine, stream, ask bool) *model {
 			default:
 				line = delta
 			}
-			if line == "" {
-				return
-			}
 			// Throttle activity-band label updates so spinner doesn't thrash.
+			// Phase-only updates still go through so peer summaries advance.
 			now := time.Now().UnixNano()
 			prev := lastPeerProgress.Load()
-			if prev != 0 && now-prev < int64(120*time.Millisecond) {
+			throttled := prev != 0 && now-prev < int64(120*time.Millisecond)
+			if !throttled {
+				lastPeerProgress.Store(now)
+			}
+			msg := toolUIMsg{
+				start:        true,
+				peerAgent:    agent,
+				peerProgress: progressKind,
+			}
+			if !throttled && line != "" {
+				label := agent + ": " + line
+				msg.name = label
+				msg.line = label
+			}
+			if msg.name == "" && msg.peerProgress == "" {
 				return
 			}
-			lastPeerProgress.Store(now)
-			label := agent + ": " + line
 			select {
-			case m.toolUICh <- toolUIMsg{name: label, start: true, line: label}:
+			case m.toolUICh <- msg:
 			default:
 			}
 		case mow.EventLSPDiagnostics:

@@ -29,10 +29,32 @@ func (m *model) ensurePeerBuf(agent string) *peerLiveBuf {
 	if name == "" {
 		name = "peer"
 	}
-	b := &peerLiveBuf{agent: name}
+	b := &peerLiveBuf{agent: name, startedAt: time.Now(), phase: peerPhaseWaiting}
 	m.peerBufs[key] = b
 	m.peerOrder = append(m.peerOrder, key)
 	return b
+}
+
+// notePeerProgress records operational peer state from EventDelegateProgress.
+// kind is the engine Tool field ("thought", "tool", "prompt", …). CoT text is
+// never stored — only the phase, so collapsed summaries stay non-leaky.
+func (m *model) notePeerProgress(agent, kind string) {
+	if m == nil || !m.peerLive.Load() {
+		return
+	}
+	b := m.ensurePeerBuf(agent)
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "thought":
+		b.phase = peerPhaseThinking
+	case "tool":
+		b.phase = peerPhaseTool
+	case "prompt", "":
+		// Initial "running…" / empty kind: keep waiting. Thought and tool
+		// already outrank prompt, so do not downgrade them.
+	default:
+		// Other operational kinds (custom peer labels) count as tool work.
+		b.phase = peerPhaseTool
+	}
 }
 
 // maxPeerBufBytes caps each peer's live buffer. A long reasoning stream would
@@ -92,10 +114,13 @@ func (m *model) peerLiveCollapsed() bool {
 
 // peerLiveSummaries renders one compact line per active peer:
 //
-//	→ grok   ⋯ 1.2k chars · thinking
+//	→ grok  ⋯ thinking · 1.2s
+//	→ grok  ⋯ using tools · 3.4s
+//	→ grok  ⋯ 1.2k chars · streaming
 //
-// Cost is O(peers) per frame instead of O(text), so a long reasoning stream
-// no longer redraws the transcript region on every chunk.
+// Pre-answer notes use delegate progress signals (thought/tool), never CoT
+// text. Once agent_message_chunk text arrives, the line switches to a char
+// count. Cost is O(peers) per frame instead of O(text).
 func (m *model) peerLiveSummaries() string {
 	if len(m.peerOrder) == 0 {
 		return ""
@@ -106,6 +131,7 @@ func (m *model) peerLiveSummaries() string {
 			labelW = max(labelW, peerLabelWidth(b.agent))
 		}
 	}
+	now := time.Now()
 	var parts []string
 	for _, key := range m.peerOrder {
 		b := m.peerBufs[key]
@@ -114,11 +140,59 @@ func (m *model) peerLiveSummaries() string {
 		}
 		label := m.rolePrefix(false) + m.peerLabel(b.agent, labelW)
 		note := m.theme.Muted.Faint(true).Render(
-			" " + glyphMore + " " + humanCount(len(b.buf)) + " · streaming",
+			" " + glyphMore + " " + peerLiveNote(b, now),
 		)
 		parts = append(parts, label+note)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// peerLiveNote is the operational status after the agent name on a collapsed
+// peer line. Answer text → char count; otherwise thought/tool/waiting.
+func peerLiveNote(b *peerLiveBuf, now time.Time) string {
+	if b == nil {
+		return "waiting"
+	}
+	// Answer chunks (agent_message_chunk) win: show growth, not prior phase.
+	if n := len(b.full); n > 0 {
+		return humanCount(n) + " · streaming"
+	}
+	if n := len(b.buf); n > 0 {
+		return humanCount(n) + " · streaming"
+	}
+	state := "waiting"
+	switch b.phase {
+	case peerPhaseThinking:
+		state = "thinking"
+	case peerPhaseTool:
+		state = "using tools"
+	}
+	if !b.startedAt.IsZero() {
+		el := now.Sub(b.startedAt)
+		if el < 0 {
+			el = 0
+		}
+		return state + " · " + formatElapsed(el)
+	}
+	return state
+}
+
+// peerNeedsElapsedPaint is true when a collapsed peer has no answer text yet
+// and its summary line includes a ticking elapsed timer.
+func (m *model) peerNeedsElapsedPaint() bool {
+	if !m.peerLiveCollapsed() || len(m.peerBufs) == 0 {
+		return false
+	}
+	for _, key := range m.peerOrder {
+		b := m.peerBufs[key]
+		if b == nil {
+			continue
+		}
+		if b.full == "" && b.buf == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // humanCount renders a byte count compactly (1234 -> "1.2k") so the peer

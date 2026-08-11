@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	xansi "github.com/charmbracelet/x/ansi"
@@ -428,5 +429,231 @@ func TestHumanCount(t *testing.T) {
 		if got := humanCount(tc.in); got != tc.want {
 			t.Errorf("humanCount(%d) = %q; want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// stripANSI drops SGR so summary assertions read plain operational text.
+func stripPeerSummary(s string) string {
+	return xansi.Strip(s)
+}
+
+// TestPeerLiveSummaryLifecycle: collapsed peer lines track operational state
+// from delegate progress signals, then switch to a char count once answer
+// text arrives. Never shows "0 chars · streaming" while the peer is only
+// thinking or using tools, and never paints chain-of-thought text.
+func TestPeerLiveSummaryLifecycle(t *testing.T) {
+	m := freshModel(t)
+	m.showWelcome = false
+	m.busy = true
+	m.peerLive.Store(true)
+	m.peerActive.Store(1)
+
+	// 1) No progress yet — waiting + elapsed, not "0 chars · streaming".
+	m.ensurePeerBuf("grok")
+	sum := stripPeerSummary(m.peerLiveSummaries())
+	if strings.Contains(sum, "0 chars") || strings.Contains(sum, "streaming") {
+		t.Fatalf("pre-progress summary must not claim streaming chars: %q", sum)
+	}
+	if !strings.Contains(sum, "grok") || !strings.Contains(sum, "waiting") {
+		t.Fatalf("want waiting state with agent name: %q", sum)
+	}
+	if !strings.Contains(sum, "s") { // elapsed like 0.0s
+		t.Fatalf("waiting should include elapsed: %q", sum)
+	}
+
+	// 2) Thought progress → thinking (no CoT text).
+	m.Update(toolUIMsg{
+		start: true, peerAgent: "grok", peerProgress: "thought",
+		name: "grok: secret chain of thought about the plan",
+	})
+	sum = stripPeerSummary(m.peerLiveSummaries())
+	if !strings.Contains(sum, "thinking") {
+		t.Fatalf("thought progress should show thinking: %q", sum)
+	}
+	if strings.Contains(sum, "secret") || strings.Contains(sum, "chain of thought") {
+		t.Fatalf("summary leaked CoT text: %q", sum)
+	}
+	if strings.Contains(sum, "0 chars") || strings.Contains(sum, "streaming") {
+		t.Fatalf("thinking must not show char streaming: %q", sum)
+	}
+
+	// 3) Tool progress → using tools.
+	m.Update(toolUIMsg{
+		start: true, peerAgent: "grok", peerProgress: "tool",
+		name: "grok: read engine.go",
+	})
+	sum = stripPeerSummary(m.peerLiveSummaries())
+	if !strings.Contains(sum, "using tools") {
+		t.Fatalf("tool progress should show using tools: %q", sum)
+	}
+	if strings.Contains(sum, "engine.go") {
+		// Detail stays on the activity band; summary is operational only.
+		t.Fatalf("summary should not embed tool path detail: %q", sum)
+	}
+
+	// 4) First answer chunk → char count · streaming.
+	m.Update(toolUIMsg{streamDelta: "Hello from peer", peerAgent: "grok"})
+	sum = stripPeerSummary(m.peerLiveSummaries())
+	if !strings.Contains(sum, "chars") || !strings.Contains(sum, "streaming") {
+		t.Fatalf("answer chunk should switch to char streaming: %q", sum)
+	}
+	if strings.Contains(sum, "thinking") || strings.Contains(sum, "using tools") || strings.Contains(sum, "waiting") {
+		t.Fatalf("answer phase must replace pre-answer state: %q", sum)
+	}
+	if strings.Contains(sum, "Hello from peer") {
+		t.Fatalf("collapsed summary must not paint answer body: %q", sum)
+	}
+	// Char count reflects the answer (not zero).
+	if strings.Contains(sum, "0 chars") {
+		t.Fatalf("non-empty answer reported 0 chars: %q", sum)
+	}
+
+	// 5) Completion clears the live summary and commits status + reply.
+	nBefore := len(m.entries)
+	m.Update(toolUIMsg{endPeer: true, peerAgent: "grok", line: "acp_delegate · 0.5s", name: "acp_delegate"})
+	if m.peerLive.Load() {
+		t.Fatal("peerLive should clear after endPeer")
+	}
+	if got := m.peerLiveSummaries(); got != "" {
+		t.Fatalf("completed peer must leave no live summary: %q", got)
+	}
+	if len(m.peerBufs) != 0 {
+		t.Fatalf("peerBufs not cleared: %#v", m.peerBufs)
+	}
+	foundStatus, foundReply := false, false
+	for _, e := range m.entries[nBefore:] {
+		if e.kind == kindStatus && strings.Contains(e.text, "grok") {
+			foundStatus = true
+		}
+		if e.kind == kindAssistant && strings.Contains(e.text, "Hello from peer") {
+			foundReply = true
+		}
+	}
+	if !foundStatus || !foundReply {
+		t.Fatalf("completion missing status/reply: status=%v reply=%v entries=%+v",
+			foundStatus, foundReply, m.entries[nBefore:])
+	}
+}
+
+// TestPeerLiveSummaryParallelPeers: each peer keeps its own operational state.
+func TestPeerLiveSummaryParallelPeers(t *testing.T) {
+	m := freshModel(t)
+	m.showWelcome = false
+	m.busy = true
+	m.peerLive.Store(true)
+	m.peerActive.Store(2)
+
+	m.ensurePeerBuf("claude")
+	m.ensurePeerBuf("gemini")
+	m.notePeerProgress("claude", "thought")
+	m.notePeerProgress("gemini", "tool")
+
+	sum := stripPeerSummary(m.peerLiveSummaries())
+	lines := strings.Split(sum, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 summary lines, got %d: %q", len(lines), sum)
+	}
+	var claudeLine, geminiLine string
+	for _, ln := range lines {
+		if strings.Contains(ln, "claude") {
+			claudeLine = ln
+		}
+		if strings.Contains(ln, "gemini") {
+			geminiLine = ln
+		}
+	}
+	if claudeLine == "" || geminiLine == "" {
+		t.Fatalf("missing per-peer lines: %q", sum)
+	}
+	if !strings.Contains(claudeLine, "thinking") {
+		t.Fatalf("claude should be thinking: %q", claudeLine)
+	}
+	if !strings.Contains(geminiLine, "using tools") {
+		t.Fatalf("gemini should be using tools: %q", geminiLine)
+	}
+	// One peer starts answering — only that line switches to chars.
+	m.appendPeerDelta("claude", "partial answer")
+	sum = stripPeerSummary(m.peerLiveSummaries())
+	for _, ln := range strings.Split(sum, "\n") {
+		switch {
+		case strings.Contains(ln, "claude"):
+			if !strings.Contains(ln, "chars") || !strings.Contains(ln, "streaming") {
+				t.Fatalf("claude with text should stream chars: %q", ln)
+			}
+		case strings.Contains(ln, "gemini"):
+			if !strings.Contains(ln, "using tools") {
+				t.Fatalf("gemini still tooling: %q", ln)
+			}
+			if strings.Contains(ln, "streaming") {
+				t.Fatalf("gemini must not show streaming without text: %q", ln)
+			}
+		}
+	}
+}
+
+// TestPeerLiveSummaryStragglerProgress: progress after endPeer must not
+// re-arm the peer summary or overwrite the host "writing" label.
+func TestPeerLiveSummaryStragglerProgress(t *testing.T) {
+	m := freshModel(t)
+	m.showWelcome = false
+	m.busy = true
+	m.peerLive.Store(true)
+	m.peerActive.Store(1)
+	m.ensurePeerBuf("opus")
+	m.notePeerProgress("opus", "thought")
+	m.appendPeerDelta("opus", "done reply")
+
+	m.Update(toolUIMsg{endPeer: true, peerAgent: "opus", line: "acp_delegate · 0.1s", name: "acp_delegate"})
+	if m.peerLive.Load() || len(m.peerBufs) != 0 {
+		t.Fatalf("after endPeer: live=%v bufs=%d", m.peerLive.Load(), len(m.peerBufs))
+	}
+	if m.toolCurrent != "writing" {
+		t.Fatalf("after endPeer want writing, got %q", m.toolCurrent)
+	}
+
+	// Straggler thought/tool progress — ignore.
+	m.Update(toolUIMsg{
+		start: true, peerAgent: "opus", peerProgress: "thought",
+		name: "opus: late thinking",
+	})
+	m.Update(toolUIMsg{
+		start: true, peerAgent: "opus", peerProgress: "tool",
+		name: "opus: late tool",
+	})
+	if m.peerLive.Load() || len(m.peerBufs) != 0 {
+		t.Fatalf("straggler re-armed peer: live=%v bufs=%#v", m.peerLive.Load(), m.peerBufs)
+	}
+	if m.toolCurrent != "writing" {
+		t.Fatalf("straggler overwrote toolCurrent: %q", m.toolCurrent)
+	}
+	if got := m.peerLiveSummaries(); got != "" {
+		t.Fatalf("straggler created a live summary: %q", got)
+	}
+}
+
+// TestPeerLiveNote: pure note helper covers pre-answer and answer states.
+func TestPeerLiveNote(t *testing.T) {
+	now := time.Now()
+	started := now.Add(-3 * time.Second)
+
+	if got := peerLiveNote(nil, now); got != "waiting" {
+		t.Fatalf("nil buf: %q", got)
+	}
+	if got := peerLiveNote(&peerLiveBuf{phase: peerPhaseWaiting, startedAt: started}, now); !strings.HasPrefix(got, "waiting · ") {
+		t.Fatalf("waiting: %q", got)
+	}
+	if got := peerLiveNote(&peerLiveBuf{phase: peerPhaseThinking, startedAt: started}, now); !strings.HasPrefix(got, "thinking · ") {
+		t.Fatalf("thinking: %q", got)
+	}
+	if got := peerLiveNote(&peerLiveBuf{phase: peerPhaseTool, startedAt: started}, now); !strings.HasPrefix(got, "using tools · ") {
+		t.Fatalf("tool: %q", got)
+	}
+	// Answer text wins over phase.
+	if got := peerLiveNote(&peerLiveBuf{phase: peerPhaseThinking, full: "hi", buf: "hi"}, now); got != "2 chars · streaming" {
+		t.Fatalf("answer: %q", got)
+	}
+	// No startedAt → no elapsed suffix.
+	if got := peerLiveNote(&peerLiveBuf{phase: peerPhaseThinking}, now); got != "thinking" {
+		t.Fatalf("no elapsed: %q", got)
 	}
 }
