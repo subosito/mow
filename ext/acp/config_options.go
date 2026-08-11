@@ -43,6 +43,7 @@ func (a *agentServer) sessionConfigOptions(ctx context.Context, mode string) []m
 // active model. Returns nil when:
 //   - catalog has no efforts for this model (nothing to switch), or
 //   - only one effort is advertised (gateway fixed tier; no UI switch).
+//
 // Falls back to a static none|low|medium|high list only when the catalog has
 // been loaded but the model has no efforts metadata (plain OpenAI/DeepSeek).
 func (a *agentServer) effortConfigOption() map[string]any {

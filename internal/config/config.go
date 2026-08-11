@@ -227,9 +227,55 @@ type SkillsConfig struct {
 	Explicit []string `yaml:"explicit"`
 }
 
-// Load merges defaults, optional config paths, then environment.
+// Load merges configuration layers with increasing precedence:
+//
+//	defaults → $MOW_HOME/config.yaml → explicit paths → environment
+//	→ trusted project .mow/config.yaml (restricted) → re-applied environment
+//
+// Callers that need a workspace profile overlay should use LoadWithProfile.
+// Explicit Options/CLI applied by the engine after Load still win over all of
+// the above.
 func Load(paths ...string) (*File, error) {
+	return LoadWithProfile("", paths...)
+}
+
+// LoadWithProfile is Load plus an optional workspace profile overlay.
+//
+// Precedence (later wins):
+//
+//	defaults
+//	→ $MOW_HOME/config.yaml          (global user/host config)
+//	→ profile config.yaml            (selected $MOW_HOME/workspaces/<name>)
+//	→ explicit --config paths        (paths argument; later files win)
+//	→ environment
+//	→ trusted project .mow/config.yaml (restricted merge)
+//	→ environment (re-applied so env still beats project)
+//
+// Explicit Options/CLI applied by the engine after Load still win.
+//
+// The profile is operator-owned $MOW_HOME state (more specific than the global
+// file, less specific than an explicit --config path). Environment and
+// Options always beat files. An empty profile or a profile without config.yaml
+// behaves exactly like Load.
+//
+// Extension sections (extensions.*) are whole-section replaced by the last
+// writer — a profile extensions.acp fully replaces the global one rather than
+// deep-merging agent maps.
+func LoadWithProfile(profile string, paths ...string) (*File, error) {
 	f := defaults()
+	// Global user config first among files (lowest precedence after defaults).
+	_ = mergeFile(f, ConfigPath()) // optional; missing is fine
+	// Selected workspace profile: more specific than global, below --config.
+	if profile != "" {
+		if p, found, perr := LoadProfile(profile); perr != nil {
+			return nil, perr
+		} else if found && p.HasConfig() {
+			if err := mergeFile(f, p.ConfigPath()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// Explicit --config / programmatic paths win over global and profile.
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -239,8 +285,6 @@ func Load(paths ...string) (*File, error) {
 			return nil, err
 		}
 	}
-	// default user config ($MOW_HOME/config.yaml, default ~/.mow/config.yaml)
-	_ = mergeFile(f, ConfigPath()) // optional
 	applyEnv(f)
 	if err := f.normalize(); err != nil {
 		return nil, err

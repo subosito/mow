@@ -105,58 +105,84 @@ type lifeHooks struct {
 
 // New builds an Engine from Options (config, tools, optional session resume).
 func New(opt Options) (*Engine, error) {
-	// Packs that register config-driven tools (mcp, lsp) run before
-	// construction; without this a library embedder that blank-imports a pack
-	// would silently get none of its tools. Re-registration is safe —
-	// ext.RegisterTool replaces by name.
-	if err := ext.BeforeNew(opt.ConfigPaths...); err != nil {
+	// --workspace / Options.Workspace is hybrid: first it is looked up as a
+	// workspace profile under $MOW_HOME/workspaces/<name> (workspace.yaml
+	// root + extra_roots, config.yaml overlay, AGENTS.md, skills/);
+	// otherwise it is treated as a plain directory path.
+	//
+	// Resolve the profile before pre-New extension setup so its config.yaml
+	// participates in config-driven registration (e.g. acp_delegate peers).
+	// Path-only BeforeNew hooks receive the profile via OverlayConfigPaths;
+	// the main Load uses LoadWithProfile by name so precedence is:
+	// defaults < global < profile < explicit --config < env < Options.
+	var activeProfile *config.Profile
+	if w := strings.TrimSpace(opt.Workspace); w != "" {
+		profile, found, perr := config.LoadProfile(w)
+		if perr != nil {
+			return nil, perr
+		}
+		if found {
+			activeProfile = &profile
+		}
+	}
+	profilePaths := append([]string(nil), opt.ConfigPaths...)
+	if activeProfile != nil && activeProfile.HasConfig() {
+		profilePaths = activeProfile.OverlayConfigPaths(profilePaths)
+	}
+	if err := ext.BeforeNew(profilePaths...); err != nil {
 		return nil, fmt.Errorf("extension init: %w", err)
 	}
-	cfg, err := config.Load(opt.ConfigPaths...)
+	profileName := ""
+	if activeProfile != nil {
+		profileName = activeProfile.Name
+	}
+	cfg, err := config.LoadWithProfile(profileName, opt.ConfigPaths...)
 	if err != nil {
 		return nil, err
 	}
 	// Explicit Options overrides (do not mutate process env).
-	// --workspace / Options.Workspace is hybrid: first it is looked up as a
-	// named set in $MOW_HOME/workspaces.yaml (root + extra_roots); otherwise
-	// it is treated as a plain directory path. A matched set wins, and its
-	// extra_roots are prepended to policy.extra_roots — explicit --extra-root
-	// flags still append on top.
+	// A matched profile wins for workspace roots; its extra_roots are
+	// prepended to policy.extra_roots — explicit --extra-root flags still
+	// append on top.
 	if w := strings.TrimSpace(opt.Workspace); w != "" {
-		set, names, found, werr := config.LookupWorkspaceSet(w)
-		if werr != nil {
-			return nil, werr
-		}
-		if found {
-			ws, roots, rerr := set.ResolveWorkspaceSet()
-			if rerr != nil {
-				return nil, rerr
-			}
-			var rw, ro []string
-			for _, r := range roots {
-				path, readOnly := config.SplitExtraRootSpec(r)
-				if path == "" {
-					continue
+		if activeProfile != nil {
+			if activeProfile.WorkspaceSet.Root != "" {
+				ws, roots, rerr := activeProfile.WorkspaceSet.ResolveWorkspaceSet()
+				if rerr != nil {
+					return nil, rerr
 				}
-				if readOnly {
-					ro = append(ro, path)
-				} else {
-					rw = append(rw, path)
+				var rw, ro []string
+				for _, r := range roots {
+					path, readOnly := config.SplitExtraRootSpec(r)
+					if path == "" {
+						continue
+					}
+					if readOnly {
+						ro = append(ro, path)
+					} else {
+						rw = append(rw, path)
+					}
 				}
+				cfg.Workspace = ws
+				cfg.Policy.ExtraRoots = append(rw, cfg.Policy.ExtraRoots...)
+				cfg.Policy.ExtraRootsReadOnly = append(ro, cfg.Policy.ExtraRootsReadOnly...)
 			}
-			cfg.Workspace = ws
-			cfg.Policy.ExtraRoots = append(rw, cfg.Policy.ExtraRoots...)
-			cfg.Policy.ExtraRootsReadOnly = append(ro, cfg.Policy.ExtraRootsReadOnly...)
-		} else {
-			// Not a set name. If it is also not a usable directory and sets
-			// are defined, this is likely a set-name typo — list them instead
-			// of silently jail-rooting a bogus path.
+		} else if !config.IsWorkspaceProfileName(w) {
 			if fi, serr := os.Stat(w); serr != nil || !fi.IsDir() {
-				if len(names) > 0 {
-					return nil, fmt.Errorf("workspace %q is not a directory and no workspace set has that name (defined sets: %s)", w, strings.Join(names, ", "))
-				}
+				return nil, fmt.Errorf("workspace %q is not a valid profile name (use a single directory name under $MOW_HOME/workspaces, or an existing directory path)", w)
 			}
 			cfg.Workspace = w
+		} else if fi, serr := os.Stat(w); serr == nil && fi.IsDir() {
+			cfg.Workspace = w
+		} else {
+			names, nerr := config.ListProfiles()
+			if nerr != nil {
+				return nil, nerr
+			}
+			if len(names) > 0 {
+				return nil, fmt.Errorf("workspace profile %q not found and not a directory (defined profiles: %s)", w, strings.Join(names, ", "))
+			}
+			return nil, fmt.Errorf("workspace profile %q not found and not a directory", w)
 		}
 	}
 	if len(opt.ExtraRoots) > 0 {
@@ -274,7 +300,19 @@ func New(opt Options) (*Engine, error) {
 	// Compiled system: harness charter (always) + project AGENTS + skills + Options.SystemAppend.
 	// llm.system_prefix is separate: prepended at request time (may set product identity).
 	agents, _ := contextload.Load(cfg.Workspace)
+	if activeProfile != nil && activeProfile.HasAgents() {
+		if extra, aerr := os.ReadFile(activeProfile.AgentsPath()); aerr == nil {
+			if text := strings.TrimSpace(string(extra)); text != "" {
+				agents = strings.TrimSpace(text + "\n\n" + agents)
+			}
+		}
+	}
 	skillDirs := append([]string(nil), cfg.Skills.Dirs...)
+	// Profile-local skills are the most specific operator-authored skills, so
+	// search them before global/config/project sources.
+	if activeProfile != nil && activeProfile.HasSkills() {
+		skillDirs = append([]string{activeProfile.SkillsDir()}, skillDirs...)
+	}
 	if contextload.ProjectTrusted(cfg.Workspace) {
 		skillDirs = append(skillDirs, filepath.Join(cfg.Workspace, ".mow", "skills"))
 	} else if _, serr := os.Stat(filepath.Join(cfg.Workspace, ".mow")); serr == nil {
@@ -650,6 +688,36 @@ func New(opt Options) (*Engine, error) {
 	}
 
 	return e, nil
+}
+
+// AddTool adds or replaces an engine-scoped extension tool. It is intended for
+// profile-aware extensions that must not leak process-global registrations
+// into other Engines. Builtin names remain reserved.
+func (e *Engine) AddTool(t Tool) error {
+	if e == nil || t == nil {
+		return fmt.Errorf("mow: nil engine/tool")
+	}
+	name := strings.ToLower(strings.TrimSpace(t.Name()))
+	if name == "" {
+		return fmt.Errorf("mow: tool name is required")
+	}
+	if isBuiltin(name) {
+		return fmt.Errorf("mow: cannot replace builtin tool %q", name)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	adapted := adaptTool(t)
+	for idx, existing := range e.tools {
+		if strings.EqualFold(existing.Name(), name) {
+			e.tools[idx] = adapted
+			return nil
+		}
+	}
+	e.tools = append(e.tools, adapted)
+	if ro, ok := any(t).(interface{ ReadOnly() bool }); ok && ro.ReadOnly() {
+		e.readOnlyExt[name] = true
+	}
+	return nil
 }
 
 // Extension decodes extensions.<name> from loaded config into dst.

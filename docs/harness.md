@@ -357,7 +357,7 @@ tool means its model id isn't set or its name isn't in `tools.enable`.
 
 ## 7. Config and trust
 
-Load order: defaults → explicit `--config` paths → `$MOW_HOME/config.yaml` (default `~/.mow/config.yaml`) → env → trusted project `.mow/config.yaml`.
+Load order: defaults → `$MOW_HOME/config.yaml` (default `~/.mow/config.yaml`) → selected profile `config.yaml` → explicit `--config` paths → env → trusted project `.mow/config.yaml` (restricted) → env again → explicit Options/CLI.
 
 `MOW_HOME` relocates the user data root (config, sessions, skills, global `AGENTS.md`). Default is `~/.mow`. Useful for tests/CI: `MOW_HOME=$(mktemp -d)`.
 
@@ -395,34 +395,31 @@ Workspace, power tools, stream, media models → **yaml** and/or **CLI flags** (
 | Embed | `Options.ExtraRoots` / `Options.Workspace` (set name) |
 | Project `.mow/config` | **Not allowed** (stripped like credentials / power tools) |
 
-**Workspace sets** group one workspace with its extra roots so a fixed
-multi-directory layout is one flag instead of repeated `--extra-root`. Sets
-are named in `$MOW_HOME/workspaces.yaml`:
+**Workspace profiles** bundle an operator-owned workspace under
+`$MOW_HOME/workspaces/<name>/`:
+
+```text
+$MOW_HOME/workspaces/monorepo/
+├── workspace.yaml   # root + extra_roots
+├── config.yaml      # optional normal mow config overlay
+├── AGENTS.md        # optional operator instructions
+└── skills/          # optional <name>/SKILL.md entries
+```
 
 ```yaml
-# $MOW_HOME/workspaces.yaml
-workspaces:
-  monorepo:
-    root: ~/code/app          # the workspace's main root
-    extra_roots:
-      - ~/code/shared         # read-write
-      - ~/code/vendor:ro      # read-only
+# workspace.yaml
+root: ~/code/app
+extra_roots:
+  - ~/code/shared
+  - ~/code/vendor:ro
 ```
 
-`--workspace` is hybrid: it is first looked up as a set name there, and
-treated as a plain directory path otherwise. So the same flag covers both:
-
-```
-mow tty --workspace monorepo          # set name → workspace + roots
-mow run --workspace /tmp/ci-checkout  # plain path (CI one-shots)
-```
-
-Within a set, the workspace resolves against the cwd, relative roots resolve
-against the workspace, and `:ro` / `:rw` suffixes work like `--extra-root`.
-A matched set name wins over an existing directory of the same name; a
-non-path that matches no set errors with the defined names. Explicit
-`--extra-root` flags still append on top of the set's roots. Sets live under
-`$MOW_HOME` (never inside a workspace), so project config cannot grant roots.
+`--workspace` is hybrid: a profile name selects this bundle; an existing
+directory remains a plain workspace path. The legacy `$MOW_HOME/workspaces.yaml`
+registry is no longer loaded. Profile `config.yaml` is operator-controlled and
+may configure normal host settings including profile-scoped `extensions.acp`
+`agents` and `mow_agents`. Profile skills take precedence over global/configured
+and trusted project skills with the same name.
 
 Relative tool paths resolve against the primary `--workspace`. **Absolute** paths are
 allowed under the workspace or an extra root. The system prompt lists configured

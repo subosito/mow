@@ -12,8 +12,24 @@ import (
 // Load walks from workspace up to root collecting AGENTS.md and CLAUDE.md,
 // then prepends optional global $MOW_HOME/AGENTS.md (default ~/.mow/AGENTS.md).
 func Load(workspace string) (string, error) {
+	return LoadWithExtras(workspace)
+}
+
+// LoadWithExtras is Load with extra AGENTS-style files inserted between the
+// global $MOW_HOME/AGENTS.md and the workspace chain (e.g. a workspace
+// profile's AGENTS.md: more specific than global, less than the workspace).
+func LoadWithExtras(workspace string, extraPaths ...string) (string, error) {
 	var parts []string
 	if b, err := os.ReadFile(config.AgentsPath()); err == nil {
+		if s := strings.TrimSpace(string(b)); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	for _, p := range extraPaths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
 		if s := strings.TrimSpace(string(b)); s != "" {
 			parts = append(parts, s)
 		}

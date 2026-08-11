@@ -27,9 +27,9 @@ func TestFormatPeerToolProgress(t *testing.T) {
 
 func TestToolCallKindTitle(t *testing.T) {
 	cases := []struct {
-		tool, args   string
-		wantKind     string
-		wantTitle    string
+		tool, args string
+		wantKind   string
+		wantTitle  string
 	}{
 		{"read", `{"path":"engine.go"}`, "read", "engine.go"},
 		{"grep", `{"pattern":"TODO","path":"pkg/"}`, "grep", "TODO in pkg/"},

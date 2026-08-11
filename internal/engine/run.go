@@ -41,7 +41,7 @@ type Options struct {
 	// logs without touching the process-global default.
 	Logger *slog.Logger
 	// Workspace overrides config/env workspace when non-empty. Hybrid: a set
-	// name from $MOW_HOME/workspaces.yaml (root + extra_roots) or a plain
+	// profile name from $MOW_HOME/workspaces/<name> (root + extra_roots) or a plain
 	// directory path. A matched set name wins over an existing directory of
 	// the same name.
 	Workspace string

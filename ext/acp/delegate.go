@@ -62,9 +62,15 @@ var (
 	sharedDelegate *delegateTool
 )
 
-// RegisterFromConfig loads config (same paths as mow.New) and registers
-// acp_delegate when agents and/or mow_agents are non-empty.
+// RegisterFromConfig loads config (same path list as mow.New / BeforeNew) and
+// registers acp_delegate when agents and/or mow_agents are non-empty.
 // Must run *before* mow.New so the tool is in the registry.
+//
+// Each call builds a fresh tool from the effective config (replace, not merge)
+// so a profile's extensions.acp fully replaces a previous Engine's peers and
+// does not accumulate into a process-global agent map. Prefer
+// RegisterFromEngine after New when engine-scoped isolation is required
+// (concurrent Engines in one process).
 func RegisterFromConfig(configPaths ...string) error {
 	cfg, err := config.Load(configPaths...)
 	if err != nil {
@@ -78,12 +84,13 @@ func RegisterFromConfig(configPaths ...string) error {
 	if err != nil {
 		return err
 	}
-	AppendAgents(agents, cfg.Workspace, c.PeerIdleSec)
-	return nil
+	return replaceSharedAgents(agents, cfg.Workspace, c.PeerIdleSec)
 }
 
 // RegisterFromEngine is like RegisterFromConfig using an already-built engine's
-// extension section. Prefer RegisterFromConfig before New; this is for tests.
+// extension section. The tool is engine-scoped (AddTool) so concurrent Engines
+// do not share peer state. Prefer this when an Engine already exists; use
+// RegisterFromConfig only from BeforeNew path-only hooks.
 func RegisterFromEngine(eng *mow.Engine) error {
 	if eng == nil {
 		return fmt.Errorf("acp: nil engine")
@@ -96,14 +103,46 @@ func RegisterFromEngine(eng *mow.Engine) error {
 	if err != nil {
 		return err
 	}
-	AppendAgents(agents, eng.Workspace(), c.PeerIdleSec)
+	indexed := indexAgents(agents)
+	if len(indexed) == 0 {
+		return nil
+	}
+	return eng.AddTool(&delegateTool{
+		agents:    indexed,
+		workspace: eng.Workspace(),
+		peerIdle:  peerIdleDuration(c.PeerIdleSec),
+		peers:     map[string]*peerSlot{},
+	})
+}
+
+// replaceSharedAgents installs a new process-global acp_delegate from the
+// given agent list (full replace). Used by RegisterFromConfig so each
+// BeforeNew reflects only the current effective config.
+func replaceSharedAgents(agents []AgentSpec, workspace string, peerIdleSec int) error {
+	indexed := indexAgents(agents)
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if len(indexed) == 0 {
+		sharedDelegate = nil
+		return nil
+	}
+	sharedDelegate = &delegateTool{
+		agents:    indexed,
+		workspace: strings.TrimSpace(workspace),
+		peerIdle:  peerIdleDuration(peerIdleSec),
+		peers:     map[string]*peerSlot{},
+	}
+	ext.RegisterTool(sharedDelegate)
 	return nil
 }
 
 // AppendAgents merges peer specs into acp_delegate (creating the tool if needed).
-// Used by extensions.acp and by other packs (e.g. ops profiles) for self-contained
-// agent lists. Empty list is a no-op. peerIdleSec: 0 = default, -1 = no idle drop;
-// only applied when the shared tool is first created.
+// Used by packs (e.g. ops profiles) that add peers on top of an existing
+// registration. Empty list is a no-op. peerIdleSec: 0 = default, -1 = no idle
+// drop; only applied when the shared tool is first created.
+//
+// Prefer RegisterFromConfig / RegisterFromEngine for full config-driven
+// registration — those replace rather than accumulate.
 func AppendAgents(agents []AgentSpec, workspace string, peerIdleSec int) {
 	indexed := indexAgents(agents)
 	if len(indexed) == 0 {
@@ -176,7 +215,7 @@ type delegateTool struct {
 	peers   map[string]*peerSlot // key: agent\x00dir
 }
 
-func (t *delegateTool) Name() string { return "acp_delegate" }
+func (t *delegateTool) Name() string    { return "acp_delegate" }
 func (t *delegateTool) Untrusted() bool { return true }
 func (t *delegateTool) Description() string {
 	names := make([]string, 0, len(t.agents))
