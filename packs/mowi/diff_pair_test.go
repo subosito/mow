@@ -413,8 +413,8 @@ func TestDiffUnevenRunsKeepEveryLine(t *testing.T) {
 	}
 }
 
-// Within a replaced pair, only the words that actually changed are emphasised,
-// so a one-token edit is findable without eyeballing both lines.
+// Within a replaced pair, only the words that actually changed are emphasised
+// (inverted chip / bold); shared tokens recede on the soft band.
 func TestDiffWordEmphasisMarksOnlyChangedWords(t *testing.T) {
 	t.Setenv("MOW_FORCE_COLOR", "1")
 	th := newTheme()
@@ -433,27 +433,34 @@ func TestDiffWordEmphasisMarksOnlyChangedWords(t *testing.T) {
 	if oldRow == "" || newRow == "" {
 		t.Fatalf("rows missing:\n%s", out)
 	}
-	// The changed token carries bold (SGR 1); shared words do not.
-	boldBefore := func(row, token string) bool {
-		i := strings.Index(xansi.Strip(row), token)
-		if i < 0 {
-			return false
+	// Changed token: bold and/or solid chip background.
+	chipOn := func(row, token string) bool {
+		for _, seg := range strings.Split(row, "\x1b[") {
+			if !strings.Contains(seg, token) {
+				continue
+			}
+			return strings.HasPrefix(seg, "1;") || strings.Contains(seg, ";1;") ||
+				strings.Contains(seg, "48;2;") || strings.HasPrefix(seg, "1m")
 		}
-		// Find the styled span that renders this token.
+		return false
+	}
+	boldOnly := func(row, token string) bool {
 		for _, seg := range strings.Split(row, "\x1b[") {
 			if strings.Contains(seg, token) {
-				return strings.HasPrefix(seg, "1;") || strings.Contains(seg, ";1;")
+				return strings.HasPrefix(seg, "1;") || strings.Contains(seg, ";1;") ||
+					strings.HasPrefix(seg, "1m")
 			}
 		}
 		return false
 	}
-	if !boldBefore(oldRow, "30") {
+	if !chipOn(oldRow, "30") {
 		t.Fatalf("changed word not emphasised on the removed row: %q", oldRow)
 	}
-	if !boldBefore(newRow, "60") {
+	if !chipOn(newRow, "60") {
 		t.Fatalf("changed word not emphasised on the added row: %q", newRow)
 	}
-	if boldBefore(oldRow, "time.Second") {
+	// "time" is shared; must not carry the bold chip.
+	if boldOnly(oldRow, "time") {
 		t.Fatalf("unchanged word emphasised: %q", oldRow)
 	}
 }

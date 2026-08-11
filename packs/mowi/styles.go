@@ -39,12 +39,18 @@ type theme struct {
 	// the block background — no separate timestamp row).
 	StampUser lipgloss.Style
 	// Diff styles: code-review card (tinted rows + gutter), not raw git.
-	DiffAdd  lipgloss.Style // + line (fg on soft bg when set)
-	DiffDel  lipgloss.Style // − line
-	DiffMeta lipgloss.Style // hunk headers / stats
-	DiffNum  lipgloss.Style // line-number gutter
-	DiffCtx  lipgloss.Style // unchanged context line
-	Sep      lipgloss.Style
+	DiffAdd lipgloss.Style // + line (fg on soft bg when set)
+	DiffDel lipgloss.Style // − line
+	// Soft variants: unchanged word-segs on a changed row (shared tokens recede).
+	DiffAddSoft lipgloss.Style
+	DiffDelSoft lipgloss.Style
+	// Word chips: inverted accent band for the tokens that actually changed.
+	DiffWordAdd lipgloss.Style
+	DiffWordDel lipgloss.Style
+	DiffMeta    lipgloss.Style // hunk headers / stats
+	DiffNum     lipgloss.Style // line-number gutter
+	DiffCtx     lipgloss.Style // unchanged context line (restrained ink)
+	Sep         lipgloss.Style
 	// SlashCmd colors /commands in the input field.
 	SlashCmd lipgloss.Style
 	// palette is the hex token set shared by chrome and glamour markdown.
@@ -624,12 +630,31 @@ func buildTheme(name string, p palette, mdDark bool, chroma string) theme {
 		StampUser:   lipgloss.NewStyle().Background(c(p.userBg)).Foreground(c(p.muted)),
 		DiffAdd:     diffAddStyle(c, p, mdDark),
 		DiffDel:     diffDelStyle(c, p, mdDark),
+		DiffAddSoft: diffSoftSegStyle(c, p.add, p.addBg, p, mdDark),
+		DiffDelSoft: diffSoftSegStyle(c, p.del, p.delBg, p, mdDark),
+		DiffWordAdd: diffWordStyle(c, p.add, p.userBg, mdDark),
+		DiffWordDel: diffWordStyle(c, p.del, p.userBg, mdDark),
 		DiffMeta:    lipgloss.NewStyle().Foreground(c(p.meta)),
 		DiffNum:     lipgloss.NewStyle().Foreground(c(p.muted)).Faint(true),
-		DiffCtx:     lipgloss.NewStyle().Foreground(c(p.fg)),
-		Sep:         lipgloss.NewStyle().Foreground(c(p.border)),
-		SlashCmd:    lipgloss.NewStyle().Foreground(c(p.slash)).Bold(true),
+		// Context body uses restrained ink so plain text is not harsh white;
+		// add/del bands + signs still carry change direction.
+		DiffCtx:  lipgloss.NewStyle().Foreground(c(softDiffInk(p))),
+		Sep:      lipgloss.NewStyle().Foreground(c(p.border)),
+		SlashCmd: lipgloss.NewStyle().Foreground(c(p.slash)).Bold(true),
 	}
+}
+
+// softDiffInk is the body colour for context and default syntax text: mostly
+// muted, slightly lifted toward fg so it stays readable without reading as
+// pure white/black chrome.
+func softDiffInk(p palette) string {
+	if p.muted != "" && p.fg != "" {
+		return mixHex(p.muted, p.fg, 0.28)
+	}
+	if p.muted != "" {
+		return p.muted
+	}
+	return p.fg
 }
 
 // Soft row backgrounds from the theme palette (not fixed green/red hex).
@@ -655,6 +680,49 @@ func diffDelStyle(c func(string) color.Color, p palette, dark bool) lipgloss.Sty
 		st = st.Background(c(bg))
 	}
 	return st
+}
+
+// diffSoftSegStyle is the shared-token style on a changed row: same band as
+// the full line, but ink pulled toward the band so unchanged words recede.
+func diffSoftSegStyle(c func(string) color.Color, accent, overrideBg string, p palette, dark bool) lipgloss.Style {
+	bg := resolveDiffBg(overrideBg, accent, p, dark)
+	st := lipgloss.NewStyle()
+	if accent != "" {
+		fg := diffFgOn(accent, bg, dark)
+		if bg != "" && fg != "" {
+			fg = mixHex(fg, bg, 0.40)
+		}
+		st = st.Foreground(c(fg))
+	}
+	if bg != "" {
+		st = st.Background(c(bg))
+	}
+	return st
+}
+
+// diffWordStyle is the changed-token chip (flashdiff-style invert): solid
+// accent background with surface ink so the edit is the loudest mark on the row.
+func diffWordStyle(c func(string) color.Color, accent, surface string, dark bool) lipgloss.Style {
+	if accent == "" {
+		return lipgloss.NewStyle().Bold(true)
+	}
+	ink := surface
+	if ink == "" {
+		if dark {
+			ink = "#1e1e2e"
+		} else {
+			ink = "#f3f4f6"
+		}
+	}
+	// Solid accents that are too dark/light for the surface need a flip.
+	if contrastRatio(ink, accent) < 3.0 {
+		if hexBrightness(accent) > 0.55 {
+			ink = "#0a0a0a"
+		} else {
+			ink = "#fafafa"
+		}
+	}
+	return lipgloss.NewStyle().Foreground(c(ink)).Background(c(accent)).Bold(true)
 }
 
 // Diff row banding thresholds, in WCAG contrast ratio (1.0 = identical).

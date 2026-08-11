@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
@@ -413,18 +414,19 @@ func formatDiffRowPre(th theme, g diffGutter, bodyStyle lipgloss.Style, oldN, ne
 	return clipDiffRow(gutter+styledBody, width)
 }
 
-// emphasizeWordDiff styles a replaced pair so the changed words stand out from
-// the words both lines share.
+// diffSeg is one intraline span for word-aware emphasis on a paired replace.
+type diffSeg struct {
+	text    string
+	changed bool
+}
+
+// emphasizeWordDiff styles a replaced pair so changed tokens stand out and
+// shared tokens recede (flashdiff-style chips + soft band ink).
 //
-// A one-token edit ("timeout 30" → "timeout 60") otherwise paints two fully
-// tinted lines and the reader has to diff them by eye. Shared prefix/suffix
-// words render in the row's base tint; the differing middle is bold, so the
-// actual edit is findable at a glance.
-//
-// Falls back to plain whole-line tint when the lines share nothing (a genuine
-// rewrite), where per-word emphasis would just add noise.
+// Tokenisation is whitespace/punctuation/identifier aware (not space-only),
+// and pairing uses LCS so a mid-line edit does not force a full rewrite paint.
+// Falls back to whole-line tint when nothing is shared or under NO_COLOR.
 func emphasizeWordDiff(th theme, oldBody, newBody string) (oldText, newText string) {
-	delStyle, addStyle := th.DiffDel, th.DiffAdd
 	plain := func() (string, string) {
 		o, n := oldBody, newBody
 		if o == "" {
@@ -433,73 +435,186 @@ func emphasizeWordDiff(th theme, oldBody, newBody string) (oldText, newText stri
 		if n == "" {
 			n = " "
 		}
-		return delStyle.Render(o), addStyle.Render(n)
+		return th.DiffDel.Render(o), th.DiffAdd.Render(n)
 	}
 	if oldBody == "" || newBody == "" {
 		return plain()
 	}
-	// Under NO_COLOR the row band is already plain; bold mid-spans would still
-	// emit SGR and break the no-color contract for copied transcripts.
+	// Under NO_COLOR chips/SGR would still emit; keep plain text only.
 	if noColor() {
 		return plain()
 	}
 
-	oldWords, newWords := splitDiffWords(oldBody), splitDiffWords(newBody)
-	// Common prefix, then common suffix over what remains.
-	pre := 0
-	for pre < len(oldWords) && pre < len(newWords) && oldWords[pre] == newWords[pre] {
-		pre++
-	}
-	suf := 0
-	for suf < len(oldWords)-pre && suf < len(newWords)-pre &&
-		oldWords[len(oldWords)-1-suf] == newWords[len(newWords)-1-suf] {
-		suf++
-	}
-	// Nothing shared, or everything shared: whole-line tint is clearer.
-	if pre == 0 && suf == 0 {
+	oldSegs, newSegs, ok := wordDiffSegs(oldBody, newBody)
+	if !ok {
 		return plain()
 	}
-	if pre == len(oldWords) && pre == len(newWords) {
-		return plain()
-	}
-
-	build := func(words []string, base lipgloss.Style) string {
-		mid := base.Bold(true)
-		var b strings.Builder
-		for i, w := range words {
-			if i < pre || i >= len(words)-suf {
-				b.WriteString(base.Render(w))
-				continue
-			}
-			b.WriteString(mid.Render(w))
-		}
-		return b.String()
-	}
-	return build(oldWords, delStyle), build(newWords, addStyle)
+	return paintDiffBodySegs(th.DiffDelSoft, th.DiffWordDel, oldSegs, 0),
+		paintDiffBodySegs(th.DiffAddSoft, th.DiffWordAdd, newSegs, 0)
 }
 
-// splitDiffWords splits a line into words that keep their trailing whitespace,
-// so joining the pieces reproduces the line exactly (indentation included).
-func splitDiffWords(s string) []string {
+// wordDiffSegs tokenises both sides and pairs them with LCS. ok is false when
+// the lines share nothing useful (full rewrite) or are identical.
+func wordDiffSegs(oldBody, newBody string) (oldSegs, newSegs []diffSeg, ok bool) {
+	if oldBody == newBody {
+		return nil, nil, false
+	}
+	ot, nt := splitDiffTokens(oldBody), splitDiffTokens(newBody)
+	if len(ot) == 0 || len(nt) == 0 {
+		return nil, nil, false
+	}
+	oldSegs, newSegs = tokenLCSSegs(ot, nt)
+	var substantive, changed int
+	count := func(segs []diffSeg) {
+		for _, s := range segs {
+			if s.changed {
+				changed++
+				continue
+			}
+			// Whitespace-only equals do not count as structure; "alpha beta" vs
+			// "gamma delta" shares a space but is still a full rewrite.
+			if strings.TrimSpace(s.text) != "" {
+				substantive++
+			}
+		}
+	}
+	count(oldSegs)
+	count(newSegs)
+	// No substantive shared tokens → whole-line tint is clearer than chips.
+	if substantive == 0 {
+		return nil, nil, false
+	}
+	// Nothing actually marked changed (shouldn't happen when texts differ).
+	if changed == 0 {
+		return nil, nil, false
+	}
+	return oldSegs, newSegs, true
+}
+
+// splitDiffTokens splits a line into lossless tokens: whitespace runs,
+// identifier runs (letter/digit/_/Unicode letter or number), and single
+// punctuation/symbol runes. Joining reproduces the line exactly.
+//
+// Space-only splitting (flashdiff) treats "foo(x)" as one token; punctuation
+// awareness lets "foo(x)" vs "foo(y)" chip only the argument.
+func splitDiffTokens(s string) []string {
+	if s == "" {
+		return nil
+	}
 	var out []string
 	var cur strings.Builder
-	inSpace := false
-	for _, r := range s {
-		isSpace := r == ' ' || r == '\t'
-		if isSpace {
-			inSpace = true
-			cur.WriteRune(r)
-			continue
-		}
-		if inSpace {
+	// kind: 0 none, 1 space, 2 word, 3 other (flush each other rune alone)
+	kind := 0
+	flush := func() {
+		if cur.Len() > 0 {
 			out = append(out, cur.String())
 			cur.Reset()
-			inSpace = false
 		}
-		cur.WriteRune(r)
+		kind = 0
 	}
-	if cur.Len() > 0 {
-		out = append(out, cur.String())
+	for _, r := range s {
+		switch {
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			if kind != 1 {
+				flush()
+				kind = 1
+			}
+			cur.WriteRune(r)
+		case isDiffWordRune(r):
+			if kind != 2 {
+				flush()
+				kind = 2
+			}
+			cur.WriteRune(r)
+		default:
+			// Each punctuation/symbol is its own token so ", " stays
+			// separable from identifiers and edits land on the right glyph.
+			flush()
+			out = append(out, string(r))
+		}
+	}
+	flush()
+	return out
+}
+
+// splitDiffWords is the historical space/tab splitter. Kept as a thin alias
+// for older tests that assert whitespace-preserving splits; new paint paths
+// use splitDiffTokens.
+func splitDiffWords(s string) []string {
+	return splitDiffTokens(s)
+}
+
+func isDiffWordRune(r rune) bool {
+	if r == '_' {
+		return true
+	}
+	// ASCII fast path, then unicode for identifiers like café / α1.
+	if r <= 0x7f {
+		return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+	}
+	return unicode.IsLetter(r) || unicode.IsNumber(r)
+}
+
+// tokenLCSSegs pairs two token slices via LCS and merges adjacent equal-kind
+// spans. Pure stdlib; lines are short so O(n·m) is fine.
+func tokenLCSSegs(a, b []string) (as, bs []diffSeg) {
+	n, m := len(a), len(b)
+	// dp[i][j] = LCS length of a[i:] and b[j:].
+	dp := make([][]int, n+1)
+	for i := range dp {
+		dp[i] = make([]int, m+1)
+	}
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			if a[i] == b[j] {
+				dp[i][j] = dp[i+1][j+1] + 1
+			} else if dp[i+1][j] >= dp[i][j+1] {
+				dp[i][j] = dp[i+1][j]
+			} else {
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+	i, j := 0, 0
+	for i < n && j < m {
+		if a[i] == b[j] {
+			as = append(as, diffSeg{text: a[i]})
+			bs = append(bs, diffSeg{text: b[j]})
+			i++
+			j++
+			continue
+		}
+		if dp[i+1][j] >= dp[i][j+1] {
+			as = append(as, diffSeg{text: a[i], changed: true})
+			i++
+		} else {
+			bs = append(bs, diffSeg{text: b[j], changed: true})
+			j++
+		}
+	}
+	for ; i < n; i++ {
+		as = append(as, diffSeg{text: a[i], changed: true})
+	}
+	for ; j < m; j++ {
+		bs = append(bs, diffSeg{text: b[j], changed: true})
+	}
+	return mergeDiffSegs(as), mergeDiffSegs(bs)
+}
+
+func mergeDiffSegs(in []diffSeg) []diffSeg {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]diffSeg, 0, len(in))
+	for _, s := range in {
+		if s.text == "" {
+			continue
+		}
+		if n := len(out); n > 0 && out[n-1].changed == s.changed {
+			out[n-1].text += s.text
+			continue
+		}
+		out = append(out, s)
 	}
 	return out
 }

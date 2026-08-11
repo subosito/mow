@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/alecthomas/chroma/v2/styles"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -17,9 +16,9 @@ import (
 // body style (background wash + base fg); this layer only injects token
 // foregrounds so keywords stay legible without drowning the green/red band.
 //
-// NO_COLOR / blank palette → paint returns "" (caller uses plain style).
-// Unknown lexer → paint returns "" (no Fallback lexer; silence is safer than
-// a wrong language paint).
+// Diff syntax always uses the theme palette (not theme.code fence splash):
+// fenced monokai/etc. can paint pure white identifiers, which is harsh on a
+// review band. Unknown lexer / NO_COLOR → paint returns "" (plain base style).
 type diffHighlighter struct {
 	style *chroma.Style
 	mu    sync.Mutex
@@ -30,21 +29,25 @@ func newDiffHighlighter(th theme) *diffHighlighter {
 	if noColor() {
 		return &diffHighlighter{}
 	}
-	var st *chroma.Style
-	if th.chromaStyle != "" {
-		st = styles.Get(th.chromaStyle)
-	}
+	// Always palette-derived for diffs: theme-integrated and restrained.
+	// (theme.code still drives markdown fences; diffs need quieter ink.)
+	st := paletteChromaStyle(th.palette)
 	if st == nil {
-		// Palette-derived style (same tokens as markdown fences).
-		st = paletteChromaStyle(th.palette)
+		return &diffHighlighter{}
 	}
 	return &diffHighlighter{style: st, cache: make(map[string]chroma.Lexer)}
 }
 
 // paletteChromaStyle builds a quiet chroma style from the theme palette.
+// Base text uses softDiffInk (not full fg) so identifiers are not harsh white;
+// keywords/strings/numbers keep accent/meta for scanability.
 func paletteChromaStyle(p palette) *chroma.Style {
-	if p.fg == "" {
+	soft := softDiffInk(p)
+	if soft == "" && p.fg == "" {
 		return nil
+	}
+	if soft == "" {
+		soft = p.fg
 	}
 	sb := chroma.NewStyleBuilder("mow-diff")
 	add := func(t chroma.TokenType, hex string) {
@@ -53,7 +56,14 @@ func paletteChromaStyle(p palette) *chroma.Style {
 		}
 		_ = sb.Add(t, "#"+strings.TrimPrefix(hex, "#"))
 	}
-	add(chroma.Text, p.fg)
+	// Quiet base — plain identifiers recede.
+	add(chroma.Text, soft)
+	add(chroma.Name, soft)
+	add(chroma.NameBuiltin, soft)
+	add(chroma.NameFunction, soft)
+	add(chroma.NameVariable, soft)
+	add(chroma.NameOther, soft)
+	// Structure and literals stay scannable but not neon.
 	add(chroma.Comment, p.muted)
 	add(chroma.CommentPreproc, p.muted)
 	add(chroma.Keyword, p.accent)
@@ -62,19 +72,14 @@ func paletteChromaStyle(p palette) *chroma.Style {
 	add(chroma.KeywordType, p.meta)
 	add(chroma.Operator, p.muted)
 	add(chroma.Punctuation, p.muted)
-	add(chroma.Name, p.fg)
-	add(chroma.NameBuiltin, p.fg)
 	add(chroma.NameTag, p.accent)
 	add(chroma.NameAttribute, p.meta)
 	add(chroma.NameClass, p.accent)
 	add(chroma.NameDecorator, p.meta)
-	add(chroma.NameFunction, p.fg)
+	add(chroma.NameConstant, p.meta)
 	add(chroma.LiteralNumber, p.meta)
 	add(chroma.LiteralString, p.meta)
 	add(chroma.LiteralStringEscape, p.accent)
-	if p.fg != "" {
-		_ = sb.Add(chroma.Background, p.fg)
-	}
 	s, _ := sb.Build()
 	return s
 }
@@ -181,4 +186,36 @@ func paintDiffBody(th theme, hl *diffHighlighter, path, body string, base lipglo
 	}
 	_ = th
 	return painted
+}
+
+// paintDiffBodySegs paints a body from word-diff segments: changed tokens use
+// the inverted word chip; shared tokens use soft base (de-emphasised). No
+// chroma on segmented rows — the chip is the primary signal.
+//
+// width > 0 pads with soft so the band spans the cell.
+func paintDiffBodySegs(soft, word lipgloss.Style, segs []diffSeg, width int) string {
+	if len(segs) == 0 {
+		return soft.Render(" ")
+	}
+	var b strings.Builder
+	for _, s := range segs {
+		if s.text == "" {
+			continue
+		}
+		if s.changed {
+			b.WriteString(word.Render(s.text))
+		} else {
+			b.WriteString(soft.Render(s.text))
+		}
+	}
+	out := b.String()
+	if out == "" {
+		out = soft.Render(" ")
+	}
+	if width > 0 {
+		if pad := width - xansi.StringWidth(out); pad > 0 {
+			out += soft.Render(strings.Repeat(" ", pad))
+		}
+	}
+	return out
 }

@@ -345,8 +345,16 @@ func renderDiffSplit(th theme, d diffModel, opt diffPaintOpts) (string, bool) {
 			b.WriteString(renderSplitMeta(th, g, *p.Left, width))
 			continue
 		}
-		left := renderSplitCell(th, hl, opt.Path, g, p.Left, colW, bodyW, true)
-		right := renderSplitCell(th, hl, opt.Path, g, p.Right, colW, bodyW, false)
+		// Word chips on paired del|add cells (same segmentation as unified).
+		var leftSegs, rightSegs []diffSeg
+		if p.Left != nil && p.Right != nil &&
+			p.Left.Op == dOpDel && p.Right.Op == dOpAdd && !noColor() {
+			oBody := expandDiffTabs(p.Left.Text, 4)
+			nBody := expandDiffTabs(p.Right.Text, 4)
+			leftSegs, rightSegs, _ = wordDiffSegs(oBody, nBody)
+		}
+		left := renderSplitCell(th, hl, opt.Path, g, p.Left, colW, bodyW, true, leftSegs)
+		right := renderSplitCell(th, hl, opt.Path, g, p.Right, colW, bodyW, false, rightSegs)
 		// Pad columns to colW in display cells so the divider stays vertical.
 		left = padDiffCell(left, colW)
 		right = padDiffCell(right, colW)
@@ -374,7 +382,7 @@ func renderSplitMeta(th theme, g diffGutter, ml diffModelLine, width int) string
 	}
 }
 
-func renderSplitCell(th theme, hl *diffHighlighter, path string, g diffGutter, ml *diffModelLine, colW, bodyW int, left bool) string {
+func renderSplitCell(th theme, hl *diffHighlighter, path string, g diffGutter, ml *diffModelLine, colW, bodyW int, left bool, segs []diffSeg) string {
 	if ml == nil {
 		return strings.Repeat(" ", colW)
 	}
@@ -420,14 +428,22 @@ func renderSplitCell(th theme, hl *diffHighlighter, path string, g diffGutter, m
 		}
 	}
 	// Truncate body to bodyW display cells before styling.
+	// Word segs: truncate the joined plain text, then drop segs that no longer fit.
 	if xansi.StringWidth(body) > bodyW {
 		body = xansi.Truncate(body, bodyW, "…")
+		segs = nil // geometry first; chips on a truncated line are misleading
 	}
 	var styled string
 	if ml.Op == dOpAdd || ml.Op == dOpDel {
 		numStyle := diffNumTint(th, style)
 		gutter := numStyle.Render(g.prefix(num, sign))
-		if hl != nil {
+		if len(segs) > 0 {
+			soft, word := th.DiffDelSoft, th.DiffWordDel
+			if ml.Op == dOpAdd {
+				soft, word = th.DiffAddSoft, th.DiffWordAdd
+			}
+			styled = paintDiffBodySegs(soft, word, segs, bodyW)
+		} else if hl != nil {
 			styled = paintDiffBody(th, hl, path, body, style, bodyW)
 		} else {
 			if body == "" {

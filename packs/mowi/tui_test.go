@@ -885,13 +885,15 @@ func TestDiffEntryRendersPathAndHunk(t *testing.T) {
 	raw.add(kindDiff, "edited f.go\n--- f.go\n+++ f.go\n@@\n-func A() {}\n+func B() {}\n")
 	raw.refreshVP()
 	content := raw.vp.View()
-	if !strings.Contains(content, "f.go") {
-		t.Fatalf("filename missing: %q", content)
+	// Strip SGR: word chips insert sequences between tokens ("func" / "A" / "()"),
+	// so raw substring checks for "func A" are brittle under real paint.
+	plain := xansi.Strip(content)
+	if !strings.Contains(plain, "f.go") {
+		t.Fatalf("filename missing: %q", plain)
 	}
-	if !strings.Contains(content, "func A") && !strings.Contains(content, "func B") {
-		// ANSI may split tokens; check markers
-		if !strings.Contains(content, "A()") && !strings.Contains(content, "B()") {
-			t.Fatalf("hunk missing: %q", content)
+	if !strings.Contains(plain, "func A") && !strings.Contains(plain, "func B") {
+		if !strings.Contains(plain, "A()") && !strings.Contains(plain, "B()") {
+			t.Fatalf("hunk missing: %q", plain)
 		}
 	}
 }
