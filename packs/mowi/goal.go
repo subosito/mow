@@ -2,6 +2,7 @@ package mowi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -226,7 +227,7 @@ func (m *model) handleGoalSlash(parts []string) tea.Cmd {
 					st.ID, st.Status, st.Step, st.MaxSteps, short(st.Goal, 40))
 			}
 		}
-		b.WriteString("run: /goal run <id>   status: /goal status <id>   facts: /goal facts <id>   board: /goal board   worktrees: /goal worktrees")
+		b.WriteString("run: /goal run <id>   status: /goal status <id>   remove: /goal remove <id> [--force]   facts: /goal facts <id>   board: /goal board   worktrees: /goal worktrees")
 		m.add(kindStatus, strings.TrimRight(b.String(), "\n"))
 		m.refreshVP()
 		return nil
@@ -339,6 +340,58 @@ func (m *model) handleGoalSlash(parts []string) tea.Cmd {
 			return nil
 		}
 		return m.startGoalRun(args[1], "", 0)
+
+	case "remove", "delete", "rm":
+		if len(args) < 2 || strings.TrimSpace(args[1]) == "" {
+			m.add(kindError, "usage: /goal remove <id> [--force]")
+			m.refreshVP()
+			return nil
+		}
+		id := strings.TrimSpace(args[1])
+		force := false
+		for _, a := range args[2:] {
+			if a == "--force" || a == "-f" || a == "force" {
+				force = true
+			}
+		}
+		// Refuse to delete the goal currently driving this TUI session: its
+		// runner is live in a goroutine and deleting the file under it leaves
+		// a dangling run and a stale live chip.
+		if !force && m.goalLive != nil && m.goalLive.ID == id && m.goalLive.Status == goal.StatusRunning {
+			m.add(kindError, fmt.Sprintf("goal · %s is running in this session — cancel it or use /goal remove %s --force", id, id))
+			m.refreshVP()
+			return nil
+		}
+		store := &goal.Store{}
+		blocked := false
+		if !force {
+			if st, lerr := store.Load(id); lerr == nil {
+				blocked = st.Status == goal.StatusBlocked
+			}
+		}
+		if err := store.Remove(id, force); err != nil {
+			cause := err.Error()
+			if errors.Is(err, goal.ErrGoalRunning) {
+				cause = fmt.Sprintf("goal · %s is running — stop it (Ctrl-C / /goal run resume finishes) or use /goal remove %s --force", id, id)
+			} else if errors.Is(err, goal.ErrGoalNotFound) {
+				cause = fmt.Sprintf("goal · %s not found — /goal list shows ids", id)
+			}
+			m.add(kindError, "goal remove: "+cause)
+			m.refreshVP()
+			return nil
+		}
+		// Clear the live chip if we just deleted the goal it tracks.
+		if m.goalLive != nil && m.goalLive.ID == id {
+			m.goalLive = nil
+		}
+		m.add(kindStatus, fmt.Sprintf("goal · deleted %s", id))
+		// Blocked runs may have kept a worktree on disk for inspection; it is
+		// separate from the goal record, so point at the prune affordance.
+		if blocked {
+			m.add(kindStatus, fmt.Sprintf("goal · %s was blocked — leftover worktrees are separate: /goal worktrees prune", id))
+		}
+		m.refreshVP()
+		return nil
 	}
 
 	// /goal <text...> — one-shot RunSpec

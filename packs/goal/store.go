@@ -2,6 +2,7 @@ package goal
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,7 +81,41 @@ func (s *Store) Load(id string) (State, error) {
 	return st, nil
 }
 
-// Delete removes a goal file by id. Missing file is not an error.
+// ErrGoalRunning is returned by Remove when a goal has StatusRunning and
+// force is false. Callers may retry with force=true to delete anyway.
+var ErrGoalRunning = errors.New("goal is running; stop it first or use force")
+
+// ErrGoalNotFound is returned by Remove when no goal file exists for id.
+// (Delete keeps its legacy "missing file is not an error" semantics.)
+var ErrGoalNotFound = errors.New("goal not found")
+
+// Remove deletes a goal by id. A running goal is refused unless force is true.
+// Other statuses (blocked, partial, failed, done) are removed: blocked is not
+// actively executing, so the file is safe to delete, but callers should prompt
+// the operator to prune any leftover worktree separately. A missing goal file
+// is an error (use Delete for the legacy not-found-is-noop behavior).
+func (s *Store) Remove(id string, force bool) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
+	if !force {
+		if st, err := s.Load(id); err == nil && st.Status == StatusRunning {
+			return fmt.Errorf("%w: %s", ErrGoalRunning, id)
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if err := os.Remove(s.path(id)); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", ErrGoalNotFound, id)
+		}
+		return err
+	}
+	return nil
+}
+
+// Delete removes a goal file by id. Missing file is not an error (legacy).
+// Deprecated: prefer Remove, which guards against deleting running goals.
 func (s *Store) Delete(id string) error {
 	if err := validateID(id); err != nil {
 		return err

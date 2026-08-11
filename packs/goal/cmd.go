@@ -60,7 +60,7 @@ Commands:
   mow goal run    --id NAME | --goal "…" [engine flags]
   mow goal status --id NAME
   mow goal reset  --id NAME          clear progress → pending
-  mow goal delete --id NAME
+  mow goal delete --id NAME [--force]
 
   --max-steps N   outer Prompt budget (default 16; raise on resume to continue)
 
@@ -217,6 +217,7 @@ func cmdList(args []string) int {
 func cmdDelete(args []string) int {
 	fs := cliutil.NewFlagSet("goal delete")
 	id := fs.String("id", "", "goal id")
+	force := fs.Bool("force", false, "delete even if the goal is running")
 	dir := fs.String("dir", "", "store dir")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -226,8 +227,11 @@ func cmdDelete(args []string) int {
 		return 2
 	}
 	store := &Store{Dir: *dir}
-	if err := store.Delete(*id); err != nil {
+	if err := store.Remove(*id, *force); err != nil {
 		fmt.Fprintf(os.Stderr, "mow goal delete: %v\n", err)
+		if errors.Is(err, ErrGoalRunning) {
+			fmt.Fprintln(os.Stderr, "  rerun with --force to delete anyway")
+		}
 		return 1
 	}
 	fmt.Printf("deleted %s\n", *id)
