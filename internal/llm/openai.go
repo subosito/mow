@@ -101,6 +101,20 @@ type Usage struct {
 	// spend on a stable prefix — which is exactly the shape of an agent loop.
 	// Zero when the provider reports none.
 	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
+	// CacheWriteInputTokens is the portion of InputTokens the provider wrote
+	// into its prompt cache this call. Also a SUBSET of InputTokens, and
+	// disjoint from CachedInputTokens: a token is either served from cache
+	// (read) or newly inserted into it (write), never both.
+	//
+	// Writes are billed ABOVE plain input (Anthropic ~1.25x), so they are the
+	// opposite of a discount. They matter far more than the rate suggests
+	// because of write amplification: whenever the cached prefix is
+	// invalidated — a model switch, a compaction that rewrites history, a
+	// change to the tool set — the next call re-inserts the entire
+	// conversation as a write rather than appending a small delta. On a long
+	// session that turns into the single largest line item, which is exactly
+	// why it must be visible rather than folded into the input total.
+	CacheWriteInputTokens int `json:"cache_write_input_tokens,omitempty"`
 	// SourcesUsed counts provider-side sources cited by server-executed tools
 	// (e.g. Responses web_search num_sources_used). Zero when the provider
 	// sent none.
@@ -117,22 +131,25 @@ func (u Usage) Zero() bool { return u.InputTokens == 0 && u.OutputTokens == 0 }
 // Add returns the element-wise sum (accumulating usage across loop turns).
 func (u Usage) Add(o Usage) Usage {
 	return Usage{
-		InputTokens:         u.InputTokens + o.InputTokens,
-		OutputTokens:        u.OutputTokens + o.OutputTokens,
-		CachedInputTokens:   u.CachedInputTokens + o.CachedInputTokens,
-		SourcesUsed:         u.SourcesUsed + o.SourcesUsed,
-		ServerSideToolCalls: u.ServerSideToolCalls + o.ServerSideToolCalls,
+		InputTokens:           u.InputTokens + o.InputTokens,
+		OutputTokens:          u.OutputTokens + o.OutputTokens,
+		CachedInputTokens:     u.CachedInputTokens + o.CachedInputTokens,
+		CacheWriteInputTokens: u.CacheWriteInputTokens + o.CacheWriteInputTokens,
+		SourcesUsed:           u.SourcesUsed + o.SourcesUsed,
+		ServerSideToolCalls:   u.ServerSideToolCalls + o.ServerSideToolCalls,
 	}
 }
 
-// FreshInputTokens is InputTokens minus the cached share: the part billed at
-// the full input rate. Clamped at zero so a provider reporting a cached count
-// larger than the total (seen on some gateways) cannot produce a negative.
+// FreshInputTokens is InputTokens minus the cache read and write shares: the
+// part billed at the plain input rate. Clamped at zero so a provider reporting
+// shares larger than the total (seen on some gateways) cannot produce a
+// negative.
 func (u Usage) FreshInputTokens() int {
-	if u.CachedInputTokens >= u.InputTokens {
+	used := u.CachedInputTokens + u.CacheWriteInputTokens
+	if used >= u.InputTokens {
 		return 0
 	}
-	return u.InputTokens - u.CachedInputTokens
+	return u.InputTokens - used
 }
 
 // Truncated reports whether the provider cut the reply at its token limit.

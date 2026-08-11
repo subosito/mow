@@ -32,13 +32,20 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 
 	e.mu.Lock()
 	if !e.skillsLoaded {
-		if skills := contextload.LoadSelectedSkills(e.skillDirs, text, e.skillSelect); skills != "" {
-			ro := e.pol.ExtraRootsReadOnly
-			e.sys = contextload.ComposeSystem(
-				contextload.PathJailFacts(e.cfg.Workspace, e.pol.ExtraRoots, ro),
-				agent.FramingFacts(e.untrustedNonce),
-				e.agents, skills, e.opt.SystemAppend,
-			)
+		// Selector-on lazy load: prompt-matched skills + explicit skills.
+		// Explicit skills (from config/CLI) load unconditionally here too,
+		// merged with any prompt-matched skills so both appear in the prompt.
+		var skills string
+		sel := contextload.LoadSelectedSkills(e.skillDirs, text, e.skillSelect)
+		if len(e.explicitSkills) > 0 {
+			ex := contextload.LoadExplicitSkills(e.skillDirs, e.explicitSkills)
+			skills = mergeSkillText(sel, ex)
+		} else {
+			skills = sel
+		}
+		e.skillsText = skills
+		if skills != "" {
+			e.sys = e.recomposeSystemLocked()
 		}
 		e.skillsLoaded = true
 	}
@@ -313,13 +320,15 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 			StopReason: stop, Text: errString(err),
 		})
 	}
-	usage := Usage{InputTokens: res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens}
+	usage := Usage{InputTokens: res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens, CachedInputTokens: res.Usage.CachedInputTokens, CacheWriteInputTokens: res.Usage.CacheWriteInputTokens}
 	out = RunResult{Text: res.Text, SessionID: sid, RunID: runID, StopReason: stop, Usage: usage}
 	e.Emit(Event{
 		Type: EventRunEnd, RunID: runID, SessionID: sid,
 		Text: res.Text, StopReason: stop, Error: errString(err),
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
-		ProviderToolCalls: res.Usage.ServerSideToolCalls,
+		CachedInputTokens:     usage.CachedInputTokens,
+		CacheWriteInputTokens: usage.CacheWriteInputTokens,
+		ProviderToolCalls:     res.Usage.ServerSideToolCalls,
 	})
 	e.log().Debug("mow run end", "run_id", runID, "session_id", sid, "stop_reason", stop, "err", err)
 

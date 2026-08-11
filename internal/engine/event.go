@@ -228,6 +228,12 @@ type Event struct {
 	// its prompt cache (a subset, not an addition). Hosts can show cache
 	// effectiveness; a sudden drop means the prefix stopped being stable.
 	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
+	// CacheWriteInputTokens is the share written INTO the cache this run.
+	// A large value relative to CachedInputTokens means the prefix is being
+	// invalidated and re-uploaded rather than extended — the expensive
+	// failure mode, and usually a symptom of something perturbing the prefix
+	// (model switch, compaction, tool-set change).
+	CacheWriteInputTokens int `json:"cache_write_input_tokens,omitempty"`
 	// ProviderToolCalls counts tools the provider executed server-side for
 	// this run (native_tools, e.g. web_search). They never enter the tool
 	// loop, so they raise no tool.start/tool.end — without this a host has no

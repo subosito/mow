@@ -233,10 +233,10 @@ func applyAnthropicSSE(data, event string, msg *Message, toolsByIdx map[int]*ant
 		if in := ev.Message.Usage.InputTokens + ev.Message.Usage.CacheCreationInputTokens + ev.Message.Usage.CacheReadInputTokens; in > 0 {
 			msg.Usage.InputTokens = in
 		}
-		// Cache READS are the discounted share. Writes are billed at a
-		// premium over plain input, so they are deliberately not counted
-		// here — treating them as cached would understate cost.
+		// Reads are the discounted share; writes carry a premium. Both are
+		// subsets of InputTokens and are priced separately downstream.
 		msg.Usage.CachedInputTokens = ev.Message.Usage.CacheReadInputTokens
+		msg.Usage.CacheWriteInputTokens = ev.Message.Usage.CacheCreationInputTokens
 		if ev.Message.Usage.OutputTokens > 0 {
 			msg.Usage.OutputTokens = ev.Message.Usage.OutputTokens
 		}

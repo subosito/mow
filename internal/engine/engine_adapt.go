@@ -276,7 +276,7 @@ func toPublicMessage(m llm.Message) Message {
 	pm := Message{
 		Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID, Name: m.Name,
 		StopReason: m.StopReason,
-		Usage:      Usage{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens},
+		Usage:      Usage{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens, CachedInputTokens: m.Usage.CachedInputTokens, CacheWriteInputTokens: m.Usage.CacheWriteInputTokens},
 	}
 	for _, tc := range m.ToolCalls {
 		pm.ToolCalls = append(pm.ToolCalls, ToolCall{
@@ -291,7 +291,7 @@ func toInternalMessage(m Message) llm.Message {
 	im := llm.Message{
 		Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID, Name: m.Name,
 		StopReason: m.StopReason,
-		Usage:      llm.Usage{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens},
+		Usage:      llm.Usage{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens, CachedInputTokens: m.Usage.CachedInputTokens, CacheWriteInputTokens: m.Usage.CacheWriteInputTokens},
 	}
 	for _, tc := range m.ToolCalls {
 		im.ToolCalls = append(im.ToolCalls, llm.ToolCall{

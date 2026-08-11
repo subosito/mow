@@ -162,6 +162,11 @@ type Usage struct {
 	// prompt cache (a subset, not an addition). Billed at a large discount, so
 	// Cost prices it separately.
 	CachedInputTokens int
+	// CacheWriteInputTokens is the share of InputTokens written INTO the cache
+	// (also a subset, disjoint from CachedInputTokens). Billed above plain
+	// input, and typically the largest line item on a long session whenever
+	// the cached prefix keeps getting invalidated.
+	CacheWriteInputTokens int
 }
 
 // PromptOpts configures a single Prompt call (not Engine lifetime).

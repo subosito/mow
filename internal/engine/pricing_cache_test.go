@@ -101,3 +101,100 @@ func TestCostGapOnACachedSession(t *testing.T) {
 	}
 	t.Logf("naive=$%.2f cache-aware=$%.2f (%.1fx overstatement)", naive, aware, ratio)
 }
+
+// Cache WRITES are a surcharge, not a discount, and on a long session they can
+// dominate the bill. Measured on a real 406-turn opus session: 83M read tokens
+// cost ~$125 while 33M write tokens cost ~$612. Pricing writes as plain input
+// understated that session's largest line item.
+func TestCostPricesCacheWritesAsASurcharge(t *testing.T) {
+	t.Parallel()
+	// Opus-tier list: $15 in, $75 out, $1.50 cache read (0.1x), $18.75 write (1.25x).
+	lim := engine.ModelLimits{
+		InputPrice: 15, OutputPrice: 75,
+		CacheReadPrice: 1.50, CacheWritePrice: 18.75,
+	}
+
+	t.Run("writes cost more than plain input", func(t *testing.T) {
+		t.Parallel()
+		write := engine.Usage{InputTokens: 1_000_000, CacheWriteInputTokens: 1_000_000}
+		fresh := engine.Usage{InputTokens: 1_000_000}
+		cw, cf := write.Cost(lim), fresh.Cost(lim)
+		if cw <= cf {
+			t.Errorf("write cost %v should exceed fresh input %v", cw, cf)
+		}
+		if cw != 18.75 {
+			t.Errorf("Cost = %v, want 18.75", cw)
+		}
+	})
+
+	t.Run("read and write are disjoint subsets of input", func(t *testing.T) {
+		t.Parallel()
+		// 600k read + 300k write + 100k fresh = 0.9 + 5.625 + 1.5 = 8.025
+		u := engine.Usage{
+			InputTokens:           1_000_000,
+			CachedInputTokens:     600_000,
+			CacheWriteInputTokens: 300_000,
+		}
+		want := 8.025
+		if got := u.Cost(lim); got < want-1e-9 || got > want+1e-9 {
+			t.Errorf("Cost = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("over-reported shares cannot go negative", func(t *testing.T) {
+		t.Parallel()
+		u := engine.Usage{InputTokens: 100, CachedInputTokens: 90, CacheWriteInputTokens: 90}
+		if got := u.Cost(lim); got < 0 {
+			t.Errorf("Cost = %v, must not be negative", got)
+		}
+	})
+
+	t.Run("unknown write rate falls back to input price", func(t *testing.T) {
+		t.Parallel()
+		// Understates (writes really cost more), but it is the only option
+		// without a published rate.
+		noRate := engine.ModelLimits{InputPrice: 15, OutputPrice: 75}
+		u := engine.Usage{InputTokens: 1_000_000, CacheWriteInputTokens: 1_000_000}
+		if got := u.Cost(noRate); got != 15.0 {
+			t.Errorf("Cost = %v, want 15.0", got)
+		}
+	})
+}
+
+// Regression pinned to the observed session: write amplification, not reads,
+// was the dominant cost. If a future change folds writes back into plain
+// input, this catches it.
+func TestRealSessionWriteAmplification(t *testing.T) {
+	t.Parallel()
+	lim := engine.ModelLimits{
+		InputPrice: 15, OutputPrice: 75,
+		CacheReadPrice: 1.50, CacheWritePrice: 18.75,
+	}
+	// Totals from a real 406-turn session.
+	u := engine.Usage{
+		InputTokens:           810 + 83_009_555 + 32_640_112,
+		CachedInputTokens:     83_009_555,
+		CacheWriteInputTokens: 32_640_112,
+		OutputTokens:          257_198,
+	}
+	total := u.Cost(lim)
+	writeOnly := engine.Usage{
+		InputTokens:           32_640_112,
+		CacheWriteInputTokens: 32_640_112,
+	}.Cost(lim)
+
+	if share := writeOnly / total; share < 0.7 {
+		t.Errorf("cache writes were %.0f%% of cost, expected >70%%", share*100)
+	}
+	// Pricing writes as plain input hides the surcharge.
+	naive := engine.Usage{
+		InputTokens:       u.InputTokens,
+		CachedInputTokens: u.CachedInputTokens,
+		OutputTokens:      u.OutputTokens,
+	}.Cost(lim)
+	if naive >= total {
+		t.Errorf("write-blind cost %v should be below write-aware %v", naive, total)
+	}
+	t.Logf("write-aware=$%.2f write-blind=$%.2f (understated by $%.2f); writes are %.0f%% of the bill",
+		total, naive, total-naive, 100*writeOnly/total)
+}

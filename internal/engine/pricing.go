@@ -16,32 +16,68 @@ type ModelLimits struct {
 	// gateway publishes it, cached input is priced at this rate instead of
 	// InputPrice.
 	CacheReadPrice float64
+	// CacheWritePrice is USD per 1M tokens written into the prompt cache
+	// (0 = unknown). Writes cost MORE than plain input (Anthropic ~1.25x),
+	// so an unset value falls back to InputPrice and therefore understates.
+	CacheWritePrice float64
 }
 
 // Cost returns the USD cost of this usage under l (0 if prices unknown).
 //
-// Cached input is priced separately when the gateway publishes a cache-read
-// rate. This matters more than it looks: an agent loop re-sends a large stable
-// prefix every turn, so on a cached provider most "input" is billed at roughly
-// a tenth of the headline rate. Charging it all at InputPrice overstated spend
-// by a wide margin on long sessions — and made the max_run_usd ceiling trip
-// early.
+// Input is split three ways because the three parts are billed at very
+// different rates:
 //
-// When no cache-read rate is published, cached tokens fall back to InputPrice.
-// That is the conservative direction: it can overstate, never understate.
+//   - cache read  — a deep discount (~0.1x input)
+//   - cache write — a surcharge (~1.25x input)
+//   - fresh       — the headline input rate
+//
+// This matters more than it looks. An agent loop re-sends a large stable
+// prefix every turn, so on a caching provider most input is a read. But when
+// the prefix is invalidated — model switch, compaction rewriting history, a
+// change to the tool set — the next call re-inserts the whole conversation as
+// a write. Measured on a real 406-turn session: reads were 83M tokens costing
+// ~$125, writes were 33M tokens costing ~$612. Pricing writes as plain input
+// understated that session's dominant line item by ~$122.
+//
+// Unknown cache rates fall back to InputPrice. For reads that is conservative
+// (overstates); for writes it is not (understates), which is unavoidable
+// without a published rate and is called out here so the direction is known.
 func (u Usage) Cost(l ModelLimits) float64 {
-	cached := u.CachedInputTokens
-	if cached > u.InputTokens {
-		cached = u.InputTokens
+	read, write := u.cacheSplit()
+	fresh := u.InputTokens - read - write
+
+	readRate := l.CacheReadPrice
+	if readRate <= 0 {
+		readRate = l.InputPrice
 	}
-	fresh := u.InputTokens - cached
-	cacheRate := l.CacheReadPrice
-	if cacheRate <= 0 {
-		cacheRate = l.InputPrice
+	writeRate := l.CacheWritePrice
+	if writeRate <= 0 {
+		writeRate = l.InputPrice
 	}
 	return float64(fresh)/1e6*l.InputPrice +
-		float64(cached)/1e6*cacheRate +
+		float64(read)/1e6*readRate +
+		float64(write)/1e6*writeRate +
 		float64(u.OutputTokens)/1e6*l.OutputPrice
+}
+
+// cacheSplit clamps the read and write shares so they never exceed the input
+// total, keeping fresh non-negative. Gateways occasionally report shares that
+// do not add up; a cost function must not emit a negative because of it.
+func (u Usage) cacheSplit() (read, write int) {
+	read, write = u.CachedInputTokens, u.CacheWriteInputTokens
+	if read < 0 {
+		read = 0
+	}
+	if write < 0 {
+		write = 0
+	}
+	if read > u.InputTokens {
+		read = u.InputTokens
+	}
+	if read+write > u.InputTokens {
+		write = u.InputTokens - read
+	}
+	return read, write
 }
 
 // PromptCostEstimate is a pre-send approximation of the next Prompt's input size
@@ -122,6 +158,7 @@ func (e *Engine) limitsLocked() ModelLimits {
 			l.InputPrice = info.Pricing.InputPerMTok
 			l.OutputPrice = info.Pricing.OutputPerMTok
 			l.CacheReadPrice = info.Pricing.CacheReadPerMTok
+			l.CacheWritePrice = info.Pricing.CacheWritePerMTok
 		}
 	}
 	// Config overrides only when explicitly set (>0).
