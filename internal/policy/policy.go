@@ -24,9 +24,23 @@ type Policy struct {
 	// ExtraRootsReadOnly are additional absolute directory trees FS tools may
 	// read from, but write/edit operations are denied even when AllowWrite is true.
 	ExtraRootsReadOnly []string
-	AllowWrite         bool
-	AllowShell         bool
-	MaxReadBytes       int
+	// WritableRoots is an explicit allowlist of absolute directory trees where
+	// write/edit is permitted even when ReadOnly is true (the primary workspace
+	// is read-only under ReadOnly). Entries come from --extra-root PATH:rw under
+	// --read-only. Under normal (non-read-only) operation this is empty and
+	// irrelevant — AllowWrite governs the tool gate and every jail root is
+	// writable. This is an allowlist, not deny logic: a root is writable only
+	// when it is the most-specific match AND appears in this list while
+	// ReadOnly holds.
+	WritableRoots []string
+	// ReadOnly makes the primary workspace a read-only jail root. Unlike
+	// AllowWrite=false (which removes the write/edit tools entirely), ReadOnly
+	// keeps the tools available so writes can still land under a WritableRoots
+	// entry. Set by --read-only when at least one --extra-root PATH:rw is given.
+	ReadOnly     bool
+	AllowWrite   bool
+	AllowShell   bool
+	MaxReadBytes int
 	// BashTimeoutSec caps each bash tool Exec (default 300). Soft-returns on timeout.
 	BashTimeoutSec int
 	// MaxBashTimeoutSec bounds a per-call timeout_sec request (default 900).
@@ -144,10 +158,32 @@ func (p *Policy) ResolvePathFor(rel string, write bool) (string, error) {
 // jailRoots returns cleaned absolute roots: workspace first, then ExtraRoots and ExtraRootsReadOnly.
 // The filesystem root ("/") is never a jail root: granting it disables the
 // jail, and the prefix check (`root+sep`) becomes "//" which matches nothing.
+//
+// Under ReadOnly, the workspace and every unsuffixed ExtraRoot become
+// read-only roots; only paths under a WritableRoots entry stay writable. This
+// is the explicit writable-root allowlist: a root is writable only when it is
+// both a non-read-only jail root and present in WritableRoots while ReadOnly
+// holds. Outside ReadOnly, WritableRoots is empty and irrelevant.
 func (p *Policy) jailRoots() ([]JailRoot, error) {
 	if p == nil {
 		return nil, fmt.Errorf("nil policy")
 	}
+	writableSet := map[string]bool{}
+	for _, r := range p.WritableRoots {
+		if r == "" {
+			continue
+		}
+		abs, err := filepath.Abs(strings.TrimSpace(r))
+		if err != nil {
+			continue
+		}
+		abs = filepath.Clean(abs)
+		if resolvedRoot, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = filepath.Clean(resolvedRoot)
+		}
+		writableSet[abs] = true
+	}
+
 	var out []JailRoot
 	seen := map[string]int{}
 
@@ -163,6 +199,19 @@ func (p *Policy) jailRoots() ([]JailRoot, error) {
 		abs = filepath.Clean(abs)
 		if abs == string(filepath.Separator) {
 			return fmt.Errorf("%s: filesystem root is not allowed as a path jail root", label)
+		}
+		// Canonicalize for the writable-allowlist lookup so a symlinked root
+		// matches its resolved form; otherwise two link spellings of the same
+		// directory would defeat the allowlist.
+		canonical := abs
+		if resolvedRoot, err := filepath.EvalSymlinks(abs); err == nil {
+			canonical = filepath.Clean(resolvedRoot)
+		}
+		// Under ReadOnly the only writable roots are those in the explicit
+		// WritableRoots allowlist; the workspace and unsuffixed extra roots
+		// become read-only. Outside ReadOnly WritableRoots is empty/irrelevant.
+		if p.ReadOnly && !writableSet[canonical] {
+			ro = true
 		}
 		if idx, ok := seen[abs]; ok {
 			if ro {

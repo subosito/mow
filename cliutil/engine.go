@@ -4,6 +4,7 @@ package cliutil
 
 import (
 	"flag"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -13,15 +14,18 @@ import (
 
 // EngineFlags are common flags for any command that constructs a mow.Engine.
 type EngineFlags struct {
-	Config       string
-	Workspace    string
-	ExtraRoots   []string // repeatable --extra-root
-	Model        string
-	Effort       string
-	BaseURL      string
-	SystemPrefix []string // repeatable --system-prefix
-	AllowShell   bool
-	AllowWrite   bool
+	Config        string
+	Workspace     string
+	ExtraRoots    []string // repeatable --extra-root
+	Model         string
+	Effort        string
+	BaseURL       string
+	SystemPrefix  []string // repeatable --system-prefix
+	AllowShell    bool
+	AllowWrite    bool
+	DisallowShell bool
+	DisallowWrite bool
+	ReadOnly      bool
 	// MaxTurns is the parsed --max-turns value. Only applied when MaxTurnsSet
 	// (omit flag → config default; --max-turns 0 → unlimited).
 	MaxTurns    int
@@ -40,13 +44,16 @@ type EngineFlags struct {
 func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.Config, "config", "", "optional config yaml")
 	fs.StringVar(&f.Workspace, "workspace", "", "workspace root: a set name from $MOW_HOME/workspaces.yaml or a directory path")
-	fs.Var((*stringList)(&f.ExtraRoots), "extra-root", "extra FS root for path jail (repeatable; PATH or PATH:ro for read-only)")
+	fs.Var((*stringList)(&f.ExtraRoots), "extra-root", "extra FS root for path jail (repeatable; PATH, PATH:ro, or explicit PATH:rw)")
 	fs.StringVar(&f.Model, "model", "", "model id")
 	fs.StringVar(&f.Effort, "effort", "", "reasoning effort (catalog efforts when listed; else none|low|medium|high)")
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
 	fs.Var((*stringList)(&f.SystemPrefix), "system-prefix", "system prompt prefix (repeatable)")
 	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash")
 	fs.BoolVar(&f.AllowWrite, "allow-write", false, "enable write/edit")
+	fs.BoolVar(&f.DisallowShell, "disallow-shell", false, "disable bash even when enabled in config")
+	fs.BoolVar(&f.DisallowWrite, "disallow-write", false, "disable write/edit even when enabled in config")
+	fs.BoolVar(&f.ReadOnly, "read-only", false, "disable bash and write/edit even when enabled in config")
 	fs.Var(&maxTurnsFlag{f: f}, "max-turns", "max agent turns per Prompt (0=unlimited)")
 	fs.BoolVar(&f.NoSession, "no-session", false, "do not persist session")
 	fs.StringVar(&f.SessionID, "session", "", "session id")
@@ -112,12 +119,27 @@ func (f *EngineFlags) ConfigPaths() []string {
 // setup happens here.
 func (f *EngineFlags) Options() mow.Options {
 	paths := f.ConfigPaths()
-	rw, ro := splitRootSpecs(f.ExtraRoots)
+	rw, ro, writable := splitRootSpecs(f.ExtraRoots)
+
+	// --read-only with at least one explicitly-writable (:rw) extra root:
+	// the workspace and unsuffixed roots stay read-only, bash stays disabled,
+	// but write/edit tools stay available and are allowed only under the :rw
+	// roots (the Policy WritableRoots allowlist). Without any :rw root,
+	// --read-only is a pure disable of write/edit/bash (backward compatible).
+	readOnlyMode := f.ReadOnly && len(writable) > 0
+	disableWrite := f.DisallowWrite
+	disableShell := f.DisallowShell || f.ReadOnly
+	if f.ReadOnly && !readOnlyMode {
+		disableWrite = true // pure read-only: no writable roots
+	}
+
 	opt := mow.Options{
 		ConfigPaths:        paths,
 		Workspace:          f.Workspace,
-		ExtraRoots:         rw,
-		ExtraRootsReadOnly: ro,
+		ExtraRoots:         append([]string(nil), rw...),
+		ExtraRootsReadOnly: append([]string(nil), ro...),
+		WritableRoots:      append([]string(nil), writable...),
+		ReadOnly:           readOnlyMode,
 		Model:              f.Model,
 		ExplicitModel:      strings.TrimSpace(f.Model) != "",
 		Effort:             f.Effort,
@@ -127,6 +149,8 @@ func (f *EngineFlags) Options() mow.Options {
 		ExplicitSkills:     append([]string(nil), f.Skills...),
 		AllowWrite:         f.AllowWrite,
 		AllowShell:         f.AllowShell,
+		DisableWrite:       disableWrite,
+		DisableShell:       disableShell,
 		NoSession:          f.NoSession,
 		SessionID:          f.SessionID,
 		Continue:           f.Continue,
@@ -143,8 +167,27 @@ func (f *EngineFlags) Options() mow.Options {
 	return opt
 }
 
+// Validate rejects contradictory capability flags rather than making their
+// behavior depend on command-line order.
+func (f *EngineFlags) Validate() error {
+	if f.AllowShell && (f.DisallowShell || f.ReadOnly) {
+		return fmt.Errorf("--allow-shell conflicts with --disallow-shell/--read-only")
+	}
+	// --allow-write with --read-only is only a conflict when there are no
+	// writable (:rw) extra roots; with :rw roots, --read-only keeps write/edit
+	// on but scopes them to those roots (--allow-write would re-enable writes
+	// everywhere, defeating the point, so it still conflicts).
+	if f.AllowWrite && (f.DisallowWrite || f.ReadOnly) {
+		return fmt.Errorf("--allow-write conflicts with --disallow-write/--read-only")
+	}
+	return nil
+}
+
 // NewEngine runs BeforeNew hooks and constructs an Engine.
 func (f *EngineFlags) NewEngine() (*mow.Engine, error) {
+	if err := f.Validate(); err != nil {
+		return nil, err
+	}
 	for _, name := range f.EnableExt {
 		ext.SetExtensionEnabled(name, true)
 	}
@@ -157,7 +200,17 @@ func (f *EngineFlags) NewEngine() (*mow.Engine, error) {
 // splitRootSpecs parses --extra-root values through the same suffix rules as
 // policy.extra_roots (mow.SplitExtraRootSpec), so the CLI and config file can
 // never drift on what ":ro" / ":rw" mean.
-func splitRootSpecs(specs []string) (rw, ro []string) {
+//
+// It returns three slices:
+//   - rw: unsuffixed roots ("PATH") and explicitly read-write ("PATH:rw")
+//   - ro: explicitly read-only roots ("PATH:ro")
+//   - writable: only the explicitly read-write ("PATH:rw") entries
+//
+// The writable slice is the explicit allowlist used under --read-only: there,
+// unsuffixed roots become read-only (only :rw roots stay writable). Outside
+// --read-only, the writable/unsuffixed distinction is irrelevant — both are
+// plain read-write jail roots.
+func splitRootSpecs(specs []string) (rw, ro, writable []string) {
 	for _, raw := range specs {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
@@ -169,9 +222,13 @@ func splitRootSpecs(specs []string) (rw, ro []string) {
 		}
 		if readOnly {
 			ro = append(ro, path)
-		} else {
-			rw = append(rw, path)
+			continue
+		}
+		rw = append(rw, path)
+		// Only explicitly-suffixed ":rw" entries are writable under --read-only.
+		if strings.HasSuffix(strings.ToLower(raw), ":rw") {
+			writable = append(writable, path)
 		}
 	}
-	return rw, ro
+	return rw, ro, writable
 }

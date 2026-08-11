@@ -55,6 +55,19 @@ type Options struct {
 	// "PATH:ro" on ExtraRoots/--extra-root; this field is for programmatic hosts.
 	// Write/edit is denied under these roots even when AllowWrite is true.
 	ExtraRootsReadOnly []string
+	// WritableRoots is an explicit allowlist of absolute directory trees where
+	// write/edit is permitted even when ReadOnly is true (the primary workspace
+	// is read-only under ReadOnly). Entries come from --extra-root PATH:rw under
+	// --read-only. Ignored unless ReadOnly is true.
+	WritableRoots []string
+	// ReadOnly makes the primary workspace and unsuffixed extra roots
+	// read-only: write/edit is denied there. Unlike DisableWrite (which removes
+	// the write/edit tools entirely), ReadOnly keeps the tools available so
+	// writes can still land under a WritableRoots entry. Bash is still denied
+	// (pair with DisableShell). Set by --read-only when at least one
+	// --extra-root PATH:rw is given; otherwise --read-only behaves as a pure
+	// DisableWrite+DisableShell for backward compatibility.
+	ReadOnly bool
 	// Model overrides config/env model when non-empty.
 	Model string
 	// ExplicitModel marks Model as a explicit user/CLI override (e.g. --model).
@@ -74,9 +87,13 @@ type Options struct {
 	// SystemPrefix prepends optional identity text before the compiled system
 	// prompt. Each entry is a separate system segment.
 	SystemPrefix []string
-	// AllowWrite / AllowShell override config enable list when true.
-	AllowWrite bool
-	AllowShell bool
+	// AllowWrite / AllowShell add capabilities to config when true.
+	// DisableWrite / DisableShell remove config-enabled capabilities for a
+	// temporary untrusted session. Matching allow/disable pairs conflict.
+	AllowWrite   bool
+	AllowShell   bool
+	DisableWrite bool
+	DisableShell bool
 	// NoSession skips JSONL persistence.
 	NoSession bool
 	// SessionID forces a session id (resume that file).

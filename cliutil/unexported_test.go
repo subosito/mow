@@ -59,7 +59,7 @@ func TestParseRootSpec(t *testing.T) {
 			t.Parallel()
 			// splitRootSpecs delegates to mow.SplitExtraRootSpec; assert the
 			// suffix contract through the seam the CLI actually uses.
-			rw, ro := splitRootSpecs([]string{c.in})
+			rw, ro, writable := splitRootSpecs([]string{c.in})
 			var path string
 			gotRO := len(ro) == 1
 			switch {
@@ -71,6 +71,11 @@ func TestParseRootSpec(t *testing.T) {
 			if path != c.wantPath || gotRO != c.wantRO {
 				t.Fatalf("splitRootSpecs(%q)=(%q,%v) want (%q,%v)", c.in, path, gotRO, c.wantPath, c.wantRO)
 			}
+			// ":rw" entries are the explicit writable allowlist under --read-only.
+			wantWritable := strings.HasSuffix(strings.ToLower(c.in), ":rw") && path != ""
+			if gotWritable := len(writable) == 1; gotWritable != wantWritable {
+				t.Fatalf("splitRootSpecs(%q) writable=%v want %v", c.in, gotWritable, wantWritable)
+			}
 		})
 	}
 }
@@ -79,37 +84,56 @@ func TestSplitRootSpecsEdges(t *testing.T) {
 	t.Parallel()
 	t.Run("nil input", func(t *testing.T) {
 		t.Parallel()
-		rw, ro := splitRootSpecs(nil)
-		if rw != nil || ro != nil {
-			t.Fatalf("rw=%v ro=%v want nil,nil", rw, ro)
+		rw, ro, w := splitRootSpecs(nil)
+		if rw != nil || ro != nil || w != nil {
+			t.Fatalf("rw=%v ro=%v w=%v want nil,nil,nil", rw, ro, w)
 		}
 	})
 	t.Run("all blank dropped", func(t *testing.T) {
 		t.Parallel()
-		rw, ro := splitRootSpecs([]string{"", "   ", "\t"})
-		if len(rw) != 0 || len(ro) != 0 {
-			t.Fatalf("rw=%v ro=%v want empty", rw, ro)
+		rw, ro, w := splitRootSpecs([]string{"", "   ", "\t"})
+		if len(rw) != 0 || len(ro) != 0 || len(w) != 0 {
+			t.Fatalf("rw=%v ro=%v w=%v want empty", rw, ro, w)
 		}
 	})
 	t.Run("mode only spec dropped", func(t *testing.T) {
 		t.Parallel()
 		// ":ro" has an empty path once the mode suffix is stripped.
-		rw, ro := splitRootSpecs([]string{":ro", ":rw", "/keep"})
+		rw, ro, w := splitRootSpecs([]string{":ro", ":rw", "/keep"})
 		if len(ro) != 0 {
 			t.Fatalf("ro=%v want empty", ro)
 		}
 		if len(rw) != 1 || rw[0] != "/keep" {
 			t.Fatalf("rw=%v want [/keep]", rw)
 		}
+		if len(w) != 0 {
+			t.Fatalf("w=%v want empty (path was empty)", w)
+		}
 	})
 	t.Run("order preserved", func(t *testing.T) {
 		t.Parallel()
-		rw, ro := splitRootSpecs([]string{"/1", "/2:ro", "/3", "/4:ro"})
+		rw, ro, w := splitRootSpecs([]string{"/1", "/2:ro", "/3", "/4:ro"})
 		if strings.Join(rw, ",") != "/1,/3" {
 			t.Fatalf("rw=%v", rw)
 		}
 		if strings.Join(ro, ",") != "/2,/4" {
 			t.Fatalf("ro=%v", ro)
+		}
+		if len(w) != 0 {
+			t.Fatalf("w=%v want empty (no :rw)", w)
+		}
+	})
+	t.Run("writable only for rw suffix", func(t *testing.T) {
+		t.Parallel()
+		rw, ro, w := splitRootSpecs([]string{"/unsuffixed", "/rw1:rw", "/ro:ro", "/rw2:rw"})
+		if strings.Join(rw, ",") != "/unsuffixed,/rw1,/rw2" {
+			t.Fatalf("rw=%v", rw)
+		}
+		if strings.Join(ro, ",") != "/ro" {
+			t.Fatalf("ro=%v", ro)
+		}
+		if strings.Join(w, ",") != "/rw1,/rw2" {
+			t.Fatalf("w=%v want [/rw1,/rw2]", w)
 		}
 	})
 }

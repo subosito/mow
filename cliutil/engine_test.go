@@ -6,7 +6,7 @@ import (
 )
 
 func TestSplitRootSpecs(t *testing.T) {
-	rw, ro := splitRootSpecs([]string{
+	rw, ro, _ := splitRootSpecs([]string{
 		"/tmp/a",
 		"/tmp/b:ro",
 		"/tmp/c:RW",

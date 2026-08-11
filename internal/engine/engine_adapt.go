@@ -360,6 +360,20 @@ func withActorHeaders(in map[string]string, actor string) map[string]string {
 	return out
 }
 
+func removeNames(in []string, names ...string) []string {
+	drop := make(map[string]bool, len(names))
+	for _, name := range names {
+		drop[strings.ToLower(strings.TrimSpace(name))] = true
+	}
+	out := in[:0]
+	for _, name := range in {
+		if !drop[strings.ToLower(strings.TrimSpace(name))] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 func appendUnique(list []string, names ...string) []string {
 	set := map[string]bool{}
 	for _, l := range list {

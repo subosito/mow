@@ -193,6 +193,20 @@ func New(opt Options) (*Engine, error) {
 	if opt.AllowShell {
 		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "bash")
 	}
+	if opt.DisableWrite {
+		cfg.Tools.Enable = removeNames(cfg.Tools.Enable, "write", "edit")
+	}
+	if opt.DisableShell {
+		cfg.Tools.Enable = removeNames(cfg.Tools.Enable, "bash")
+	}
+	// --read-only with at least one --extra-root PATH:rw keeps write/edit
+	// tools available (so writes can land under the explicit writable roots)
+	// while the policy jail makes the workspace and unsuffixed extra roots
+	// read-only. Without any writable root, --read-only is a pure disable and
+	// leaves write/edit removed (backward compatible).
+	if opt.ReadOnly && len(opt.WritableRoots) > 0 {
+		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit")
+	}
 	// MaxTurns: >0 overrides; <0 means unlimited (stored as 0). 0 leaves config.
 	if opt.MaxTurns > 0 {
 		cfg.Policy.MaxTurns = opt.MaxTurns
@@ -204,6 +218,8 @@ func New(opt Options) (*Engine, error) {
 		Workspace:          cfg.Workspace,
 		ExtraRoots:         append([]string(nil), cfg.Policy.ExtraRoots...),
 		ExtraRootsReadOnly: append([]string(nil), cfg.Policy.ExtraRootsReadOnly...),
+		WritableRoots:      append([]string(nil), opt.WritableRoots...),
+		ReadOnly:           opt.ReadOnly,
 		AllowWrite:         cfg.ToolEnabled("write") || cfg.ToolEnabled("edit"),
 		AllowShell:         cfg.ToolEnabled("bash"),
 		MaxReadBytes:       cfg.Policy.MaxReadBytes,
