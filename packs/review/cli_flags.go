@@ -13,22 +13,24 @@ import (
 // entry point and passed to Resolve, so a flag struct can never disagree with
 // the command the user actually typed.
 type CLIFlags struct {
-	Diff        string
-	Staged      bool
-	Base        string
-	Format      string
-	Output      string
-	MinSeverity string
-	FailOn      string
-	Budget      string
-	Excludes    []string
-	IncludeAll  bool
-	IncludeLow  bool
-	Unverified  bool
-	NoVerify    bool
-	ExitZero    bool
-	NoColor     bool
-	Quiet       bool
+	Diff             string
+	Staged           bool
+	Base             string
+	Format           string
+	Output           string
+	MinSeverity      string
+	FailOn           string
+	Budget           string
+	Excludes         []string
+	IncludeAll       bool
+	IncludeLow       bool
+	Unverified       bool
+	NoVerify         bool
+	ExitZero         bool
+	NoColor          bool
+	Quiet            bool
+	Reviewers        []string
+	ReviewerParallel int
 }
 
 // Bind registers the review flags on fs.
@@ -49,6 +51,9 @@ func (f *CLIFlags) Bind(fs *flag.FlagSet) {
 	fs.BoolVar(&f.ExitZero, "exit-zero", false, "always exit 0 on a successful run (advisory CI)")
 	fs.BoolVar(&f.NoColor, "no-color", false, "disable ANSI color in text output")
 	fs.BoolVar(&f.Quiet, "quiet", false, "suppress progress output on stderr")
+	fs.Var((*repeatable)(&f.Reviewers), "reviewer", "candidate reviewer model (repeatable)")
+	fs.Var((*repeatable)(&f.Reviewers), "reviewers", "comma-separated candidate reviewer models")
+	fs.IntVar(&f.ReviewerParallel, "reviewer-parallel", 0, "maximum concurrent candidate reviewers (0=all)")
 }
 
 // repeatable is an append-on-Set string slice flag.

@@ -137,6 +137,11 @@ func runCommand(cmd string, args []string) int {
 			"(check the selector, --exclude patterns, or --budget)\n", cmd)
 	}
 
+	models, err := reviewerModels(rf.Reviewers)
+	if err != nil {
+		return fail(cmd, err)
+	}
+
 	// A review must never modify the code it reviews, regardless of config.
 	ef.AllowWrite = false
 	ef.AllowShell = false
@@ -157,21 +162,47 @@ func runCommand(cmd string, args []string) int {
 		opt.MaxTurns = budget.MaxTurns
 	}
 
-	eng, err := mow.New(opt)
-	if err != nil {
-		return fail(cmd, err)
+	var reviewer Reviewer
+	var engines []*mow.Engine
+	if len(models) == 0 {
+		eng, err := mow.New(opt)
+		if err != nil {
+			return fail(cmd, err)
+		}
+		engines = []*mow.Engine{eng}
+		reviewer = NewEngineReviewer(eng)
+	} else {
+		budget, _ := LookupBudget(rf.Budget)
+		opts, parallel, err := ensembleOptions(ef, workspace, models, rf.ReviewerParallel, rf.Quiet, budget)
+		if err != nil {
+			return fail(cmd, err)
+		}
+		engines, err = newEnsembleEngines(opts, mow.New)
+		if err != nil {
+			return fail(cmd, err)
+		}
+		ensemble, err := ensembleFromEngines(models, engines, parallel)
+		if err != nil {
+			closeEngines(engines)
+			return fail(cmd, err)
+		}
+		reviewer = ensemble
 	}
-	defer eng.Close()
+	defer closeEngines(engines)
 
 	if !rf.Quiet && !sc.Empty() {
 		passes := "2 passes"
 		if rf.NoVerify {
 			passes = "1 pass (verification skipped)"
 		}
-		fmt.Fprintf(os.Stderr, "mow %s: reviewing with %s, %s…\n", cmd, eng.Model(), passes)
+		name := engines[0].Model()
+		if len(models) > 0 {
+			name = strings.Join(models, ", ")
+		}
+		fmt.Fprintf(os.Stderr, "mow %s: reviewing with %s, %s…\n", cmd, name, passes)
 	}
 
-	res, err := Run(ctx, NewEngineReviewer(eng), sc, req)
+	res, err := Run(ctx, reviewer, sc, req)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			fmt.Fprintf(os.Stderr, "mow %s: cancelled\n", cmd)

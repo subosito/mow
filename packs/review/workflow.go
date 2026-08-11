@@ -123,7 +123,11 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 	case req.SkipVerification:
 		rep.Notes = append(rep.Notes, "Verification pass skipped: findings are unverified.")
 	default:
-		verified, vnotes, verr := verifyPass(ctx, rev, prof, sc, candidates, req)
+		verifier := rev
+		if ensemble, ok := rev.(*EnsembleReviewer); ok {
+			verifier = ensemble.verifier()
+		}
+		verified, vnotes, verr := verifyPass(ctx, verifier, prof, sc, candidates, req)
 		if verr != nil {
 			return nil, verr
 		}

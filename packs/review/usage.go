@@ -58,6 +58,9 @@ CI:
 Other:
 
   --no-verify              skip the verification pass (faster, noisier)
+  --reviewer MODEL         add a model to the candidate-review group (repeatable)
+  --reviewers MODELS       comma-separated candidate-review models
+  --reviewer-parallel N    concurrent candidate reviewers (default: all)
   [engine flags]           --model --base-url --workspace --config …
 
 Examples:
@@ -67,6 +70,7 @@ Examples:
   mow review ./internal/api                  review a package
   mow review --format sarif --output r.sarif  for code scanning
   mow review --staged --fail-on medium       pre-commit gate
+  mow review --reviewer gpt-5-mini --reviewer claude-sonnet-4  group review
 
 The review runs read-only: write and shell tools are disabled regardless of
 config, so it can never modify the code it is reviewing.
@@ -124,6 +128,9 @@ CI:
 Other:
 
   --no-verify              skip the verification pass (faster, noisier)
+  --reviewer MODEL         add a model to the candidate-review group (repeatable)
+  --reviewers MODELS       comma-separated candidate-review models
+  --reviewer-parallel N    concurrent candidate reviewers (default: all)
   [engine flags]           --model --base-url --workspace --config …
 
 Examples:
@@ -133,6 +140,7 @@ Examples:
   mow sec ./internal/auth                    review a sensitive package
   mow sec --format sarif --output sec.sarif  for code scanning
   mow sec --fail-on critical --exit-zero     advisory CI job
+  mow sec --reviewers gpt-5-mini,claude-sonnet-4  group security review
 
 The review runs read-only: write and shell tools are disabled regardless of
 config. Static analyzers (Semgrep, CodeQL, gosec, Trivy) remain complementary.
