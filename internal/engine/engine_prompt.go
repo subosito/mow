@@ -253,6 +253,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		MaxContextChars:    maxCtx,
 		MaxToolResultChars: maxToolRes,
 		MaxOutputTokens:    e.maxOutputTokens(),
+		OnPrefixDrift:      e.prefixDriftReporter(),
 		MaxParallelTools:   maxPar,
 		Workspace:          ws,
 		UntrustedNonce:     e.untrustedNonce,

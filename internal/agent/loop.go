@@ -84,6 +84,11 @@ type Options struct {
 	MaxContextChars int
 	// MaxToolResultChars caps each tool result in history (0 = DefaultMaxToolResultChars).
 	MaxToolResultChars int
+	// OnPrefixDrift, when set, is called whenever an already-sent message
+	// changes between turns — the event that forces a provider to re-cache
+	// the prompt from that point on. Diagnostic only; the loop does not act
+	// on it. Nil (the default) skips the hashing entirely.
+	OnPrefixDrift func(turn, index int, detail string)
 	// MaxOutputTokens mirrors the provider's reply cap (llm.max_tokens) so a
 	// PreModel gate can bound the call it is about to authorize. 0 = unknown;
 	// a spend ceiling must then treat the reply as unbounded and refuse to
@@ -193,6 +198,8 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		// truncatedBatches counts consecutive turns where the provider cut
 		// the tool-call arguments at its output limit.
 		truncatedBatches int
+		drift            prefixTracker
+		driftSum         driftSummary
 	)
 	// Stable per-call overhead outside message history: the serialized tool
 	// definitions ride along on every request and the provider bills them in
@@ -228,6 +235,19 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		// from the full pre-compact span.
 		if compacted {
 			messages = send
+		}
+		// Compare this request's prefix against the previous one. A change to
+		// an already-sent message means the provider must re-cache from that
+		// index — billed as a cache write, above plain input.
+		if opt.OnPrefixDrift != nil {
+			if d := drift.note(turn+1, send); d != nil {
+				driftSum.add(*d)
+				opt.OnPrefixDrift(d.Turn, d.Index, d.String())
+				// Summary on every event: a run can end by any of a dozen
+				// paths, and a per-event running total is simpler than
+				// threading a defer through all of them.
+				opt.OnPrefixDrift(d.Turn, -1, driftSum.String())
+			}
 		}
 		sentChars := EstChars(send) + toolChars
 		// Gate the call itself. This is the only point where a policy can

@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"os"
+
 	"github.com/subosito/mow/internal/agent"
 )
 
@@ -76,4 +78,30 @@ func (e *Engine) budgetLimits() agent.BudgetLimits {
 // the operator a ceiling that can never fire.
 func (e *Engine) budgetGate() (agent.PreModelFunc, error) {
 	return agent.NewBudgetGate(e.budgetLimits())
+}
+
+// prefixDriftReporter returns a callback that logs prompt-prefix drift, or nil
+// to skip the check entirely.
+//
+// Off unless MOW_DEBUG_CACHE=1. The cost is a hash per message per turn, which
+// is small but not free, and the output is only meaningful to someone actively
+// chasing a cache-write bill.
+//
+// Why this exists: a provider caches by exact prefix, so an edit to an
+// already-sent message forces everything from that point to be re-uploaded and
+// billed as a cache write (above plain input). Nothing about that is visible
+// in normal operation — the run succeeds and the answer is fine. On one
+// observed 406-turn session it cost ~$24.
+func (e *Engine) prefixDriftReporter() func(turn, index int, detail string) {
+	if os.Getenv("MOW_DEBUG_CACHE") != "1" {
+		return nil
+	}
+	return func(turn, index int, detail string) {
+		if index < 0 {
+			e.log().Info("prompt cache: drift summary", "detail", detail)
+			return
+		}
+		e.log().Warn("prompt cache: prefix drift",
+			"turn", turn, "index", index, "detail", detail)
+	}
 }
