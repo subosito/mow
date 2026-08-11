@@ -248,7 +248,7 @@ func TestDeviceCodeFlow(t *testing.T) {
 					"verification_uri":          "https://example.com/verify",
 					"verification_uri_complete": "https://example.com/verify?code=ABCD-1234",
 					"expires_in":                60,
-					"interval":                 1,
+					"interval":                  1,
 				})
 				return
 			}
@@ -300,7 +300,7 @@ func TestDeviceCodeFlow(t *testing.T) {
 					"user_code":        "EXP-1234",
 					"verification_uri": "https://example.com/verify",
 					"expires_in":       60,
-					"interval":        1,
+					"interval":         1,
 				})
 				return
 			}
