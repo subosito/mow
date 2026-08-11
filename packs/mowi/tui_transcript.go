@@ -565,23 +565,17 @@ func (m *model) metaLine(text string, width int) string {
 
 // renderDiffEntry paints a file-change tool result as a compact review card:
 // verb + basename (+ muted path) + +N/−M stats, then tinted dual-number hunks.
+// Large bodies collapse; the full text is available via the diff overlay
+// (ViewDiff key, default ctrl+e).
 func (m *model) renderDiffEntry(text string, width int) string {
 	text = strings.TrimRight(text, "\n")
 	if text == "" {
 		return ""
 	}
-	lines := strings.Split(text, "\n")
-	head := lines[0]
-	// "created path", "wrote path", "edited path"
-	op, path, _ := strings.Cut(head, " ")
-	path = strings.TrimSpace(path)
+	op, path, body := parseDiffEntry(text)
 	base := path
 	if path != "" {
 		base = filepath.Base(path)
-	}
-	body := ""
-	if len(lines) > 1 {
-		body = strings.Join(lines[1:], "\n")
 	}
 	add, del := countDiffStats(body)
 
@@ -613,6 +607,8 @@ func (m *model) renderDiffEntry(text string, width int) string {
 	if stats != "" {
 		title += "  " + stats
 	}
+	// Discoverability: the expand key is quiet on the title so compact cards
+	// stay scannable; collapsed bodies also carry an expand hint (below).
 	if width > 0 && lipgloss.Width(title) > width {
 		title = xansi.Truncate(title, width, "")
 	}
@@ -620,27 +616,34 @@ func (m *model) renderDiffEntry(text string, width int) string {
 		return title
 	}
 	// Collapse very large diffs to a summary + first N lines (P2 polish).
+	// The overlay paints the uncollapsed body so nothing is lost.
 	const diffBodyMaxLines = 40
+	collapsed := false
 	bodyLines := strings.Split(body, "\n")
 	if len(bodyLines) > diffBodyMaxLines {
-		kept := strings.Join(bodyLines[:diffBodyMaxLines], "\n")
-		more := len(bodyLines) - diffBodyMaxLines
-		rest := strings.Join(bodyLines[diffBodyMaxLines:], "\n")
-		ra, rd := countDiffStats(rest)
-		fold := fmt.Sprintf("… %d more lines", more)
-		if ra > 0 || rd > 0 {
-			fold = fmt.Sprintf("… %d more lines (+%d −%d)", more, ra, rd)
-		}
-		body = kept + "\n" + fold
+		body = collapseDiffBody(body, diffBodyMaxLines)
+		collapsed = true
 	}
 	inner := width
 	if inner > 0 {
 		inner = max(24, width-roleGutterW)
 	}
-	colored := renderPrettyDiff(th, body, inner)
+	colored := renderPrettyDiffPath(th, body, path, inner)
 	// Keep dual-number columns aligned under the title (no extra indent).
 	indented := indentLines(colored, gutter)
-	return title + "\n" + indented
+	out := title + "\n" + indented
+	if collapsed {
+		key := m.cfg.Keys.Primary(m.cfg.Keys.ViewDiff)
+		if key == "" {
+			key = "ctrl+e"
+		}
+		hint := gutter + th.Muted.Faint(true).Render(key+" expand full diff")
+		if width > 0 && lipgloss.Width(hint) > width {
+			hint = xansi.Truncate(hint, width, "")
+		}
+		out += "\n" + hint
+	}
+	return out
 }
 
 // formatDiffStats is "+3 −1" for the card header (empty when nothing counted).

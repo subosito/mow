@@ -1,6 +1,7 @@
 package mowi
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,64 @@ func BenchmarkSanitizeDisplayClean(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if out := sanitizeDisplay(s); out == "" {
 			b.Fatal("empty")
+		}
+	}
+}
+
+// benchUnifiedDiff builds a multi-hunk Go-ish unified diff for paint benches.
+func benchUnifiedDiff() string {
+	var b strings.Builder
+	b.WriteString("--- a/pkg/loop.go\n+++ b/pkg/loop.go\n")
+	for h := 0; h < 8; h++ {
+		start := 10 + h*20
+		b.WriteString(fmt.Sprintf("@@ -%d,6 +%d,6 @@\n", start, start))
+		b.WriteString(" func run() {\n")
+		b.WriteString("-	timeout := 30\n")
+		b.WriteString("+	timeout := 60\n")
+		b.WriteString(" 	cfg := load()\n")
+		b.WriteString("-	return cfg.Dial(timeout, false)\n")
+		b.WriteString("+	return cfg.Dial(timeout, true)\n")
+		b.WriteString(" }\n")
+	}
+	return b.String()
+}
+
+// BenchmarkRenderPrettyDiff is the compact-card paint path (parse + unified).
+func BenchmarkRenderPrettyDiff(b *testing.B) {
+	th := newTheme()
+	src := benchUnifiedDiff()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if out := renderPrettyDiffPath(th, src, "pkg/loop.go", 80); out == "" {
+			b.Fatal("empty")
+		}
+	}
+}
+
+// BenchmarkRenderDiffSplit is the wide overlay split path.
+func BenchmarkRenderDiffSplit(b *testing.B) {
+	th := newTheme()
+	d := parseUnifiedDiff(benchUnifiedDiff())
+	d.Path = "pkg/loop.go"
+	opt := diffPaintOpts{Path: d.Path, Mode: diffModeSplit, Width: 120, Syntax: true}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if out := renderDiffModel(th, d, opt); out == "" {
+			b.Fatal("empty")
+		}
+	}
+}
+
+// BenchmarkParseUnifiedDiff isolates the structured intermediate model.
+func BenchmarkParseUnifiedDiff(b *testing.B) {
+	src := benchUnifiedDiff()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if d := parseUnifiedDiff(src); len(d.Lines) == 0 {
+			b.Fatal("empty model")
 		}
 	}
 }

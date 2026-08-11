@@ -56,6 +56,9 @@ type KeysConfig struct {
 	SelectMode string `yaml:"select_mode"`
 	// EffortCycle cycles reasoning effort levels (none/low/medium/high).
 	EffortCycle string `yaml:"effort_cycle"`
+	// ViewDiff opens the expanded full-screen diff overlay for the latest
+	// write/edit card (unified by default; tab toggles split when wide).
+	ViewDiff string `yaml:"view_diff"`
 }
 
 // DefaultWelcomeMessage is shown when welcome is on and welcome_message is empty.
@@ -85,6 +88,7 @@ func DefaultKeys() KeysConfig {
 		Focus:      "ctrl+o", // editor ↔ transcript
 		PeerExpand: "ctrl+p", // collapsed peer stream ↔ live text
 		SelectMode: "ctrl+s", // release mouse so the terminal can select text
+		ViewDiff:   "ctrl+e", // expand last write/edit diff to full-screen overlay
 	}
 }
 
@@ -105,6 +109,7 @@ func (k KeysConfig) Resolve() KeysConfig {
 		Focus:      firstNonEmpty(k.Focus, d.Focus),
 		PeerExpand: firstNonEmpty(k.PeerExpand, d.PeerExpand),
 		SelectMode: firstNonEmpty(k.SelectMode, d.SelectMode),
+		ViewDiff:   firstNonEmpty(k.ViewDiff, d.ViewDiff),
 	}
 }
 

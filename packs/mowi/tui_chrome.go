@@ -259,14 +259,20 @@ func (m *model) View() tea.View {
 	case m.tooSmall():
 		content = m.sizeWarnView()
 	default:
-		content = m.mainFrame()
-		if m.effortPick != nil {
-			content = placeOverlayCenter(m.effortPickerCard(), content, max(1, m.width), max(1, m.height))
-		} else if m.modelPick != nil {
-			content = placeOverlayCenter(m.modelPickerCard(), content, max(1, m.width), max(1, m.height))
-		} else if m.showHelp {
-			// Overlay help card on the live frame so transcript stays visible.
-			content = placeOverlayCenter(m.helpCard(), content, max(1, m.width), max(1, m.height))
+		// Full-screen diff overlay replaces the frame (not a floating card):
+		// it needs the full width for split geometry and keeps dismiss cheap.
+		if m.diffView != nil {
+			content = m.renderDiffOverlayFrame()
+		} else {
+			content = m.mainFrame()
+			if m.effortPick != nil {
+				content = placeOverlayCenter(m.effortPickerCard(), content, max(1, m.width), max(1, m.height))
+			} else if m.modelPick != nil {
+				content = placeOverlayCenter(m.modelPickerCard(), content, max(1, m.width), max(1, m.height))
+			} else if m.showHelp {
+				// Overlay help card on the live frame so transcript stays visible.
+				content = placeOverlayCenter(m.helpCard(), content, max(1, m.width), max(1, m.height))
+			}
 		}
 	}
 	v := tea.NewView(content)
@@ -554,7 +560,7 @@ func (m *model) emptyStateView() string {
 		"Plan a safe refactor",
 	}
 	var b strings.Builder
-	b.WriteString(th.Muted.Faint(true).Render("type a question, or " + helpKey + " for help") + "\n\n")
+	b.WriteString(th.Muted.Faint(true).Render("type a question, or "+helpKey+" for help") + "\n\n")
 	for _, e := range examples {
 		b.WriteString(th.Muted.Faint(true).Render(glyphBullet+" "+e) + "\n")
 	}
@@ -959,6 +965,7 @@ func (m *model) helpCard() string {
 		{k.Primary(k.Focus), "focus editor ↔ transcript"},
 		{k.Primary(k.SelectMode), "select mode (release mouse to copy)"},
 		{k.Primary(k.PeerExpand), "peer output: collapsed ↔ live text"},
+		{k.Primary(k.ViewDiff), "expand last diff  (tab: split when wide)"},
 		{k.Primary(k.PermCycle), "perm  auto ↔ ask"},
 		{k.Primary(k.Clear), "clear transcript"},
 		{k.Primary(k.Cancel), "cancel turn · dismiss"},

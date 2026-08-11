@@ -109,6 +109,7 @@ type model struct {
 	showWelcome bool
 	modelPick   *modelPicker  // interactive /model overlay
 	effortPick  *effortPicker // interactive /effort overlay
+	diffView    *diffOverlay  // expanded full-screen diff (compact card stays default)
 	// editingPrompt is true while the prompt holds a recalled message awaiting
 	// edit (arrow-up on empty input, or /edit). Esc cancels back to a blank
 	// prompt; sending clears it.

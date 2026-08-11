@@ -338,197 +338,10 @@ func colorDiffLines(th theme, code string) string {
 	return renderPrettyDiff(th, code, 0)
 }
 
-// renderPrettyDiff formats unified-diff body as a code-review panel:
-//
-//	lines 10–14 · +2 −1          soft hunk header (not raw @@)
-//	10  10 │ context
-//	11     │ removed             red tint, no leading "-"
-//	    12 │ added               green tint, no leading "+"
-//
-// Dual line numbers (old | new) match GitHub-style review UIs. Meta ---/+++
-// headers are omitted (path lives on the entry title).
-//
-// Replaced lines are paired: a −/+ run of equal length is emitted as adjacent
-// old/new rows (first removal, first addition, second removal, …) instead of
-// every deletion followed by every addition. Within a pair the words that
-// actually differ are emphasised, so a one-token edit does not read as two
-// entirely rewritten lines. True side-by-side panes are deliberately not used:
-// at 80 columns each pane would get ~28 cells, which wraps real code to
-// uselessness inside the transcript's indent.
-func renderPrettyDiff(th theme, code string, width int) string {
-	code = strings.TrimRight(code, "\n")
-	if code == "" {
-		return ""
-	}
-	var b strings.Builder
-	lines := strings.Split(code, "\n")
-	// Measure the gutter before rendering: every row must share one geometry,
-	// so the width cannot be discovered as rows are emitted.
-	g := newDiffGutter(lines)
-	oldLn, newLn := 1, 1
-	haveNums := false
-	first := true
-	var dels, adds []string
-
-	nl := func() {
-		if !first {
-			b.WriteByte('\n')
-		}
-		first = false
-	}
-
-	flushRun := func() {
-		if len(dels) == 0 && len(adds) == 0 {
-			return
-		}
-		pre := 0
-		for pre < len(dels) && pre < len(adds) && dels[pre] == adds[pre] {
-			on, nn := g.blank(), g.blank()
-			if haveNums {
-				on = g.num(oldLn)
-				nn = g.num(newLn)
-				oldLn++
-				newLn++
-			}
-			nl()
-			gutter := th.DiffNum.Render(g.numPrefix(g.pick(on, nn)))
-			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(dels[pre]), width))
-			pre++
-		}
-
-		remDels, remAdds := dels[pre:], adds[pre:]
-		suf := 0
-		for suf < len(remDels) && suf < len(remAdds) &&
-			remDels[len(remDels)-1-suf] == remAdds[len(remAdds)-1-suf] {
-			suf++
-		}
-		midDels := remDels[:len(remDels)-suf]
-		midAdds := remAdds[:len(remAdds)-suf]
-		sufDels := remDels[len(remDels)-suf:]
-
-		var oldStyled, newStyled []string
-		if len(midDels) > 0 && len(midDels) == len(midAdds) {
-			oldStyled = make([]string, len(midDels))
-			newStyled = make([]string, len(midAdds))
-			for i := range midDels {
-				oldStyled[i], newStyled[i] = emphasizeWordDiff(th, midDels[i], midAdds[i])
-			}
-		}
-
-		for i, body := range midDels {
-			on, nn := g.blank(), g.blank()
-			if haveNums {
-				on = g.num(oldLn)
-				oldLn++
-			}
-			nl()
-			if oldStyled != nil {
-				b.WriteString(formatDiffRowPre(th, g, th.DiffDel, on, nn, diffSignDel, oldStyled[i], width))
-			} else {
-				b.WriteString(formatDiffRow(th, g, th.DiffDel, on, nn, diffSignDel, body, width))
-			}
-		}
-
-		for i, body := range midAdds {
-			on, nn := g.blank(), g.blank()
-			if haveNums {
-				nn = g.num(newLn)
-				newLn++
-			}
-			nl()
-			if newStyled != nil {
-				b.WriteString(formatDiffRowPre(th, g, th.DiffAdd, on, nn, diffSignAdd, newStyled[i], width))
-			} else {
-				b.WriteString(formatDiffRow(th, g, th.DiffAdd, on, nn, diffSignAdd, body, width))
-			}
-		}
-
-		for i := 0; i < suf; i++ {
-			on, nn := g.blank(), g.blank()
-			if haveNums {
-				on = g.num(oldLn)
-				nn = g.num(newLn)
-				oldLn++
-				newLn++
-			}
-			nl()
-			gutter := th.DiffNum.Render(g.numPrefix(g.pick(on, nn)))
-			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(sufDels[i]), width))
-		}
-
-		dels = nil
-		adds = nil
-	}
-
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") ||
-			strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index ") {
-			continue
-		}
-		if strings.HasPrefix(line, "@@") {
-			flushRun()
-			oh, nh, ok := parseHunkHeader(line)
-			if ok {
-				oldLn, newLn = oh.start, nh.start
-				if oldLn == 0 && oh.count == 0 {
-					oldLn = 0
-				}
-				if newLn == 0 && nh.count == 0 {
-					newLn = 0
-				}
-				haveNums = true
-				nl()
-				b.WriteString(th.DiffMeta.Render("  " + formatHunkReviewLabel(oh, nh)))
-			} else if strings.TrimSpace(line) == "@@" {
-				oldLn, newLn = 1, 1
-				haveNums = true
-				nl()
-				b.WriteString(th.DiffMeta.Render("  change"))
-			} else {
-				nl()
-				b.WriteString(th.DiffMeta.Render("  " + strings.TrimSpace(line)))
-			}
-			continue
-		}
-
-		switch {
-		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
-			dels = append(dels, strings.TrimPrefix(line, "-"))
-
-		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-			adds = append(adds, strings.TrimPrefix(line, "+"))
-
-		case strings.HasPrefix(line, "\\"): // "\ No newline at end of file"
-			flushRun()
-			nl()
-			b.WriteString(th.Muted.Render(g.numPrefix(g.blank()) + "no newline at end of file"))
-		case strings.HasPrefix(line, "…"):
-			flushRun()
-			nl()
-			b.WriteString(th.Muted.Render(g.numPrefix(g.ellipsis()) + strings.TrimSpace(line)))
-		default:
-			flushRun()
-			body := line
-			if strings.HasPrefix(body, " ") {
-				body = body[1:]
-			}
-			on, nn := g.blank(), g.blank()
-			if haveNums {
-				on = g.num(oldLn)
-				nn = g.num(newLn)
-				oldLn++
-				newLn++
-			}
-			// Context: muted numbers, normal text — no tint.
-			nl()
-			gutter := th.DiffNum.Render(g.numPrefix(g.pick(on, nn)))
-			b.WriteString(clipDiffRow(gutter+th.DiffCtx.Render(body), width))
-		}
-	}
-	flushRun()
-	return b.String()
-}
+// renderPrettyDiff lives in diff_render.go: it parses unified text into a
+// structured model (diff_model.go) and paints unified (or split) review rows.
+// True side-by-side panes stay off the compact transcript card; the expanded
+// overlay may offer split when the terminal is wide enough.
 
 // Add/deleted rows carry a glyph so the change direction survives a
 // color-blind (or no-color) terminal instead of being signalled by tint alone.
@@ -623,6 +436,11 @@ func emphasizeWordDiff(th theme, oldBody, newBody string) (oldText, newText stri
 		return delStyle.Render(o), addStyle.Render(n)
 	}
 	if oldBody == "" || newBody == "" {
+		return plain()
+	}
+	// Under NO_COLOR the row band is already plain; bold mid-spans would still
+	// emit SGR and break the no-color contract for copied transcripts.
+	if noColor() {
 		return plain()
 	}
 

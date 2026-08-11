@@ -47,6 +47,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
+		if m.diffView != nil {
+			// Rebuild split/unified geometry for the new width; fall back to
+			// unified automatically when the terminal is too narrow.
+			m.layoutDiffOverlay()
+			return m, nil
+		}
 		// Plain re-wrap immediately; async glamour after resize settle.
 		w := max(24, m.vp.Width()-2)
 		inner := max(16, w-roleGutterW)
@@ -86,6 +92,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		ks := m.cfg.Keys
 		keyStr := msg.String()
+		if m.diffView != nil {
+			if handled, cmd := m.handleDiffOverlayKey(keyStr, msg); handled {
+				return m, cmd
+			}
+		}
 		if m.effortPick != nil {
 			return m, m.handleEffortPickKey(keyStr, msg)
 		}
@@ -205,7 +216,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clearTranscript()
 			return m, nil
 		case ks.Matches(ks.Help, keyStr):
-			if m.modelPick == nil {
+			if m.modelPick == nil && m.diffView == nil {
 				// Help is allowed while busy: a user is most likely to need it
 				// when something unfamiliar is happening during a turn. The
 				// overlay is read-only and dismissible (see the showHelp block
@@ -213,10 +224,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = true
 			}
 			return m, nil
-		case keyStr == "?" && m.modelPick == nil && strings.TrimSpace(m.ta.Value()) == "":
+		case keyStr == "?" && m.modelPick == nil && m.diffView == nil && strings.TrimSpace(m.ta.Value()) == "":
 			// Soft help when input empty (not configurable — avoids stealing typing).
 			// Allowed while busy for the same reason as the Help key above.
 			m.showHelp = true
+			return m, nil
+		case ks.Matches(ks.ViewDiff, keyStr):
+			// Expand the latest write/edit card. Allowed while busy so a
+			// mid-turn edit can be reviewed without waiting for the turn to end.
+			if m.modelPick != nil || m.effortPick != nil || m.showHelp {
+				return m, nil
+			}
+			if !m.toggleDiffOverlay() {
+				m.add(kindStatus, "no diff to expand")
+				m.refreshVP()
+			}
 			return m, nil
 		case ks.Matches(ks.Send, keyStr):
 			m.editingPrompt = false
@@ -647,10 +669,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Typing: idle and busy (draft next message while the turn runs).
 	// Letter keys stay with the textarea; scroll keys handled above.
-	canType := m.permWait == nil && !m.showHelp && m.modelPick == nil && m.effortPick == nil && m.focus == focusEditor
-	// Mouse belongs exclusively to the transcript viewport. Passing wheel or
-	// click messages through textarea.Update first can move its internal view/
-	// cursor even though the draft text is unchanged.
+	// Diff overlay is exclusive: keys are handled above, but keep typing
+	// gated here so a fall-through never edits the draft under the frame.
+	canType := m.permWait == nil && !m.showHelp && m.modelPick == nil && m.effortPick == nil && m.diffView == nil && m.focus == focusEditor
+	// Mouse belongs exclusively to the transcript viewport (or the diff
+	// overlay viewport when open). Passing wheel or click messages through
+	// textarea.Update first can move its internal view/cursor even though
+	// the draft text is unchanged.
 	switch msg.(type) {
 	case tea.MouseWheelMsg, tea.MouseMotionMsg, tea.MouseClickMsg, tea.MouseReleaseMsg:
 		canType = false
@@ -709,13 +734,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	// Mouse: wheel scrolls the transcript only — it must never touch the draft
-	// or recall a prompt (arrow keys own prompt recall). Motion/click are
-	// dropped so they never flood Update.
+	// Mouse: wheel scrolls the active viewport only — never the draft, and
+	// never the transcript under a full-screen diff overlay. Motion/click
+	// are dropped so they never flood Update.
 	if m.mouseOn() {
 		switch msg.(type) {
 		case tea.MouseWheelMsg:
 			m.lastMouseAt = time.Now() // wheel activity: arm the KeyUp grace window
+			if m.diffView != nil {
+				var cmd tea.Cmd
+				m.diffView.vp, cmd = m.diffView.vp.Update(msg)
+				cmds = append(cmds, cmd)
+				return m, tea.Batch(cmds...)
+			}
 			before := m.vp.YOffset()
 			var cmd tea.Cmd
 			m.vp, cmd = m.vp.Update(msg)
