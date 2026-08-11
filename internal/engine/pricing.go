@@ -12,12 +12,36 @@ type ModelLimits struct {
 	ContextWindow int     // max context tokens (0 = unknown)
 	InputPrice    float64 // USD per 1M input tokens (0 = unknown)
 	OutputPrice   float64 // USD per 1M output tokens (0 = unknown)
+	// CacheReadPrice is USD per 1M cached input tokens (0 = unknown). When the
+	// gateway publishes it, cached input is priced at this rate instead of
+	// InputPrice.
+	CacheReadPrice float64
 }
 
 // Cost returns the USD cost of this usage under l (0 if prices unknown).
-// Cache discounts are not applied (gateway may still bill less for cache hits).
+//
+// Cached input is priced separately when the gateway publishes a cache-read
+// rate. This matters more than it looks: an agent loop re-sends a large stable
+// prefix every turn, so on a cached provider most "input" is billed at roughly
+// a tenth of the headline rate. Charging it all at InputPrice overstated spend
+// by a wide margin on long sessions — and made the max_run_usd ceiling trip
+// early.
+//
+// When no cache-read rate is published, cached tokens fall back to InputPrice.
+// That is the conservative direction: it can overstate, never understate.
 func (u Usage) Cost(l ModelLimits) float64 {
-	return float64(u.InputTokens)/1e6*l.InputPrice + float64(u.OutputTokens)/1e6*l.OutputPrice
+	cached := u.CachedInputTokens
+	if cached > u.InputTokens {
+		cached = u.InputTokens
+	}
+	fresh := u.InputTokens - cached
+	cacheRate := l.CacheReadPrice
+	if cacheRate <= 0 {
+		cacheRate = l.InputPrice
+	}
+	return float64(fresh)/1e6*l.InputPrice +
+		float64(cached)/1e6*cacheRate +
+		float64(u.OutputTokens)/1e6*l.OutputPrice
 }
 
 // PromptCostEstimate is a pre-send approximation of the next Prompt's input size
@@ -97,6 +121,7 @@ func (e *Engine) limitsLocked() ModelLimits {
 			l.ContextWindow = info.ContextWindow
 			l.InputPrice = info.Pricing.InputPerMTok
 			l.OutputPrice = info.Pricing.OutputPerMTok
+			l.CacheReadPrice = info.Pricing.CacheReadPerMTok
 		}
 	}
 	// Config overrides only when explicitly set (>0).

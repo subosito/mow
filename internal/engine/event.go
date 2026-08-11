@@ -224,6 +224,10 @@ type Event struct {
 	// when the provider sent no usage).
 	InputTokens  int `json:"input_tokens,omitempty"`
 	OutputTokens int `json:"output_tokens,omitempty"`
+	// CachedInputTokens is the share of InputTokens the provider served from
+	// its prompt cache (a subset, not an addition). Hosts can show cache
+	// effectiveness; a sudden drop means the prefix stopped being stable.
+	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
 	// ProviderToolCalls counts tools the provider executed server-side for
 	// this run (native_tools, e.g. web_search). They never enter the tool
 	// loop, so they raise no tool.start/tool.end — without this a host has no

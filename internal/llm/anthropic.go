@@ -122,6 +122,9 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 	msg.Usage = Usage{
 		InputTokens:  parsed.Usage.InputTokens + parsed.Usage.CacheCreationInputTokens + parsed.Usage.CacheReadInputTokens,
 		OutputTokens: parsed.Usage.OutputTokens,
+		// Reads only: a cache WRITE is billed above plain input, so counting
+		// it as cached would understate cost.
+		CachedInputTokens: parsed.Usage.CacheReadInputTokens,
 	}
 	if st := parsed.Usage.ServerToolUse; st != nil {
 		// Anthropic reports server-side work as a request count rather than a

@@ -90,6 +90,17 @@ func toOpenAIMessages(in []Message) []openAIMessage {
 type Usage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+	// CachedInputTokens is the portion of InputTokens the provider served from
+	// its prompt cache. It is a SUBSET of InputTokens, not an addition —
+	// every wire mow speaks reports the total first and the cached share
+	// separately (OpenAI prompt_tokens_details.cached_tokens, Anthropic
+	// cache_read_input_tokens).
+	//
+	// Cached input is billed at a large discount (commonly ~10% of the input
+	// rate), so cost computed from InputTokens alone materially overstates
+	// spend on a stable prefix — which is exactly the shape of an agent loop.
+	// Zero when the provider reports none.
+	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
 	// SourcesUsed counts provider-side sources cited by server-executed tools
 	// (e.g. Responses web_search num_sources_used). Zero when the provider
 	// sent none.
@@ -108,9 +119,20 @@ func (u Usage) Add(o Usage) Usage {
 	return Usage{
 		InputTokens:         u.InputTokens + o.InputTokens,
 		OutputTokens:        u.OutputTokens + o.OutputTokens,
+		CachedInputTokens:   u.CachedInputTokens + o.CachedInputTokens,
 		SourcesUsed:         u.SourcesUsed + o.SourcesUsed,
 		ServerSideToolCalls: u.ServerSideToolCalls + o.ServerSideToolCalls,
 	}
+}
+
+// FreshInputTokens is InputTokens minus the cached share: the part billed at
+// the full input rate. Clamped at zero so a provider reporting a cached count
+// larger than the total (seen on some gateways) cannot produce a negative.
+func (u Usage) FreshInputTokens() int {
+	if u.CachedInputTokens >= u.InputTokens {
+		return 0
+	}
+	return u.InputTokens - u.CachedInputTokens
 }
 
 // Truncated reports whether the provider cut the reply at its token limit.
@@ -237,7 +259,10 @@ type ChatResponse struct {
 		FinishReason string  `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 		CompletionTokens int `json:"completion_tokens"`
 	} `json:"usage"`
 	Error *struct {
@@ -337,8 +362,9 @@ func (c *Client) chatOpenAI(ctx context.Context, messages []Message, tools []Too
 	}
 	msg.StopReason = parsed.Choices[0].FinishReason
 	msg.Usage = Usage{
-		InputTokens:  parsed.Usage.PromptTokens,
-		OutputTokens: parsed.Usage.CompletionTokens,
+		InputTokens:       parsed.Usage.PromptTokens,
+		OutputTokens:      parsed.Usage.CompletionTokens,
+		CachedInputTokens: cachedFromDetails(parsed.Usage.PromptTokensDetails),
 	}
 	return msg, nil
 }
@@ -374,4 +400,15 @@ func (c *Client) OneShot() *Client {
 	cp.PromptCache = false
 	cp.CacheTTL = ""
 	return &cp
+}
+
+// cachedFromDetails reads the cached-token share from an OpenAI-shaped
+// prompt_tokens_details block. Nil-safe: most gateways omit it entirely.
+func cachedFromDetails(d *struct {
+	CachedTokens int `json:"cached_tokens"`
+}) int {
+	if d == nil {
+		return 0
+	}
+	return d.CachedTokens
 }

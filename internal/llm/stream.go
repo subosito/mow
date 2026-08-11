@@ -154,6 +154,12 @@ type streamChunk struct {
 	Usage   *struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
+		// PromptTokensDetails carries the cached share of PromptTokens.
+		// Without it a stable prefix — the normal shape of an agent loop —
+		// is billed at full rate in every figure mow reports.
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -320,8 +326,9 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		// The usage chunk arrives with empty choices — read it before the guard.
 		if chunk.Usage != nil {
 			msg.Usage = Usage{
-				InputTokens:  chunk.Usage.PromptTokens,
-				OutputTokens: chunk.Usage.CompletionTokens,
+				InputTokens:       chunk.Usage.PromptTokens,
+				CachedInputTokens: cachedFromDetails(chunk.Usage.PromptTokensDetails),
+				OutputTokens:      chunk.Usage.CompletionTokens,
 			}
 		}
 		if len(chunk.Choices) == 0 {

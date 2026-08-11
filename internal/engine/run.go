@@ -89,6 +89,15 @@ type Options struct {
 	MaxTurns int
 	// Extra system text appended after AGENTS.md.
 	SystemAppend string
+	// ExplicitSkills names skill folders to load unconditionally, regardless
+	// of the first-prompt selector (skills.selector). Names match folder names
+	// case-insensitively. Unknown names are silently ignored. CLI --skill
+	// appends here; config skills.explicit is merged separately.
+	ExplicitSkills []string
+	// SkillsDirs adds extra skill directories searched (after the global and
+	// config dirs). Lets tests and hosts inject a temp skill dir without
+	// writing config. Empty by default.
+	SkillsDirs []string
 	// Tools are engine-scoped custom tools, unlike the process-global
 	// ext.RegisterTool: two Engines in one process can run different toolsets.
 	// A per-engine tool overrides a registry tool of the same name; colliding
@@ -149,6 +158,10 @@ type RunResult struct {
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
+	// CachedInputTokens is the share of InputTokens served from the provider's
+	// prompt cache (a subset, not an addition). Billed at a large discount, so
+	// Cost prices it separately.
+	CachedInputTokens int
 }
 
 // PromptOpts configures a single Prompt call (not Engine lifetime).
