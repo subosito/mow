@@ -97,6 +97,18 @@ type LLMConfig struct {
 	// insensitive globs: *, ?). Empty = apply for every model when
 	// SystemPrefix is set. Example: ["family-*"].
 	SystemPrefixModels []string `yaml:"system_prefix_models"`
+	// FirstByteTimeoutSec bounds how long a streaming call waits for the
+	// first response byte/headers before failing. Long-reasoning models can
+	// legitimately spend minutes thinking before the first SSE chunk; the
+	// default (300s) matches stream_idle_timeout so "no bytes for X" means
+	// the same X before and after the first byte. A full first-byte timeout
+	// is a hard, non-retried failure (it does not multiply across attempts).
+	// 0 = use the default.
+	FirstByteTimeoutSec int `yaml:"first_byte_timeout_sec"`
+	// CallTimeoutSec bounds a single non-streaming call (one attempt), not
+	// the whole retry sequence. A non-streaming high-effort completion can
+	// exceed 120s; raise this for such models. 0 = default (120s).
+	CallTimeoutSec int `yaml:"call_timeout_sec"`
 	// ContextWindow / InputPrice / OutputPrice override the built-in model
 	// catalog (context tokens; USD per 1M input/output tokens) when it is
 	// missing or stale for the configured model.
@@ -207,6 +219,12 @@ type SkillsConfig struct {
 	Dirs []string `yaml:"dirs"`
 	// Selector defaults on. Set false to load every configured skill.
 	Selector *bool `yaml:"selector"`
+	// Explicit names skill folders to load unconditionally, regardless of the
+	// first-prompt selector. Names are matched case-insensitively against
+	// folder names in the configured dirs (global, user, and trusted project).
+	// Unknown names are silently ignored so a name that exists on one machine
+	// but not another does not break config. CLI --skill appends here.
+	Explicit []string `yaml:"explicit"`
 }
 
 // Load merges defaults, optional config paths, then environment.
@@ -336,6 +354,9 @@ func mergeProjectFile(dst *File, path string) error {
 	// bill it. That is a capability decision for the host/user, not something
 	// a cloned workspace may switch on.
 	overlay.LLM.NativeTools = nil
+	// Network timeouts are host/user behavior (not project-controlled).
+	overlay.LLM.FirstByteTimeoutSec = 0
+	overlay.LLM.CallTimeoutSec = 0
 	overlay.Session.Dir = ""
 	// OTEL exporter endpoint/headers are host/user only (not project).
 	overlay.OTEL = OTELConfig{}
@@ -353,6 +374,9 @@ func mergeProjectFile(dst *File, path string) error {
 	// absolute paths into $HOME/.ssh etc.). Union, do not replace.
 	projectSkills := overlay.Skills.Dirs
 	overlay.Skills.Dirs = nil
+	// skills.explicit is host/user-only: a project must not force-load skills
+	// from global/user dirs it does not own (it could name any folder there).
+	overlay.Skills.Explicit = nil
 
 	mergeOverlay(dst, &overlay)
 	if len(safeEnable) > 0 {
@@ -518,6 +542,9 @@ func mergeOverlay(dst *File, overlay *File) {
 		v := *overlay.Skills.Selector
 		dst.Skills.Selector = &v
 	}
+	if len(overlay.Skills.Explicit) > 0 {
+		dst.Skills.Explicit = mergeStringList(dst.Skills.Explicit, overlay.Skills.Explicit)
+	}
 	mergeOTEL(&dst.OTEL, overlay.OTEL)
 	mergeExtensions(dst, overlay.Extensions)
 }
@@ -623,6 +650,12 @@ func mergeLLM(dst *LLMConfig, o LLMConfig) {
 		// tool impossible to drop.
 		dst.NativeTools = o.NativeTools
 	}
+	if o.FirstByteTimeoutSec != 0 {
+		dst.FirstByteTimeoutSec = o.FirstByteTimeoutSec
+	}
+	if o.CallTimeoutSec != 0 {
+		dst.CallTimeoutSec = o.CallTimeoutSec
+	}
 	if s := strings.TrimSpace(o.Generate.Image); s != "" {
 		dst.Generate.Image = s
 	}
@@ -721,6 +754,12 @@ func (f *File) normalize() error {
 			return fmt.Errorf("llm.effort: %w", err)
 		}
 		f.LLM.Effort = norm
+	}
+	if f.LLM.FirstByteTimeoutSec < 0 {
+		return fmt.Errorf("llm.first_byte_timeout_sec must be >= 0 (0 = default), got %d", f.LLM.FirstByteTimeoutSec)
+	}
+	if f.LLM.CallTimeoutSec < 0 {
+		return fmt.Errorf("llm.call_timeout_sec must be >= 0 (0 = default), got %d", f.LLM.CallTimeoutSec)
 	}
 	if f.LLM.APIKey == "" && f.LLM.APIKeyEnv != "" {
 		f.LLM.APIKey = strings.TrimSpace(os.Getenv(f.LLM.APIKeyEnv))

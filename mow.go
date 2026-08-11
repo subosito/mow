@@ -142,6 +142,20 @@ func Run(ctx context.Context, prompt string, opt Options) (RunResult, error) {
 func Home() string                 { return engine.Home() }
 func VersionString() string        { return engine.VersionString() }
 func IsPowerTool(name string) bool { return engine.IsPowerTool(name) }
+
+// SkillsDir returns the global skills directory ($MOW_HOME/skills, default
+// ~/.mow/skills) where skills live in the standard <name>/SKILL.md layout.
+// It is one of several skill sources: host/user skills.dirs and trusted
+// project .mow/skills are also searched. See AvailableSkillNames.
+func SkillsDir() string { return engine.SkillsDir() }
+
+// AvailableSkillNames returns the sorted, deduplicated skill folder names
+// that contain a SKILL.md entry point across the given directories. It lists
+// what is discoverable without reading skill bodies into the prompt — hosts
+// (e.g. /skill in the TUI) use it to show names so users know what to pass to
+// --skill / skills.explicit. Missing dirs are silently skipped.
+func AvailableSkillNames(dirs []string) []string { return engine.AvailableSkillNames(dirs) }
+
 func ExtractThinking(s string) (visible, thinking string, unclosed bool) {
 	return engine.ExtractThinking(s)
 }

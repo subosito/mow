@@ -33,6 +33,7 @@ type EngineFlags struct {
 	Verbose     bool
 	EnableExt   []string // repeatable --enable-ext
 	DisableExt  []string // repeatable --disable-ext
+	Skills      []string // repeatable --skill
 }
 
 // Bind registers flags on fs.
@@ -54,6 +55,7 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.BoolVar(&f.Verbose, "verbose", false, "debug lifecycle logs (run/tool) on stderr")
 	fs.Var((*stringList)(&f.EnableExt), "enable-ext", "force enable extension instance by name (repeatable)")
 	fs.Var((*stringList)(&f.DisableExt), "disable-ext", "force disable extension instance by name (repeatable)")
+	fs.Var((*stringList)(&f.Skills), "skill", "load a named skill unconditionally regardless of selector (repeatable; use `/skill` in the TUI to list or activate)")
 }
 
 // stringList is a repeatable flag.String-like value (append on each Set).
@@ -122,6 +124,7 @@ func (f *EngineFlags) Options() mow.Options {
 		ExplicitEffort:     strings.TrimSpace(f.Effort) != "",
 		BaseURL:            f.BaseURL,
 		SystemPrefix:       append([]string(nil), f.SystemPrefix...),
+		ExplicitSkills:     append([]string(nil), f.Skills...),
 		AllowWrite:         f.AllowWrite,
 		AllowShell:         f.AllowShell,
 		NoSession:          f.NoSession,

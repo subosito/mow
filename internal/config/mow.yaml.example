@@ -34,6 +34,11 @@ llm:
   # model: gpt-5-mini                 # chat agent loop (tools + reasoning)
   # model: deepseek-chat              # or any OpenAI-compatible id
   # effort: medium                    # none|low|medium|high (optional; not part of model id)
+  # first_byte_timeout_sec: 300     # streaming: max wait for response headers/first byte
+  #                                 # (default 300; a full timeout is hard, not retried).
+  #                                 # Host/user config only — project configs cannot set it.
+  # call_timeout_sec: 120           # non-streaming: per-attempt cap (default 120).
+  #                                 # Host/user config only, like first_byte_timeout_sec.
   # Provider-executed tools declared in the request. USUALLY LEAVE UNSET: when
   # the gateway publishes native_tools per model on GET /v1/models, mow uses
   # that automatically, so capability lives in one place instead of being
@@ -149,7 +154,11 @@ policy:
   # CLI: --extra-root PATH (repeatable)
 
 skills:
-  # dirs: [/path/to/skills]   # *.md files appended to system prompt
+  # dirs: [~/skills]           # skill dirs; each skill is <name>/SKILL.md (folder layout)
+  #                            # host/user config only; project .mow/skills is added when trusted
+  # selector: true             # default on: load only skills whose folder name appears in the first prompt
+  # selector: false            # off: load every configured skill at startup
+  # explicit: [docker, go]     # load named skills unconditionally regardless of selector (CLI: --skill)
   # Project skills: workspace/.mow/skills when trusted (mow trust, or MOW_TRUST_PROJECT=1)
   # Project config: workspace/.mow/config.yaml only when trusted
 
