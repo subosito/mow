@@ -226,6 +226,29 @@ extensions:
         max_turns: 90
 ```
 
+## Group review
+
+Pass one can use several independently configured models. Repeat `--reviewer`
+or use `--reviewers` with a comma-separated list; the listed order is retained
+and the first reviewer runs the existing verification pass:
+
+```bash
+mow review --reviewer gpt-5-mini --reviewer claude-sonnet-4 --reviewer-parallel 2
+mow sec --reviewers gpt-5-mini,claude-sonnet-4 --diff main...HEAD
+```
+
+Each selected model receives its own read-only, ephemeral engine. Candidate JSON
+is parsed independently, merged, and passed through the ordinary validation and
+verification workflow. A member failure, malformed JSON, or cancellation fails
+the review rather than producing a partial clean report. `--reviewer-parallel`
+bounds concurrent candidate calls; its default runs every listed model at once.
+Findings include a backward-compatible `reviewer` extra field identifying the
+candidate model. Without reviewer flags, review uses its existing single engine.
+
+Programmatic callers may likewise use `NewEnsembleReviewer` with named,
+read-only `Reviewer` values. ACP peers are not used: read-only review denies
+`acp_delegate` and this policy remains unchanged.
+
 Only the keys you set change; the rest keep their built-in values, so raising
 `max_files` alone does not quietly remove the byte or turn caps. An unknown
 budget name or a non-positive cap is a hard error rather than a silent

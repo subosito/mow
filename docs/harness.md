@@ -241,10 +241,29 @@ Compaction is **character-estimate**, not a real tokenizer. It keeps the system 
 4. Project `AGENTS.md` / `CLAUDE.md` (walk) + optional `$MOW_HOME/AGENTS.md`
 5. Skills + per-call `SystemAppend` (goal protocol, packs)
 
+**Skills** are markdown injected into the system prompt from `<dir>/<name>/SKILL.md` (folder layout). Skill dir precedence (search order): global `$MOW_HOME/skills` → `skills.dirs` (host/user config) → trusted `workspace/.mow/skills`. Dedup is by lowercased skill name with first-directory precedence (not by resolved path), so a name present in both global and user dirs loads once — the first dir's copy wins.
+
+Selection: `skills.selector` (default on) loads only skills whose folder name appears (case-insensitive substring) in the first user prompt. `skills.selector: false` loads all. `skills.explicit` / `--skill <name>` (repeatable) loads named skills unconditionally regardless of the selector — they load at startup, before the first prompt. CLI `--skill` and config `skills.explicit` are merged; unknown names are silently ignored. Name precedence: CLI wins over config (both deduped, first-seen order). `skills.explicit` is host/user-only — a project config may not force-load skills from global/user dirs it does not own.
+
+Mid-session activation: `Engine.ActivateSkills(name...)` loads named skills into the live system prompt for subsequent turns without restarting, merging (deduping by name) with skills already loaded by the first-prompt selector or explicit config/CLI. Unknown names are returned, not errored. `Engine.AvailableSkills()` lists what can be loaded. In the TUI, `/skill` lists names and `/skill <name>...` activates immediately. Activation acquires the prompt mutex, does not mutate committed history, and preserves the selector and explicit skills.
+
+When `skills.selector` is on, the lazy load happens on the first `Prompt` call (not at `Engine.New`); explicit skills merge with prompt-matched skills there. When the selector is off, all skills compile at `Engine.New`. Both compile into the same system segment after AGENTS.md.
+
 When prefix matches the model (e.g. Claude family → “You are Claude Code”), the “You are mow” line is **omitted** so the model does not see two identities. Prefix sets persona; harness rules still apply.
 
 | `llm.generate.*` | Side-lane model ids for generate tools |
 | `llm.understand.*` | Side-lane model ids for understand tools |
+
+**Network timeouts:** `llm.first_byte_timeout_sec` (default `300`) bounds how
+long a streaming call waits for response headers/first byte — long-reasoning
+models can spend minutes thinking before the first SSE chunk. A full
+first-byte timeout is a hard, non-retried failure (it does not multiply
+across attempts) and the error names the bound and the knob.
+`llm.call_timeout_sec` (default `120`) caps one non-streaming attempt. Both
+are host/user config only — a project config cannot set them (same trust
+class as `llm.base_url`). A host-injected `Options.HTTPClient` takes
+precedence over both knobs: mow consults them only when building its own
+transport, so a custom client keeps its own timeout semantics.
 
 **Wire vs cost (Claude / Anthropic):** `--model claude-…` without an explicit wire used to stay on `openai-chat-completions`. Gateways often accept that and translate (O2A), but **prompt cache is not applied** on that path, so large sessions (100k+ input tokens every call) cost far more than native Anthropic with cache hits. Catalog auto-align (and `/model` via `SetModelWithWire`) select `anthropic-messages` when the catalog advertises it.
 
