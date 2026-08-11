@@ -163,10 +163,10 @@ func TestJSONCallTimeoutCapApplies(t *testing.T) {
 	}{
 		{0, true},
 		{30 * time.Second, false},
-		{jsonCallTimeout, false},
+		{defaultCallTimeout, false},
 		{10 * time.Minute, true},
 	} {
-		got := tc.timeout <= 0 || tc.timeout > jsonCallTimeout
+		got := tc.timeout <= 0 || tc.timeout > defaultCallTimeout
 		if got != tc.wantCap {
 			t.Fatalf("timeout %v: cap=%v want %v", tc.timeout, got, tc.wantCap)
 		}
@@ -174,13 +174,15 @@ func TestJSONCallTimeoutCapApplies(t *testing.T) {
 }
 
 func TestRetryableAttemptErrRetriesInternalTimeoutOnly(t *testing.T) {
-	if !retryableAttemptErr(true, context.DeadlineExceeded) {
+	cap := 120 * time.Second
+	noCap := time.Duration(0)
+	if !retryableAttemptErr(cap, context.DeadlineExceeded) {
 		t.Fatal("internal per-attempt deadline should be retryable")
 	}
-	if retryableAttemptErr(false, context.DeadlineExceeded) {
+	if retryableAttemptErr(noCap, context.DeadlineExceeded) {
 		t.Fatal("host http.Client timeout must not widen into multiple attempts")
 	}
-	if retryableAttemptErr(true, context.Canceled) {
+	if retryableAttemptErr(cap, context.Canceled) {
 		t.Fatal("cancellation must not be retried")
 	}
 }

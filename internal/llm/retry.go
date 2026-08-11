@@ -56,20 +56,57 @@ func retryDelayRefused(n int) time.Duration {
 	return d
 }
 
+// defaultFirstByteTimeout bounds how long a streaming call waits for the
+// first response byte/headers (300s). It matches streamIdleTimeout so "no
+// bytes for X" means the same X before and after the first byte: a
+// long-reasoning model that spends minutes thinking before its first SSE
+// chunk gets the same grace as inter-chunk silence. Vars so tests can shrink
+// them.
+var defaultFirstByteTimeout = 5 * time.Minute
+
+// defaultCallTimeout bounds a single non-streaming call (one attempt, not the
+// whole retry sequence). The streaming path has idleReader; the JSON path had
+// nothing, so a host that injects &http.Client{Timeout: 0} — or any very large
+// timeout — could hang a run forever on a wedged gateway. Var so tests can
+// shrink it.
+var defaultCallTimeout = 120 * time.Second
+
+func (c *Client) firstByteTimeout() time.Duration {
+	if c.FirstByteTimeout > 0 {
+		return c.FirstByteTimeout
+	}
+	return defaultFirstByteTimeout
+}
+
+func (c *Client) callTimeout() time.Duration {
+	if c.CallTimeout > 0 {
+		return c.CallTimeout
+	}
+	return defaultCallTimeout
+}
+
 // doHTTPStream retries a replayable request using a long-lived client when
 // c.HTTP is nil.
 // Timeout is 0 for the overall body (streams can run for minutes) but dial and
 // response-header waits are bounded so a silent gateway cannot freeze forever.
+// The response-header (first-byte) bound is c.FirstByteTimeout (default
+// defaultFirstByteTimeout); a full first-byte timeout is a hard, non-retried
+// failure — it does not multiply across attempts.
 func (c *Client) doHTTPStream(req *http.Request) (*http.Response, error) {
 	hc := c.HTTP
 	if hc == nil {
-		hc = streamHTTPClient()
+		hc = streamHTTPClient(c.firstByteTimeout())
 	}
 	return doWithRetry(hc, req, maxHTTPAttempts)
 }
 
-// streamHTTPClient: no overall Timeout (SSE can be long); bound connect + headers.
-func streamHTTPClient() *http.Client {
+// streamHTTPClient: no overall Timeout (SSE can be long); bound connect +
+// headers. firstByte sets ResponseHeaderTimeout (the pre-first-byte bound);
+// it defaults to defaultFirstByteTimeout via doHTTPStream.
+func streamHTTPClient(firstByte time.Duration) *http.Client {
+	if firstByte <= 0 {
+		firstByte = defaultFirstByteTimeout
+	}
 	return &http.Client{
 		Timeout: 0,
 		Transport: &http.Transport{
@@ -82,7 +119,7 @@ func streamHTTPClient() *http.Client {
 			MaxIdleConns:          16,
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   15 * time.Second,
-			ResponseHeaderTimeout: 120 * time.Second, // wait for first byte/headers
+			ResponseHeaderTimeout: firstByte, // wait for first byte/headers
 			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
@@ -116,8 +153,23 @@ func doWithRetry(hc *http.Client, req *http.Request, attempts int) (*http.Respon
 		}
 		res, err := hc.Do(req)
 		if err != nil {
+			// ResponseHeaderTimeout is a complete first-byte wait, not a short
+			// transient attempt. Return one actionable diagnostic instead of
+			// multiplying a five-minute bound across generic retries.
+			if responseHeaderTimedOut(err) {
+				return nil, fmt.Errorf("llm: timed out after %s waiting for response headers/first byte (configure llm.first_byte_timeout_sec to allow more pre-first-byte think time): %w", headerTimeoutBound(hc), err)
+			}
 			if !retryableNetErr(err) {
 				return nil, err
+			}
+			// A first-byte timeout (ResponseHeaderTimeout) is a hard,
+			// non-retried failure: the model spent the whole budget thinking
+			// before emitting a byte, and retrying would just wait the same
+			// span again — multiplying a 5-minute think into 15. Return a
+			// diagnostic error that names the bound and the configured
+			// duration without leaking the request URL or credentials.
+			if isHeaderTimeout(err) {
+				return nil, fmt.Errorf("llm: timed out after %s waiting for response headers/first byte (configure llm.first_byte_timeout_sec to allow more pre-first-byte think time)", headerTimeoutBound(hc))
 			}
 			// Connection refused = upstream down/restarting: survive the bounce
 			// with a much longer window than generic transients (the generic
@@ -144,6 +196,49 @@ func doWithRetry(hc *http.Client, req *http.Request, attempts int) (*http.Respon
 		}
 		return res, nil
 	}
+}
+
+// isHeaderTimeout reports whether err is a ResponseHeaderTimeout firing. On
+// HTTP/1 the transport wraps it as a net.Error whose Timeout() is true; on
+// HTTP/2 (x/net) it surfaces as a context deadline or a response-header
+// timeout error string. We match conservatively so a genuine caller deadline
+// (context.DeadlineExceeded) is NOT treated as a first-byte timeout — those
+// are already classified as non-retryable by retryableNetErr.
+func isHeaderTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		s := err.Error()
+		if strings.Contains(s, "response header") || strings.Contains(s, "timeout awaiting response") {
+			return true
+		}
+	}
+	return false
+}
+
+// headerTimeoutBound returns the configured ResponseHeaderTimeout on the
+// client's transport, or the default when it cannot be read.
+func responseHeaderTimedOut(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "timeout awaiting response headers")
+}
+
+func headerTimeoutBound(hc *http.Client) time.Duration {
+	if hc != nil {
+		if t, ok := hc.Transport.(*http.Transport); ok && t != nil {
+			if t.ResponseHeaderTimeout > 0 {
+				return t.ResponseHeaderTimeout
+			}
+		}
+	}
+	return defaultFirstByteTimeout
 }
 
 func rewindRequest(req *http.Request) error {

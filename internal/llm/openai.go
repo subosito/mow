@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -211,6 +212,18 @@ type Client struct {
 	ExtraHeaders map[string]string
 	// Stream enables SSE token deltas when supported by the wire.
 	Stream bool
+	// FirstByteTimeout bounds how long a streaming call waits for the first
+	// response byte/headers (the ResponseHeaderTimeout of the stream HTTP
+	// client). Zero = defaultFirstByteTimeout. Long-reasoning models can
+	// spend minutes thinking before the first SSE chunk; the default matches
+	// streamIdleTimeout so "no bytes for X" means the same X before and after
+	// the first byte. A full first-byte timeout is a hard, non-retried
+	// failure. Only consulted when c.HTTP is nil (mow's own stream client);
+	// a caller-supplied HTTP client keeps its own semantics.
+	FirstByteTimeout time.Duration `json:"-"`
+	// CallTimeout bounds a single non-streaming call (one attempt). Zero =
+	// defaultCallTimeout (120s). Only consulted when c.HTTP is nil.
+	CallTimeout time.Duration `json:"-"`
 	// MaxTokens caps the response length on wires that require it
 	// (anthropic-messages, openai-responses max_output_tokens). Zero means
 	// provider default (8192 for Anthropic; omit for Responses).

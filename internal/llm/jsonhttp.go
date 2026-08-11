@@ -14,12 +14,6 @@ import (
 // jsonBodyLimit caps how much of a non-streaming response we buffer.
 const jsonBodyLimit = 8 << 20
 
-// jsonCallTimeout bounds a single non-streaming LLM call (one attempt, not the
-// whole retry sequence). The streaming path has idleReader; the JSON path had
-// nothing, so a host that injects &http.Client{Timeout: 0} — or any very large
-// timeout — could hang a run forever on a wedged gateway.
-const jsonCallTimeout = 120 * time.Second
-
 // doJSON performs a non-streaming LLM call with retries and returns the status
 // and buffered body. It is the JSON-path counterpart of doHTTPStream: never use
 // it for SSE (a retry mid-stream would replay tokens the caller already saw).
@@ -28,14 +22,24 @@ const jsonCallTimeout = 120 * time.Second
 // gateways signal overload with HTTP 200 and {"error":{...}} in the body. Those
 // used to abort the whole run on the first blip.
 func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
+	// callTimeout is the per-attempt cap. A caller-supplied HTTP client
+	// (c.HTTP) keeps its own semantics: we only cap per attempt when using
+	// mow's own default client (hc.Timeout <= 0) or when the caller's timeout
+	// exceeds the configured bound. A caller with a tighter Timeout wins.
+	perAttempt := c.callTimeout()
 	hc := c.HTTP
 	if hc == nil {
-		hc = &http.Client{Timeout: jsonCallTimeout}
+		hc = &http.Client{Timeout: perAttempt}
 	}
 	// Bound each attempt regardless of the client's own Timeout. WithTimeout
 	// keeps the parent's deadline when that one is earlier, so a caller with a
-	// tighter ctx still wins.
-	capPerAttempt := hc.Timeout <= 0 || hc.Timeout > jsonCallTimeout
+	// tighter ctx still wins. capPerAttempt is the per-attempt bound (0 = do
+	// not add an internal cap, e.g. a caller-supplied HTTP client with its own
+	// Timeout already in force).
+	capPerAttempt := time.Duration(0)
+	if hc.Timeout <= 0 || hc.Timeout > perAttempt {
+		capPerAttempt = perAttempt
+	}
 
 	var (
 		lastErr    error
@@ -121,24 +125,27 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 // caller cancelling or exhausting the whole run. The former is an upstream
 // stall and should consume the normal jittered retry budget; the latter must
 // return immediately. net/http often wraps both as context deadline exceeded.
-func retryableAttemptErr(internalCap bool, err error) bool {
+// internalCap is the per-attempt bound; 0 means no internal cap was applied
+// (a caller-supplied HTTP client's own Timeout is in force, so a deadline
+// is the caller's, not ours — do not retry).
+func retryableAttemptErr(internalCap time.Duration, err error) bool {
 	if err == nil {
 		return false
 	}
 	// Only the timeout introduced by doJSONAttempt is retryable here. A host's
 	// explicit http.Client.Timeout remains its requested whole-call bound.
 	if errors.Is(err, context.DeadlineExceeded) {
-		return internalCap
+		return internalCap > 0
 	}
 	return retryableNetErr(err)
 }
 
 // doJSONAttempt runs one request and fully buffers the body so the connection
 // is released before any backoff sleep.
-func doJSONAttempt(hc *http.Client, req *http.Request, capPerAttempt bool) (int, []byte, http.Header, error) {
+func doJSONAttempt(hc *http.Client, req *http.Request, capPerAttempt time.Duration) (int, []byte, http.Header, error) {
 	r := req
-	if capPerAttempt {
-		ctx, cancel := context.WithTimeout(req.Context(), jsonCallTimeout)
+	if capPerAttempt > 0 {
+		ctx, cancel := context.WithTimeout(req.Context(), capPerAttempt)
 		defer cancel()
 		r = req.Clone(ctx)
 	}
