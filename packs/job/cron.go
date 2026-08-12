@@ -138,7 +138,7 @@ func (c *cronSched) matchFields(min, hour, day, mon, dow int) bool {
 	return domOK && dowOK
 }
 
-// nextAfter returns the next minute strictly after t that matches (search up to 2 years).
+// nextAfter returns the next minute strictly after t that matches (search up to 8 years).
 //
 // DST is handled vixie-cron style. The scan advances by absolute minutes and
 // watches the zone offset between consecutive steps:
@@ -153,7 +153,7 @@ func (c *cronSched) matchFields(min, hour, day, mon, dow int) bool {
 func (c *cronSched) nextAfter(t time.Time) (time.Time, error) {
 	prev := t.Truncate(time.Minute)
 	t = prev.Add(time.Minute)
-	limit := t.AddDate(2, 0, 0)
+	limit := t.AddDate(8, 0, 0)
 	var skipUntil time.Time // end of a fall-back repeated window (second pass)
 	for !t.After(limit) {
 		_, prevOff := prev.Zone()
@@ -175,7 +175,7 @@ func (c *cronSched) nextAfter(t time.Time) (time.Time, error) {
 		prev = t
 		t = t.Add(time.Minute)
 	}
-	return time.Time{}, fmt.Errorf("cron: no match within 2 years")
+	return time.Time{}, fmt.Errorf("cron: no match within 8 years")
 }
 
 // matchesInGap reports whether the schedule matches any wall-clock minute

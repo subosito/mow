@@ -254,10 +254,19 @@ No profile means no ops tools.
 
 Opt-in language-server tools (`lsp_hover`, `lsp_definition`) and post-edit
 `textDocument/diagnostic`. Requires an operator-installed/configured language
-server. No config means no process.
+server. No config means no process. Tools declare `ReadOnly()` so they stay
+available in read-only prompts.
+
+Paths resolve through the engine path jail when available (same boundary as
+`read`/`write`); hosts without an engine in context fall back to containment
+under the configured `root`. RPC framing is bounded (1 MiB frames, capped
+header lines and skipped frames); `didOpen` rejects symlinks/non-regular files
+and caps file bodies at 4 MiB.
 
 Diagnostics are sorted by severity, capped at `mow.MaxLSPDiagnostics`, attached
 to successful write/edit results, and emitted as `harness.lsp.diagnostics`.
+Post-edit pulls use their own deadline (`diagTimeout`, default 10s) and never
+fail a successful edit when the server is slow or down.
 
 ```yaml
 extensions:
@@ -270,7 +279,18 @@ extensions:
 ### Job (`packs/job`)
 
 Interval/cron prompt or goal jobs. Job depends on goal; ops uses job for daemon
-runs. Same id never overlaps an active tick.
+runs.
+
+- Same id never overlaps an active tick (later ticks are skipped, not queued).
+- Each tick builds a fresh `Engine` and closes it when the tick ends.
+- A `every` shorter than 1s is raised to 1s. Cron is 5-field local time;
+  `29 2` searches up to 8 years so leap days are not dropped.
+- Done goals are reset via `goal.Store.Reset` (plan items return to pending)
+  before the tick; blocked goals are skipped until `mow goal run --answer`.
+- `$MOW_HOME/job/schedules.yaml` (or `--schedules`) must be a regular file,
+  max 1 MiB / 64 entries. An explicit `--schedules` path that is missing is
+  an error; only the default path falls back to `extensions.job`.
+- Duplicate ids fail `mow job check` / `run`. Disabled entries are valid.
 
 ### Context sink (`packs/contextsink`)
 

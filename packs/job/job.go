@@ -10,7 +10,9 @@ package job
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +24,15 @@ import (
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/packs/goal"
 )
+
+const (
+	maxSchedules          = 64
+	maxSchedulesFileBytes = 1 << 20 // 1 MiB
+	minEvery              = time.Second
+)
+
+// ErrDisabled is returned by ValidateJob when the schedule is present but off.
+var ErrDisabled = errors.New("disabled")
 
 // Job is one recurring unit of work (an entry under schedules).
 type Job struct {
@@ -50,11 +61,13 @@ func DefaultSchedulesPath() string {
 }
 
 // LoadSchedules reads YAML from path (or DefaultSchedulesPath).
+// The path must be a regular file (a symlink to a regular file is allowed)
+// and is capped at 1 MiB / 64 schedules.
 func LoadSchedules(path string) ([]Job, error) {
 	if strings.TrimSpace(path) == "" {
 		path = DefaultSchedulesPath()
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := readSchedulesFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +75,7 @@ func LoadSchedules(path string) ([]Job, error) {
 	if err := yaml.Unmarshal(raw, &c); err != nil {
 		return nil, err
 	}
-	return c.Schedules, nil
+	return capSchedules(c.Schedules)
 }
 
 // LoadSchedulesFromEngine reads extensions.job from the engine config.
@@ -74,19 +87,62 @@ func LoadSchedulesFromEngine(eng *mow.Engine) ([]Job, error) {
 	if err := eng.Extension("job", &c); err != nil {
 		return nil, err
 	}
-	return c.Schedules, nil
+	return capSchedules(c.Schedules)
+}
+
+func capSchedules(jobs []Job) ([]Job, error) {
+	if len(jobs) > maxSchedules {
+		return nil, fmt.Errorf("job: more than %d schedules", maxSchedules)
+	}
+	return jobs, nil
+}
+
+func readSchedulesFile(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		info, err = os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("job: schedules path is not a regular file")
+	}
+	if info.Size() > maxSchedulesFileBytes {
+		return nil, fmt.Errorf("job: schedules file exceeds %d bytes", maxSchedulesFileBytes)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxSchedulesFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxSchedulesFileBytes {
+		return nil, fmt.Errorf("job: schedules file exceeds %d bytes", maxSchedulesFileBytes)
+	}
+	return data, nil
 }
 
 // ValidateJob checks one schedule is runnable (id, every/cron, goal/prompt).
 func ValidateJob(j Job) error {
-	if strings.TrimSpace(j.ID) == "" {
+	id := strings.TrimSpace(j.ID)
+	if id == "" {
 		return fmt.Errorf("missing id")
+	}
+	if strings.ContainsAny(id, "\x00\n\r\t") {
+		return fmt.Errorf("id contains invalid characters")
 	}
 	if strings.TrimSpace(j.Goal) == "" && strings.TrimSpace(j.Prompt) == "" {
 		return fmt.Errorf("need goal or prompt")
 	}
 	if j.Enabled != nil && !*j.Enabled {
-		return fmt.Errorf("disabled")
+		return ErrDisabled
 	}
 	cronExpr := strings.TrimSpace(j.Cron)
 	everyExpr := strings.TrimSpace(j.Every)
@@ -125,8 +181,25 @@ func NextFire(j Job, from time.Time) string {
 	return ""
 }
 
+func duplicateScheduleIDs(jobs []Job) error {
+	seen := make(map[string]struct{}, len(jobs))
+	for _, j := range jobs {
+		id := strings.TrimSpace(j.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			return fmt.Errorf("job: duplicate id %q", id)
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
+}
+
 // Daemon runs schedules until ctx is cancelled.
 type Daemon struct {
+	// NewEngine must return a fresh Engine the daemon owns. Each tick
+	// Closes that value when the tick ends (including on error or cancel).
 	NewEngine func() (*mow.Engine, error)
 	Schedules []Job
 	OnLog     func(string)
@@ -134,6 +207,7 @@ type Daemon struct {
 
 	// fireMu serializes fires per job id so a slow tick cannot overlap the next.
 	fireMu sync.Map // id -> *sync.Mutex
+	logMu  sync.Mutex
 }
 
 // Start blocks until ctx done.
@@ -145,9 +219,20 @@ func (d *Daemon) Start(ctx context.Context) error {
 	if len(jobs) == 0 {
 		return fmt.Errorf("job: no schedules")
 	}
+	if len(jobs) > maxSchedules {
+		return fmt.Errorf("job: more than %d schedules", maxSchedules)
+	}
+	if err := duplicateScheduleIDs(jobs); err != nil {
+		return err
+	}
 	var wg sync.WaitGroup
 	started := 0
 	for _, j := range jobs {
+		j.ID = strings.TrimSpace(j.ID)
+		if j.ID == "" {
+			d.log("skip job: missing id")
+			continue
+		}
 		if j.Enabled != nil && !*j.Enabled {
 			continue
 		}
@@ -180,6 +265,10 @@ func (d *Daemon) Start(ctx context.Context) error {
 			d.log(fmt.Sprintf("skip job %q: bad every %q", j.ID, j.Every))
 			continue
 		}
+		if dur < minEvery {
+			d.log(fmt.Sprintf("job %s: every %s raised to %s", j.ID, dur, minEvery))
+			dur = minEvery
+		}
 		started++
 		wg.Add(1)
 		go func(j Job, every time.Duration) {
@@ -191,10 +280,16 @@ func (d *Daemon) Start(ctx context.Context) error {
 		return fmt.Errorf("job: no runnable schedules")
 	}
 	wg.Wait()
-	return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("job: all schedules stopped")
 }
 
 func (d *Daemon) runEveryLoop(ctx context.Context, j Job, every time.Duration) {
+	if ctx.Err() != nil {
+		return
+	}
 	// Fire once at start so short demos (e.g. every: 30s) are not silent for a full interval.
 	d.fire(ctx, j)
 	t := time.NewTicker(every)
@@ -233,6 +328,9 @@ func (d *Daemon) runCronLoop(ctx context.Context, j Job, sched *cronSched) {
 }
 
 func (d *Daemon) fire(ctx context.Context, j Job) {
+	if ctx.Err() != nil {
+		return
+	}
 	// One in-flight fire per schedule id (skip if still running).
 	muAny, _ := d.fireMu.LoadOrStore(j.ID, &sync.Mutex{})
 	mu := muAny.(*sync.Mutex)
@@ -248,21 +346,29 @@ func (d *Daemon) fire(ctx context.Context, j Job) {
 		d.log(fmt.Sprintf("job %s engine: %v", j.ID, err))
 		return
 	}
+	defer eng.Close()
+	if ctx.Err() != nil {
+		return
+	}
 	if g := strings.TrimSpace(j.Goal); g != "" {
 		store := d.goalStore()
-		// Recurring jobs should re-run completed goals each tick.
-		if prev, err := store.Load(g); err == nil && prev.Status == goal.StatusDone {
-			prev.Status = goal.StatusPending
-			prev.Step = 0
-			prev.Error = ""
-			prev.SessionID = ""
-			prev.LastReply = ""
-			// keep Summary as last successful result until overwritten
-			if err := store.Save(prev); err != nil {
-				d.log(fmt.Sprintf("job %s goal %s reset: %v", j.ID, g, err))
+		if prev, err := store.Load(g); err == nil {
+			switch prev.Status {
+			case goal.StatusDone:
+				// Store.Reset also restores plan items; a hand-rolled
+				// Status=pending write left checklists marked done.
+				if _, err := store.Reset(g); err != nil {
+					d.log(fmt.Sprintf("job %s goal %s reset: %v", j.ID, g, err))
+					return
+				}
+				d.log(fmt.Sprintf("job %s goal %s reset for re-run", j.ID, g))
+			case goal.StatusBlocked:
+				d.log(fmt.Sprintf("job %s skip: goal %s is blocked (resume with --answer)", j.ID, g))
 				return
 			}
-			d.log(fmt.Sprintf("job %s goal %s reset for re-run", j.ID, g))
+		} else if !os.IsNotExist(err) {
+			d.log(fmt.Sprintf("job %s goal %s: %v", j.ID, g, err))
+			return
 		}
 		r := &goal.Runner{Engine: eng, Store: store}
 		st, err := r.Run(ctx, g)
@@ -316,6 +422,8 @@ func (d *Daemon) goalStore() *goal.Store {
 }
 
 func (d *Daemon) log(s string) {
+	d.logMu.Lock()
+	defer d.logMu.Unlock()
 	if d.OnLog != nil {
 		d.OnLog(s)
 		return

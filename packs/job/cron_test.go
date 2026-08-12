@@ -103,6 +103,24 @@ func TestCronNextAfterDST(t *testing.T) {
 	}
 }
 
+func TestCronFeb29AcrossGapYears(t *testing.T) {
+	s, err := parseCron("0 0 29 2 *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2028 is a leap year; after 29 Feb the next leap day is 2032 (4 years),
+	// which a 2-year search used to miss.
+	from := time.Date(2028, 3, 1, 0, 0, 0, 0, time.UTC)
+	next, err := s.nextAfter(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2032, 2, 29, 0, 0, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Fatalf("nextAfter(%v) = %v, want %v", from, next, want)
+	}
+}
+
 func TestParseCronListsAndRanges(t *testing.T) {
 	s, err := parseCron("0 9-17 * * 1,3,5")
 	if err != nil {

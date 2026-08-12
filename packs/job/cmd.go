@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -72,6 +73,7 @@ Flags:
   --goal ID       re-run saved goal each tick
   --id NAME       job id (default: inline)
   --schedules path   yaml file (default $MOW_HOME/job/schedules.yaml)
+                     explicit path must exist (no silent fallback)
 
 File / extensions.job:
 
@@ -87,13 +89,21 @@ For fleet ops prefer: mow ops run NAME
 }
 
 func loadSchedulesForCLI(schedPath string, ef *cliutil.EngineFlags) ([]Job, string, error) {
+	explicit := strings.TrimSpace(schedPath) != ""
 	path := strings.TrimSpace(schedPath)
 	if path == "" {
 		path = DefaultSchedulesPath()
 	}
-	if _, statErr := os.Stat(path); statErr == nil {
+	_, statErr := os.Lstat(path)
+	if statErr == nil {
 		jobs, err := LoadSchedules(path)
 		return jobs, path, err
+	}
+	if !os.IsNotExist(statErr) {
+		return nil, path, statErr
+	}
+	if explicit {
+		return nil, path, fmt.Errorf("no file at %s", path)
 	}
 	if ef == nil {
 		return nil, path, fmt.Errorf("no file at %s (and no engine flags to load extensions.job)", path)
@@ -102,6 +112,7 @@ func loadSchedulesForCLI(schedPath string, ef *cliutil.EngineFlags) ([]Job, stri
 	if err != nil {
 		return nil, path, fmt.Errorf("%v (or create %s)", err, DefaultSchedulesPath())
 	}
+	defer eng.Close()
 	jobs, err := LoadSchedulesFromEngine(eng)
 	return jobs, "extensions.job", err
 }
@@ -169,11 +180,19 @@ func cmdCheck(args []string) int {
 	bad := 0
 	for _, j := range jobs {
 		if err := ValidateJob(j); err != nil {
+			if errors.Is(err, ErrDisabled) {
+				fmt.Printf("disabled %s\n", j.ID)
+				continue
+			}
 			fmt.Fprintf(os.Stderr, "bad %s: %v\n", j.ID, err)
 			bad++
 			continue
 		}
 		fmt.Printf("ok %s next=%s\n", j.ID, NextFire(j, time.Now()))
+	}
+	if err := duplicateScheduleIDs(jobs); err != nil {
+		fmt.Fprintf(os.Stderr, "mow job check: %v\n", err)
+		bad++
 	}
 	fmt.Fprintf(os.Stderr, "source: %s checked=%d bad=%d\n", src, len(jobs), bad)
 	if bad > 0 {
@@ -223,10 +242,14 @@ func cmdRun(args []string) int {
 	}
 	// Refuse to start with invalid schedules.
 	for _, j := range jobs {
-		if err := ValidateJob(j); err != nil && err.Error() != "disabled" {
+		if err := ValidateJob(j); err != nil && !errors.Is(err, ErrDisabled) {
 			fmt.Fprintf(os.Stderr, "mow job: schedule %q: %v (mow job check)\n", j.ID, err)
 			return 1
 		}
+	}
+	if err := duplicateScheduleIDs(jobs); err != nil {
+		fmt.Fprintf(os.Stderr, "mow job: %v\n", err)
+		return 1
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
