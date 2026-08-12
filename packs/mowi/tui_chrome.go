@@ -278,11 +278,10 @@ func (m *model) View() tea.View {
 	v := tea.NewView(content)
 	// BT v2: declare terminal features on the View (not NewProgram options).
 	v.AltScreen = true
-	// Mouse tracking steals the mouse from the terminal: drag-to-select text
-	// is traded for wheel scroll. On by default so the wheel reaches the
-	// transcript as a MouseWheelMsg instead of translated arrow keys, which
-	// would recall or edit the prompt in the input box. MOW_MOUSE=0 opts out
-	// and restores native selection; ctrl+u / ctrl+d still scroll either way.
+	// Mouse tracking steals drag-select in exchange for MouseWheelMsg. On by
+	// default. MOW_MOUSE=0 or select mode release the mouse for native copy;
+	// wheel then arrives as arrow keys and still scrolls (consumeMouseOffArrow).
+	// ctrl+u / ctrl+d scroll either way.
 	v.MouseMode = tea.MouseModeNone
 	if m.mouseOn() {
 		v.MouseMode = tea.MouseModeCellMotion
@@ -292,11 +291,9 @@ func (m *model) View() tea.View {
 
 // mouseTrackingEnabled reports whether the app owns the mouse for wheel
 // scroll. On by default: without tracking, terminals translate wheel events
-// into arrow-key sequences, and a wheel-up would recall the last prompt into
-// the input (or a wheel-down would move/clear it) instead of scrolling the
-// transcript. Set MOW_MOUSE=0 (also false/off/no) to restore native terminal
-// selection — keys ctrl+u / ctrl+d still scroll, and the arrow-burst guard
-// keeps wheel noise out of the prompt.
+// into arrow keys (handled by consumeMouseOffArrow — scroll + edit-last
+// debounce). Set MOW_MOUSE=0 (also false/off/no) to restore native terminal
+// selection from startup; select mode toggles the same at runtime.
 func mouseTrackingEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("MOW_MOUSE"))) {
 	case "0", "false", "off", "no", "none":
@@ -628,10 +625,10 @@ func (m *model) renderHeader() string {
 	if m.perm() == PermAsk {
 		must = append(must, chip{th.Muted.Render("ask"), true})
 	}
-	// Select mode is a persistent interaction state: the wheel no longer
-	// scrolls and the mouse belongs to the terminal. It must survive width
-	// pressure (dropping it would look like a broken wheel), so it is a must
-	// chip like the permission posture.
+	// Select mode is a persistent interaction state: the mouse belongs to the
+	// terminal for drag-copy; wheel still scrolls via arrow-key translation.
+	// It must survive width pressure (dropping it looks like a broken mode),
+	// so it is a must chip like the permission posture.
 	if !m.mouseOn() {
 		must = append(must, chip{th.Accent.Render(glyphSelect + " select"), true})
 	}

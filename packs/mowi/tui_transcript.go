@@ -27,8 +27,8 @@ type (
 		err   error
 	}
 	// recallConfirmMsg fires after the up-arrow confirm window when mouse
-	// tracking is off: a wheel burst's second arrow cancels the held recall
-	// before this tick; a single deliberate press runs editLast.
+	// tracking is off: any further arrow (burst / sticky wheel mode) clears
+	// pendingRecall before this tick; a deliberate lone Up runs editLast.
 	recallConfirmMsg struct{}
 	// streamSnapMsg is a batched content/reasoning drain from streamIngest.
 	streamSnapMsg struct {

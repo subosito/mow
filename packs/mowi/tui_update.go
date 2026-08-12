@@ -128,20 +128,27 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.permWait != nil {
 			return m, m.handlePermKey(keyStr)
 		}
+		// Select mode / MOW_MOUSE=0: wheel arrives as KeyUp/KeyDown. Handle
+		// before global bindings and the textarea so a spin scrolls the
+		// transcript and never arms edit-last or walks the draft cursor.
+		// Pickers/diff/help/perm already returned above and keep their arrows.
+		if !m.mouseOn() && (msg.Code == tea.KeyUp || msg.Code == tea.KeyDown) {
+			return m, m.consumeMouseOffArrow(msg)
+		}
 		// Configurable global bindings (idle + busy unless noted).
 		switch {
 		case ks.Matches(ks.SelectMode, keyStr):
 			// Mouse tracking steals drag-select from the terminal. Releasing
 			// it at runtime lets the user copy text without restarting; the
-			// wheel falls back to the arrow-burst guard while off. The header
-			// chip is the persistent state signal; the transcript only teaches
-			// the mechanics once per session (queueTeachShown pattern), so
-			// repeated toggles do not spam scrollback.
+			// wheel becomes arrow keys and still scrolls (consumeMouseOffArrow).
+			// The header chip is the persistent state signal; the transcript
+			// only teaches the mechanics once per session (queueTeachShown
+			// pattern), so repeated toggles do not spam scrollback.
 			m.mouseOff = !m.mouseOff
 			if m.mouseOff && !m.selectTeachShown {
 				m.selectTeachShown = true
 				m.add(kindStatus, "select mode — mouse released, drag to select ("+
-					m.cfg.Keys.Primary(m.cfg.Keys.SelectMode)+" to resume scroll)")
+					m.cfg.Keys.Primary(m.cfg.Keys.SelectMode)+" to restore mouse)")
 			}
 			m.layout()
 			m.refreshVP()
@@ -597,14 +604,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case recallConfirmMsg:
 		// Mouse-off wheel guard: the up-arrow recall was held for the confirm
-		// window. It fires only if it is STILL pending (a wheel burst's second
-		// arrow clears it) and the prompt is still empty and idle.
+		// window. It fires only if it is STILL pending (any further arrow
+		// clears it), the prompt is still empty and idle, and we are not
+		// inside a sticky wheel gesture from a recent burst.
 		if !m.pendingRecall {
 			return m, nil
 		}
 		m.pendingRecall = false
+		now := time.Now()
+		if now.Before(m.wheelUntil) {
+			return m, nil
+		}
 		if !m.busy && strings.TrimSpace(m.ta.Value()) == "" &&
-			time.Since(m.pendingRecallAt) >= recallConfirmWindow {
+			now.Sub(m.pendingRecallAt) >= recallConfirmWindow {
 			return m, m.editLast()
 		}
 		return m, nil
@@ -705,36 +717,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			// Any non-arrow key cancels a held recall (mouse-off confirm window).
+			// Mouse-off arrows are handled earlier and never reach here.
 			if m.pendingRecall && km.Code != tea.KeyUp && km.Code != tea.KeyDown {
 				m.pendingRecall = false
 			}
-			// Arrow bursts are wheel noise when mouse tracking is off
-			// (MOW_MOUSE=0): terminals translate scroll into rapid
-			// KeyUp/KeyDown sequences. Drop the burst before it can recall
-			// a prompt or walk the draft cursor.
-			if !m.mouseOn() && (km.Code == tea.KeyUp || km.Code == tea.KeyDown) && m.arrowBurst() {
-				m.pendingRecall = false
-				return m, nil
-			}
 			// ↑ on an empty prompt recalls the last message for editing (shell-style).
 			// (Model picker owns ↑ while open — see handleModelPickKey.)
-			// Wheel events are consumed before this path, but some terminals
-			// leak wheel-up as an up-arrow escape right after a mouse event —
-			// the grace window keeps recall arrow-key-only.
+			// Mouse-off path is consumeMouseOffArrow above. With tracking on,
+			// wheel is MouseWheelMsg; the lastMouseAt grace blocks a terminal
+			// that still leaks an up-arrow escape after a real mouse event.
 			if km.Code == tea.KeyUp && !m.busy && strings.TrimSpace(m.ta.Value()) == "" &&
 				time.Since(m.lastMouseAt) > 150*time.Millisecond {
-				if m.mouseOn() {
-					return m, m.editLast()
-				}
-				// Mouse off: a single up-arrow may be the FIRST event of a
-				// wheel burst (no MouseWheelMsg ever arrives, so the grace
-				// window above can't arm). Hold the recall for a short confirm
-				// window; the next arrow of the spin cancels it, a lone press
-				// fires it (recallConfirmMsg / arrowBurst).
-				m.lastArrowAt = time.Now()
-				m.pendingRecall = true
-				m.pendingRecallAt = time.Now()
-				return m, tea.Tick(recallConfirmWindow, func(time.Time) tea.Msg { return recallConfirmMsg{} })
+				return m, m.editLast()
 			}
 		}
 		// Cap before Update so DynamicHeight recalculates with the right MaxHeight.
@@ -821,20 +815,80 @@ func (m *model) sanitizeInput() {
 	}
 }
 
-// recallConfirmWindow is how long an up-arrow prompt recall is held when mouse
-// tracking is off (MOW_MOUSE=0), waiting to see whether a second arrow follows
-// (a wheel spin) and cancels it. 90ms is imperceptible for a deliberate press
-// but catches every real wheel notch.
-const recallConfirmWindow = 90 * time.Millisecond
+// Mouse-off arrow discrimination (select mode / MOW_MOUSE=0).
+//
+// Terminals without mouse tracking turn the wheel into KeyUp/KeyDown sequences.
+// A deliberate lone Up on an empty idle prompt should edit-last; a wheel
+// gesture must only scroll. The events are otherwise identical, so we use:
+//
+//   - recallConfirmWindow: hold a candidate Up; fire edit-last only if nothing
+//     else arrives. ~1–2 frames — not a felt lag for a real keypress.
+//   - arrowBurstGap: arrows closer than this are one wheel notch/gesture.
+//   - wheelSticky: after a confirmed burst, keep treating arrows as wheel so a
+//     slow multi-notch spin cannot re-arm edit-last between notches.
+//
+// Any second arrow while recall is pending cancels it (even outside the burst
+// gap): users do not double-tap Up to edit, but a slow wheel can space arrows
+// >arrowBurstGap apart.
+const (
+	recallConfirmWindow = 120 * time.Millisecond
+	arrowBurstGap       = 100 * time.Millisecond
+	wheelSticky         = 200 * time.Millisecond
+)
 
-// arrowBurst reports whether this arrow key is part of a rapid burst — the
-// shape a terminal emits when it translates the wheel into keys because mouse
-// tracking is off (MOW_MOUSE=0). A deliberate press is a single event; a wheel
-// notch emits several arrows within a few ms. Only arrows are tracked, so
-// typing cadence never trips it.
-func (m *model) arrowBurst() bool {
+// consumeMouseOffArrow handles KeyUp/KeyDown when mouse tracking is off.
+// Always owns the key (caller already gated on !mouseOn + arrow): either arms
+// a pending edit-last, scrolls the transcript, or both across a burst.
+func (m *model) consumeMouseOffArrow(km tea.KeyPressMsg) tea.Cmd {
 	now := time.Now()
-	burst := now.Sub(m.lastArrowAt) < 80*time.Millisecond
+	sinceLast := now.Sub(m.lastArrowAt)
+	wasPending := m.pendingRecall
+	inBurst := !m.lastArrowAt.IsZero() && sinceLast < arrowBurstGap
+	inSticky := now.Before(m.wheelUntil)
 	m.lastArrowAt = now
-	return burst
+
+	// Confirmed or continuing wheel gesture: scroll, never edit-last.
+	// wasPending covers a slow second arrow that missed arrowBurstGap.
+	if wasPending || inBurst || inSticky {
+		m.pendingRecall = false
+		m.wheelUntil = now.Add(wheelSticky)
+		return m.scrollByArrow(km.Code)
+	}
+
+	// Fresh lone Up on empty idle prompt: candidate edit-last. Do not scroll
+	// yet — a deliberate press should not nudge the transcript before recall.
+	if km.Code == tea.KeyUp && !m.busy && strings.TrimSpace(m.ta.Value()) == "" {
+		m.pendingRecall = true
+		m.pendingRecallAt = now
+		return tea.Tick(recallConfirmWindow, func(time.Time) tea.Msg {
+			return recallConfirmMsg{}
+		})
+	}
+
+	// Lone Down, Up-with-draft, or busy: single-notch wheel should still move
+	// the view. Select mode prioritizes copy+scroll over textarea cursor keys.
+	return m.scrollByArrow(km.Code)
+}
+
+// scrollByArrow moves the transcript one line for a mouse-off wheel arrow.
+// Diff/help/pickers own their arrows before this path is reached.
+func (m *model) scrollByArrow(code rune) tea.Cmd {
+	before := m.vp.YOffset()
+	switch code {
+	case tea.KeyUp:
+		m.vp.ScrollUp(1)
+	case tea.KeyDown:
+		m.vp.ScrollDown(1)
+	default:
+		return nil
+	}
+	if m.vp.YOffset() < before {
+		m.followBottom = false
+	} else {
+		m.followBottom = m.vp.AtBottom()
+	}
+	if m.vp.YOffset() != before {
+		return m.afterScrollPretty()
+	}
+	return nil
 }

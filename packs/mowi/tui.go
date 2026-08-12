@@ -206,10 +206,13 @@ type model struct {
 	// up-arrow escape, and a wheel must never rewrite the prompt.
 	lastMouseAt time.Time
 	// lastArrowAt is when the last arrow key was consumed. With mouse tracking
-	// off (MOW_MOUSE=0) terminals translate wheel events into rapid arrow-key
-	// bursts; a burst (<80ms between arrows) is treated as wheel noise and
-	// dropped so scroll can never recall a prompt or walk the draft cursor.
+	// off (select mode / MOW_MOUSE=0) terminals translate wheel events into
+	// arrow-key sequences; timing against this stamp discriminates a deliberate
+	// lone Up (edit-last) from a wheel gesture (scroll).
 	lastArrowAt time.Time
+	// wheelUntil is a sticky window after a confirmed wheel burst: further
+	// arrows only scroll, and must not re-arm edit-last between slow notches.
+	wheelUntil time.Time
 	// pendingRecall holds an up-arrow prompt recall open for a short confirm
 	// window (mouse tracking off): a wheel burst's second arrow cancels it
 	// before it can fire; a single deliberate press fires after the window.
