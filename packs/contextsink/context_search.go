@@ -278,6 +278,9 @@ func (t *contextSearchTool) Exec(ctx context.Context, args json.RawMessage) (out
 	if err != nil {
 		return "", err
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	maxResults := clampInt(a.MaxResults, contextSearchDefaultResults, 1, contextSearchMaxResults)
 	ctxLines := clampInt(a.ContextLines, contextSearchDefaultCtxLine, 0, contextSearchMaxCtxLines)
 
@@ -319,7 +322,7 @@ func (t *contextSearchTool) Exec(ctx context.Context, args json.RawMessage) (out
 			b.truncated = true
 			break
 		}
-		if !searchArchiveFile(base, rel, patterns, ctxLines, b) {
+		if !searchArchiveFile(ctx, base, rel, patterns, ctxLines, b) {
 			break
 		}
 	}
@@ -347,8 +350,12 @@ func (t *contextSearchTool) Exec(ctx context.Context, args json.RawMessage) (out
 // whole blob, and the window counts against the same cumulative retrieval
 // budget as pattern searches.
 func (t *contextSearchTool) getByID(ctx context.Context, id string, offset, window *int) (string, error) {
+	id = strings.TrimSpace(id)
 	if !contextSearchToolIDPattern.MatchString(id) {
 		return "", fmt.Errorf("context_search: invalid stored result id %q", id)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	off := clampInt(offset, 0, 0, 1<<30)
 	win := clampInt(window, contextSearchDefaultWindow, 0, contextSearchMaxWindow)
@@ -369,18 +376,32 @@ func (t *contextSearchTool) getByID(ctx context.Context, id string, offset, wind
 		return "(context_search retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
 	}
 
-	// Stored tool results live in the current session's <sid>.tools dir,
-	// beside <sid>.jsonl — never another session's.
-	path := filepath.Join(base, sid+".tools", id)
-	data, ok := readStoredResult(path)
-	if !ok {
-		return "", fmt.Errorf("context_search: stored result %s expired or missing", id)
+	// Prefer the engine store API when available (session mutex + ID checks).
+	// Tests pin t.dir and open files directly under that root.
+	var data string
+	if eng := mow.EngineFromContext(ctx); eng != nil && t.dir == "" {
+		body, err := eng.StoredToolResult(id)
+		if err != nil {
+			return "", fmt.Errorf("context_search: stored result %s expired or missing", id)
+		}
+		data = body
+	} else {
+		// Stored tool results live in the current session's <sid>.tools dir,
+		// beside <sid>.jsonl — never another session's.
+		toolsDir := filepath.Join(base, sid+".tools")
+		path := filepath.Join(toolsDir, id)
+		if err := rejectSymlinkComponents(base, path); err != nil {
+			return "", fmt.Errorf("context_search: stored result %s expired or missing", id)
+		}
+		var ok bool
+		data, ok = readStoredResult(ctx, base, path)
+		if !ok {
+			return "", fmt.Errorf("context_search: stored result %s expired or missing", id)
+		}
 	}
-	runes := []rune(data)
-	start := min(off, len(runes))
-	end := min(start+win, len(runes))
-	body := string(runes[start:end])
-	out := fmt.Sprintf("[stored id=%s offset=%d chars=%d/%d]\n%s", id, start, len(body), len(runes), body)
+	// Window without []rune of the whole body (8MiB max → avoid ~32MiB peak).
+	body, start, total := runeWindow(data, off, win)
+	out := fmt.Sprintf("[stored id=%s offset=%d chars=%d/%d]\n%s", id, start, utf8.RuneCountInString(body), total, body)
 	if len(out) > callCap {
 		out = clampBytes(out, callCap) + "\n…(window truncated)\n"
 	}
@@ -415,20 +436,35 @@ func (t *contextSearchTool) charge(key string, n int) {
 		t.retrieved = map[string]int{}
 	}
 	t.retrieved[key] += n
-	if len(t.retrieved) > contextSearchMaxBudgetSessions {
+	for len(t.retrieved) > contextSearchMaxBudgetSessions {
+		var victim string
 		for k := range t.retrieved {
-			delete(t.retrieved, k)
+			if k != key {
+				victim = k
+				break
+			}
+		}
+		if victim == "" {
 			break
 		}
+		delete(t.retrieved, victim)
 	}
 }
 
 // archiveFiles lists the current session's <sid>.archive/*.md and
 // <sid>.tools/*.txt newest-first (bounded), as paths relative to the session
 // base dir. Only this session's dirs are scanned — never sibling sessions'.
+// Symlinked session subdirs are skipped (containment).
 func (t *contextSearchTool) archiveFiles(base, sid string) []string {
 	var files []string
 	scan := func(dir, suffix string) {
+		if err := rejectSymlinkComponents(base, dir); err != nil {
+			return
+		}
+		info, err := os.Lstat(dir)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return
@@ -437,6 +473,7 @@ func (t *contextSearchTool) archiveFiles(base, sid string) []string {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), suffix) {
 				continue
 			}
+			// Name only — basename of dir is sid.archive / sid.tools.
 			files = append(files, filepath.Join(filepath.Base(dir), e.Name()))
 		}
 	}
@@ -453,13 +490,20 @@ func (t *contextSearchTool) archiveFiles(base, sid string) []string {
 // searchArchiveFile greps one archive file and appends bounded snippets to b.
 // Overlapping hits are merged into the preceding snippet's window rather than
 // emitted twice. Reports whether scanning should continue with more files.
-func searchArchiveFile(root, rel string, patterns []string, ctxLines int, b *searchBudget) bool {
+func searchArchiveFile(ctx context.Context, root, rel string, patterns []string, ctxLines int, b *searchBudget) bool {
+	if err := ctx.Err(); err != nil {
+		return false
+	}
 	if b.scanned >= b.maxScan {
 		b.stopReason = "scan cap"
 		b.truncated = true
 		return false
 	}
-	data, ok := readArchiveFile(filepath.Join(root, rel))
+	path := filepath.Join(root, rel)
+	if err := rejectSymlinkComponents(root, path); err != nil {
+		return true
+	}
+	data, ok := readArchiveFile(ctx, root, path)
 	if !ok {
 		return true
 	}
@@ -472,6 +516,11 @@ func searchArchiveFile(root, rel string, patterns []string, ctxLines int, b *sea
 	lines := strings.Split(data, "\n")
 	lastEnd := -1 // last line index already covered by an emitted snippet
 	for i, line := range lines {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return false
+			}
+		}
 		if !matchesAny(line, patterns) {
 			continue
 		}
@@ -498,19 +547,58 @@ func searchArchiveFile(root, rel string, patterns []string, ctxLines int, b *sea
 }
 
 // readArchiveFile reads a bounded prefix of one archive file, rejecting
-// binary-ish content.
-func readArchiveFile(path string) (string, bool) {
+// binary-ish content, symlinks, and non-regular files. root is the session
+// base used for containment; path must already pass rejectSymlinkComponents.
+func readArchiveFile(ctx context.Context, root, path string) (string, bool) {
+	return readContainedFile(ctx, root, path, contextSearchMaxReadFile, true)
+}
+
+// readStoredResult reads one stored tool body for get-by-id. Stored bodies
+// are capped by the store (contextSearchMaxStoredRead). Symlinks and
+// non-regular files read as missing.
+func readStoredResult(ctx context.Context, root, path string) (string, bool) {
+	return readContainedFile(ctx, root, path, contextSearchMaxStoredRead, false)
+}
+
+// readContainedFile Lstats + opens a regular file under root. allowTrunc means
+// oversized files return a prefix rather than missing (archive scan path).
+func readContainedFile(ctx context.Context, root, path string, maxBytes int64, allowTrunc bool) (string, bool) {
+	if err := ctx.Err(); err != nil {
+		return "", false
+	}
+	if err := rejectSymlinkComponents(root, path); err != nil {
+		return "", false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", false
+	}
+	if !allowTrunc && info.Size() > maxBytes {
+		return "", false
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return "", false
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, contextSearchMaxReadFile+1))
+	// Re-check after open: detect replace-with-symlink races where possible.
+	// f.Stat follows the opened inode; if it is not regular, abort.
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() {
+		return "", false
+	}
+	if !allowTrunc && st.Size() > maxBytes {
+		return "", false
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	if err != nil || len(data) == 0 {
 		return "", false
 	}
-	if len(data) > contextSearchMaxReadFile {
-		data = data[:contextSearchMaxReadFile]
+	if int64(len(data)) > maxBytes {
+		if !allowTrunc {
+			return "", false
+		}
+		data = data[:maxBytes]
 	}
 	if bytes.IndexByte(data, 0) >= 0 {
 		return "", false
@@ -518,31 +606,53 @@ func readArchiveFile(path string) (string, bool) {
 	return string(data), true
 }
 
-// readStoredResult reads one stored tool body for get-by-id. Stored bodies
-// are capped by the store (contextSearchMaxStoredRead), so the whole file
-// always fits in memory; the returned body is then sliced to the requested
-// bounded window by the caller. Files above the cap (legacy) read as missing.
-func readStoredResult(path string) (string, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", false
+// runeWindow returns a substring covering win runes starting at off (rune
+// index), plus the start index used and total rune count — without allocating
+// []rune for the entire body.
+func runeWindow(s string, off, win int) (body string, start, total int) {
+	total = utf8.RuneCountInString(s)
+	if win < 0 {
+		win = 0
 	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		return "", false
+	if off < 0 {
+		off = 0
 	}
-	if info.Size() > contextSearchMaxStoredRead {
-		return "", false
+	if off > total {
+		off = total
 	}
-	data, err := io.ReadAll(io.LimitReader(f, contextSearchMaxStoredRead+1))
-	if err != nil || len(data) == 0 || len(data) > contextSearchMaxStoredRead {
-		return "", false
+	start = off
+	if win == 0 || start >= total {
+		return "", start, total
 	}
-	if bytes.IndexByte(data, 0) >= 0 {
-		return "", false
+	// Byte index of rune start.
+	byteStart := len(s)
+	n := 0
+	for i := range s {
+		if n == start {
+			byteStart = i
+			break
+		}
+		n++
 	}
-	return string(data), true
+	if start == total {
+		return "", start, total
+	}
+	// Take win runes from byteStart.
+	byteEnd := len(s)
+	n = 0
+	for i := byteStart; i < len(s); {
+		if n == win {
+			byteEnd = i
+			break
+		}
+		_, size := utf8.DecodeRuneInString(s[i:])
+		if size < 1 {
+			size = 1
+		}
+		i += size
+		n++
+	}
+	return s[byteStart:byteEnd], start, total
 }
 
 func matchesAny(line string, patterns []string) bool {

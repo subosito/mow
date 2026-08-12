@@ -39,6 +39,9 @@ const (
 	// results get the explicit head+tail fallback, so a store outage never
 	// shrinks the model's view below what the loop would have kept.
 	loopToolResultCap = 24000
+	// maxConfigInlineBytes caps configured max_inline_bytes so a typo cannot
+	// disable stubbing for bodies the store could never persist anyway.
+	maxConfigInlineBytes = contextSearchMaxStoredRead
 )
 
 func init() {
@@ -67,6 +70,9 @@ func loadConfig(eng *mow.Engine) config {
 	}
 	if cfg.MaxInlineBytes <= 0 {
 		cfg.MaxInlineBytes = defaultMaxInlineBytes
+	}
+	if cfg.MaxInlineBytes > maxConfigInlineBytes {
+		cfg.MaxInlineBytes = maxConfigInlineBytes
 	}
 	return cfg
 }
@@ -117,13 +123,14 @@ func contextSinkHook(ctx context.Context, ev ext.PostToolEvent) (ext.PostToolDec
 }
 
 // formatStub is the model-visible replacement for a stored tool body. Kept
-// well under the history tool-result cap (~600 chars).
+// well under the history tool-result cap (~600 chars). Preview text is lightly
+// redacted; full recovery via context_search is intentionally unredacted.
 func formatStub(id, toolName, body string) string {
 	name := strings.TrimSpace(toolName)
 	if name == "" {
 		name = "?"
 	}
-	preview := clampRunes(body, stubPreviewRunes)
+	preview := clampRunes(redactSecrets(body), stubPreviewRunes)
 	return fmt.Sprintf(
 		"[stored id=%s tool=%s bytes=%d]\n%s\nuse context_search id=%s (or pattern= any literal above) to recover more",
 		id, name, len(body), preview, id,

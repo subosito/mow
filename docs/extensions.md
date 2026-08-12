@@ -175,7 +175,9 @@ extensions:
 
 Durable multi-step workflow around `Engine.Prompt`: checklist state, evidence,
 budgets, optional parallel nodes, worktree workers, process tools, and graph
-events. State lives under `$MOW_HOME/goals`.
+events. State lives under `$MOW_HOME/goals` (atomic JSON writes, symlink-safe
+loads, bounded plan/facts fields). Only one in-process run per goal id is
+allowed; a crashed `StatusRunning` on disk can still be resumed.
 
 ```bash
 mow goal run --goal "Make CI green"
@@ -276,7 +278,8 @@ The full tool-result side channel, write side and read side together:
   archives and stored results (stored files carry a `stored ` snippet header),
   or get-by-id fetch of a stored body (`id=…`, bounded window). It resolves
   the session dir from the engine at call time and is read-only, so it works
-  in read-only prompts.
+  in read-only prompts. Symlinks and non-regular files under the session
+  archive/tools dirs are ignored; stub previews redact common secret shapes.
 
 Storage is strictly session-scoped (search, get-by-id, and the retrieval
 budget are all pinned to the engine's own `SessionDir`+`SessionID` — never a
@@ -310,7 +313,7 @@ results simply stay inline and no search tool exists. Stock binaries (`mow`,
 extensions:
   contextsink:
     enabled: true           # required; default: off
-    max_inline_bytes: 8000  # above this → store + stub (default)
+    max_inline_bytes: 8000  # above this → store + stub (default; capped at 8 MiB)
 ```
 
 ## OpenTelemetry (`packs/otel`)
