@@ -99,7 +99,8 @@ func runCommand(cmd string, args []string) int {
 	if err != nil {
 		return fail(cmd, err)
 	}
-	req, format, policy, err := rf.Resolve(prof, workspace, paths)
+	// ExitPolicy is carried on req and stamped onto Report.Exit inside Run.
+	req, format, _, err := rf.Resolve(prof, workspace, paths)
 	if err != nil {
 		return fail(cmd, err)
 	}
@@ -229,7 +230,7 @@ func runCommand(cmd string, args []string) int {
 	if err := emit(res.Report, format, rf, ef.Verbose); err != nil {
 		return fail(cmd, err)
 	}
-	return policy.ExitCode(res.Report)
+	return res.Report.Exit.Code
 }
 
 // emit writes the report to stdout or --output.

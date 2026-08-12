@@ -60,7 +60,8 @@ The verifier may only confirm, reject, mark uncertain, or correct severity and
 confidence for existing candidate ids. On `mow sec` it may also return
 `evidence_fields` to correct or clear structured security evidence (source,
 sink, reachability, and the other optional keys). Only keys present in the
-verdict are changed. It cannot introduce new findings.
+verdict are changed; unknown keys are ignored with a report note (malformed
+values for known keys still fail the run). It cannot introduce new findings.
 Unknown, duplicate, or missing verdict ids are handled explicitly; malformed
 model output is a hard error and cannot appear as a clean report.
 
@@ -154,10 +155,12 @@ mow sec --reviewers gpt-5-mini,claude-sonnet-4 --reviewer-parallel 2
 
 Each reviewer analyzes the same scope independently. Candidates are merged and
 then passed through one verification stage (by default the first listed reviewer,
-or `--verifier-model` when set). Reviewer provenance is retained when available;
-duplicate fingerprints merge into a `reviewers` list. Cross-reviewer disagreement
-after verification is not yet surfaced as a first-class field — use report notes
-and per-finding `reviewer`/`reviewers` for triage. The default remains one reviewer.
+or `--verifier-model` when set). Optional finding extras record ensemble
+provenance (`reviewer_count`, `reviewer_consensus`, `reviewers`) and pass-two
+agreement on kept findings (`verifier_agreement`, e.g. `confirmed_independent`
+when multiple reviewers surfaced the same fingerprint and the verifier confirmed
+it). Rejected candidates are dropped and do not carry agreement extras. The
+default remains one reviewer.
 
 ## Read-only safety contract
 
@@ -169,6 +172,11 @@ or CLI power settings:
 - extension tools must explicitly declare themselves read-only;
 - no persistent conversation is needed—the report is the artifact;
 - no patch, test, reproducer, or exploit is generated or executed automatically.
+
+Reports record `run.read_only: true` and `run.tool_policy: prompt_read_only`.
+Only builtins (`read`, `glob`, `grep`) and extension tools with `ReadOnly() true`
+are callable during review passes; mis-declared read-only extension tools remain
+a trust risk for side effects such as network I/O.
 
 This boundary is intentional. Adding a quiet execution flag to `mow sec` would
 make its trust posture ambiguous.

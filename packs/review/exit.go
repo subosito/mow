@@ -28,17 +28,29 @@ type ExitPolicy struct {
 	FailOnTruncated bool
 }
 
+// ExitReasonTruncatedScope is recorded in Report.Exit.Reasons when --fail-on-truncated applies.
+const ExitReasonTruncatedScope = "truncated_scope"
+
+// ExitReasonFindingSeverity is recorded when findings meet --fail-on.
+const ExitReasonFindingSeverity = "finding_severity"
+
 // ExitCode maps a completed report to a process exit code. A nil report is an
 // error: no report means nothing was verified, which must not read as clean.
 func (p ExitPolicy) ExitCode(rep *Report) int {
+	return p.ExitInfo(rep).Code
+}
+
+// ExitInfo returns the exit code and machine-readable reasons for a finished report.
+func (p ExitPolicy) ExitInfo(rep *Report) ExitInfo {
 	if rep == nil {
-		return ExitError
+		return ExitInfo{Code: ExitError}
 	}
 	if p.ExitZero {
-		return ExitClean
+		return ExitInfo{Code: ExitClean}
 	}
+	var reasons []string
 	if p.FailOnTruncated && rep.Run.Truncated {
-		return ExitFindings
+		reasons = append(reasons, ExitReasonTruncatedScope)
 	}
 	threshold := p.FailOn
 	if !threshold.Valid() {
@@ -49,7 +61,10 @@ func (p ExitPolicy) ExitCode(rep *Report) int {
 		}
 	}
 	if rep.MaxSeverity() >= threshold {
-		return ExitFindings
+		reasons = append(reasons, ExitReasonFindingSeverity)
 	}
-	return ExitClean
+	if len(reasons) > 0 {
+		return ExitInfo{Code: ExitFindings, Reasons: reasons}
+	}
+	return ExitInfo{Code: ExitClean}
 }

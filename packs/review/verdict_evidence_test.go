@@ -54,8 +54,12 @@ func TestApplyVerdictEvidenceCorrectionsIgnoresGeneralReview(t *testing.T) {
 func TestApplyVerdictEvidenceCorrectionsRejectsUnknownField(t *testing.T) {
 	f := Finding{ID: "sec-001", Title: "t", Extra: map[string]string{}}
 	v := Verdict{EvidenceFields: map[string]json.RawMessage{"made_up": json.RawMessage(`"x"`)}}
-	if _, err := applyVerdictEvidenceCorrections(&f, v, SecurityProfile()); err == nil || !strings.Contains(err.Error(), "unknown evidence field") {
-		t.Fatalf("err = %v", err)
+	notes, err := applyVerdictEvidenceCorrections(&f, v, SecurityProfile())
+	if err != nil {
+		t.Fatalf("unknown keys should not abort: %v", err)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "ignored unknown evidence field") {
+		t.Fatalf("notes = %v", notes)
 	}
 }
 

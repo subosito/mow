@@ -36,6 +36,9 @@ type Request struct {
 	// Verifier runs pass two when set. When nil, pass two uses the primary
 	// reviewer (or the first ensemble member).
 	Verifier Reviewer
+	// ExitPolicy stamps Report.Exit after the run (CLI and library share this).
+	// Zero value uses the profile's default --fail-on threshold.
+	ExitPolicy ExitPolicy
 	// Now is injectable for deterministic tests.
 	Now func() time.Time
 }
@@ -67,6 +70,9 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 	if sc == nil {
 		return nil, fmt.Errorf("review: nil scope")
 	}
+	if err := ValidateRequest(req); err != nil {
+		return nil, err
+	}
 	started := now()
 
 	rep := NewReport(prof.Name)
@@ -80,6 +86,7 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 		Truncated:        sc.Truncated,
 		TruncationReason: sc.TruncReason,
 	}
+	stampReadOnlyRun(&rep.Run)
 	// Record pass-two provenance when verification will run. An explicit
 	// Request.Verifier is always named (even if the model id matches pass one);
 	// otherwise only record when the resolved verifier differs from the
@@ -99,6 +106,7 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 		rep.Summary = "No files in scope; nothing was reviewed."
 		rep.Notes = append(rep.Notes, "Review scope was empty — check the selector, excludes, or budget.")
 		finish(rep, started, now)
+		stampExit(rep, req.ExitPolicy)
 		return &Result{Report: rep, Scope: sc}, nil
 	}
 
@@ -173,7 +181,26 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 		}
 	}
 	finish(rep, started, now)
+	stampExit(rep, req.ExitPolicy)
 	return &Result{Report: RedactReport(rep), Scope: sc}, nil
+}
+
+// stampExit records machine-readable exit causes on the report so library and
+// CLI consumers share the same envelope (CLI process status still comes from
+// Report.Exit.Code).
+func stampExit(rep *Report, policy ExitPolicy) {
+	if rep == nil {
+		return
+	}
+	rep.Exit = policy.ExitInfo(rep)
+	for _, reason := range rep.Exit.Reasons {
+		switch reason {
+		case ExitReasonTruncatedScope:
+			rep.Notes = append(rep.Notes, "exit non-zero: scope was truncated (--fail-on-truncated)")
+		case ExitReasonFindingSeverity:
+			rep.Notes = append(rep.Notes, "exit non-zero: finding(s) at or above --fail-on severity")
+		}
+	}
 }
 
 // verifyPass runs the second model call and applies its verdicts.
@@ -237,6 +264,7 @@ func verifyPass(ctx context.Context, rev Reviewer, prof *Profile, sc *Scope, can
 		} else {
 			notes = append(notes, corrNotes...)
 		}
+		applyVerifierAgreement(&f, v)
 		if !f.Verified {
 			f.VerificationNotes = appendNote(f.VerificationNotes, "not confirmed by the verification pass")
 		}

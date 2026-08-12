@@ -395,20 +395,49 @@ func TestRunRecordsExplicitVerifierEvenWhenModelMatches(t *testing.T) {
 	}
 }
 
-func TestRunSkipVerificationOmitsVerifierModel(t *testing.T) {
+func TestRunSkipVerificationRejectsVerifier(t *testing.T) {
 	sc := testScope(t)
 	candidate := &fakeReviewer{model: "candidate-model", replies: []string{candidateReply}}
 	verifier := &fakeReviewer{model: "verifier-model"}
-	res, err := Run(context.Background(), candidate, sc, Request{
+	_, err := Run(context.Background(), candidate, sc, Request{
 		Profile: GeneralProfile(), Now: fixedNow(), Verifier: verifier, SkipVerification: true,
+	})
+	if err == nil {
+		t.Fatal("want error when Verifier is set with SkipVerification")
+	}
+}
+
+func TestRunStampsExitFromRequestPolicy(t *testing.T) {
+	sc := testScope(t)
+	// Confirm one high finding so default profile fail-on (high) trips.
+	verify := `{"verdicts":[{"id":"review-001","status":"confirmed"},{"id":"review-002","status":"rejected","reason":"fine"}]}`
+	rev := &fakeReviewer{replies: []string{candidateReply, verify}}
+	res, err := Run(context.Background(), rev, sc, Request{
+		Profile: GeneralProfile(), Now: fixedNow(),
+		ExitPolicy: ExitPolicy{FailOn: SevHigh},
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if verifier.calls != 0 {
-		t.Fatalf("verifier should not run when skipped, calls=%d", verifier.calls)
+	if res.Report.Exit.Code != ExitFindings {
+		t.Fatalf("Exit.Code = %d want %d", res.Report.Exit.Code, ExitFindings)
 	}
-	if res.Report.Run.VerifierModel != "" {
-		t.Fatalf("VerifierModel = %q want empty when verification skipped", res.Report.Run.VerifierModel)
+	if len(res.Report.Exit.Reasons) != 1 || res.Report.Exit.Reasons[0] != ExitReasonFindingSeverity {
+		t.Fatalf("Exit.Reasons = %v", res.Report.Exit.Reasons)
+	}
+	if !hasNote(res.Report.Notes, "exit non-zero: finding") {
+		t.Fatalf("notes missing exit reason: %v", res.Report.Notes)
+	}
+}
+
+func TestRunStampsReadOnlyMetadata(t *testing.T) {
+	sc := testScope(t)
+	rev := &fakeReviewer{replies: []string{`{"findings":[]}`}}
+	res, err := Run(context.Background(), rev, sc, Request{Profile: GeneralProfile(), Now: fixedNow()})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !res.Report.Run.ReadOnly || res.Report.Run.ToolPolicy != readOnlyToolPolicy {
+		t.Fatalf("read-only metadata = %+v", res.Report.Run)
 	}
 }

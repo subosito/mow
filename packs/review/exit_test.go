@@ -71,6 +71,26 @@ func TestExitCodeConstantsAreDistinct(t *testing.T) {
 	}
 }
 
+func TestExitInfoTruncatedScopeReason(t *testing.T) {
+	info := (ExitPolicy{FailOnTruncated: true}).ExitInfo(truncatedReport("general"))
+	if info.Code != ExitFindings || len(info.Reasons) != 1 || info.Reasons[0] != ExitReasonTruncatedScope {
+		t.Fatalf("info = %+v", info)
+	}
+}
+
+func TestExitInfoBothTruncationAndFindings(t *testing.T) {
+	rep := truncatedReport("general")
+	rep.Findings = []Finding{{Severity: SevHigh, Title: "t", Path: "a.go", Evidence: "e"}}
+	rep = rep.Recount()
+	info := (ExitPolicy{FailOnTruncated: true}).ExitInfo(rep)
+	if info.Code != ExitFindings || len(info.Reasons) != 2 {
+		t.Fatalf("info = %+v", info)
+	}
+	if info.Reasons[0] != ExitReasonTruncatedScope || info.Reasons[1] != ExitReasonFindingSeverity {
+		t.Fatalf("reasons = %v", info.Reasons)
+	}
+}
+
 func TestProfileFailOnDefaults(t *testing.T) {
 	// Both profiles fail on high by default; security reports from medium up.
 	if GeneralProfile().FailOn != SevHigh || SecurityProfile().FailOn != SevHigh {

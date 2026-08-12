@@ -78,6 +78,12 @@ func writeScopeHeader(b *strings.Builder, rep *Report) {
 	if rep.Run.Model != "" {
 		fmt.Fprintf(b, "  model:           %s\n", rep.Run.Model)
 	}
+	if rep.Run.VerifierModel != "" {
+		fmt.Fprintf(b, "  verifier:        %s\n", rep.Run.VerifierModel)
+	}
+	if rep.Run.ReadOnly {
+		fmt.Fprintf(b, "  read_only:       true (%s)\n", rep.Run.ToolPolicy)
+	}
 	b.WriteString("\n")
 }
 
@@ -190,6 +196,9 @@ func writeSummary(b *strings.Builder, rep *Report, opt TextOptions) {
 	}
 	b.WriteString(strings.TrimSpace(rep.Summary))
 	b.WriteString("\n")
+	if rep.Exit.Code == ExitFindings && len(rep.Exit.Reasons) > 0 {
+		fmt.Fprintf(b, "Exit reasons: %s (code %d)\n", strings.Join(rep.Exit.Reasons, ", "), rep.Exit.Code)
+	}
 	// The summary already states the suppressed count; only add the pointer to
 	// --verbose, and only when there is something extra to show.
 	if rep.Suppressed > 0 && !opt.Verbose {

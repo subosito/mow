@@ -80,6 +80,9 @@ type RunInfo struct {
 	DurationMS       int64     `json:"duration_ms,omitempty"`
 	Truncated        bool      `json:"truncated"`
 	TruncationReason string    `json:"truncation_reason,omitempty"`
+	// ReadOnly is always true for mow review / mow sec runs.
+	ReadOnly   bool   `json:"read_only,omitempty"`
+	ToolPolicy string `json:"tool_policy,omitempty"`
 }
 
 // ScopeInfo is the resolved review scope as decided by mow (not by the model).
@@ -126,6 +129,14 @@ type Report struct {
 	Suppressed int      `json:"suppressed"`
 	Summary    string   `json:"summary"`
 	Notes      []string `json:"notes,omitempty"`
+	// Exit carries machine-readable exit causes for CI without changing codes.
+	Exit ExitInfo `json:"exit,omitempty"`
+}
+
+// ExitInfo describes why a finished run would exit non-zero under an ExitPolicy.
+type ExitInfo struct {
+	Code    int      `json:"code,omitempty"`
+	Reasons []string `json:"reasons,omitempty"`
 }
 
 // NewReport returns an envelope with the invariant fields set.

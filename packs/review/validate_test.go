@@ -198,6 +198,9 @@ func TestValidateMergeReviewerProvenance(t *testing.T) {
 	if out[0].Extra["reviewers"] != "alpha, beta" {
 		t.Fatalf("reviewers = %q", out[0].Extra["reviewers"])
 	}
+	if out[0].Extra["reviewer_count"] != "2" || out[0].Extra["reviewer_consensus"] != "independent" {
+		t.Fatalf("consensus extras = %+v", out[0].Extra)
+	}
 }
 
 func TestValidateSecurityProfileIDsAndExtras(t *testing.T) {

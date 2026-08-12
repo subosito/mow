@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 )
 
 // SARIF 2.1.0 projection. SARIF is what GitHub code scanning, GitLab, and most
@@ -121,7 +122,13 @@ func RenderSARIF(w io.Writer, rep *Report) error {
 			Message: sarifText{Text: "Review scope was truncated: " + rep.Run.TruncationReason},
 		})
 	}
-	run.Invocations = []sarifInvocation{{ExecutionSuccessful: true, ToolExecutionNotifications: notes}}
+	if rep.Exit.Code == ExitFindings && len(rep.Exit.Reasons) > 0 {
+		notes = append(notes, sarifNotification{
+			Level:   "warning",
+			Message: sarifText{Text: fmt.Sprintf("Review exit code %d; reasons: %s", rep.Exit.Code, strings.Join(rep.Exit.Reasons, ", "))},
+		})
+	}
+	run.Invocations = []sarifInvocation{{ExecutionSuccessful: rep.Exit.Code != ExitError, ToolExecutionNotifications: notes}}
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

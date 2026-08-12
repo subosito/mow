@@ -42,7 +42,8 @@ func applyVerdictEvidenceCorrections(f *Finding, v Verdict, prof *Profile) ([]st
 			return nil, fmt.Errorf("review: verification pass returned empty evidence field key for %q", f.ID)
 		}
 		if _, ok := verdictCorrectableFields[key]; !ok {
-			return nil, fmt.Errorf("review: verification pass returned unknown evidence field %q for %q", rawKey, f.ID)
+			notes = append(notes, fmt.Sprintf("pass 2 ignored unknown evidence field %q on %q", rawKey, f.Title))
+			continue
 		}
 		if isJSONNull(rawVal) {
 			if _, had := f.Extra[key]; had {

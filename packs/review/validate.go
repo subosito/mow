@@ -61,7 +61,8 @@ func Validate(raw []Finding, workspace string, opt ValidationOptions) ([]Finding
 
 // mergeReviewerProvenance combines ensemble reviewer names when duplicate
 // candidates are merged on fingerprint. The singular "reviewer" field is kept
-// for backward compatibility; "reviewers" lists every model that reported it.
+// for backward compatibility; reviewer_count and reviewer_consensus distinguish
+// single-reviewer findings from independently corroborated ones.
 func mergeReviewerProvenance(dst *Finding, src Finding) {
 	names := reviewerNames(*dst)
 	for _, n := range reviewerNames(src) {
@@ -76,13 +77,7 @@ func mergeReviewerProvenance(dst *Finding, src Finding) {
 	if dst.Extra == nil {
 		dst.Extra = map[string]string{}
 	}
-	dst.Extra["reviewer"] = names[0]
-	if len(names) > 1 {
-		dst.Extra["reviewers"] = strings.Join(names, ", ")
-	} else {
-		// Keep singular/plural extras consistent when a merge collapses to one name.
-		delete(dst.Extra, "reviewers")
-	}
+	applyReviewerProvenanceExtras(dst.Extra, names)
 }
 
 func reviewerNames(f Finding) []string {

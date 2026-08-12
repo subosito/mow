@@ -136,7 +136,7 @@ func (e *EnsembleReviewer) askCandidates(ctx context.Context, system, prompt str
 			if finding.Extra == nil {
 				finding.Extra = map[string]string{}
 			}
-			finding.Extra["reviewer"] = member.Name
+			applyReviewerProvenanceExtras(finding.Extra, []string{member.Name})
 			merged.Findings = append(merged.Findings, finding)
 		}
 		if summary := strings.TrimSpace(env.Summary); summary != "" {

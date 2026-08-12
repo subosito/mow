@@ -136,6 +136,7 @@ func (f *CLIFlags) Resolve(prof *Profile, workspace string, paths []string) (Req
 		MinSeverity:       minSev,
 		IncludeUnverified: f.Unverified,
 		SkipVerification:  f.NoVerify,
+		ExitPolicy:        policy,
 		Scope: ScopeRequest{
 			Workspace:  workspace,
 			Paths:      paths,

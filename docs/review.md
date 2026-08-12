@@ -174,6 +174,13 @@ advisory contract). `--fail-on-truncated` exits 1 when the scope was truncated
 (partial coverage) even if no findings meet `--fail-on`; default off so
 truncation is disclosed but not blocking unless you opt in.
 
+Finished reports include an `exit` object when the run would exit non-zero under
+the active exit policy, with machine-readable `reasons` (`truncated_scope`,
+`finding_severity`) so CI can distinguish truncation from severity failures
+without changing the exit-code contract (both remain code `1`). Clean runs omit
+`exit` (zero value). Library `Run` stamps the same field from `Request.ExitPolicy`
+(CLI flags map into that policy). Text and SARIF output surface the same reasons.
+
 ```yaml
 # advisory security job
 - run: mow sec --diff origin/main...HEAD --format sarif --output sec.sarif --exit-zero
@@ -188,6 +195,15 @@ truncation is disclosed but not blocking unless you opt in.
 `AllowWrite` and `AllowShell` are forced **off** regardless of config or flags,
 so a review can never modify the code it is reviewing. Sessions are disabled —
 the report is the artifact, not the conversation.
+
+Each pass runs with `ReadOnly` + `Ephemeral` prompts. The report records
+`run.read_only: true` and `run.tool_policy: prompt_read_only`. Under that policy
+the model may call only builtin read tools (`read`, `glob`, `grep`) and extension
+tools that explicitly implement `ReadOnly() bool`. Write, edit, bash, and
+`acp_delegate` are denied. Extension authors must declare read-only accurately:
+a tool that performs network I/O or other side effects but claims read-only can
+still run during review — mow blocks non-declared tools at call time but does not
+audit extension registrations from the review pack.
 
 ## Design notes
 
@@ -295,14 +311,25 @@ verification workflow. A member failure, malformed JSON, or cancellation fails
 the review rather than producing a partial clean report. `--reviewer-parallel`
 bounds concurrent candidate calls; its default runs every listed model at once.
 Findings include a backward-compatible `reviewer` extra field identifying the
-candidate model; when several reviewers report the same fingerprint, a
-`reviewers` field lists every model that surfaced it. Without reviewer flags,
-review uses its existing single engine. By default the first listed reviewer also
-runs pass two; `--verifier-model` overrides that with a dedicated verifier.
+candidate model when an ensemble is used. Provenance extras:
+
+| Field | Meaning |
+|---|---|
+| `reviewer_count` | How many candidate reviewers reported this fingerprint |
+| `reviewer_consensus` | `single` (one reviewer) or `independent` (2+ reviewers merged on fingerprint) |
+| `reviewers` | Comma-separated list when `reviewer_consensus` is `independent` |
+| `verifier_agreement` | Pass-two outcome on reported findings: `confirmed`, `confirmed_independent`, `uncertain`, or `uncertain_independent` |
+
+When several reviewers report the same fingerprint, a `reviewers` field lists every
+model that surfaced it. Without reviewer flags, review uses its existing single
+engine. By default the first listed reviewer also runs pass two; `--verifier-model`
+overrides that with a dedicated verifier.
 
 Programmatic callers may likewise use `NewEnsembleReviewer` with named,
-read-only `Reviewer` values. ACP peers are not used: read-only review denies
-`acp_delegate` and this policy remains unchanged.
+read-only `Reviewer` values, or pass `Request.Verifier` for a dedicated pass-two
+model. `ValidateRequest` rejects `Verifier` together with `SkipVerification`.
+ACP peers are not used: read-only review denies `acp_delegate` and this policy
+remains unchanged.
 
 
 ### Does it depend on the model?
