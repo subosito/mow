@@ -35,6 +35,25 @@ func GeneralProfile() *Profile {
 	}
 }
 
+// SecurityEvidenceFields are optional structured evidence keys for mow sec.
+// They are profile extras (flattened into finding JSON), never required base
+// fields, so general review and older consumers stay compatible when absent.
+//
+// Preferred order is the source→sink narrative maintainers follow when
+// triaging; renderers and digests use the same order when present.
+var SecurityEvidenceFields = []string{
+	"source",
+	"sink",
+	"sanitizers_considered",
+	"reachability",
+	"attacker_prerequisites",
+	"evidence_limitations",
+	"attack_surface",
+	"trust_boundary",
+	"exploitability",
+	"cwe",
+}
+
 // SecurityProfile is the adversarial persona behind `mow sec`.
 func SecurityProfile() *Profile {
 	return &Profile{
@@ -44,7 +63,7 @@ func SecurityProfile() *Profile {
 		Categories:  append([]Category(nil), securityCategories...),
 		MinSeverity: SevMedium,
 		FailOn:      SevHigh,
-		ExtraFields: []string{"attack_surface", "trust_boundary", "exploitability", "cwe"},
+		ExtraFields: append([]string(nil), SecurityEvidenceFields...),
 	}
 }
 

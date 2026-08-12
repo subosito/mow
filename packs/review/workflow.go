@@ -151,6 +151,7 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 	// Re-number after filtering so ids stay contiguous in the output.
 	renumber(kept, prof.Name)
 
+	applySecurityEvidenceLevel(prof.Name, kept)
 	rep.Findings = kept
 	rep.Suppressed = dropped
 	rep.Recount()

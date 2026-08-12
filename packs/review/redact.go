@@ -82,6 +82,11 @@ func redactFinding(f Finding) Finding {
 	for i := range f.Locations {
 		f.Locations[i].Snippet = redactSecrets(f.Locations[i].Snippet)
 	}
+	if len(f.Extra) > 0 {
+		for k, v := range f.Extra {
+			f.Extra[k] = redactSecrets(v)
+		}
+	}
 	return f
 }
 

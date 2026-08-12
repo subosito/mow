@@ -210,6 +210,55 @@ func TestValidateSecurityProfileIDsAndExtras(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityEvidenceFieldsOptional(t *testing.T) {
+	// Structured security evidence is optional: a finding with none still validates.
+	f := validFinding()
+	f.Category = "injection"
+	opt := testOpts()
+	opt.Profile = SecurityProfile()
+	out, issues := Validate([]Finding{f}, "/ws", opt)
+	if len(out) != 1 || len(issues) != 0 {
+		t.Fatalf("optional evidence missing must not drop findings: out=%d issues=%v", len(out), issues)
+	}
+
+	// Full evidence set is preserved (keys canonicalized, values redacted).
+	full := validFinding()
+	full.Category = "sql-injection"
+	full.Extra = map[string]string{
+		"Source":                 "r.URL.Query().Get(\"q\")",
+		"Sink":                   "db.Query(\"SELECT …\" + q)",
+		"Sanitizers-Considered":  "none found on handler path",
+		"Reachability":           "reachable for any HTTP client",
+		"Attacker-Prerequisites": "network access to API",
+		"Evidence-Limitations":   "WAF rules not inspected",
+		"Attack-Surface":         "public HTTP",
+		"Trust-Boundary":         "internet → SQL",
+		"Exploitability":         "trivial with crafted q",
+		"CWE":                    "CWE-89",
+		"token":                  "sk-abcdefghijklmnopqrstuvwxyz", // secret-shaped value
+	}
+	out, _ = Validate([]Finding{full}, "/ws", opt)
+	if len(out) != 1 {
+		t.Fatalf("got %d findings", len(out))
+	}
+	ex := out[0].Extra
+	for _, k := range SecurityEvidenceFields {
+		if strings.TrimSpace(ex[k]) == "" {
+			t.Errorf("missing or empty evidence field %q: %+v", k, ex)
+		}
+	}
+	if !strings.Contains(ex["token"], "[redacted]") && ex["token"] == "sk-abcdefghijklmnopqrstuvwxyz" {
+		t.Errorf("secret-shaped extra not redacted: %q", ex["token"])
+	}
+	// Absence of evidence fields must not break general profile either.
+	gen := validFinding()
+	gen.Extra = map[string]string{"source": "should still pass through"}
+	gout, _ := Validate([]Finding{gen}, "/ws", testOpts())
+	if gout[0].Extra["source"] != "should still pass through" {
+		t.Errorf("unknown extras should pass through on general: %+v", gout[0].Extra)
+	}
+}
+
 func TestValidateClampsLongText(t *testing.T) {
 	f := validFinding()
 	f.Evidence = strings.Repeat("x", maxTextField+500)

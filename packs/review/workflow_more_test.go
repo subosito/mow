@@ -203,9 +203,17 @@ func TestPromptsCarryContractAndScope(t *testing.T) {
 	if !strings.Contains(p1, "1| // line") {
 		t.Error("candidate prompt should include line-numbered content")
 	}
-	for _, want := range []string{"Pass 2 of 2", `"verdicts"`, "sec-001", "sec-002", "attacker-controlled"} {
+	for _, want := range []string{
+		"Pass 2 of 2", `"verdicts"`, "sec-001", "sec-002",
+		"attacker-controlled", "source→transform→sink", "model-verified",
+	} {
 		if !strings.Contains(p2, want) {
 			t.Errorf("verify prompt missing %q", want)
+		}
+	}
+	for _, want := range []string{"source", "sink", "sanitizers_considered", "source → transform → sink"} {
+		if !strings.Contains(p1, want) {
+			t.Errorf("security candidate prompt missing evidence cue %q", want)
 		}
 	}
 	// The verifier must not be handed the raw candidate JSON envelope.

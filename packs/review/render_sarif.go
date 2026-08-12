@@ -220,11 +220,20 @@ func sarifResults(rep *Report) []sarifResult {
 }
 
 // sarifMessage keeps title plus evidence in the message body, since many UIs
-// only show the message.
+// only show the message. Security structured evidence is appended when present
+// so dashboards that ignore custom properties still show source/sink context.
 func sarifMessage(f Finding) string {
 	msg := f.Title
 	if f.Evidence != "" {
 		msg += "\n\n" + f.Evidence
+	}
+	for _, k := range orderedExtraKeys(f.Extra, SecurityEvidenceFields) {
+		// Prefer the highest-signal security evidence keys in the message body.
+		switch k {
+		case "source", "sink", "sanitizers_considered", "reachability",
+			"attacker_prerequisites", "evidence_limitations":
+			msg += "\n\n" + k + ": " + f.Extra[k]
+		}
 	}
 	if f.Recommendation != "" {
 		msg += "\n\nRecommendation: " + f.Recommendation

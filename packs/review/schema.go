@@ -36,8 +36,10 @@ type Location struct {
 }
 
 // Finding is one advisory review result. The base fields are shared by every
-// profile; Extra carries profile-specific fields (security adds attack_surface,
-// trust_boundary, exploitability, …) without forking the schema.
+// profile; Extra carries profile-specific fields (security: source, sink,
+// sanitizers_considered, reachability, attacker_prerequisites,
+// evidence_limitations, attack_surface, trust_boundary, exploitability, cwe)
+// without forking the schema. All extras are optional and flattened into JSON.
 type Finding struct {
 	ID          string     `json:"id"`
 	Fingerprint string     `json:"fingerprint"`

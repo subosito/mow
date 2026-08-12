@@ -112,3 +112,24 @@ func TestRedactReportCoversSummaryAndNotes(t *testing.T) {
 		t.Error("nil report should stay nil")
 	}
 }
+
+func TestRedactFindingCoversExtra(t *testing.T) {
+	f := Finding{
+		Title: "t", Evidence: "e",
+		Extra: map[string]string{
+			"source": "Authorization: Bearer sk-abcdefghijklmnopqrstuvwx",
+			"sink":   "clean sink description",
+			"token":  "ghp_0123456789abcdefghijABCDEFGHIJ",
+		},
+	}
+	got := redactFinding(f)
+	if strings.Contains(got.Extra["source"], "sk-abcdefghij") {
+		t.Errorf("extra source not redacted: %q", got.Extra["source"])
+	}
+	if strings.Contains(got.Extra["token"], "ghp_0123456789") {
+		t.Errorf("extra token not redacted: %q", got.Extra["token"])
+	}
+	if got.Extra["sink"] != "clean sink description" {
+		t.Errorf("clean extra mutated: %q", got.Extra["sink"])
+	}
+}

@@ -141,6 +141,52 @@ func TestRenderTextTruncationIsVisible(t *testing.T) {
 	}
 }
 
+func TestRenderTextSecurityEvidenceOrder(t *testing.T) {
+	rep := NewReport("security")
+	rep.Run.Tool = "mow sec"
+	rep.Findings = []Finding{{
+		ID: "sec-001", Fingerprint: "sha256:x", Severity: SevHigh, Confidence: ConfHigh,
+		Category: CatAuthz, Title: "Missing ownership check",
+		Path: "internal/api/users.go", StartLine: 10, Verified: true,
+		Evidence: "handler updates by id without owner check",
+		Extra: map[string]string{
+			"cwe":                    "CWE-639",
+			"sink":                   "UPDATE users",
+			"source":                 "path id",
+			"reachability":           "reachable",
+			"sanitizers_considered":  "none found",
+			"attacker_prerequisites": "authenticated session",
+			"evidence_limitations":   "global authz middleware not read",
+			"attack_surface":         "HTTP API",
+		},
+	}}
+	rep.Recount()
+	rep.Summary = "1 finding"
+	out := renderToString(t, rep, FormatText, TextOptions{})
+	order := []string{
+		"source:",
+		"sink:",
+		"sanitizers considered:",
+		"reachability:",
+		"attacker prerequisites:",
+		"evidence limitations:",
+		"attack surface:",
+		"cwe:",
+	}
+	prev := -1
+	for _, want := range order {
+		i := strings.Index(out, want)
+		if i < 0 {
+			t.Errorf("text missing %q\n%s", want, out)
+			continue
+		}
+		if i < prev {
+			t.Errorf("text order wrong for %q\n%s", want, out)
+		}
+		prev = i
+	}
+}
+
 func TestRenderTextWrapsLongProse(t *testing.T) {
 	rep := NewReport("general")
 	rep.Findings = []Finding{{

@@ -3,7 +3,6 @@ package review
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 )
 
@@ -120,16 +119,10 @@ func writeFinding(b *strings.Builder, f Finding, opt TextOptions) {
 	writeField(b, "evidence", f.Evidence)
 	writeField(b, "impact", f.Impact)
 	writeField(b, "recommendation", f.Recommendation)
-	// Profile-specific fields, in a stable order.
-	if len(f.Extra) > 0 {
-		keys := make([]string, 0, len(f.Extra))
-		for k := range f.Extra {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			writeField(b, strings.ReplaceAll(k, "_", " "), f.Extra[k])
-		}
+	// Profile-specific fields: security evidence follows source→sink order;
+	// anything else is sorted for stable, grep-friendly output.
+	for _, k := range orderedExtraKeys(f.Extra, SecurityEvidenceFields) {
+		writeField(b, strings.ReplaceAll(k, "_", " "), f.Extra[k])
 	}
 	// Secondary locations help a reader follow a data path.
 	if len(f.Locations) > 1 {

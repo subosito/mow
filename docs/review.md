@@ -97,7 +97,14 @@ Findings are stable and machine-friendly:
       "evidence": "…",
       "impact": "…",
       "recommendation": "…",
-      "attack_vector": "network"
+      "source": "HTTP path parameter id",
+      "sink": "UPDATE users SET … WHERE id=$1 without ownership check",
+      "sanitizers_considered": "none found on handler path",
+      "reachability": "reachable for any authenticated session",
+      "attacker_prerequisites": "valid session cookie",
+      "evidence_limitations": "middleware authz not fully inspected",
+      "attack_surface": "authenticated HTTP API",
+      "trust_boundary": "user → tenant data"
     }
   ]
 }
@@ -110,11 +117,18 @@ Notes on the schema:
   git range that does not exist.
 - **Fingerprints** are content-based and line-drift immune, so a finding can be
   tracked across runs (exported as SARIF `partialFingerprints`).
-- **Profile extras** (`attack_vector`, `asset_at_risk`, …) are flattened into
-  the finding object, not nested under `extra`.
+- **Profile extras** are flattened into the finding object, not nested under
+  `extra`. Security may emit optional evidence fields (`source`, `sink`,
+  `sanitizers_considered`, `reachability`, `attacker_prerequisites`,
+  `evidence_limitations`, `attack_surface`, `trust_boundary`, `exploitability`,
+  `cwe`); general review may emit `affected_behavior` / `test_gap`. Consumers
+  must treat all extras as optional for backward compatibility.
+- **`verified`** is set only by pass 2. High confidence from pass 1 is not
+  “model-verified” until the verifier confirms the claim from code.
 - **SARIF rule ids are profile-namespaced** (`mow/security/authz`) so review and
   sec findings do not collide in one dashboard.
 - Secrets are **redacted** before anything is rendered or written.
+
 
 ## Validation
 

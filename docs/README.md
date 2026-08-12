@@ -7,7 +7,6 @@
 - **Embedding mow in a Go program?** [architecture.md](architecture.md) for the public/internal line → [embedding.md](embedding.md) for the how-to (options, events, custom tools/providers, hooks, sessions).
 - **Operating the CLI?** [../README.md](../README.md) to run it → [harness.md](harness.md) for config, tools, sessions, and the token/policy knobs.
 - **Writing or wiring a pack?** [extensions.md](extensions.md) — core-vs-pack boundary, CLI ownership, hooks table, ACP, media, cmdhook.
-- **Running or scripting code review?** [review.md](review.md) — `mow review` / `mow sec`, the report schema, exit codes, CI.
 - **Large tool results / context window pressure?** [context.md](context.md) — design note: native tool-result side-channel.
 - **Contributing / an AI agent working here?** [../CONTRIBUTING.md](../CONTRIBUTING.md) and [../AGENTS.md](../AGENTS.md).
 

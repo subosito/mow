@@ -152,6 +152,92 @@ func TestRenderSARIF(t *testing.T) {
 	}
 }
 
+func TestRenderJSONSecurityEvidenceFlatOptional(t *testing.T) {
+	rep := NewReport("security")
+	rep.Run.Tool = "mow sec"
+	rep.Findings = []Finding{{
+		ID: "sec-001", Fingerprint: "sha256:x", Severity: SevHigh, Confidence: ConfMedium,
+		Category: CatInjection, Title: "SQL injection", Path: "a.go", StartLine: 3,
+		Evidence: "concatenated query", Verified: true,
+		Extra: map[string]string{
+			"source":                "q param",
+			"sink":                  "db.Query",
+			"sanitizers_considered": "none found",
+			"reachability":          "reachable",
+			"cwe":                   "CWE-89",
+		},
+	}}
+	rep.Recount()
+	out := renderToString(t, rep, FormatJSON, TextOptions{})
+	var back Report
+	if err := json.Unmarshal([]byte(out), &back); err != nil {
+		t.Fatalf("round-trip: %v\n%s", err, out)
+	}
+	f := back.Findings[0]
+	for _, k := range []string{"source", "sink", "sanitizers_considered", "reachability", "cwe"} {
+		if f.Extra[k] == "" {
+			t.Errorf("extra %q lost on JSON round-trip: %+v", k, f.Extra)
+		}
+	}
+	// Flat shape: no nested "extra" object.
+	var m map[string]any
+	if err := json.Unmarshal([]byte(out), &m); err != nil {
+		t.Fatal(err)
+	}
+	first := m["findings"].([]any)[0].(map[string]any)
+	if _, nested := first["extra"]; nested {
+		t.Error("security extras must stay flattened")
+	}
+	if first["source"] != "q param" || first["sink"] != "db.Query" {
+		t.Errorf("flattened security evidence missing: %v", first)
+	}
+}
+
+func TestRenderSARIFSecurityEvidenceInMessageAndProps(t *testing.T) {
+	rep := NewReport("security")
+	rep.Run.Tool = "mow sec"
+	rep.Findings = []Finding{{
+		ID: "sec-001", Fingerprint: "sha256:x", Severity: SevHigh, Confidence: ConfHigh,
+		Category: CatInjection, Title: "SQL injection", Path: "a.go", StartLine: 3,
+		Evidence: "concatenated query", Verified: true,
+		Extra: map[string]string{
+			"source":                 "q param",
+			"sink":                   "db.Query",
+			"sanitizers_considered":  "none found",
+			"reachability":           "reachable",
+			"attacker_prerequisites": "none",
+			"evidence_limitations":   "no dynamic test",
+			"cwe":                    "CWE-89",
+		},
+	}}
+	rep.Recount()
+	out := renderToString(t, rep, FormatSARIF, TextOptions{})
+	var log map[string]any
+	if err := json.Unmarshal([]byte(out), &log); err != nil {
+		t.Fatalf("SARIF JSON: %v", err)
+	}
+	res := log["runs"].([]any)[0].(map[string]any)["results"].([]any)[0].(map[string]any)
+	msg := res["message"].(map[string]any)["text"].(string)
+	for _, want := range []string{
+		"SQL injection",
+		"concatenated query",
+		"source: q param",
+		"sink: db.Query",
+		"sanitizers_considered: none found",
+		"reachability: reachable",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("SARIF message missing %q\n%s", want, msg)
+		}
+	}
+	props := res["properties"].(map[string]any)
+	for _, k := range []string{"source", "sink", "cwe", "verified", "advisory"} {
+		if props[k] == nil || props[k] == "" {
+			t.Errorf("SARIF properties missing %q: %v", k, props)
+		}
+	}
+}
+
 func TestRenderSARIFTruncationWarning(t *testing.T) {
 	rep := sampleReport("general")
 	rep.Run.Truncated = true
