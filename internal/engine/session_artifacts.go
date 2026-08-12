@@ -29,3 +29,12 @@ func (e *Engine) StoredToolResult(id string) (string, error) {
 	}
 	return e.sess.GetToolResult(id)
 }
+
+// StoredToolResultWindow returns a bounded rune window from a stored tool
+// result without loading the full body into memory.
+func (e *Engine) StoredToolResultWindow(id string, offset, window int) (body string, start, total int, err error) {
+	if e == nil || e.sess == nil {
+		return "", 0, 0, fmt.Errorf("engine: no session")
+	}
+	return e.sess.GetToolResultWindow(id, offset, window)
+}

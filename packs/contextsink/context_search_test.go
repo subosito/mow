@@ -239,6 +239,8 @@ func TestContextSearchReadOnly(t *testing.T) {
 // sessions of a project; search, get-by-id, and the retrieval budget must all
 // be pinned to the tool's own session — never a sibling's.
 func TestContextSearchSessionIsolation(t *testing.T) {
+	resetBudgetRegistryForTest()
+	t.Cleanup(resetBudgetRegistryForTest)
 	base := t.TempDir()
 	for _, sid := range []string{"sess1", "sess2"} {
 		tdir := filepath.Join(base, sid+".tools")
@@ -278,7 +280,7 @@ func TestContextSearchSessionIsolation(t *testing.T) {
 	}
 
 	// Budget isolation: exhausting sess1 must not touch sess2.
-	tool.retrieved[base+"/sess1"] = contextSearchMaxRetrieved
+	chargeBudgetForTest(base+"/sess1", contextSearchMaxRetrieved)
 	out, err = tool.Exec(ctx, json.RawMessage(`{"pattern":"marker-sess1"}`))
 	if err != nil {
 		t.Fatal(err)

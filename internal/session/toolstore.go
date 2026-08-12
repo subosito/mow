@@ -59,19 +59,9 @@ func (s *Store) SaveToolResult(tool, body string) (string, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	dir := s.ToolDir()
-	if dir == "" {
-		return "", fmt.Errorf("session: tool result dir unavailable")
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	dirInfo, err := os.Lstat(dir)
+	dir, err := s.ensureToolDirLocked()
 	if err != nil {
 		return "", err
-	}
-	if !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("session: tool result dir is not a regular directory")
 	}
 	seq := nextToolSequence(dir)
 	if seq > 9999 {
@@ -84,17 +74,21 @@ func (s *Store) SaveToolResult(tool, body string) (string, error) {
 	}
 	sum := sha1.Sum([]byte(body))
 	id := fmt.Sprintf("%04d-%s-%x.txt", seq, sanitizeToolName(tool), sum[:4])
-	f, err := os.OpenFile(filepath.Join(dir, id), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	path, err := toolResultPath(dir, id)
+	if err != nil {
+		return "", err
+	}
+	f, err := createRegularFileNoFollow(dir, path, 0o600)
 	if err != nil {
 		return "", err
 	}
 	if _, err := io.WriteString(f, body); err != nil {
 		_ = f.Close()
-		_ = os.Remove(filepath.Join(dir, id))
+		_ = os.Remove(path)
 		return "", err
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(filepath.Join(dir, id))
+		_ = os.Remove(path)
 		return "", err
 	}
 	pruneToolResults(dir, toolResultKeepFiles, toolResultMaxDirBytes)
@@ -113,17 +107,21 @@ func (s *Store) GetToolResult(id string) (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("session: tool result dir unavailable")
 	}
-	f, err := os.Open(filepath.Join(dir, id))
+	if _, err := os.Lstat(dir); err != nil {
+		return "", fmt.Errorf("session: tool result expired or missing")
+	}
+	path, err := toolResultPath(dir, id)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("session: tool result expired or missing")
-		}
-		return "", err
+		return "", fmt.Errorf("session: tool result expired or missing")
+	}
+	f, err := openRegularFileNoFollow(dir, path)
+	if err != nil {
+		return "", fmt.Errorf("session: tool result expired or missing")
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("session: tool result expired or missing")
 	}
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("session: tool result expired or missing")
@@ -139,6 +137,30 @@ func (s *Store) GetToolResult(id string) (string, error) {
 		return "", fmt.Errorf("session: tool result exceeds %d byte read limit", toolResultMaxReadBytes)
 	}
 	return string(data), nil
+}
+
+func (s *Store) ensureToolDirLocked() (string, error) {
+	dir := s.ToolDir()
+	if dir == "" {
+		return "", fmt.Errorf("session: tool result dir unavailable")
+	}
+	if s.Dir == "" {
+		return "", fmt.Errorf("session: tool result dir unavailable")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := rejectSymlinkComponents(s.Dir, dir); err != nil {
+		return "", fmt.Errorf("session: tool result dir is not a regular directory")
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("session: tool result dir is not a regular directory")
+	}
+	return dir, nil
 }
 
 // ToolFiles lists this session's stored tool results newest-first (by their

@@ -83,6 +83,8 @@ func TestContextSearchCancelDuringScan(t *testing.T) {
 }
 
 func TestContextSearchConcurrentBudget(t *testing.T) {
+	resetBudgetRegistryForTest()
+	t.Cleanup(resetBudgetRegistryForTest)
 	root := t.TempDir()
 	adir := filepath.Join(root, "sess1.archive")
 	if err := os.MkdirAll(adir, 0o700); err != nil {
@@ -111,8 +113,8 @@ func TestContextSearchConcurrentBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if tool.retrieved[root+"/sess1"] > contextSearchMaxRetrieved {
-		t.Fatalf("budget exceeded: %d", tool.retrieved[root+"/sess1"])
+	if budgetUsedForTest(root+"/sess1") > contextSearchMaxRetrieved {
+		t.Fatalf("budget exceeded: %d", budgetUsedForTest(root+"/sess1"))
 	}
 }
 
@@ -237,13 +239,103 @@ func TestRuneWindow(t *testing.T) {
 }
 
 func TestContextSearchBudgetEvictionPreservesActiveSession(t *testing.T) {
-	tool := newContextSearchTool(t.TempDir(), "active")
+	resetBudgetRegistryForTest()
+	t.Cleanup(resetBudgetRegistryForTest)
 	activeKey := filepath.Join(t.TempDir(), "active")
 	for i := 0; i < contextSearchMaxBudgetSessions+5; i++ {
-		tool.charge(filepath.Join("/other", fmt.Sprintf("sess-%d", i)), 1)
+		chargeBudgetForTest(filepath.Join("/other", fmt.Sprintf("sess-%d", i)), 1)
 	}
-	tool.charge(activeKey, 42)
-	if tool.retrieved[activeKey] != 42 {
-		t.Fatalf("active session budget lost: %+v", tool.retrieved)
+	chargeBudgetForTest(activeKey, 42)
+	if budgetUsedForTest(activeKey) != 42 {
+		t.Fatalf("active session budget lost: used=%d", budgetUsedForTest(activeKey))
+	}
+}
+
+func TestRecoveryBudgetLRUEvictsOldest(t *testing.T) {
+	resetBudgetRegistryForTest()
+	t.Cleanup(resetBudgetRegistryForTest)
+	keys := make([]string, contextSearchMaxBudgetSessions+1)
+	for i := 0; i <= contextSearchMaxBudgetSessions; i++ {
+		keys[i] = fmt.Sprintf("/sessions/%d/s1", i)
+		chargeBudgetForTest(keys[i], i+1)
+	}
+	if budgetHasKeyForTest(keys[0]) {
+		t.Fatal("oldest session budget entry should be evicted")
+	}
+	want := contextSearchMaxBudgetSessions + 1
+	if got := budgetUsedForTest(keys[contextSearchMaxBudgetSessions]); got != want {
+		t.Fatalf("newest session budget=%d want %d", got, want)
+	}
+}
+
+func TestRecoveryBudgetNotResetWhileHeld(t *testing.T) {
+	resetBudgetRegistryForTest()
+	t.Cleanup(resetBudgetRegistryForTest)
+	key := "/sessions/active/s1"
+	b, release := acquireRecoveryBudget(key)
+	chargeBudgetLocked(key, b, contextSearchMaxRetrieved-100)
+	// Fill registry so eviction would run; active key must keep its charged bytes.
+	for i := 0; i < contextSearchMaxBudgetSessions+2; i++ {
+		chargeBudgetForTest(fmt.Sprintf("/sessions/other-%d/s1", i), 1)
+	}
+	if got := b.used; got != contextSearchMaxRetrieved-100 {
+		t.Fatalf("in-flight budget mutated during eviction: used=%d", got)
+	}
+	release()
+	if budgetUsedForTest(key) != contextSearchMaxRetrieved-100 {
+		t.Fatalf("after release used=%d", budgetUsedForTest(key))
+	}
+}
+
+func TestContextSearchConcurrentDifferentSessions(t *testing.T) {
+	resetBudgetRegistryForTest()
+	t.Cleanup(resetBudgetRegistryForTest)
+	root := t.TempDir()
+	for _, sid := range []string{"sessA", "sessB"} {
+		adir := filepath.Join(root, sid+".archive")
+		if err := os.MkdirAll(adir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(adir, "0001-x.md"), []byte("needle-"+sid+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	toolA := newContextSearchTool(root, "sessA")
+	toolB := newContextSearchTool(root, "sessB")
+	var wg sync.WaitGroup
+	outA := make(chan string, 1)
+	outB := make(chan string, 1)
+	errA := make(chan error, 1)
+	errB := make(chan error, 1)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		out, err := toolA.Exec(context.Background(), json.RawMessage(`{"pattern":"needle-sessA"}`))
+		outA <- out
+		errA <- err
+	}()
+	go func() {
+		defer wg.Done()
+		out, err := toolB.Exec(context.Background(), json.RawMessage(`{"pattern":"needle-sessB"}`))
+		outB <- out
+		errB <- err
+	}()
+	wg.Wait()
+	if err := <-errA; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errB; err != nil {
+		t.Fatal(err)
+	}
+	gotA := <-outA
+	gotB := <-outB
+	if !strings.Contains(gotA, "needle-sessA") {
+		t.Fatalf("sessA miss: %q", gotA)
+	}
+	if !strings.Contains(gotB, "needle-sessB") {
+		t.Fatalf("sessB miss: %q", gotB)
+	}
+	if budgetUsedForTest(root+"/sessA") == 0 || budgetUsedForTest(root+"/sessB") == 0 {
+		t.Fatal("each session should track its own budget")
 	}
 }

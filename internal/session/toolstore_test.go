@@ -212,6 +212,55 @@ func TestSaveToolResultConcurrent(t *testing.T) {
 	}
 }
 
+func TestGetToolResultRejectsSymlinkFile(t *testing.T) {
+	root := t.TempDir()
+	s := &Store{Dir: root, ID: "session"}
+	id, err := s.SaveToolResult("read", "legit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(s.ToolDir(), id)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(secret, []byte("leaked\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := s.GetToolResult(id); err == nil || !strings.Contains(err.Error(), "expired or missing") {
+		t.Fatalf("GetToolResult symlink: err=%v", err)
+	}
+}
+
+func TestGetToolResultWindow(t *testing.T) {
+	s := &Store{Dir: t.TempDir(), ID: "session"}
+	body := "héllo世界" + strings.Repeat("x", 5000)
+	id, err := s.SaveToolResult("read", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, start, total, err := s.GetToolResultWindow(id, 1, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start != 1 || total != 7+5000 {
+		t.Fatalf("start=%d total=%d", start, total)
+	}
+	if got != "éll" {
+		t.Fatalf("window=%q", got)
+	}
+}
+
+func TestGetToolResultWindowRejectsInvalidID(t *testing.T) {
+	s := &Store{Dir: t.TempDir(), ID: "session"}
+	if _, _, _, err := s.GetToolResultWindow("../../etc/passwd", 0, 10); err == nil {
+		t.Fatal("invalid id must fail")
+	}
+}
+
 func TestSaveToolResultRejectsSymlinkDirectory(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target")

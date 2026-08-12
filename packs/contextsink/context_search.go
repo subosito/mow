@@ -1,6 +1,7 @@
 package contextsink
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -12,7 +13,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"unicode/utf8"
 
 	"github.com/subosito/mow"
@@ -29,23 +29,16 @@ import (
 // Results are snippets (a few lines around each hit) under a hard output cap:
 // a broad pattern must never dump the archive back into the live window.
 type contextSearchTool struct {
-	mu sync.Mutex
 	// dir/sid pin the session to search (tests). Empty dir → resolve both
 	// from the engine at Exec time.
 	dir string
 	sid string
-	// retrieved bounds archive output across calls in one session. A search
-	// tool must not be able to refill the live context indefinitely by
-	// issuing many broad queries. Keyed per session (dir+"/"+sid) so
-	// concurrent engines/sessions never share a budget, and bounded so a
-	// long-lived host does not leak budget entries for dead sessions.
-	retrieved map[string]int
 }
 
 // newContextSearchTool builds a tool pinned to a session dir (used by tests;
 // the registered instance resolves the session from the engine instead).
 func newContextSearchTool(dir, sid string) *contextSearchTool {
-	return &contextSearchTool{dir: dir, sid: sid, retrieved: map[string]int{}}
+	return &contextSearchTool{dir: dir, sid: sid}
 }
 
 // contextSearchToolIDPattern mirrors the stored-tool-result filename shape
@@ -289,22 +282,17 @@ func (t *contextSearchTool) Exec(ctx context.Context, args json.RawMessage) (out
 		return "", err
 	}
 
-	// Serialize searches so the cumulative budget is an actual session-wide
-	// limit even when the agent runs read-only tools in parallel.
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	budget, release := acquireRecoveryBudget(key)
+	defer release()
 
 	files := t.archiveFiles(base, sid)
 	if len(files) == 0 {
 		msg := "(no context archives yet — nothing has been compacted out of context)"
-		t.charge(key, len(msg))
+		chargeBudgetLocked(key, budget, len(msg))
 		return msg, nil
 	}
 
-	// Account the result before returning it. If the session budget is nearly
-	// spent, return a small explicit message rather than silently consuming an
-	// unbounded amount of context over repeated calls.
-	remaining := contextSearchMaxRetrieved - t.retrieved[key]
+	remaining := contextSearchMaxRetrieved - budget.used
 	if remaining <= 0 {
 		return "(context_search retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
 	}
@@ -329,7 +317,7 @@ func (t *contextSearchTool) Exec(ctx context.Context, args json.RawMessage) (out
 	if b.results == 0 {
 		// Even a miss has a bounded response. Charge a small diagnostic budget so
 		// repeated miss queries cannot spin indefinitely for free.
-		t.charge(key, contextSearchTruncationReserve)
+		chargeBudgetLocked(key, budget, contextSearchTruncationReserve)
 		return "(no matches in context archive)", nil
 	}
 	out = strings.TrimRight(b.out.String(), "\n")
@@ -340,8 +328,7 @@ func (t *contextSearchTool) Exec(ctx context.Context, args json.RawMessage) (out
 		}
 		out += fmt.Sprintf("\n\n…(stopped at %d snippets / %s; refine the pattern for more)", b.results, reason)
 	}
-	// Charge the actual bounded payload, including the small truncation note.
-	t.charge(key, len(out))
+	chargeBudgetLocked(key, budget, len(out))
 	return out, nil
 }
 
@@ -365,9 +352,10 @@ func (t *contextSearchTool) getByID(ctx context.Context, id string, offset, wind
 		return "", err
 	}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	remaining := contextSearchMaxRetrieved - t.retrieved[key]
+	budget, release := acquireRecoveryBudget(key)
+	defer release()
+
+	remaining := contextSearchMaxRetrieved - budget.used
 	if remaining <= 0 {
 		return "(context_search retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
 	}
@@ -376,36 +364,33 @@ func (t *contextSearchTool) getByID(ctx context.Context, id string, offset, wind
 		return "(context_search retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
 	}
 
-	// Prefer the engine store API when available (session mutex + ID checks).
-	// Tests pin t.dir and open files directly under that root.
-	var data string
+	// Prefer the engine store window API (no full-body load). Tests pin t.dir
+	// and stream from disk under that root.
+	var body string
+	var start, total int
 	if eng := mow.EngineFromContext(ctx); eng != nil && t.dir == "" {
-		body, err := eng.StoredToolResult(id)
+		var err error
+		body, start, total, err = eng.StoredToolResultWindow(id, off, win)
 		if err != nil {
 			return "", fmt.Errorf("context_search: stored result %s expired or missing", id)
 		}
-		data = body
 	} else {
-		// Stored tool results live in the current session's <sid>.tools dir,
-		// beside <sid>.jsonl — never another session's.
 		toolsDir := filepath.Join(base, sid+".tools")
 		path := filepath.Join(toolsDir, id)
 		if err := rejectSymlinkComponents(base, path); err != nil {
 			return "", fmt.Errorf("context_search: stored result %s expired or missing", id)
 		}
 		var ok bool
-		data, ok = readStoredResult(ctx, base, path)
+		body, start, total, ok = readStoredResultWindow(ctx, base, path, off, win)
 		if !ok {
 			return "", fmt.Errorf("context_search: stored result %s expired or missing", id)
 		}
 	}
-	// Window without []rune of the whole body (8MiB max → avoid ~32MiB peak).
-	body, start, total := runeWindow(data, off, win)
 	out := fmt.Sprintf("[stored id=%s offset=%d chars=%d/%d]\n%s", id, start, utf8.RuneCountInString(body), total, body)
 	if len(out) > callCap {
 		out = clampBytes(out, callCap) + "\n…(window truncated)\n"
 	}
-	t.charge(key, len(out))
+	chargeBudgetLocked(key, budget, len(out))
 	return out, nil
 }
 
@@ -428,27 +413,61 @@ func (t *contextSearchTool) searchRoot(ctx context.Context) (base, sid, key stri
 	return dir, sid, dir + "/" + sid, nil
 }
 
-// charge adds n to the session's cumulative retrieval budget. The budget map
-// is bounded: long-lived hosts open many sessions, and a closed session's
-// entry is only a few bytes — evict an arbitrary entry past the cap.
-func (t *contextSearchTool) charge(key string, n int) {
-	if t.retrieved == nil {
-		t.retrieved = map[string]int{}
+// readStoredResultWindow reads a bounded rune window from one stored tool
+// body without loading the entire file into memory.
+func readStoredResultWindow(ctx context.Context, root, path string, off, win int) (body string, start, total int, ok bool) {
+	if err := ctx.Err(); err != nil {
+		return "", 0, 0, false
 	}
-	t.retrieved[key] += n
-	for len(t.retrieved) > contextSearchMaxBudgetSessions {
-		var victim string
-		for k := range t.retrieved {
-			if k != key {
-				victim = k
-				break
+	if err := rejectSymlinkComponents(root, path); err != nil {
+		return "", 0, 0, false
+	}
+	f, err := openRegularFileNoFollow(root, path)
+	if err != nil {
+		return "", 0, 0, false
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() {
+		return "", 0, 0, false
+	}
+	if st.Size() > contextSearchMaxStoredRead {
+		return "", 0, 0, false
+	}
+	body, start, total, err = readRuneWindow(ctx, io.LimitReader(f, contextSearchMaxStoredRead+1), off, win)
+	if err != nil {
+		return "", 0, 0, false
+	}
+	return body, start, total, true
+}
+
+func readRuneWindow(ctx context.Context, r io.Reader, off, win int) (body string, start, total int, err error) {
+	br := bufio.NewReader(r)
+	var b strings.Builder
+	total = 0
+	for {
+		if total&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return "", 0, 0, err
 			}
 		}
-		if victim == "" {
+		ru, _, rerr := br.ReadRune()
+		if rerr == io.EOF {
 			break
 		}
-		delete(t.retrieved, victim)
+		if rerr != nil {
+			return "", 0, 0, rerr
+		}
+		if total >= off && total < off+win {
+			b.WriteRune(ru)
+		}
+		total++
 	}
+	start = off
+	if off > total {
+		start = total
+	}
+	return b.String(), start, total, nil
 }
 
 // archiveFiles lists the current session's <sid>.archive/*.md and
@@ -553,13 +572,6 @@ func readArchiveFile(ctx context.Context, root, path string) (string, bool) {
 	return readContainedFile(ctx, root, path, contextSearchMaxReadFile, true)
 }
 
-// readStoredResult reads one stored tool body for get-by-id. Stored bodies
-// are capped by the store (contextSearchMaxStoredRead). Symlinks and
-// non-regular files read as missing.
-func readStoredResult(ctx context.Context, root, path string) (string, bool) {
-	return readContainedFile(ctx, root, path, contextSearchMaxStoredRead, false)
-}
-
 // readContainedFile Lstats + opens a regular file under root. allowTrunc means
 // oversized files return a prefix rather than missing (archive scan path).
 func readContainedFile(ctx context.Context, root, path string, maxBytes int64, allowTrunc bool) (string, bool) {
@@ -569,14 +581,7 @@ func readContainedFile(ctx context.Context, root, path string, maxBytes int64, a
 	if err := rejectSymlinkComponents(root, path); err != nil {
 		return "", false
 	}
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return "", false
-	}
-	if !allowTrunc && info.Size() > maxBytes {
-		return "", false
-	}
-	f, err := os.Open(path)
+	f, err := openRegularFileNoFollow(root, path)
 	if err != nil {
 		return "", false
 	}

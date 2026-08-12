@@ -162,8 +162,13 @@ never the whole blob by default.
   boundary: quotas, retention, pruning, deletion with the session, and
   `0700`/`0600` permissions like the rest of `$MOW_HOME`.
 - Tool output can carry secrets or hostile text. Per-session scope plus
-  bounded retention limit the exfiltration surface; redaction and retrieval
-  audit are later options, not first-cut blockers.
+  bounded retention limit the exfiltration surface. **Stub previews** redact
+  common secret shapes; **`context_search` recovery is verbatim** (explicit
+  product choice — recovery is opt-in and bounded, and the model needs
+  faithful text when fetching by id or pattern). Session tool I/O uses
+  `O_NOFOLLOW` on Unix; other platforms rely on Lstat containment plus
+  post-open regular-file checks (residual TOCTOU on hostile hosts — see
+  `internal/session/safefile*`).
 - Store failure is a defined path, not an afterthought: the loop must still
   return a usable bounded result, with an explicit marker so the model knows
   text was dropped.
@@ -189,4 +194,3 @@ This builds on mow's own session archive and `context_search`
 ([harness.md](harness.md)), the PostTool rewrite surface
 ([embedding.md](embedding.md)), and the pack/extension rules
 ([extensions.md](extensions.md)) — no external product is part of the design.
-design.

@@ -175,9 +175,14 @@ extensions:
 
 Durable multi-step workflow around `Engine.Prompt`: checklist state, evidence,
 budgets, optional parallel nodes, worktree workers, process tools, and graph
-events. State lives under `$MOW_HOME/goals` (atomic JSON writes, symlink-safe
-loads, bounded plan/facts fields). Only one in-process run per goal id is
-allowed; a crashed `StatusRunning` on disk can still be resumed.
+events. State lives under `$MOW_HOME/goals`:
+
+- Atomic JSON writes with per-goal lock files (portable flock / O_EXCL) plus
+  in-process directory locks.
+- One run per goal id across processes via `<id>.run.lock` and owner PID/host
+  metadata; dead owners heal `StatusRunning` → `Pending` for safe resume.
+- Event logs (`events.jsonl`) rotate at ~4MiB; conflicted worktrees stay for
+  manual inspection; parent-repo merges take `.git/mow-repo.lock`.
 
 ```bash
 mow goal run --goal "Make CI green"
@@ -279,7 +284,15 @@ The full tool-result side channel, write side and read side together:
   or get-by-id fetch of a stored body (`id=…`, bounded window). It resolves
   the session dir from the engine at call time and is read-only, so it works
   in read-only prompts. Symlinks and non-regular files under the session
-  archive/tools dirs are ignored; stub previews redact common secret shapes.
+  archive/tools dirs are ignored. Stub previews redact common secret shapes;
+  recovery via `context_search` returns verbatim stored/archive text (product
+  choice — the model needs faithful detail when explicitly recovering).
+  Session tool I/O uses `O_NOFOLLOW` on Unix; other platforms use Lstat
+  containment plus post-open regular-file checks (residual TOCTOU on hostile
+  hosts — see `internal/session/safefile*` for the store and
+  `packs/contextsink/safefile*` for pinned-disk reads in tests).
+  Per-session retrieval budgets use deterministic LRU eviction (128 sessions);
+  unrelated sessions search in parallel.
 
 Storage is strictly session-scoped (search, get-by-id, and the retrieval
 budget are all pinned to the engine's own `SessionDir`+`SessionID` — never a
