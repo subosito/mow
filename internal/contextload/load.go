@@ -15,14 +15,28 @@ func Load(workspace string) (string, error) {
 	return LoadWithExtras(workspace)
 }
 
+// LoadHermetic is Load without the global $MOW_HOME/AGENTS.md layer. Used by
+// hermetic Engine construction (Options.LoadUserConfig=false) so embedding
+// never pulls operator-home instructions. Workspace-chain AGENTS/CLAUDE files
+// still load (they are project files, not user-home state).
+func LoadHermetic(workspace string) (string, error) {
+	return loadAgents(workspace, false)
+}
+
 // LoadWithExtras is Load with extra AGENTS-style files inserted between the
 // global $MOW_HOME/AGENTS.md and the workspace chain (e.g. a workspace
 // profile's AGENTS.md: more specific than global, less than the workspace).
 func LoadWithExtras(workspace string, extraPaths ...string) (string, error) {
+	return loadAgents(workspace, true, extraPaths...)
+}
+
+func loadAgents(workspace string, includeGlobal bool, extraPaths ...string) (string, error) {
 	var parts []string
-	if b, err := os.ReadFile(config.AgentsPath()); err == nil {
-		if s := strings.TrimSpace(string(b)); s != "" {
-			parts = append(parts, s)
+	if includeGlobal {
+		if b, err := os.ReadFile(config.AgentsPath()); err == nil {
+			if s := strings.TrimSpace(string(b)); s != "" {
+				parts = append(parts, s)
+			}
 		}
 	}
 	for _, p := range extraPaths {

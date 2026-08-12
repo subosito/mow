@@ -67,20 +67,21 @@ func TestRegisterFromConfigProfileOverridesGlobalPeerModel(t *testing.T) {
 	t.Cleanup(func() { mowAgentBinary = orig })
 
 	globalModel := "deepseek-v4-flash"
-	profileModel := "dk/openrouter/deepseek/deepseek-v4-flash-0731"
+	profileModel := "gateway/deepseek/deepseek-chat"
 	global := "extensions:\n  acp:\n    mow_agents:\n      deepseek:\n        model: " + globalModel + "\n"
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(global), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	profileBody := "extensions:\n  acp:\n    mow_agents:\n      deepseek:\n        model: " + profileModel + "\n"
-	writeNamedProfile(t, home, "dk-ai-gateway", workspace, profileBody)
+	writeNamedProfile(t, home, "gateway-profile", workspace, profileBody)
 
-	p, found, err := config.LoadProfile("dk-ai-gateway")
+	p, found, err := config.LoadProfile("gateway-profile")
 	if err != nil || !found {
 		t.Fatalf("LoadProfile: found=%v err=%v", found, err)
 	}
-	// Same path list engine.New builds for BeforeNew.
-	paths := p.OverlayConfigPaths(nil)
+	// Same path list engine.New builds for BeforeNew with LoadUserConfig:
+	// global config first, then profile overlay.
+	paths := []string{filepath.Join(home, "config.yaml"), p.ConfigPath()}
 	if err := RegisterFromConfig(paths...); err != nil {
 		t.Fatal(err)
 	}
@@ -175,20 +176,21 @@ func TestEngineProfileCapturesAcpDelegateModel(t *testing.T) {
 	t.Cleanup(func() { mowAgentBinary = orig })
 
 	globalModel := "deepseek-v4-flash"
-	profileModel := "dk/openrouter/deepseek/deepseek-v4-flash-0731"
+	profileModel := "gateway/deepseek/deepseek-chat"
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(
 		"llm:\n  model: global-host\nextensions:\n  acp:\n    mow_agents:\n      deepseek:\n        model: "+globalModel+"\n",
 	), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeNamedProfile(t, home, "dk-ai-gateway", workspace,
+	writeNamedProfile(t, home, "gateway-profile", workspace,
 		"llm:\n  model: profile-host\nextensions:\n  acp:\n    mow_agents:\n      deepseek:\n        model: "+profileModel+"\n",
 	)
 
 	var tools []mow.ToolSpec
 	eng, err := mow.New(mow.Options{
-		Workspace: "dk-ai-gateway",
-		NoSession: true,
+		LoadUserConfig: true,
+		Workspace:      "gateway-profile",
+		NoSession:      true,
 		Chat: func(_ context.Context, _ []mow.Message, specs []mow.ToolSpec) (mow.Message, error) {
 			tools = append([]mow.ToolSpec(nil), specs...)
 			return mow.Message{Role: "assistant", Content: "ok"}, nil
@@ -279,9 +281,10 @@ func TestEngineScopedDelegateIsolatesPeers(t *testing.T) {
 func captureDelegateViaEngine(t *testing.T, profile string) *delegateTool {
 	t.Helper()
 	eng, err := mow.New(mow.Options{
-		Workspace: profile,
-		Model:     "gpt-5-mini",
-		NoSession: true,
+		LoadUserConfig: true,
+		Workspace:      profile,
+		Model:          "gpt-5-mini",
+		NoSession:      true,
 		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
 			return mow.Message{Role: "assistant", Content: "ok"}, nil
 		},

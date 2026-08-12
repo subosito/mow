@@ -136,6 +136,10 @@ func TestEngineFlagsDefaults(t *testing.T) {
 	if opt.Workspace != "" || opt.Model != "" || opt.BaseURL != "" || opt.SessionID != "" {
 		t.Errorf("non-empty string defaults: %+v", opt)
 	}
+	// Stock CLI/mowi must opt into user/host config; plain mow.New stays hermetic.
+	if !opt.LoadUserConfig {
+		t.Error("cliutil Options() must set LoadUserConfig=true so hosts keep $MOW_HOME behavior")
+	}
 	// Options() does not wire OnToken/OnEvent (that's OptionsCLI); verify the
 	// bare mapping leaves them nil so library embedders own the stream sink.
 	if opt.OnToken != nil {
@@ -143,6 +147,16 @@ func TestEngineFlagsDefaults(t *testing.T) {
 	}
 	if opt.OnEvent != nil {
 		t.Error("Options() wired OnEvent unexpectedly")
+	}
+}
+
+func TestCliutilSetsLoadUserConfig(t *testing.T) {
+	var ef cliutil.EngineFlags
+	if !ef.Options().LoadUserConfig {
+		t.Fatal("EngineFlags.Options() LoadUserConfig=false; stock CLI would regress to hermetic")
+	}
+	if !ef.OptionsCLI().LoadUserConfig {
+		t.Fatal("OptionsCLI must preserve LoadUserConfig=true")
 	}
 }
 

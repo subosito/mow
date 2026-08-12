@@ -163,11 +163,15 @@ func setup(configPaths ...string) error {
 		return fmt.Errorf("cmdhook extensions: %w", err)
 	}
 	if !ok || (strings.TrimSpace(c.Root) == "" && len(c.Plugins) == 0) {
-		// fallback file, mirroring mcp.yaml / lsp.yaml
-		raw, rerr := os.ReadFile(filepath.Join(mow.Home(), "cmdhook.yaml"))
-		if rerr == nil {
-			if err := yaml.Unmarshal(raw, &c); err != nil {
-				return fmt.Errorf("cmdhook: cmdhook.yaml: %w", err)
+		// Home-file fallback only when the host opted into user config
+		// (BeforeNew paths include $MOW_HOME/config.yaml). Hermetic embedding
+		// must not load cmdhook plugins from the operator home.
+		if extcfg.IncludesUserConfig(configPaths) {
+			raw, rerr := os.ReadFile(filepath.Join(mow.Home(), "cmdhook.yaml"))
+			if rerr == nil {
+				if err := yaml.Unmarshal(raw, &c); err != nil {
+					return fmt.Errorf("cmdhook: cmdhook.yaml: %w", err)
+				}
 			}
 		}
 	}

@@ -690,7 +690,9 @@ func TestSetupFallbackFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(mow.Home(), "cmdhook.yaml"), []byte("root: "+root+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := setup(); err != nil {
+	// Home fallbacks only when the host path list includes $MOW_HOME/config.yaml
+	// (LoadUserConfig). Empty path lists are hermetic and skip home files.
+	if err := setup(filepath.Join(mow.Home(), "config.yaml")); err != nil {
 		t.Fatal(err)
 	}
 	if !registered {
@@ -744,12 +746,13 @@ func TestSetupBadConfigSection(t *testing.T) {
 func TestSetupErrors(t *testing.T) {
 	setupReset(t)
 	t.Setenv("MOW_HOME", t.TempDir())
+	hostPaths := []string{filepath.Join(mow.Home(), "config.yaml")}
 
 	// Malformed cmdhook.yaml.
 	if err := os.WriteFile(filepath.Join(mow.Home(), "cmdhook.yaml"), []byte("root: [unclosed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := setup(); err == nil {
+	if err := setup(hostPaths...); err == nil {
 		t.Fatal("expected yaml error")
 	}
 
@@ -757,7 +760,7 @@ func TestSetupErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(mow.Home(), "cmdhook.yaml"), []byte("root: "+t.TempDir()+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := setup(); err == nil {
+	if err := setup(hostPaths...); err == nil {
 		t.Fatal("expected missing hooks file error")
 	}
 
@@ -765,7 +768,7 @@ func TestSetupErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(mow.Home(), "cmdhook.yaml"), []byte("root: \n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := setup(); err != nil {
+	if err := setup(hostPaths...); err != nil {
 		t.Fatal(err)
 	}
 	if registered {

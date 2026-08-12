@@ -72,7 +72,10 @@ var (
 // RegisterFromEngine after New when engine-scoped isolation is required
 // (concurrent Engines in one process).
 func RegisterFromConfig(configPaths ...string) error {
-	cfg, err := config.Load(configPaths...)
+	// Path-only load: defaults + the handed paths + env. No implicit
+	// $MOW_HOME/config.yaml — the host (engine.New with LoadUserConfig) must
+	// include that path when it wants user/global extensions.acp.
+	cfg, err := config.LoadPaths(configPaths...)
 	if err != nil {
 		return err
 	}

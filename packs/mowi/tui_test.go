@@ -1355,7 +1355,7 @@ func TestSeedTranscriptFromEngine(t *testing.T) {
 	t.Setenv("MOW_ALLOW_WRITE", "")
 
 	// New session first turn via Chat inject — writes user/assistant + dumps.
-	eng1, err := mow.New(mow.Options{
+	eng1, err := mow.New(mow.Options{LoadUserConfig: true,
 		NoSession: false,
 		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
 			return mow.Message{Role: "assistant", Content: "prior reply"}, nil
@@ -1373,7 +1373,7 @@ func TestSeedTranscriptFromEngine(t *testing.T) {
 	}
 
 	// Resume same session id.
-	eng2, err := mow.New(mow.Options{
+	eng2, err := mow.New(mow.Options{LoadUserConfig: true,
 		NoSession: false,
 		SessionID: sid,
 		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
@@ -1994,7 +1994,7 @@ func TestPrintSessionExit(t *testing.T) {
 	// Persist a session so SessionID is set after first prompt.
 	dir := t.TempDir()
 	t.Setenv("MOW_HOME", dir)
-	eng, err := mow.New(mow.Options{
+	eng, err := mow.New(mow.Options{LoadUserConfig: true,
 		NoSession: false,
 		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
 			return mow.Message{Role: "assistant", Content: "hi"}, nil

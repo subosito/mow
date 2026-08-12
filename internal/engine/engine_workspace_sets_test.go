@@ -37,7 +37,7 @@ func TestWorkspaceProfileNameResolvesWorkspaceAndRoots(t *testing.T) {
 	t.Setenv("MOW_HOME", home)
 	writeWorkspaceProfile(t, home, "monorepo", "root: "+workspace+"\nextra_roots:\n  - "+extra+"\n  - "+readOnly+":ro\n")
 
-	eng, err := New(Options{Workspace: "monorepo", Model: "model-a", NoSession: true, Chat: profileChat()})
+	eng, err := New(Options{LoadUserConfig: true, Workspace: "monorepo", Model: "model-a", NoSession: true, Chat: profileChat()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestWorkspaceProfileRejectsUnsafeNamesBeforePathResolution(t *testing.T) {
 	t.Setenv("MOW_HOME", home)
 	for _, name := range []string{"team/api", `team\\api`, " team", "team ", "team..api"} {
 		t.Run(strings.ReplaceAll(name, "/", "slash"), func(t *testing.T) {
-			_, err := New(Options{Workspace: name, Model: "model-a", NoSession: true, Chat: profileChat()})
+			_, err := New(Options{LoadUserConfig: true, Workspace: name, Model: "model-a", NoSession: true, Chat: profileChat()})
 			if err == nil || !strings.Contains(strings.ToLower(err.Error()), "profile") {
 				t.Fatalf("Workspace=%q error = %v, want profile-name validation error", name, err)
 			}
@@ -78,7 +78,7 @@ func TestWorkspaceProfileConfigOverridesUserConfigButNotOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fromProfile, err := New(Options{Workspace: "monorepo", NoSession: true, Chat: profileChat()})
+	fromProfile, err := New(Options{LoadUserConfig: true, Workspace: "monorepo", NoSession: true, Chat: profileChat()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestWorkspaceProfileConfigOverridesUserConfigButNotOptions(t *testing.T) {
 		t.Fatalf("Model() = %q, want profile-model (profile config overrides user config)", got)
 	}
 
-	fromOption, err := New(Options{Workspace: "monorepo", Model: "option-model", NoSession: true, Chat: profileChat()})
+	fromOption, err := New(Options{LoadUserConfig: true, Workspace: "monorepo", Model: "option-model", NoSession: true, Chat: profileChat()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestWorkspaceProfileSkillsPrecedeTrustedWorkspaceSkills(t *testing.T) {
 	}
 
 	var system string
-	eng, err := New(Options{Workspace: "monorepo", NoSession: true, Chat: func(_ context.Context, messages []Message, _ []ToolSpec) (Message, error) {
+	eng, err := New(Options{LoadUserConfig: true, Workspace: "monorepo", NoSession: true, Chat: func(_ context.Context, messages []Message, _ []ToolSpec) (Message, error) {
 		for _, message := range messages {
 			if message.Role == "system" {
 				system = message.Content
@@ -160,7 +160,7 @@ func TestWorkspaceProfileDoesNotLoadLegacyWorkspaceSets(t *testing.T) {
 	}
 	writeWorkspaceProfile(t, home, "monorepo", "root: "+profileWorkspace+"\n")
 
-	eng, err := New(Options{Workspace: "monorepo", Model: "model-a", NoSession: true, Chat: profileChat()})
+	eng, err := New(Options{LoadUserConfig: true, Workspace: "monorepo", Model: "model-a", NoSession: true, Chat: profileChat()})
 	if err != nil {
 		t.Fatal(err)
 	}

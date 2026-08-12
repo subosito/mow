@@ -181,7 +181,7 @@ func TestContextSearchNoSessionCtx(t *testing.T) {
 	}
 	eng, _ := runToolPrompt(t, strings.Repeat("a", 100), nil, nil)
 	// NoSession engine: SessionDir() empty.
-	nosess, err := mow.New(mow.Options{Workspace: t.TempDir(), NoSession: true, Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+	nosess, err := mow.New(mow.Options{LoadUserConfig: true, Workspace: t.TempDir(), NoSession: true, Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
 		return mow.Message{Role: "assistant", Content: "ok"}, nil
 	}})
 	if err != nil {

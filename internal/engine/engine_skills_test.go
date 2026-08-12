@@ -184,6 +184,7 @@ func TestExplicitSkillsSelectorOffNoDouble(t *testing.T) {
 
 	var sawSys string
 	eng, err := mow.New(mow.Options{
+		LoadUserConfig: true, // project trust / .mow/config is host state
 		NoSession:      true,
 		Workspace:      ws,
 		ExplicitSkills: []string{"docker"},

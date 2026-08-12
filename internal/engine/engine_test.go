@@ -327,9 +327,10 @@ func TestResumeModelUsesSessionModelOverConfigDefault(t *testing.T) {
 	t.Setenv("MOW_HOME", home)
 	// Create a dummy session file with a recorded model runtime event
 	eng1, err := mow.New(mow.Options{
-		Workspace: ws,
-		Model:     "resumed-model",
-		SessionID: "sess-model",
+		LoadUserConfig: true,
+		Workspace:      ws,
+		Model:          "resumed-model",
+		SessionID:      "sess-model",
 		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
 			return mow.Message{Role: "assistant", Content: "ok"}, nil
 		},
@@ -344,9 +345,10 @@ func TestResumeModelUsesSessionModelOverConfigDefault(t *testing.T) {
 
 	// Non-explicit opt.Model (simulates default model loaded from config)
 	eng2, err := mow.New(mow.Options{
-		Workspace: ws,
-		Model:     "default-config-model",
-		SessionID: "sess-model",
+		LoadUserConfig: true,
+		Workspace:      ws,
+		Model:          "default-config-model",
+		SessionID:      "sess-model",
 		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
 			return mow.Message{Role: "assistant", Content: "ok"}, nil
 		},

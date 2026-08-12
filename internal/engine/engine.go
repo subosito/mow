@@ -104,39 +104,57 @@ type lifeHooks struct {
 }
 
 // New builds an Engine from Options (config, tools, optional session resume).
+//
+// Hermetic by default: Options.LoadUserConfig is false, so New does not read
+// or use $MOW_HOME user state (global config, workspace profiles, trust,
+// global AGENTS/skills, user sessions, extension home fallbacks). Stock CLI
+// and mowi set LoadUserConfig true via cliutil. Explicit ConfigPaths always
+// load when provided (defaults → paths → env → Options), without implicit
+// global config when LoadUserConfig is false.
 func New(opt Options) (*Engine, error) {
-	// --workspace / Options.Workspace is hybrid: first it is looked up as a
-	// workspace profile under $MOW_HOME/workspaces/<name> (workspace.yaml
-	// root + extra_roots, config.yaml overlay, AGENTS.md, skills/);
-	// otherwise it is treated as a plain directory path.
+	// --workspace / Options.Workspace is hybrid only with LoadUserConfig:
+	// first looked up as a workspace profile under $MOW_HOME/workspaces/<name>
+	// (workspace.yaml root + extra_roots, config.yaml overlay, AGENTS.md,
+	// skills/); otherwise a plain directory path. Hermetic mode skips profile
+	// lookup entirely — Workspace must be an existing directory when set.
 	//
 	// Resolve the profile before pre-New extension setup so its config.yaml
 	// participates in config-driven registration (e.g. acp_delegate peers).
 	// Path-only BeforeNew hooks receive the profile via OverlayConfigPaths;
-	// the main Load uses LoadWithProfile by name so precedence is:
+	// when LoadUserConfig, the global config path is prepended so DecodeSection
+	// / RegisterFromConfig see host state without each pack re-opening Home.
+	// Main load precedence (LoadUserConfig true):
 	// defaults < global < profile < explicit --config < env < Options.
+	// Hermetic: defaults < explicit ConfigPaths < env < Options.
 	var activeProfile *config.Profile
-	if w := strings.TrimSpace(opt.Workspace); w != "" {
-		profile, found, perr := config.LoadProfile(w)
-		if perr != nil {
-			return nil, perr
-		}
-		if found {
-			activeProfile = &profile
+	if opt.LoadUserConfig {
+		if w := strings.TrimSpace(opt.Workspace); w != "" {
+			profile, found, perr := config.LoadProfile(w)
+			if perr != nil {
+				return nil, perr
+			}
+			if found {
+				activeProfile = &profile
+			}
 		}
 	}
-	profilePaths := append([]string(nil), opt.ConfigPaths...)
+	beforePaths := append([]string(nil), opt.ConfigPaths...)
 	if activeProfile != nil && activeProfile.HasConfig() {
-		profilePaths = activeProfile.OverlayConfigPaths(profilePaths)
+		beforePaths = activeProfile.OverlayConfigPaths(beforePaths)
 	}
-	if err := ext.BeforeNew(profilePaths...); err != nil {
+	if opt.LoadUserConfig {
+		// Host mode: ensure $MOW_HOME/config.yaml is visible to BeforeNew hooks
+		// (extcfg no longer falls back to Home on its own).
+		beforePaths = prependConfigPath(beforePaths, config.ConfigPath())
+	}
+	if err := ext.BeforeNew(beforePaths...); err != nil {
 		return nil, fmt.Errorf("extension init: %w", err)
 	}
 	profileName := ""
 	if activeProfile != nil {
 		profileName = activeProfile.Name
 	}
-	cfg, err := config.LoadWithProfile(profileName, opt.ConfigPaths...)
+	cfg, err := config.LoadForEngine(opt.LoadUserConfig, profileName, opt.ConfigPaths...)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +185,12 @@ func New(opt Options) (*Engine, error) {
 				cfg.Policy.ExtraRoots = append(rw, cfg.Policy.ExtraRoots...)
 				cfg.Policy.ExtraRootsReadOnly = append(ro, cfg.Policy.ExtraRootsReadOnly...)
 			}
+		} else if !opt.LoadUserConfig {
+			// Hermetic: directory path only — no profile names from $MOW_HOME.
+			if fi, serr := os.Stat(w); serr != nil || !fi.IsDir() {
+				return nil, fmt.Errorf("workspace %q is not an existing directory (workspace profiles require Options.LoadUserConfig)", w)
+			}
+			cfg.Workspace = w
 		} else if !config.IsWorkspaceProfileName(w) {
 			if fi, serr := os.Stat(w); serr != nil || !fi.IsDir() {
 				return nil, fmt.Errorf("workspace %q is not a valid profile name (use a single directory name under $MOW_HOME/workspaces, or an existing directory path)", w)
@@ -257,7 +281,10 @@ func New(opt Options) (*Engine, error) {
 	enabled := cfg.Tools.Enable
 	toolList := tools.Registry(pol, enabled)
 	readOnlyExt := map[string]bool{}
-	for _, t := range ext.Tools() {
+	// Hermetic engines skip config-sourced process-global tools left by a
+	// prior host New; static init tools and tools from this BeforeNew still
+	// merge (ToolsForEngine). LoadUserConfig includes every registered tool.
+	for _, t := range ext.ToolsForEngine(opt.LoadUserConfig) {
 		toolList = append(toolList, adaptTool(t))
 		// Ext tools may declare themselves side-effect free; only those run
 		// in read-only prompts (see isReadOnlyTool).
@@ -299,7 +326,13 @@ func New(opt Options) (*Engine, error) {
 
 	// Compiled system: harness charter (always) + project AGENTS + skills + Options.SystemAppend.
 	// llm.system_prefix is separate: prepended at request time (may set product identity).
-	agents, _ := contextload.Load(cfg.Workspace)
+	// Hermetic mode skips global $MOW_HOME/AGENTS.md; workspace-chain files remain.
+	var agents string
+	if opt.LoadUserConfig {
+		agents, _ = contextload.Load(cfg.Workspace)
+	} else {
+		agents, _ = contextload.LoadHermetic(cfg.Workspace)
+	}
 	if activeProfile != nil && activeProfile.HasAgents() {
 		if extra, aerr := os.ReadFile(activeProfile.AgentsPath()); aerr == nil {
 			if text := strings.TrimSpace(string(extra)); text != "" {
@@ -313,21 +346,25 @@ func New(opt Options) (*Engine, error) {
 	if activeProfile != nil && activeProfile.HasSkills() {
 		skillDirs = append([]string{activeProfile.SkillsDir()}, skillDirs...)
 	}
-	if contextload.ProjectTrusted(cfg.Workspace) {
-		skillDirs = append(skillDirs, filepath.Join(cfg.Workspace, ".mow", "skills"))
-	} else if _, serr := os.Stat(filepath.Join(cfg.Workspace, ".mow")); serr == nil {
-		// The trust cue is a user-facing hint, not log noise: emit it as a
-		// plain stderr line unless the host configured its own logger.
-		msg := "mow: project .mow/ found but not trusted — run `mow trust` to load its config/skills"
-		if opt.Logger != nil {
-			opt.Logger.Warn(msg)
-		} else {
-			fmt.Fprintln(os.Stderr, msg)
+	if opt.LoadUserConfig {
+		if contextload.ProjectTrusted(cfg.Workspace) {
+			skillDirs = append(skillDirs, filepath.Join(cfg.Workspace, ".mow", "skills"))
+		} else if _, serr := os.Stat(filepath.Join(cfg.Workspace, ".mow")); serr == nil {
+			// The trust cue is a user-facing hint, not log noise: emit it as a
+			// plain stderr line unless the host configured its own logger.
+			msg := "mow: project .mow/ found but not trusted — run `mow trust` to load its config/skills"
+			if opt.Logger != nil {
+				opt.Logger.Warn(msg)
+			} else {
+				fmt.Fprintln(os.Stderr, msg)
+			}
 		}
+		// Global $MOW_HOME/skills — host only.
+		skillDirs = append([]string{config.SkillsDir()}, skillDirs...)
 	}
-	skillDirs = append([]string{config.SkillsDir()}, skillDirs...)
 	// Programmatic dirs (tests/hosts) are searched last, after global/config
-	// dirs, so config and the global $MOW_HOME/skills still take precedence.
+	// dirs, so config and the global $MOW_HOME/skills still take precedence
+	// when LoadUserConfig is on. Hermetic embedders use SkillsDirs alone.
 	skillDirs = append(skillDirs, opt.SkillsDirs...)
 	selectSkills := true
 	if cfg.Skills.Selector != nil {
@@ -353,6 +390,12 @@ func New(opt Options) (*Engine, error) {
 
 	loopHooks, life := mergeHooks(opt.Hooks)
 
+	// Hermetic embedding defaults to no session persistence: session.dir
+	// otherwise falls under $MOW_HOME/sessions. There is no separate safe
+	// session-dir Options field yet; hosts that want sessions set
+	// LoadUserConfig. Explicit NoSession remains respected either way.
+	noSess := opt.NoSession || !opt.LoadUserConfig
+
 	e := &Engine{
 		cfg:            cfg,
 		pol:            pol,
@@ -364,7 +407,7 @@ func New(opt Options) (*Engine, error) {
 		skillsText:     skills,
 		explicitSkills: explicitSkills,
 		opt:            opt,
-		noSess:         opt.NoSession,
+		noSess:         noSess,
 		hooks:          loopHooks,
 		life:           life,
 		onToken:        opt.OnToken,
@@ -546,7 +589,7 @@ func New(opt Options) (*Engine, error) {
 		e.untrustedNonce = hex.EncodeToString(nb)
 	}
 
-	if !opt.NoSession {
+	if !noSess {
 		proj := projectHash(cfg.Workspace)
 		sessDir := filepath.Join(cfg.Session.Dir, proj)
 		sid := strings.TrimSpace(opt.SessionID)
@@ -851,6 +894,22 @@ func cacheTTL(m *config.CacheMode) string {
 		return ""
 	}
 	return m.TTL()
+}
+
+// prependConfigPath puts the global user config path first in the BeforeNew
+// path list when the host opted into LoadUserConfig, without duplicating it.
+func prependConfigPath(paths []string, cfgPath string) []string {
+	cfgPath = strings.TrimSpace(cfgPath)
+	if cfgPath == "" {
+		return paths
+	}
+	want := filepath.Clean(cfgPath)
+	for _, p := range paths {
+		if filepath.Clean(strings.TrimSpace(p)) == want {
+			return paths
+		}
+	}
+	return append([]string{cfgPath}, paths...)
 }
 
 // mergeSkillNames unions two skill-name lists case-insensitively, dedupes,

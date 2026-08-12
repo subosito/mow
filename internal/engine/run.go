@@ -33,6 +33,15 @@ var ErrAgentMaxTurns = agent.ErrMaxTurns
 // Options configures New / Run.
 type Options struct {
 	ConfigPaths []string
+	// LoadUserConfig, when true, loads $MOW_HOME user/host state the way the
+	// stock CLI and mowi do: global config.yaml, MOW_* env application already
+	// happens via config load, workspace profiles, global AGENTS/skills,
+	// out-of-band trust, user sessions, and extension BeforeNew home fallbacks
+	// (MCP/cmdhook/acp/lsp). When false (the zero value — embedding default),
+	// New is hermetic: defaults + explicit ConfigPaths + Options fields only.
+	// No read of $MOW_HOME config, profiles, trust, global instructions/skills,
+	// or user session storage; sessions default off. Hosts (cliutil) set true.
+	LoadUserConfig bool
 	// HTTPClient is used for all LLM/media HTTP (proxies, custom timeouts,
 	// transport middleware). Nil uses a default client (120s chat, 180s media).
 	HTTPClient *http.Client
@@ -40,10 +49,11 @@ type Options struct {
 	// Set a discarding handler to silence, or your own to capture structured
 	// logs without touching the process-global default.
 	Logger *slog.Logger
-	// Workspace overrides config/env workspace when non-empty. Hybrid: a set
-	// profile name from $MOW_HOME/workspaces/<name> (root + extra_roots) or a plain
-	// directory path. A matched set name wins over an existing directory of
-	// the same name.
+	// Workspace overrides config/env workspace when non-empty. With
+	// LoadUserConfig true: hybrid profile name from $MOW_HOME/workspaces/<name>
+	// (root + extra_roots) or a plain directory path. A matched profile name
+	// wins over an existing directory of the same name. With LoadUserConfig
+	// false (hermetic): treated as a directory path only — no profile lookup.
 	Workspace string
 	// ExtraRoots appends directory trees to the FS path jail (in addition to
 	// Workspace). Relative paths resolve against the process cwd at New.

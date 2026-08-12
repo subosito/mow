@@ -85,17 +85,22 @@ func registerAll(configPaths ...string) error {
 		return fmt.Errorf("mcp extensions: %w", err)
 	}
 	if !ok || (len(c.Servers) == 0 && len(c.MCPServers) == 0) {
-		// Fallback files: $MOW_HOME/mcp.json (standard filename) then mcp.yaml.
-		// yaml.v3 parses JSON, so one decoder handles both.
-		for _, name := range []string{"mcp.json", "mcp.yaml"} {
-			raw, rerr := os.ReadFile(filepath.Join(mow.Home(), name))
-			if rerr != nil {
-				continue
+		// Home-file fallbacks only when the host opted into user config
+		// (BeforeNew paths include $MOW_HOME/config.yaml). Hermetic embedding
+		// must not start MCP servers from the operator home.
+		if extcfg.IncludesUserConfig(configPaths) {
+			// Fallback files: $MOW_HOME/mcp.json (standard filename) then mcp.yaml.
+			// yaml.v3 parses JSON, so one decoder handles both.
+			for _, name := range []string{"mcp.json", "mcp.yaml"} {
+				raw, rerr := os.ReadFile(filepath.Join(mow.Home(), name))
+				if rerr != nil {
+					continue
+				}
+				if err := yaml.Unmarshal(raw, &c); err != nil {
+					return fmt.Errorf("mcp: %s: %w", name, err)
+				}
+				break
 			}
-			if err := yaml.Unmarshal(raw, &c); err != nil {
-				return fmt.Errorf("mcp: %s: %w", name, err)
-			}
-			break
 		}
 	}
 	return RegisterServers(c.resolved())

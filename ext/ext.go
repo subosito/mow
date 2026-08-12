@@ -169,9 +169,19 @@ type Command struct {
 	DefaultInteractive bool
 }
 
+// toolEntry tracks a registered tool and whether it came from a BeforeNew
+// generation (config-driven MCP/cmdhook/acp/lsp) vs a static init registration.
+// Hermetic engines (LoadUserConfig=false) only merge static tools plus tools
+// registered during the current BeforeNew call, so a prior host setup cannot
+// leak process-global user tools into an embedder's Engine.
+type toolEntry struct {
+	tool Tool
+	gen  int // 0 = static (init / RegisterTool outside BeforeNew); >0 = BeforeNew gen
+}
+
 var (
 	mu         sync.Mutex
-	tools      []Tool
+	tools      []toolEntry
 	commands   []Command
 	beforeNew  []func(configPaths ...string) error
 	preTool    []PreToolFunc
@@ -184,6 +194,11 @@ var (
 	stop       []StopFunc
 
 	extInstances map[string]*ExtensionState
+
+	// beforeNewGen increments on each BeforeNew; beforeNewActive is true while
+	// hooks run so RegisterTool can tag config-sourced tools.
+	beforeNewGen    int
+	beforeNewActive bool
 )
 
 // ExtensionState describes a registered extension instance (e.g. MCP server or cmdhook plugin).
@@ -331,28 +346,56 @@ func ListExtensions(currentTurn int) []ExtensionStatus {
 // RegisterTool adds a tool available to integrators and the default registry merge.
 // Re-registering a name replaces the earlier tool — BeforeNew may run once per
 // Engine, and duplicate specs would otherwise reach the model.
+//
+// Tools registered while BeforeNew is running are tagged as config-sourced for
+// that generation so hermetic Engines can exclude leftovers from a prior host
+// setup while still accepting tools from the current BeforeNew (explicit
+// ConfigPaths) and static init registrations (proc, contextsink, …).
 func RegisterTool(t Tool) {
 	if t == nil {
 		return
 	}
 	mu.Lock()
 	defer mu.Unlock()
+	gen := 0
+	if beforeNewActive {
+		gen = beforeNewGen
+	}
 	name := strings.ToLower(strings.TrimSpace(t.Name()))
 	for i, ex := range tools {
-		if strings.ToLower(strings.TrimSpace(ex.Name())) == name {
-			tools[i] = t
+		if strings.ToLower(strings.TrimSpace(ex.tool.Name())) == name {
+			tools[i] = toolEntry{tool: t, gen: gen}
 			return
 		}
 	}
-	tools = append(tools, t)
+	tools = append(tools, toolEntry{tool: t, gen: gen})
 }
 
-// Tools returns a copy of registered extension tools.
+// Tools returns a copy of all registered extension tools (every generation).
 func Tools() []Tool {
 	mu.Lock()
 	defer mu.Unlock()
 	out := make([]Tool, len(tools))
-	copy(out, tools)
+	for i, e := range tools {
+		out[i] = e.tool
+	}
+	return out
+}
+
+// ToolsForEngine returns extension tools appropriate for Engine construction.
+// When loadUserConfig is true (CLI/host), every registered tool is included.
+// When false (hermetic embedding), only static tools (registered outside
+// BeforeNew) and tools registered during the most recent BeforeNew call are
+// included — config-driven tools from an earlier host New do not leak in.
+func ToolsForEngine(loadUserConfig bool) []Tool {
+	mu.Lock()
+	defer mu.Unlock()
+	out := make([]Tool, 0, len(tools))
+	for _, e := range tools {
+		if loadUserConfig || e.gen == 0 || e.gen == beforeNewGen {
+			out = append(out, e.tool)
+		}
+	}
 	return out
 }
 
@@ -554,10 +597,19 @@ func RegisterBeforeNew(fn func(configPaths ...string) error) {
 }
 
 // BeforeNew invokes all RegisterBeforeNew hooks (best-effort; first error returned).
+// Each call bumps the tool registration generation so ToolsForEngine can
+// isolate config-sourced tools per Engine construction.
 func BeforeNew(configPaths ...string) error {
 	mu.Lock()
+	beforeNewGen++
+	beforeNewActive = true
 	fns := append([]func(configPaths ...string) error(nil), beforeNew...)
 	mu.Unlock()
+	defer func() {
+		mu.Lock()
+		beforeNewActive = false
+		mu.Unlock()
+	}()
 	var first error
 	for _, fn := range fns {
 		if err := fn(configPaths...); err != nil && first == nil {
@@ -583,4 +635,6 @@ func Reset() {
 	afterTurn = nil
 	stop = nil
 	extInstances = nil
+	beforeNewGen = 0
+	beforeNewActive = false
 }

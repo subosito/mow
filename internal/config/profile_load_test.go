@@ -101,11 +101,11 @@ extensions:
   acp:
     mow_agents:
       deepseek:
-        model: dk/openrouter/deepseek/deepseek-v4-flash-0731
+        model: gateway/deepseek/deepseek-chat
 `
-	writeProfileConfig(t, home, "dk-ai-gateway", workspace, profileBody)
+	writeProfileConfig(t, home, "gateway-profile", workspace, profileBody)
 
-	f, err := config.LoadWithProfile("dk-ai-gateway")
+	f, err := config.LoadWithProfile("gateway-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ extensions:
 		t.Fatal(err)
 	}
 	got := sec.MowAgents["deepseek"].Model
-	want := "dk/openrouter/deepseek/deepseek-v4-flash-0731"
+	want := "gateway/deepseek/deepseek-chat"
 	if got != want {
 		t.Fatalf("deepseek model=%q want %q", got, want)
 	}

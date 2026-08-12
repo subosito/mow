@@ -15,6 +15,7 @@ func TestResumeRestoresSessionEffort(t *testing.T) {
 
 	newEng := func(model, effort, sid string, explicitModel, explicitEffort bool) (*Engine, error) {
 		return New(Options{
+			LoadUserConfig: true,
 			Workspace:      ws,
 			Model:          model,
 			Effort:         effort,
@@ -64,10 +65,11 @@ func TestResumeSessionEffortPersistedInRuntimeEvent(t *testing.T) {
 	t.Setenv("MOW_HOME", home)
 
 	eng, err := New(Options{
-		Workspace: ws,
-		Model:     "model-a",
-		Effort:    "medium",
-		SessionID: "sess-effort-file",
+		LoadUserConfig: true,
+		Workspace:      ws,
+		Model:          "model-a",
+		Effort:         "medium",
+		SessionID:      "sess-effort-file",
 		Chat: func(context.Context, []Message, []ToolSpec) (Message, error) {
 			return Message{Role: "assistant", Content: "ok"}, nil
 		},

@@ -593,14 +593,15 @@ func TestConfigResolvedAndFallbackFiles(t *testing.T) {
 		t.Fatalf("unexpected order: %v, %v, %v", res[0].Name, res[1].Name, res[2].Name)
 	}
 
-	// Test fallback config files in registerAll
+	// Test fallback config files in registerAll (host path list includes
+	// $MOW_HOME/config.yaml so home mcp.json is eligible).
 	tmpHome := t.TempDir()
 	t.Setenv("MOW_HOME", tmpHome)
 
 	mcpFile := filepath.Join(tmpHome, "mcp.json")
 	_ = os.WriteFile(mcpFile, []byte(`{"mcpServers": {}}`), 0600)
 
-	if err := registerAll(); err != nil {
+	if err := registerAll(filepath.Join(tmpHome, "config.yaml")); err != nil {
 		t.Fatalf("registerAll failed with fallback file: %v", err)
 	}
 }

@@ -234,9 +234,28 @@ type SkillsConfig struct {
 //
 // Callers that need a workspace profile overlay should use LoadWithProfile.
 // Explicit Options/CLI applied by the engine after Load still win over all of
-// the above.
+// the above. For hermetic embedding (no $MOW_HOME), use LoadForEngine(false, …)
+// or LoadPaths.
 func Load(paths ...string) (*File, error) {
 	return LoadWithProfile("", paths...)
+}
+
+// LoadPaths merges only defaults → explicit paths → environment.
+// It never reads $MOW_HOME/config.yaml, workspace profiles, or trusted project
+// config. Used by path-only extension setup (BeforeNew) so a hermetic Engine
+// that hands explicit ConfigPaths does not pull implicit global config.
+func LoadPaths(paths ...string) (*File, error) {
+	return loadConfig(false, "", paths...)
+}
+
+// LoadForEngine is the Engine construction entry: when loadUserConfig is true
+// it matches LoadWithProfile (CLI/host); when false it is hermetic like
+// LoadPaths plus an optional profile name is ignored (profiles are $MOW_HOME).
+func LoadForEngine(loadUserConfig bool, profile string, paths ...string) (*File, error) {
+	if !loadUserConfig {
+		profile = ""
+	}
+	return loadConfig(loadUserConfig, profile, paths...)
 }
 
 // LoadWithProfile is Load plus an optional workspace profile overlay.
@@ -262,16 +281,28 @@ func Load(paths ...string) (*File, error) {
 // writer — a profile extensions.acp fully replaces the global one rather than
 // deep-merging agent maps.
 func LoadWithProfile(profile string, paths ...string) (*File, error) {
+	return loadConfig(true, profile, paths...)
+}
+
+// loadConfig is the shared merge pipeline.
+//
+// loadUserConfig gates all $MOW_HOME-derived layers: global config.yaml,
+// named workspace profile overlay, and trusted project .mow/config.yaml.
+// Explicit paths and process env always apply (env/Options still win over
+// files). Hermetic embedding passes loadUserConfig=false.
+func loadConfig(loadUserConfig bool, profile string, paths ...string) (*File, error) {
 	f := defaults()
-	// Global user config first among files (lowest precedence after defaults).
-	_ = mergeFile(f, ConfigPath()) // optional; missing is fine
-	// Selected workspace profile: more specific than global, below --config.
-	if profile != "" {
-		if p, found, perr := LoadProfile(profile); perr != nil {
-			return nil, perr
-		} else if found && p.HasConfig() {
-			if err := mergeFile(f, p.ConfigPath()); err != nil {
-				return nil, err
+	if loadUserConfig {
+		// Global user config first among files (lowest precedence after defaults).
+		_ = mergeFile(f, ConfigPath()) // optional; missing is fine
+		// Selected workspace profile: more specific than global, below --config.
+		if profile != "" {
+			if p, found, perr := LoadProfile(profile); perr != nil {
+				return nil, perr
+			} else if found && p.HasConfig() {
+				if err := mergeFile(f, p.ConfigPath()); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -289,15 +320,43 @@ func LoadWithProfile(profile string, paths ...string) (*File, error) {
 	if err := f.normalize(); err != nil {
 		return nil, err
 	}
-	// Project-local config only when trusted (MOW_TRUST_PROJECT or the
-	// out-of-band trust list — see trust.go). Even then the merge is
-	// restricted: project files may never set credentials, endpoints, or
-	// power tools (mergeProjectFile).
-	if ProjectConfigAllowed(f.Workspace) {
+	// Project-local config only when loading user state and trusted
+	// (MOW_TRUST_PROJECT or the out-of-band trust list — see trust.go).
+	// Even then the merge is restricted: project files may never set
+	// credentials, endpoints, or power tools (mergeProjectFile).
+	if loadUserConfig && ProjectConfigAllowed(f.Workspace) {
 		_ = mergeProjectFile(f, filepath.Join(f.Workspace, ".mow", "config.yaml"))
 		// re-apply env so env still wins
 		applyEnv(f)
 		_ = f.normalize()
+	}
+	return f, nil
+}
+
+// LoadExplicit is the hermetic loader for embedded Engines: it merges only
+//
+//	defaults → explicit paths → environment
+//
+// It never reads $MOW_HOME/config.yaml, never applies a workspace profile
+// overlay, and never merges a trusted project .mow/config.yaml, so a
+// poisoned or merely populated home directory cannot influence an Engine
+// built by a library caller. Environment variables still apply: they are
+// process-explicit input from the embedding program, not on-disk user state.
+// CLI-facing code keeps LoadWithProfile semantics via Options.LoadUserConfig.
+func LoadExplicit(paths ...string) (*File, error) {
+	f := defaults()
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if err := mergeFile(f, p); err != nil {
+			return nil, err
+		}
+	}
+	applyEnv(f)
+	if err := f.normalize(); err != nil {
+		return nil, err
 	}
 	return f, nil
 }

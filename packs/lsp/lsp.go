@@ -48,6 +48,12 @@ func registerAll(configPaths ...string) error {
 		return fmt.Errorf("lsp extensions: %w", err)
 	}
 	if !ok || strings.TrimSpace(c.Command) == "" {
+		// Home-file fallback only when the host opted into user config
+		// (BeforeNew paths include $MOW_HOME/config.yaml). Hermetic embedding
+		// must not start an LSP from the operator home.
+		if !extcfg.IncludesUserConfig(configPaths) {
+			return nil
+		}
 		path := filepath.Join(mow.Home(), "lsp.yaml")
 		raw, rerr := os.ReadFile(path)
 		if rerr != nil {

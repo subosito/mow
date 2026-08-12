@@ -59,7 +59,7 @@ func TestProfileAgentsAreScopedPerEngineWithoutCapabilityEscalation(t *testing.T
 		firstTools = append([]mow.ToolSpec(nil), tools...)
 		return mow.Message{Role: "assistant", Content: "ok"}, nil
 	}
-	first, err := mow.New(mow.Options{Workspace: "one", Model: "gpt-5-mini", NoSession: true, Chat: chatOne})
+	first, err := mow.New(mow.Options{LoadUserConfig: true, Workspace: "one", Model: "gpt-5-mini", NoSession: true, Chat: chatOne})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestProfileAgentsAreScopedPerEngineWithoutCapabilityEscalation(t *testing.T
 		secondTools = append([]mow.ToolSpec(nil), tools...)
 		return mow.Message{Role: "assistant", Content: "ok"}, nil
 	}
-	second, err := mow.New(mow.Options{Workspace: "two", Model: "gpt-5-mini", NoSession: true, Chat: chatTwo})
+	second, err := mow.New(mow.Options{LoadUserConfig: true, Workspace: "two", Model: "gpt-5-mini", NoSession: true, Chat: chatTwo})
 	if err != nil {
 		t.Fatal(err)
 	}

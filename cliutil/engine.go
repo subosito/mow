@@ -134,6 +134,9 @@ func (f *EngineFlags) Options() mow.Options {
 	}
 
 	opt := mow.Options{
+		// Host program: load $MOW_HOME + env + profiles + trust + sessions.
+		// Plain mow.New (embedding) leaves LoadUserConfig false (hermetic).
+		LoadUserConfig:     true,
 		ConfigPaths:        paths,
 		Workspace:          f.Workspace,
 		ExtraRoots:         append([]string(nil), rw...),

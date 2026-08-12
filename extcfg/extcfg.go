@@ -1,5 +1,10 @@
-// Package extcfg decodes extensions.<name> from config paths / $MOW_HOME.
+// Package extcfg decodes extensions.<name> from explicit config paths.
 // It is shared by core extensions and optional packs before mow.New.
+//
+// DecodeSection never falls back to $MOW_HOME on its own. Hosts that want
+// user/global config must pass that path explicitly (engine.New does so when
+// Options.LoadUserConfig is true). Hermetic embedding therefore cannot pick
+// up MCP/cmdhook/acp/lsp sections from the operator's home by accident.
 package extcfg
 
 import (
@@ -12,17 +17,19 @@ import (
 	"github.com/subosito/mow"
 )
 
-// DecodeSection unmarshals extensions.<section> into dst.
-// Tries configPaths, then $MOW_HOME/config.yaml. Returns true if a section was found.
+// DecodeSection unmarshals extensions.<section> into dst from configPaths only
+// (first match wins). Returns true if a section was found.
+//
+// Paths are tried in order. Missing files are skipped; a present file with a
+// YAML error fails the call. Callers that want $MOW_HOME/config.yaml must
+// include it in configPaths (CLI/host via LoadUserConfig).
 func DecodeSection(section string, configPaths []string, dst any) (bool, error) {
 	section = strings.TrimSpace(section)
 	if section == "" {
 		return false, nil
 	}
-	paths := append([]string{}, configPaths...)
-	paths = append(paths, filepath.Join(mow.Home(), "config.yaml"))
 	seen := map[string]bool{}
-	for _, p := range paths {
+	for _, p := range configPaths {
 		p = strings.TrimSpace(p)
 		if p == "" || seen[p] {
 			continue
@@ -48,4 +55,22 @@ func DecodeSection(section string, configPaths []string, dst any) (bool, error) 
 		return true, nil
 	}
 	return false, nil
+}
+
+// IncludesUserConfig reports whether configPaths already contains the global
+// $MOW_HOME/config.yaml path. Extension packs use this to gate home-file
+// fallbacks (mcp.json, cmdhook.yaml, lsp.yaml) so hermetic BeforeNew calls
+// with only explicit paths never touch the operator home.
+func IncludesUserConfig(configPaths []string) bool {
+	want := filepath.Clean(filepath.Join(mow.Home(), "config.yaml"))
+	for _, p := range configPaths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if filepath.Clean(p) == want {
+			return true
+		}
+	}
+	return false
 }

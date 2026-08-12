@@ -21,7 +21,7 @@ func testContextSinkEngine(t *testing.T) *mow.Engine {
 	if err := os.WriteFile(cfgPath, []byte("extensions:\n  contextsink:\n    enabled: true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	eng, err := mow.New(mow.Options{
+	eng, err := mow.New(mow.Options{LoadUserConfig: true,
 		Workspace:   t.TempDir(),
 		ConfigPaths: []string{cfgPath},
 		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
@@ -69,7 +69,8 @@ func runToolPrompt(t *testing.T, body string, configPaths []string, extra func(*
 	var toolResults []string
 	step := 0
 	opt := mow.Options{
-		Workspace: t.TempDir(),
+		LoadUserConfig: true,
+		Workspace:      t.TempDir(),
 		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
 			step++
 			if step == 1 {
@@ -324,7 +325,7 @@ func TestSinkIsPlainExtHookAndEventCarriesFullBody(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("extensions:\n  contextsink:\n    enabled: true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	eng, err := mow.New(mow.Options{
+	eng, err := mow.New(mow.Options{LoadUserConfig: true,
 		ConfigPaths: []string{cfgPath},
 		Workspace:   t.TempDir(),
 		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
