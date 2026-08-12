@@ -70,7 +70,7 @@ export OPENAI_MODEL=gpt-5-mini
 ./bin/mow tty
 ./bin/mow goal run --goal "Make CI green"   # packs/goal — multi-step
 ./bin/mow review                              # packs/review — advisory review
-./bin/mow sec --format sarif                  # security profile / SARIF
+./bin/mow sec --format sarif                  # advisory security review / SARIF
 ./bin/mow job                                 # packs/job — interval jobs
 ./bin/mow acp                                 # ext/acp — ACP agent
 ./bin/mow rpc                                 # ext/rpc — JSON-lines
@@ -130,6 +130,8 @@ Docs: [docs/extensions.md](docs/extensions.md).
 | [docs/architecture.md](docs/architecture.md) | Public/internal and module boundaries |
 | [docs/embedding.md](docs/embedding.md) | Embed in Go: options, events, custom tools/providers, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config |
+| [docs/review.md](docs/review.md) | Shared review workflow, scope, formats, and CI |
+| [docs/sec.md](docs/sec.md) | Read-only security review and evidence model |
 | [docs/extensions.md](docs/extensions.md) | Core extensions, optional packs, ACP, MCP/LSP, media |
 
 ## License

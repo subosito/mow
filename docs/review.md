@@ -5,7 +5,8 @@ for correctness and maintainability problems; `mow sec` reads the same code
 adversarially for security problems. They share a schema, a scope resolver, a
 two-pass verification workflow, and a set of renderers. Specialization is
 internal (persona, taxonomy, defaults) — the public surface is the two
-commands, not a profile flag.
+commands, not a profile flag. Security-specific evidence, safety boundaries,
+and future stages are documented in [sec.md](sec.md).
 
 Both are **advisory**. They are not a scanner, not a pentest, and not proof
 that the code is correct or secure. Static analyzers (Semgrep, CodeQL, gosec,
@@ -64,6 +65,13 @@ binary, too large, budget exhausted); `--verbose` prints them. `--budget
 small|medium|large` caps files, bytes, per-file bytes, and turns; a truncated
 scope is flagged in every format so a partial review cannot look like a complete
 clean scan.
+
+## Command defaults
+
+| Command | Default report floor | Default failing severity |
+|---------|----------------------|--------------------------|
+| `mow review` | low | high |
+| `mow sec` | medium | high |
 
 ## Output
 
@@ -240,6 +248,23 @@ extensions:
         max_turns: 90
 ```
 
+Only the keys you set change; the rest keep their built-in values, so raising
+`max_files` alone does not quietly remove the byte or turn caps. An unknown
+budget name or a non-positive cap is a hard error rather than a silent
+fallback: a user who raised a cap and got the built-in one instead would
+believe more had been reviewed than was.
+
+Nothing else is configurable. Personas, taxonomies, severity floors, and the
+two-pass workflow are the product — if a project could weaken them, a reader
+could no longer tell what `mow sec` actually did from the fact that it ran.
+Because the section is read from `$MOW_HOME` and explicit `-config` paths only,
+project config cannot reach it.
+
+Raising a cap is usually the wrong first move. A single review of a very large
+scope is a weaker review than several narrow ones: attention spreads thin, and
+the verification pass has more to hold. Prefer `--diff`, a path, or `--exclude`
+first, and raise the budget when the scope is genuinely irreducible.
+
 ## Group review
 
 Pass one can use several independently configured models. Repeat `--reviewer`
@@ -263,22 +288,6 @@ Programmatic callers may likewise use `NewEnsembleReviewer` with named,
 read-only `Reviewer` values. ACP peers are not used: read-only review denies
 `acp_delegate` and this policy remains unchanged.
 
-Only the keys you set change; the rest keep their built-in values, so raising
-`max_files` alone does not quietly remove the byte or turn caps. An unknown
-budget name or a non-positive cap is a hard error rather than a silent
-fallback: a user who raised a cap and got the built-in one instead would
-believe more had been reviewed than was.
-
-Nothing else is configurable. Personas, taxonomies, severity floors, and the
-two-pass workflow are the product — if a project could weaken them, a reader
-could no longer tell what `mow sec` actually did from the fact that it ran.
-Because the section is read from `$MOW_HOME` and explicit `-config` paths only,
-project config cannot reach it.
-
-Raising a cap is usually the wrong first move. A single review of a very large
-scope is a weaker review than several narrow ones: attention spreads thin, and
-the verification pass has more to hold. Prefer `--diff`, a path, or `--exclude`
-first, and raise the budget when the scope is genuinely irreducible.
 
 ### Does it depend on the model?
 
@@ -312,3 +321,8 @@ is the range where reports come back reliably.
 Prefer `--diff`/`--staged` on a change over a whole-tree sweep, and reach for
 `--budget large` only when the change really is broad. If a review fails to
 produce a report, narrowing the scope is usually the fix.
+
+## See also
+
+- [mow sec](sec.md) — security-specific evidence and read-only boundaries
+- [Documentation index](README.md)

@@ -7,6 +7,7 @@
 - **Embedding mow in a Go program?** [architecture.md](architecture.md) for the public/internal line → [embedding.md](embedding.md) for the how-to (options, events, custom tools/providers, hooks, sessions).
 - **Operating the CLI?** [../README.md](../README.md) to run it → [harness.md](harness.md) for config, tools, sessions, and the token/policy knobs.
 - **Writing or wiring a pack?** [extensions.md](extensions.md) — core-vs-pack boundary, CLI ownership, hooks table, ACP, media, cmdhook.
+- **Security review or CI?** [review.md](review.md) for shared mechanics → [sec.md](sec.md) for security evidence and command boundaries.
 - **Large tool results / context window pressure?** [context.md](context.md) — design note: native tool-result side-channel.
 - **Contributing / an AI agent working here?** [../CONTRIBUTING.md](../CONTRIBUTING.md) and [../AGENTS.md](../AGENTS.md).
 
@@ -18,7 +19,9 @@
 | [harness.md](harness.md) | Implementers | Loop, tools, config, sessions, policy |
 | [extensions.md](extensions.md) | Integrators | `ext/` packs, CLI ownership, ACP, media, decisions |
 | [context.md](context.md) | Implementers | Design: tool-result side-channel store + search (sink in the loop, per-session archive) |
-| [review.md](review.md) | CI + reviewers | `mow review` / `mow sec`: two-pass workflow, schema, formats, exit codes |
+| [review.md](review.md) | CI + reviewers | Shared review scope, two-pass workflow, schema, formats, budgets, exit codes |
+| [sec.md](sec.md) | Security reviewers | `mow sec`: evidence fields, safety contract, evidence levels, future stages |
+| [workspace-profiles.md](workspace-profiles.md) | CLI operators | Named workspace topology, config, skills, instructions, and scoped peers |
 
 ## Dev shell
 
