@@ -42,6 +42,17 @@ type Options struct {
 	// No read of $MOW_HOME config, profiles, trust, global instructions/skills,
 	// or user session storage; sessions default off. Hosts (cliutil) set true.
 	LoadUserConfig bool
+	// SkipExtensionSetup, when true, skips ext.BeforeNew during New and does
+	// not merge process-global extension tools into the engine. User LLM
+	// config, workspace profiles, AGENTS/skills, and Options.Tools are
+	// unchanged. Review/sec use this so MCP/cmdhook/LSP processes and
+	// config-driven extension tools are not initialized for read-only passes.
+	SkipExtensionSetup bool
+	// DisableExtensionHooks, when true, omits ext global lifecycle hooks
+	// (pre/post tool, user prompt, session start, pre-model, pre-compact,
+	// after turn, stop). Options.Hooks still run. Combine with
+	// SkipExtensionSetup for strict read-only workflows.
+	DisableExtensionHooks bool
 	// HTTPClient is used for all LLM/media HTTP (proxies, custom timeouts,
 	// transport middleware). Nil uses a default client (120s chat, 180s media).
 	HTTPClient *http.Client
@@ -218,6 +229,11 @@ type PromptOpts struct {
 	// context. Orthogonal to side effects — combine with ReadOnly to also
 	// forbid writes/shell during the aside.
 	Ephemeral bool
+	// AllowedTools restricts tool specs and execution for this prompt to the
+	// named tools only (case-insensitive). Empty means no extra restriction.
+	// Combine with ReadOnly for strict review workflows that must not expose
+	// MCP, ACP, or other extension tools even when they declare ReadOnly() true.
+	AllowedTools []string
 }
 
 // Run is a one-shot helper: New + single Prompt. Close is deferred so

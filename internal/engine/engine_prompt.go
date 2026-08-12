@@ -116,6 +116,10 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		}
 		tools = append(tools, adaptTool(t))
 	}
+	allowed := allowedToolSet(opt.AllowedTools)
+	if len(allowed) > 0 {
+		tools = filterAgentToolsByAllowed(tools, allowed)
+	}
 
 	// Cancellable run context + stable id for hosts/orchestrators.
 	// Clear stale guidance BEFORE the run is observable: once beginRun marks
@@ -264,6 +268,9 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 			e.mu.Unlock()
 		},
 		AllowTool: func(name string) error {
+			if !isAllowedTool(name, allowed) {
+				return fmt.Errorf("tool %q denied: not in allowed tool set", name)
+			}
 			// Read-only prompts allow only known side-effect-free tools.
 			// Ext/MCP tools are denied unless they declared ReadOnly() —
 			// an editor "ask" session must not write through an extension.

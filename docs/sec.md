@@ -165,18 +165,24 @@ default remains one reviewer.
 ## Read-only safety contract
 
 `mow sec` forces read-only, ephemeral prompts regardless of global configuration
-or CLI power settings:
+or CLI power settings. Candidate and verifier engines skip extension setup and
+extension lifecycle hooks during construction (`SkipExtensionSetup`,
+`DisableExtensionHooks`); only user LLM config and pre-loaded
+`extensions.review` budgets apply.
 
 - write and edit are unavailable;
 - bash and project execution are unavailable;
-- extension tools must explicitly declare themselves read-only;
+- extension tools, MCP, and ACP are not started for review engines and are not
+  callable even when they declare `ReadOnly() true`;
 - no persistent conversation is needed—the report is the artifact;
 - no patch, test, reproducer, or exploit is generated or executed automatically.
 
-Reports record `run.read_only: true` and `run.tool_policy: prompt_read_only`.
-Only builtins (`read`, `glob`, `grep`) and extension tools with `ReadOnly() true`
-are callable during review passes; mis-declared read-only extension tools remain
-a trust risk for side effects such as network I/O.
+Reports record `run.read_only: true` and `run.tool_policy: builtin_read_inspect_only`.
+Each review pass uses `PromptOpts.AllowedTools` limited to `read`, `glob`, and
+`grep` in addition to `ReadOnly`/`Ephemeral`. Extension, MCP, and ACP tools are
+not exposed to the model and cannot execute, even when they declare
+`ReadOnly() true`. `context_search`, `understand_*`, write, edit, and bash are
+excluded.
 
 This boundary is intentional. Adding a quiet execution flag to `mow sec` would
 make its trust posture ambiguous.

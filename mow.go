@@ -143,6 +143,9 @@ func Home() string                 { return engine.Home() }
 func VersionString() string        { return engine.VersionString() }
 func IsPowerTool(name string) bool { return engine.IsPowerTool(name) }
 
+// BuiltinReadInspectTools are read/glob/grep — the strict allowlist for review/sec prompts.
+func BuiltinReadInspectTools() []string { return engine.BuiltinReadInspectTools() }
+
 // SkillsDir returns the global skills directory ($MOW_HOME/skills, default
 // ~/.mow/skills) where skills live in the standard <name>/SKILL.md layout.
 // It is one of several skill sources: host/user skills.dirs and trusted

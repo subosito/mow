@@ -196,14 +196,19 @@ without changing the exit-code contract (both remain code `1`). Clean runs omit
 so a review can never modify the code it is reviewing. Sessions are disabled —
 the report is the artifact, not the conversation.
 
-Each pass runs with `ReadOnly` + `Ephemeral` prompts. The report records
-`run.read_only: true` and `run.tool_policy: prompt_read_only`. Under that policy
-the model may call only builtin read tools (`read`, `glob`, `grep`) and extension
-tools that explicitly implement `ReadOnly() bool`. Write, edit, bash, and
-`acp_delegate` are denied. Extension authors must declare read-only accurately:
-a tool that performs network I/O or other side effects but claims read-only can
-still run during review — mow blocks non-declared tools at call time but does not
-audit extension registrations from the review pack.
+Each pass runs with `ReadOnly` + `Ephemeral` prompts and a strict per-call
+`AllowedTools` allowlist of `read`, `glob`, and `grep` only. Candidate and
+verifier engines are built with `Options.SkipExtensionSetup` and
+`Options.DisableExtensionHooks`, so constructing them does not run extension
+`BeforeNew` setup (MCP/cmdhook/LSP processes) or inherit extension lifecycle
+hooks. User LLM config still loads; `extensions.review` budgets are read before
+scope resolve via the pack's own config loader, not via engine construction.
+The report records
+`run.read_only: true` and `run.tool_policy: builtin_read_inspect_only`. MCP, ACP,
+and other extension tools are omitted from tool specs and denied at execution even
+when they declare `ReadOnly() true`. Write, edit, bash, `context_search`, and
+`understand_*` are excluded. Extension authors must not rely on review exposing
+their tools.
 
 ## Design notes
 

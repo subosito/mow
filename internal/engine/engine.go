@@ -147,8 +147,10 @@ func New(opt Options) (*Engine, error) {
 		// (extcfg no longer falls back to Home on its own).
 		beforePaths = prependConfigPath(beforePaths, config.ConfigPath())
 	}
-	if err := ext.BeforeNew(beforePaths...); err != nil {
-		return nil, fmt.Errorf("extension init: %w", err)
+	if !opt.SkipExtensionSetup {
+		if err := ext.BeforeNew(beforePaths...); err != nil {
+			return nil, fmt.Errorf("extension init: %w", err)
+		}
 	}
 	profileName := ""
 	if activeProfile != nil {
@@ -284,12 +286,15 @@ func New(opt Options) (*Engine, error) {
 	// Hermetic engines skip config-sourced process-global tools left by a
 	// prior host New; static init tools and tools from this BeforeNew still
 	// merge (ToolsForEngine). LoadUserConfig includes every registered tool.
-	for _, t := range ext.ToolsForEngine(opt.LoadUserConfig) {
-		toolList = append(toolList, adaptTool(t))
-		// Ext tools may declare themselves side-effect free; only those run
-		// in read-only prompts (see isReadOnlyTool).
-		if ro, ok := t.(interface{ ReadOnly() bool }); ok && ro.ReadOnly() {
-			readOnlyExt[strings.ToLower(strings.TrimSpace(t.Name()))] = true
+	// SkipExtensionSetup omits all ext tools (review/sec isolation).
+	if !opt.SkipExtensionSetup {
+		for _, t := range ext.ToolsForEngine(opt.LoadUserConfig) {
+			toolList = append(toolList, adaptTool(t))
+			// Ext tools may declare themselves side-effect free; only those run
+			// in read-only prompts (see isReadOnlyTool).
+			if ro, ok := t.(interface{ ReadOnly() bool }); ok && ro.ReadOnly() {
+				readOnlyExt[strings.ToLower(strings.TrimSpace(t.Name()))] = true
+			}
 		}
 	}
 	// Per-engine tools (Options.Tools): engine-scoped, unlike the global
@@ -388,7 +393,7 @@ func New(opt Options) (*Engine, error) {
 	jailFacts := contextload.PathJailFacts(cfg.Workspace, pol.ExtraRoots, pol.ExtraRootsReadOnly)
 	sys := contextload.ComposeSystem(jailFacts, agents, skills, opt.SystemAppend)
 
-	loopHooks, life := mergeHooks(opt.Hooks)
+	loopHooks, life := mergeHooks(opt)
 
 	// Hermetic embedding defaults to no session persistence: session.dir
 	// otherwise falls under $MOW_HOME/sessions. There is no separate safe

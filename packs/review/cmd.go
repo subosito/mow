@@ -110,9 +110,8 @@ func runCommand(cmd string, args []string) int {
 
 	// Load extensions.review before resolving scope. Budgets are config-
 	// tunable, and ResolveScope enforces them — deferring this to mow.New
-	// (which runs BeforeNew) would resolve the scope against the built-in
-	// caps and then build an engine with the configured ones, so a raised
-	// max_files would silently do nothing and the run would truncate anyway.
+	// would resolve the scope against the built-in caps while review engines
+	// skip extension BeforeNew (SkipExtensionSetup), so budgets must load here.
 	if err := loadConfig(ef.ConfigPaths()...); err != nil {
 		return fail(cmd, err)
 	}
@@ -162,6 +161,7 @@ func runCommand(cmd string, args []string) int {
 	if budget, ok := LookupBudget(rf.Budget); ok && !ef.MaxTurnsSet {
 		opt.MaxTurns = budget.MaxTurns
 	}
+	applyReviewEngineIsolation(&opt)
 
 	var reviewer Reviewer
 	var engines []*mow.Engine

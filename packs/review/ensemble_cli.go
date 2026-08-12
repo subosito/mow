@@ -58,6 +58,7 @@ func ensembleOptions(ef cliutil.EngineFlags, workspace string, models []string, 
 		if !copy.MaxTurnsSet {
 			opt.MaxTurns = budget.MaxTurns
 		}
+		applyReviewEngineIsolation(&opt)
 		opts = append(opts, opt)
 	}
 	return opts, parallel, nil
@@ -115,5 +116,6 @@ func verifierEngineOptions(ef cliutil.EngineFlags, workspace, model string, quie
 	if !copy.MaxTurnsSet {
 		opt.MaxTurns = budget.MaxTurns
 	}
+	applyReviewEngineIsolation(&opt)
 	return opt
 }

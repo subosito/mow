@@ -63,6 +63,10 @@ func TestEnsembleOptionsAreIsolatedAndReadOnly(t *testing.T) {
 		if opt.MaxTurns != 42 || opt.OnEvent != nil {
 			t.Errorf("option %d max turns/progress = %d/%v", i, opt.MaxTurns, opt.OnEvent)
 		}
+		if !opt.SkipExtensionSetup || !opt.DisableExtensionHooks {
+			t.Errorf("option %d missing review extension isolation: skip=%t disable=%t",
+				i, opt.SkipExtensionSetup, opt.DisableExtensionHooks)
+		}
 	}
 	if ef.Model != "default-model" || !ef.AllowWrite || !ef.AllowShell || ef.NoSession || !ef.Stream {
 		t.Fatalf("input EngineFlags mutated: %+v", ef)
@@ -83,6 +87,10 @@ func TestVerifierEngineOptionsAreReadOnly(t *testing.T) {
 	}
 	if opt.MaxTurns != 55 {
 		t.Fatalf("MaxTurns = %d", opt.MaxTurns)
+	}
+	if !opt.SkipExtensionSetup || !opt.DisableExtensionHooks {
+		t.Fatalf("verifier missing review extension isolation: skip=%t disable=%t",
+			opt.SkipExtensionSetup, opt.DisableExtensionHooks)
 	}
 }
 

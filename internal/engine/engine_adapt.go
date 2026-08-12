@@ -62,72 +62,87 @@ func adaptChat(fn ChatFunc) agent.ChatFn {
 
 // mergeHooks combines ext globals + Options into agent loop hooks and engine life hooks.
 // Order: ext globals first, then Options (so Options can override/annotate after packs).
-func mergeHooks(opt Hooks) (agent.Hooks, lifeHooks) {
+func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 	var h agent.Hooks
 	var life lifeHooks
+	hooks := opt.Hooks
 
-	for _, fn := range ext.PreToolHooks() {
-		fn := fn
-		h.PreTool = append(h.PreTool, adaptPreToolExt(fn))
+	if !opt.DisableExtensionHooks {
+		for _, fn := range ext.PreToolHooks() {
+			fn := fn
+			h.PreTool = append(h.PreTool, adaptPreToolExt(fn))
+		}
 	}
-	for _, fn := range opt.OnPreTool {
+	for _, fn := range hooks.OnPreTool {
 		fn := fn
 		h.PreTool = append(h.PreTool, adaptPreTool(fn))
 	}
-	for _, fn := range ext.PostToolHooks() {
-		fn := fn
-		h.PostTool = append(h.PostTool, adaptPostToolExt(fn))
+	if !opt.DisableExtensionHooks {
+		for _, fn := range ext.PostToolHooks() {
+			fn := fn
+			h.PostTool = append(h.PostTool, adaptPostToolExt(fn))
+		}
 	}
-	for _, fn := range opt.OnPostTool {
+	for _, fn := range hooks.OnPostTool {
 		fn := fn
 		h.PostTool = append(h.PostTool, adaptPostTool(fn))
 	}
-	for _, fn := range ext.PreModelHooks() {
-		fn := fn
-		h.PreModel = append(h.PreModel, adaptPreModelExt(fn))
+	if !opt.DisableExtensionHooks {
+		for _, fn := range ext.PreModelHooks() {
+			fn := fn
+			h.PreModel = append(h.PreModel, adaptPreModelExt(fn))
+		}
+		for _, fn := range ext.PreCompactHooks() {
+			fn := fn
+			h.PreCompact = append(h.PreCompact, adaptPreCompactExt(fn))
+		}
 	}
-	for _, fn := range ext.PreCompactHooks() {
-		fn := fn
-		h.PreCompact = append(h.PreCompact, adaptPreCompactExt(fn))
-	}
-	for _, fn := range opt.OnPreCompact {
+	for _, fn := range hooks.OnPreCompact {
 		fn := fn
 		h.PreCompact = append(h.PreCompact, adaptPreCompact(fn))
 	}
-	for _, fn := range ext.AfterTurnHooks() {
-		fn := fn
-		h.AfterTurn = append(h.AfterTurn, func(ctx context.Context, e agent.AfterTurnEvent) {
-			fn(ctx, ext.AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
-		})
+	if !opt.DisableExtensionHooks {
+		for _, fn := range ext.AfterTurnHooks() {
+			fn := fn
+			h.AfterTurn = append(h.AfterTurn, func(ctx context.Context, e agent.AfterTurnEvent) {
+				fn(ctx, ext.AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
+			})
+		}
 	}
-	for _, fn := range opt.OnAfterTurn {
+	for _, fn := range hooks.OnAfterTurn {
 		fn := fn
 		h.AfterTurn = append(h.AfterTurn, func(ctx context.Context, e agent.AfterTurnEvent) {
 			fn(ctx, AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
 		})
 	}
 
-	for _, fn := range ext.SessionStartHooks() {
-		fn := fn
-		life.onSessionStart = append(life.onSessionStart, adaptSessionStartExt(fn))
+	if !opt.DisableExtensionHooks {
+		for _, fn := range ext.SessionStartHooks() {
+			fn := fn
+			life.onSessionStart = append(life.onSessionStart, adaptSessionStartExt(fn))
+		}
 	}
-	for _, fn := range opt.OnSessionStart {
+	for _, fn := range hooks.OnSessionStart {
 		fn := fn
 		life.onSessionStart = append(life.onSessionStart, fn)
 	}
-	for _, fn := range ext.UserPromptHooks() {
-		fn := fn
-		life.onUserPrompt = append(life.onUserPrompt, adaptUserPromptExt(fn))
+	if !opt.DisableExtensionHooks {
+		for _, fn := range ext.UserPromptHooks() {
+			fn := fn
+			life.onUserPrompt = append(life.onUserPrompt, adaptUserPromptExt(fn))
+		}
 	}
-	for _, fn := range opt.OnUserPrompt {
+	for _, fn := range hooks.OnUserPrompt {
 		fn := fn
 		life.onUserPrompt = append(life.onUserPrompt, fn)
 	}
-	for _, fn := range ext.StopHooks() {
-		fn := fn
-		life.onStop = append(life.onStop, adaptStopExt(fn))
+	if !opt.DisableExtensionHooks {
+		for _, fn := range ext.StopHooks() {
+			fn := fn
+			life.onStop = append(life.onStop, adaptStopExt(fn))
+		}
 	}
-	for _, fn := range opt.OnStop {
+	for _, fn := range hooks.OnStop {
 		fn := fn
 		life.onStop = append(life.onStop, fn)
 	}
@@ -338,6 +353,57 @@ func isReadOnlyTool(name string, extRO map[string]bool) bool {
 		return true
 	}
 	return extRO[n]
+}
+
+// BuiltinReadInspectTools are the standard read-only inspection builtins.
+// Strict review prompts should pass these as PromptOpts.AllowedTools together
+// with ReadOnly so extension/MCP tools never appear in specs or execute.
+func BuiltinReadInspectTools() []string { return []string{"read", "glob", "grep"} }
+
+func allowedToolSet(names []string) map[string]bool {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(names))
+	for _, name := range names {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			out[name] = true
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func isAllowedTool(name string, allowed map[string]bool) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	return allowed[strings.ToLower(strings.TrimSpace(name))]
+}
+
+func filterAgentToolsByAllowed(tools []agent.Tool, allowed map[string]bool) []agent.Tool {
+	if len(allowed) == 0 {
+		return tools
+	}
+	// First match per lowercased name wins so PromptOpts.ExtraTools cannot
+	// shadow engine builtins that share an allowlisted name (e.g. "read").
+	seen := make(map[string]bool, len(allowed))
+	out := make([]agent.Tool, 0, len(allowed))
+	for _, t := range tools {
+		if t == nil || !isAllowedTool(t.Name(), allowed) {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(t.Name()))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 func toolPresent(list []agent.Tool, name string) bool {

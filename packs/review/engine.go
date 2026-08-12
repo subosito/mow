@@ -11,11 +11,10 @@ import (
 
 // engineReviewer adapts *mow.Engine to Reviewer.
 //
-// Each pass is an Ephemeral + ReadOnly prompt: ephemeral so pass 1's raw JSON
-// never becomes context for pass 2 (the verifier must re-derive evidence from
-// code, not inherit the candidate reasoning), and read-only so a review can
-// never edit the code it is reviewing even if the engine was built with
-// write/shell enabled.
+// Each pass is an Ephemeral + ReadOnly prompt with AllowedTools limited to
+// mow.BuiltinReadInspectTools (read/glob/grep only): ephemeral so pass 1's raw
+// JSON never becomes context for pass 2, and the strict allowlist so MCP/ACP/
+// extension tools never appear in specs or execute.
 type engineReviewer struct {
 	eng *mow.Engine
 }
@@ -30,6 +29,7 @@ func (r *engineReviewer) Ask(ctx context.Context, system, prompt string) (string
 		SystemAppend: system,
 		ReadOnly:     true,
 		Ephemeral:    true,
+		AllowedTools: mow.BuiltinReadInspectTools(),
 	})
 	// Turn exhaustion arrives as an error, and it is the single most likely
 	// way a review fails on a real repo: the pass spent its budget exploring
