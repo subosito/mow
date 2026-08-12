@@ -33,6 +33,9 @@ type Request struct {
 	// SkipVerification runs the candidate pass only. Faster and cheaper, but
 	// the report is explicitly marked as unverified.
 	SkipVerification bool
+	// Verifier runs pass two when set. When nil, pass two uses the primary
+	// reviewer (or the first ensemble member).
+	Verifier Reviewer
 	// Now is injectable for deterministic tests.
 	Now func() time.Time
 }
@@ -76,6 +79,17 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 		StartedAt:        started,
 		Truncated:        sc.Truncated,
 		TruncationReason: sc.TruncReason,
+	}
+	// Record pass-two provenance when verification will run. An explicit
+	// Request.Verifier is always named (even if the model id matches pass one);
+	// otherwise only record when the resolved verifier differs from the
+	// candidate-reviewer Model() string (e.g. ensemble default).
+	if !req.SkipVerification {
+		if req.Verifier != nil {
+			rep.Run.VerifierModel = req.Verifier.Model()
+		} else if v := resolveVerifier(req, rev); v != nil && v.Model() != rev.Model() {
+			rep.Run.VerifierModel = v.Model()
+		}
 	}
 	rep.Scope = sc.Info(req.Scope)
 
@@ -123,10 +137,7 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 	case req.SkipVerification:
 		rep.Notes = append(rep.Notes, "Verification pass skipped: findings are unverified.")
 	default:
-		verifier := rev
-		if ensemble, ok := rev.(*EnsembleReviewer); ok {
-			verifier = ensemble.verifier()
-		}
+		verifier := resolveVerifier(req, rev)
 		verified, vnotes, verr := verifyPass(ctx, verifier, prof, sc, candidates, req)
 		if verr != nil {
 			return nil, verr
@@ -212,13 +223,19 @@ func verifyPass(ctx context.Context, rev Reviewer, prof *Profile, sc *Scope, can
 		if r := strings.TrimSpace(v.Reason); r != "" {
 			f.VerificationNotes = appendNote(f.VerificationNotes, r)
 		}
-		// The verifier may only correct severity/confidence, never the claim.
+		// The verifier may correct severity/confidence and, on mow sec, structured
+		// evidence fields returned explicitly in evidence_fields.
 		if s, ok := ParseSeverity(v.Severity); ok && s != f.Severity {
 			notes = append(notes, fmt.Sprintf("pass 2 adjusted severity of %q: %s → %s", f.Title, f.Severity, s))
 			f.Severity = s
 		}
 		if c, ok := ParseConfidence(v.Confidence); ok {
 			f.Confidence = c
+		}
+		if corrNotes, err := applyVerdictEvidenceCorrections(&f, v, prof); err != nil {
+			return nil, nil, err
+		} else {
+			notes = append(notes, corrNotes...)
 		}
 		if !f.Verified {
 			f.VerificationNotes = appendNote(f.VerificationNotes, "not confirmed by the verification pass")
@@ -228,6 +245,18 @@ func verifyPass(ctx context.Context, rev Reviewer, prof *Profile, sc *Scope, can
 	}
 	sortFindings(out)
 	return out, notes, nil
+}
+
+// resolveVerifier picks the pass-two reviewer. An explicit Request.Verifier
+// overrides the ensemble default (first member) or the single-engine default.
+func resolveVerifier(req Request, rev Reviewer) Reviewer {
+	if req.Verifier != nil {
+		return req.Verifier
+	}
+	if ensemble, ok := rev.(*EnsembleReviewer); ok {
+		return ensemble.verifier()
+	}
+	return rev
 }
 
 // effectiveMinSeverity resolves the report floor.

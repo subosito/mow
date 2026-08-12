@@ -10,6 +10,14 @@ func reportWithSeverities(profile string, sevs ...Severity) *Report {
 	return rep.Recount()
 }
 
+func truncatedReport(profile string) *Report {
+	rep := NewReport(profile)
+	rep.Run.Truncated = true
+	rep.Run.TruncationReason = "file limit 15"
+	rep.Scope.FilesReviewed = 15
+	return rep
+}
+
 func TestExitCodeThresholds(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -24,6 +32,15 @@ func TestExitCodeThresholds(t *testing.T) {
 		{"explicit fail-on medium", ExitPolicy{FailOn: SevMedium}, reportWithSeverities("general", SevMedium), ExitFindings},
 		{"explicit fail-on critical", ExitPolicy{FailOn: SevCritical}, reportWithSeverities("general", SevHigh), ExitClean},
 		{"exit-zero overrides findings", ExitPolicy{ExitZero: true}, reportWithSeverities("general", SevCritical), ExitClean},
+		{"truncated scope fails when configured", ExitPolicy{FailOnTruncated: true}, truncatedReport("general"), ExitFindings},
+		{"truncated scope default passes", ExitPolicy{}, truncatedReport("general"), ExitClean},
+		// --exit-zero is advisory: it wins over both findings and truncation.
+		{"exit-zero overrides truncated", ExitPolicy{ExitZero: true, FailOnTruncated: true}, truncatedReport("general"), ExitClean},
+		{"exit-zero overrides findings and truncated", ExitPolicy{ExitZero: true, FailOnTruncated: true}, func() *Report {
+			rep := reportWithSeverities("general", SevCritical)
+			rep.Run.Truncated = true
+			return rep
+		}(), ExitClean},
 		{"security profile default", ExitPolicy{}, reportWithSeverities("security", SevHigh), ExitFindings},
 		{"unknown profile falls back to high", ExitPolicy{}, reportWithSeverities("mystery", SevHigh), ExitFindings},
 		{"nil report is an error", ExitPolicy{}, nil, ExitError},

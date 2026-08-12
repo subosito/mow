@@ -29,13 +29,18 @@ workflow splits discovery from judgment:
 | Pass | Input | Allowed output |
 |------|-------|----------------|
 | 1 — discovery | scope briefing (diffs + line-numbered content) | candidate findings as JSON |
-| 2 — verification | candidate digests + bounded line-numbered excerpts around each cited location; tools for wider context, **not** pass 1's JSON | confirm / reject / correct severity+confidence |
+| 2 — verification | candidate digests + bounded line-numbered excerpts around each cited location; tools for wider context, **not** pass 1's JSON | confirm / reject / correct severity+confidence; on `mow sec`, optionally correct or clear structured evidence fields |
 
 Both passes run `ReadOnly` **and** `Ephemeral`. Ephemeral matters: pass 1's JSON
 never becomes pass 2's context, so the verifier has to re-derive the evidence
 from the code instead of agreeing with its own earlier reasoning. The verifier
-may only rule on ids that already exist — it cannot introduce a claim or rewrite
-the evidence.
+may only rule on ids that already exist — it cannot introduce a new finding. On
+`mow sec`, it may correct or clear pass-one structured evidence fields when it
+returns them explicitly in `evidence_fields`.
+
+Use `--verifier-model` to run pass two with a different read-only model than pass
+one (default unchanged: same engine, or the first ensemble member when using
+`--reviewer`/`--reviewers`).
 
 Rules that follow from this:
 
@@ -132,7 +137,9 @@ Notes on the schema:
   `cwe`); general review may emit `affected_behavior` / `test_gap`. Consumers
   must treat all extras as optional for backward compatibility.
 - **`verified`** is set only by pass 2. High confidence from pass 1 is not
-  “model-verified” until the verifier confirms the claim from code.
+  “model-verified” until the verifier confirms the claim from code. On `mow sec`,
+  `evidence_level: model-verified` additionally requires `verified: true` — a
+  complete-looking but unconfirmed finding is capped at `code-supported`.
 - **SARIF rule ids are profile-namespaced** (`mow/security/authz`) so review and
   sec findings do not collide in one dashboard.
 - Secrets are **redacted** before anything is rendered or written.
@@ -156,19 +163,24 @@ Every drop is recorded with a reason and shown under `--verbose`.
 
 | Code | Meaning |
 |------|---------|
-| 0 | no findings at or above `--fail-on` |
-| 1 | findings at or above `--fail-on` (default: profile's, `high`) |
+| 0 | no findings at or above `--fail-on` (and not failing on truncation) |
+| 1 | findings at or above `--fail-on` (default: profile's, `high`), or truncated scope with `--fail-on-truncated` |
 | 2 | error — bad selector, unreachable model, contract violation |
 
 `--exit-zero` forces 0 on a *successful* run for advisory CI. It does not apply
 to errors: a run with no report exits 2, because "no report" must never read as
-passing.
+passing. It also overrides `--fail-on` findings and `--fail-on-truncated` (same
+advisory contract). `--fail-on-truncated` exits 1 when the scope was truncated
+(partial coverage) even if no findings meet `--fail-on`; default off so
+truncation is disclosed but not blocking unless you opt in.
 
 ```yaml
 # advisory security job
 - run: mow sec --diff origin/main...HEAD --format sarif --output sec.sarif --exit-zero
 # blocking gate
 - run: mow sec --diff origin/main...HEAD --fail-on high
+# strict coverage gate (fail when budget truncated the scope)
+- run: mow sec --diff origin/main...HEAD --fail-on high --fail-on-truncated
 ```
 
 ## Safety
@@ -274,6 +286,7 @@ and the first reviewer runs the existing verification pass:
 ```bash
 mow review --reviewer gpt-5-mini --reviewer claude-sonnet-4 --reviewer-parallel 2
 mow sec --reviewers gpt-5-mini,claude-sonnet-4 --diff main...HEAD
+mow sec --reviewers gpt-5-mini,claude-sonnet-4 --verifier-model claude-sonnet-4
 ```
 
 Each selected model receives its own read-only, ephemeral engine. Candidate JSON
@@ -282,7 +295,10 @@ verification workflow. A member failure, malformed JSON, or cancellation fails
 the review rather than producing a partial clean report. `--reviewer-parallel`
 bounds concurrent candidate calls; its default runs every listed model at once.
 Findings include a backward-compatible `reviewer` extra field identifying the
-candidate model. Without reviewer flags, review uses its existing single engine.
+candidate model; when several reviewers report the same fingerprint, a
+`reviewers` field lists every model that surfaced it. Without reviewer flags,
+review uses its existing single engine. By default the first listed reviewer also
+runs pass two; `--verifier-model` overrides that with a dedicated verifier.
 
 Programmatic callers may likewise use `NewEnsembleReviewer` with named,
 read-only `Reviewer` values. ACP peers are not used: read-only review denies

@@ -57,7 +57,10 @@ first pass's conversation. Both calls are `ReadOnly` and `Ephemeral`, forcing th
 verifier to re-derive evidence rather than continuing the discoverer's argument.
 
 The verifier may only confirm, reject, mark uncertain, or correct severity and
-confidence for existing candidate ids. It cannot introduce new findings.
+confidence for existing candidate ids. On `mow sec` it may also return
+`evidence_fields` to correct or clear structured security evidence (source,
+sink, reachability, and the other optional keys). Only keys present in the
+verdict are changed. It cannot introduce new findings.
 Unknown, duplicate, or missing verdict ids are handled explicitly; malformed
 model output is a hard error and cannot appear as a clean report.
 
@@ -116,10 +119,12 @@ Example:
 |---|---|
 | `suspected` | The candidate lacks a sufficiently traced static flow |
 | `code-supported` | Some source, sink, reachability, or guard evidence exists, but uncertainty remains |
-| `model-verified` | After pass-two confirmation, the finding has a complete static source/sink/reachability claim without recorded limitations |
+| `model-verified` | Pass two confirmed the finding (`verified: true`) **and** the structured source/sink/reachability claim is complete with no recorded limitations |
 
-`model-verified` does **not** mean an exploit was run. The current command can
-never emit `execution-confirmed` because it has no execution authority.
+`model-verified` does **not** mean an exploit was run. A finding with complete
+pass-one fields that pass two could not confirm stays at `code-supported` even
+with `--include-unverified`. The current command can never emit
+`execution-confirmed` because it has no execution authority.
 
 ## Output and CI
 
@@ -148,8 +153,11 @@ mow sec --reviewers gpt-5-mini,claude-sonnet-4 --reviewer-parallel 2
 ```
 
 Each reviewer analyzes the same scope independently. Candidates are merged and
-then passed through one independent verification stage. Reviewer provenance is
-retained when available. The default remains one reviewer.
+then passed through one verification stage (by default the first listed reviewer,
+or `--verifier-model` when set). Reviewer provenance is retained when available;
+duplicate fingerprints merge into a `reviewers` list. Cross-reviewer disagreement
+after verification is not yet surfaced as a first-class field — use report notes
+and per-finding `reviewer`/`reviewers` for triage. The default remains one reviewer.
 
 ## Read-only safety contract
 

@@ -205,7 +205,7 @@ func TestPromptsCarryContractAndScope(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Pass 2 of 2", `"verdicts"`, "sec-001", "sec-002",
-		"attacker-controlled", "source→transform→sink", "model-verified",
+		"attacker-controlled", "source→transform→sink", "model-verified", "evidence_fields",
 	} {
 		if !strings.Contains(p2, want) {
 			t.Errorf("verify prompt missing %q", want)
@@ -294,5 +294,121 @@ func TestRunNilScope(t *testing.T) {
 func TestRunNilReviewer(t *testing.T) {
 	if _, err := Run(context.Background(), nil, testScope(t), Request{}); err == nil || !strings.Contains(err.Error(), "nil reviewer") {
 		t.Fatalf("err=%v want nil reviewer error", err)
+	}
+}
+
+func TestRunSecurityVerdictCorrectsEvidenceFields(t *testing.T) {
+	sc := testScope(t)
+	cand := `{"findings":[{
+	  "title":"Path traversal","category":"path-traversal","severity":"high","confidence":"medium",
+	  "path":"internal/api/users.go","start_line":10,
+	  "evidence":"user path joined into open","impact":"read arbitrary file","recommendation":"validate path",
+	  "source":"HTTP path","sink":"os.Open","reachability":"public route"
+	}]}`
+	verify := `{"verdicts":[{"id":"sec-001","status":"confirmed","evidence_fields":{
+	  "reachability":"conditional — auth required",
+	  "sink":null
+	}}]}`
+	rev := &fakeReviewer{replies: []string{cand, verify}}
+	res, err := Run(context.Background(), rev, sc, Request{Profile: SecurityProfile(), Now: fixedNow()})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	f := res.Report.Findings[0]
+	if f.Extra["reachability"] != "conditional — auth required" {
+		t.Fatalf("reachability = %q", f.Extra["reachability"])
+	}
+	if _, ok := f.Extra["sink"]; ok {
+		t.Fatal("sink should be cleared by verifier")
+	}
+	if f.Extra["evidence_level"] != "code-supported" {
+		t.Fatalf("evidence_level = %q want code-supported after sink cleared", f.Extra["evidence_level"])
+	}
+}
+
+func TestRunIncludeUnverifiedNeverGetsModelVerifiedLevel(t *testing.T) {
+	sc := testScope(t)
+	cand := `{"findings":[{
+	  "title":"Path traversal","category":"path-traversal","severity":"high","confidence":"high",
+	  "path":"internal/api/users.go","start_line":10,
+	  "evidence":"user path joined into open","impact":"read arbitrary file","recommendation":"validate path",
+	  "source":"HTTP path","sink":"os.Open","reachability":"public route"
+	}]}`
+	verify := `{"verdicts":[{"id":"sec-001","status":"uncertain","reason":"cannot confirm auth"}]}`
+	rev := &fakeReviewer{replies: []string{cand, verify}}
+	res, err := Run(context.Background(), rev, sc, Request{
+		Profile: SecurityProfile(), Now: fixedNow(), IncludeUnverified: true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(res.Report.Findings) != 1 {
+		t.Fatalf("findings = %d", len(res.Report.Findings))
+	}
+	if got := res.Report.Findings[0].Extra["evidence_level"]; got == "model-verified" {
+		t.Fatalf("unverified finding must not be model-verified, got %q", got)
+	}
+}
+
+func TestRunUsesDedicatedVerifier(t *testing.T) {
+	sc := testScope(t)
+	candidate := &fakeReviewer{
+		model:   "candidate-model",
+		replies: []string{candidateReply},
+	}
+	verifier := &fakeReviewer{
+		model:   "verifier-model",
+		replies: []string{`{"verdicts":[{"id":"review-001","status":"confirmed"},{"id":"review-002","status":"rejected","reason":"fine"}]}`},
+	}
+	res, err := Run(context.Background(), candidate, sc, Request{
+		Profile: GeneralProfile(), Now: fixedNow(), Verifier: verifier,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if candidate.calls != 1 || verifier.calls != 1 {
+		t.Fatalf("candidate calls=%d verifier calls=%d", candidate.calls, verifier.calls)
+	}
+	if res.Report.Run.VerifierModel != "verifier-model" {
+		t.Fatalf("VerifierModel = %q", res.Report.Run.VerifierModel)
+	}
+}
+
+func TestRunRecordsExplicitVerifierEvenWhenModelMatches(t *testing.T) {
+	sc := testScope(t)
+	candidate := &fakeReviewer{
+		model:   "same-model",
+		replies: []string{candidateReply},
+	}
+	verifier := &fakeReviewer{
+		model:   "same-model",
+		replies: []string{`{"verdicts":[{"id":"review-001","status":"confirmed"},{"id":"review-002","status":"rejected","reason":"fine"}]}`},
+	}
+	res, err := Run(context.Background(), candidate, sc, Request{
+		Profile: GeneralProfile(), Now: fixedNow(), Verifier: verifier,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Report.Run.VerifierModel != "same-model" {
+		t.Fatalf("VerifierModel = %q want same-model for explicit verifier", res.Report.Run.VerifierModel)
+	}
+}
+
+func TestRunSkipVerificationOmitsVerifierModel(t *testing.T) {
+	sc := testScope(t)
+	candidate := &fakeReviewer{model: "candidate-model", replies: []string{candidateReply}}
+	verifier := &fakeReviewer{model: "verifier-model"}
+	res, err := Run(context.Background(), candidate, sc, Request{
+		Profile: GeneralProfile(), Now: fixedNow(), Verifier: verifier, SkipVerification: true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if verifier.calls != 0 {
+		t.Fatalf("verifier should not run when skipped, calls=%d", verifier.calls)
+	}
+	if res.Report.Run.VerifierModel != "" {
+		t.Fatalf("VerifierModel = %q want empty when verification skipped", res.Report.Run.VerifierModel)
 	}
 }

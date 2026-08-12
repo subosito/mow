@@ -74,3 +74,23 @@ func TestEnsembleOptionsRejectNegativeParallel(t *testing.T) {
 		t.Fatal("negative parallel unexpectedly succeeded")
 	}
 }
+
+func TestVerifierEngineOptionsAreReadOnly(t *testing.T) {
+	ef := cliutil.EngineFlags{Model: "default-model", AllowWrite: true, AllowShell: true}
+	opt := verifierEngineOptions(ef, "/workspace", "claude-sonnet-4", true, Budget{MaxTurns: 55})
+	if opt.Model != "claude-sonnet-4" || !opt.ExplicitModel || opt.AllowWrite || opt.AllowShell || !opt.NoSession || opt.Stream {
+		t.Fatalf("verifier option not read-only/isolated: %+v", opt)
+	}
+	if opt.MaxTurns != 55 {
+		t.Fatalf("MaxTurns = %d", opt.MaxTurns)
+	}
+}
+
+func TestResolveRejectsVerifierModelWithNoVerify(t *testing.T) {
+	var rf CLIFlags
+	rf.NoVerify = true
+	rf.VerifierModel = "claude-sonnet-4"
+	if _, _, _, err := rf.Resolve(GeneralProfile(), "/ws", nil); err == nil || !strings.Contains(err.Error(), "--verifier-model") {
+		t.Fatalf("err = %v", err)
+	}
+}

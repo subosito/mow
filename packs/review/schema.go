@@ -73,6 +73,7 @@ type RunInfo struct {
 	Tool             string    `json:"tool"`
 	Version          string    `json:"version,omitempty"`
 	Model            string    `json:"model,omitempty"`
+	VerifierModel    string    `json:"verifier_model,omitempty"`
 	Commit           string    `json:"commit,omitempty"`
 	Branch           string    `json:"branch,omitempty"`
 	StartedAt        time.Time `json:"started_at,omitempty"`

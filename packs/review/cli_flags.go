@@ -31,6 +31,8 @@ type CLIFlags struct {
 	Quiet            bool
 	Reviewers        []string
 	ReviewerParallel int
+	VerifierModel    string
+	FailOnTruncated  bool
 }
 
 // Bind registers the review flags on fs.
@@ -54,6 +56,8 @@ func (f *CLIFlags) Bind(fs *flag.FlagSet) {
 	fs.Var((*repeatable)(&f.Reviewers), "reviewer", "candidate reviewer model (repeatable)")
 	fs.Var((*repeatable)(&f.Reviewers), "reviewers", "comma-separated candidate reviewer models")
 	fs.IntVar(&f.ReviewerParallel, "reviewer-parallel", 0, "maximum concurrent candidate reviewers (0=all)")
+	fs.StringVar(&f.VerifierModel, "verifier-model", "", "model for pass-two verification (default: same as candidate reviewer)")
+	fs.BoolVar(&f.FailOnTruncated, "fail-on-truncated", false, "exit non-zero when scope was truncated")
 }
 
 // repeatable is an append-on-Set string slice flag.
@@ -113,7 +117,7 @@ func (f *CLIFlags) Resolve(prof *Profile, workspace string, paths []string) (Req
 		minSev = SevInfo
 	}
 
-	policy := ExitPolicy{ExitZero: f.ExitZero}
+	policy := ExitPolicy{ExitZero: f.ExitZero, FailOnTruncated: f.FailOnTruncated}
 	if s := strings.TrimSpace(f.FailOn); s != "" {
 		v, ok := ParseSeverity(s)
 		if !ok {
@@ -121,6 +125,10 @@ func (f *CLIFlags) Resolve(prof *Profile, workspace string, paths []string) (Req
 				s, strings.Join(SeverityNames(), ", "))
 		}
 		policy.FailOn = v
+	}
+
+	if f.NoVerify && strings.TrimSpace(f.VerifierModel) != "" {
+		return req, "", ExitPolicy{}, fmt.Errorf("--verifier-model cannot be used with --no-verify")
 	}
 
 	req = Request{

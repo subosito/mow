@@ -4,6 +4,8 @@ import "strings"
 
 // securityEvidenceLevel classifies the strength of a read-only security claim.
 // It deliberately does not claim execution proof: mow sec never runs the code.
+// model-verified requires pass-two confirmation (Finding.Verified); complete-
+// looking pass-one fields alone are capped at code-supported.
 func securityEvidenceLevel(f Finding) string {
 	if f.Extra == nil {
 		return "suspected"
@@ -12,7 +14,8 @@ func securityEvidenceLevel(f Finding) string {
 	sink := strings.TrimSpace(f.Extra["sink"])
 	reach := strings.ToLower(strings.TrimSpace(f.Extra["reachability"]))
 	limits := strings.TrimSpace(f.Extra["evidence_limitations"])
-	if source != "" && sink != "" && !strings.Contains(reach, "unknown") && limits == "" {
+	complete := source != "" && sink != "" && reach != "" && !strings.Contains(reach, "unknown") && limits == ""
+	if complete && f.Verified {
 		return "model-verified"
 	}
 	if source != "" || sink != "" || reach != "" {

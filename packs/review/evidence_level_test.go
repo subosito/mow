@@ -4,19 +4,22 @@ import "testing"
 
 func TestSecurityEvidenceLevel(t *testing.T) {
 	tests := []struct {
-		name  string
-		extra map[string]string
-		want  string
+		name     string
+		extra    map[string]string
+		verified bool
+		want     string
 	}{
-		{"none", nil, "suspected"},
-		{"partial flow", map[string]string{"source": "request query"}, "code-supported"},
-		{"unknown reachability", map[string]string{"source": "request", "sink": "exec", "reachability": "unknown"}, "code-supported"},
-		{"limited", map[string]string{"source": "request", "sink": "exec", "reachability": "reachable", "evidence_limitations": "framework config unavailable"}, "code-supported"},
-		{"complete static evidence", map[string]string{"source": "request", "sink": "exec", "reachability": "reachable"}, "model-verified"},
+		{"none", nil, false, "suspected"},
+		{"partial flow", map[string]string{"source": "request query"}, false, "code-supported"},
+		{"unknown reachability", map[string]string{"source": "request", "sink": "exec", "reachability": "unknown"}, false, "code-supported"},
+		{"missing reachability", map[string]string{"source": "request", "sink": "exec"}, true, "code-supported"},
+		{"limited", map[string]string{"source": "request", "sink": "exec", "reachability": "reachable", "evidence_limitations": "framework config unavailable"}, false, "code-supported"},
+		{"complete unverified", map[string]string{"source": "request", "sink": "exec", "reachability": "reachable"}, false, "code-supported"},
+		{"complete verified", map[string]string{"source": "request", "sink": "exec", "reachability": "reachable"}, true, "model-verified"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := securityEvidenceLevel(Finding{Extra: tt.extra}); got != tt.want {
+			if got := securityEvidenceLevel(Finding{Extra: tt.extra, Verified: tt.verified}); got != tt.want {
 				t.Fatalf("level=%q want %q", got, tt.want)
 			}
 		})

@@ -183,6 +183,23 @@ func TestValidateDedupesAndSorts(t *testing.T) {
 	}
 }
 
+func TestValidateMergeReviewerProvenance(t *testing.T) {
+	a := validFinding()
+	a.Extra = map[string]string{"reviewer": "alpha"}
+	b := validFinding()
+	b.Extra = map[string]string{"reviewer": "beta"}
+	out, _ := Validate([]Finding{a, b}, "/ws", testOpts())
+	if len(out) != 1 {
+		t.Fatalf("want one merged finding, got %d", len(out))
+	}
+	if out[0].Extra["reviewer"] != "alpha" {
+		t.Fatalf("reviewer = %q", out[0].Extra["reviewer"])
+	}
+	if out[0].Extra["reviewers"] != "alpha, beta" {
+		t.Fatalf("reviewers = %q", out[0].Extra["reviewers"])
+	}
+}
+
 func TestValidateSecurityProfileIDsAndExtras(t *testing.T) {
 	f := validFinding()
 	f.Category = "authorization"

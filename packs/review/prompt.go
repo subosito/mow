@@ -208,14 +208,37 @@ func verifyPrompt(prof *Profile, sc *Scope, cands []Finding) string {
 	}
 	b.WriteString("\n## Required output\n\n")
 	b.WriteString("Reply with exactly this JSON object, one verdict per candidate id:\n\n")
-	b.WriteString(`{
+	b.WriteString(verifyContract(prof))
+	return b.String()
+}
+
+// verifyContract is the literal JSON shape requested from the verifier.
+func verifyContract(prof *Profile) string {
+	evidenceFields := ""
+	evidenceRules := ""
+	if prof != nil && prof.Name == "security" {
+		evidenceFields = `,
+      "evidence_fields": {
+        "source": "optional corrected value, or null to clear",
+        "sink": "optional corrected value, or null to clear",
+        "reachability": "reachable|conditional|unknown — short why, or null to clear"
+      }`
+		evidenceRules = `
+- evidence_fields is optional. Include only fields you are correcting or clearing.
+- Allowed keys: source, sink, sanitizers_considered, reachability, attacker_prerequisites, evidence_limitations, attack_surface, trust_boundary, exploitability, cwe.
+- Use null to clear a field you refuted; use a string to set the value you verified from code.
+- Do not invent new evidence fields; reason about the digests and code only.
+- For security: "confirmed" only when the material claim is model-verified from code (source→sink or an equally concrete weakness such as a hardcoded secret). Use "uncertain" when the path is incomplete or only suspected. Use "rejected" when framework/upstream protection already covers it, the input is not attacker-controlled, or the sink is not real.
+- Lower confidence when the path is partial even if you confirm a weaker form of the finding.`
+	}
+	return `{
   "verdicts": [
     {
       "id": "the candidate id, copied exactly",
       "status": "confirmed|rejected|uncertain",
       "severity": "optional corrected severity",
       "confidence": "optional corrected confidence",
-      "reason": "why it survives, was corrected, or was rejected"
+      "reason": "why it survives, was corrected, or was rejected"` + evidenceFields + `
     }
   ],
   "summary": "one sentence on what survived"
@@ -225,16 +248,8 @@ Rules:
 - Emit exactly one verdict per candidate id above; do not invent new ids.
 - "confirmed" means the evidence holds and a maintainer should act on it.
 - "rejected" means the claim is wrong, already handled elsewhere, out of scope, or a pure nitpick.
-- "uncertain" means you could not confirm it from the code available.
-`)
-	if prof.Name == "security" {
-		b.WriteString(`- For security: "confirmed" only when the material claim is model-verified from code (source→sink or an equally concrete weakness such as a hardcoded secret). Use "uncertain" when the path is incomplete or only suspected. Use "rejected" when framework/upstream protection already covers it, the input is not attacker-controlled, or the sink is not real.
-- Lower confidence when the path is partial even if you confirm a weaker form of the finding.
-- Do not invent new evidence fields; reason about the digests and code only.
-`)
-	}
-	b.WriteString("- Output the JSON object alone.")
-	return b.String()
+- "uncertain" means you could not confirm it from the code available.` + evidenceRules + `
+- Output the JSON object alone.`
 }
 
 // verificationQuestions are the profile-appropriate challenges from the design.

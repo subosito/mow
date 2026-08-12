@@ -188,6 +188,17 @@ func runCommand(cmd string, args []string) int {
 		}
 		reviewer = ensemble
 	}
+	if verifierModel := strings.TrimSpace(rf.VerifierModel); verifierModel != "" {
+		budget, _ := LookupBudget(rf.Budget)
+		vopt := verifierEngineOptions(ef, workspace, verifierModel, rf.Quiet, budget)
+		verEng, err := mow.New(vopt)
+		if err != nil {
+			closeEngines(engines)
+			return fail(cmd, err)
+		}
+		engines = append(engines, verEng)
+		req.Verifier = NewEngineReviewer(verEng)
+	}
 	defer closeEngines(engines)
 
 	if !rf.Quiet && !sc.Empty() {
@@ -199,7 +210,11 @@ func runCommand(cmd string, args []string) int {
 		if len(models) > 0 {
 			name = strings.Join(models, ", ")
 		}
-		fmt.Fprintf(os.Stderr, "mow %s: reviewing with %s, %s…\n", cmd, name, passes)
+		if req.Verifier != nil {
+			fmt.Fprintf(os.Stderr, "mow %s: reviewing with %s, %s (verifier: %s)…\n", cmd, name, passes, req.Verifier.Model())
+		} else {
+			fmt.Fprintf(os.Stderr, "mow %s: reviewing with %s, %s…\n", cmd, name, passes)
+		}
 	}
 
 	res, err := Run(ctx, reviewer, sc, req)

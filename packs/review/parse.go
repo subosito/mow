@@ -38,6 +38,10 @@ type Verdict struct {
 	// Confidence optionally corrects the candidate's confidence.
 	Confidence string `json:"confidence,omitempty"`
 	Reason     string `json:"reason,omitempty"`
+	// EvidenceFields optionally corrects or clears security structured evidence
+	// on mow sec findings. Keys must be from SecurityEvidenceFields; a JSON null
+	// clears the field, a string sets it. Omitted keys are left unchanged.
+	EvidenceFields map[string]json.RawMessage `json:"evidence_fields,omitempty"`
 }
 
 // Confirmed reports whether the verdict keeps the finding.

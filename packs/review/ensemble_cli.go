@@ -97,3 +97,23 @@ func ensembleFromEngines(models []string, engines []*mow.Engine, parallel int) (
 	}
 	return NewEnsembleReviewer(members, parallel)
 }
+
+// verifierEngineOptions builds read-only engine options for a dedicated pass-two
+// verifier model.
+func verifierEngineOptions(ef cliutil.EngineFlags, workspace, model string, quiet bool, budget Budget) mow.Options {
+	copy := ef
+	copy.Model = strings.TrimSpace(model)
+	copy.AllowWrite = false
+	copy.AllowShell = false
+	copy.NoSession = true
+	copy.Stream = false
+	opt := copy.OptionsCLI()
+	opt.Workspace = workspace
+	if quiet {
+		opt.OnEvent = nil
+	}
+	if !copy.MaxTurnsSet {
+		opt.MaxTurns = budget.MaxTurns
+	}
+	return opt
+}

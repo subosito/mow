@@ -15,6 +15,7 @@ type fakeReviewer struct {
 	prompts []string
 	err     error
 	calls   int
+	model   string
 }
 
 func (f *fakeReviewer) Ask(ctx context.Context, system, prompt string) (string, error) {
@@ -30,7 +31,12 @@ func (f *fakeReviewer) Ask(ctx context.Context, system, prompt string) (string, 
 	return f.replies[f.calls-1], nil
 }
 
-func (f *fakeReviewer) Model() string { return "test-model" }
+func (f *fakeReviewer) Model() string {
+	if f.model != "" {
+		return f.model
+	}
+	return "test-model"
+}
 
 // testScope builds an in-memory scope over two files.
 func testScope(t *testing.T) *Scope {

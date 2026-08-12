@@ -23,6 +23,9 @@ type ExitPolicy struct {
 	// ExitZero forces ExitClean for any successful run (advisory CI jobs that
 	// must never block a merge).
 	ExitZero bool
+	// FailOnTruncated exits non-zero when the resolved scope was truncated.
+	// Default off: truncation is disclosed in the report but does not fail.
+	FailOnTruncated bool
 }
 
 // ExitCode maps a completed report to a process exit code. A nil report is an
@@ -33,6 +36,9 @@ func (p ExitPolicy) ExitCode(rep *Report) int {
 	}
 	if p.ExitZero {
 		return ExitClean
+	}
+	if p.FailOnTruncated && rep.Run.Truncated {
+		return ExitFindings
 	}
 	threshold := p.FailOn
 	if !threshold.Valid() {

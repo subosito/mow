@@ -51,6 +51,7 @@ Output:
 CI:
 
   --fail-on high           lowest severity that exits 1 (default: high)
+  --fail-on-truncated      exit 1 when scope was truncated (partial coverage)
   --exit-zero              always exit 0 on a successful run
 
   Exit codes: 0 clean · 1 findings at/above --fail-on · 2 error
@@ -61,6 +62,7 @@ Other:
   --reviewer MODEL         add a model to the candidate-review group (repeatable)
   --reviewers MODELS       comma-separated candidate-review models
   --reviewer-parallel N    concurrent candidate reviewers (default: all)
+  --verifier-model MODEL   pass-two verifier model (default: same reviewer)
   [engine flags]           --model --base-url --workspace --config …
 
 Examples:
@@ -121,6 +123,7 @@ Output:
 CI:
 
   --fail-on high           lowest severity that exits 1 (default: high)
+  --fail-on-truncated      exit 1 when scope was truncated (partial coverage)
   --exit-zero              always exit 0 on a successful run
 
   Exit codes: 0 clean · 1 findings at/above --fail-on · 2 error
@@ -131,6 +134,7 @@ Other:
   --reviewer MODEL         add a model to the candidate-review group (repeatable)
   --reviewers MODELS       comma-separated candidate-review models
   --reviewer-parallel N    concurrent candidate reviewers (default: all)
+  --verifier-model MODEL   pass-two verifier model (default: same reviewer)
   [engine flags]           --model --base-url --workspace --config …
 
 Examples:

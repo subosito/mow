@@ -40,6 +40,7 @@ func Validate(raw []Finding, workspace string, opt ValidationOptions) ([]Finding
 			if f.Confidence > out[at].Confidence {
 				out[at].Confidence = f.Confidence
 			}
+			mergeReviewerProvenance(&out[at], f)
 			issues = append(issues, ValidationIssue{
 				Index: i, Title: f.Title,
 				Reason: "duplicate of an earlier finding (merged)", Dropped: true,
@@ -56,6 +57,60 @@ func Validate(raw []Finding, workspace string, opt ValidationOptions) ([]Finding
 		out[i].ID = fmt.Sprintf("%s-%03d", prefix, i+1)
 	}
 	return out, issues
+}
+
+// mergeReviewerProvenance combines ensemble reviewer names when duplicate
+// candidates are merged on fingerprint. The singular "reviewer" field is kept
+// for backward compatibility; "reviewers" lists every model that reported it.
+func mergeReviewerProvenance(dst *Finding, src Finding) {
+	names := reviewerNames(*dst)
+	for _, n := range reviewerNames(src) {
+		if !containsReviewer(names, n) {
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	sort.Strings(names)
+	if dst.Extra == nil {
+		dst.Extra = map[string]string{}
+	}
+	dst.Extra["reviewer"] = names[0]
+	if len(names) > 1 {
+		dst.Extra["reviewers"] = strings.Join(names, ", ")
+	} else {
+		// Keep singular/plural extras consistent when a merge collapses to one name.
+		delete(dst.Extra, "reviewers")
+	}
+}
+
+func reviewerNames(f Finding) []string {
+	if f.Extra == nil {
+		return nil
+	}
+	if rs := strings.TrimSpace(f.Extra["reviewers"]); rs != "" {
+		var out []string
+		for _, part := range strings.Split(rs, ",") {
+			if n := strings.TrimSpace(part); n != "" {
+				out = append(out, n)
+			}
+		}
+		return out
+	}
+	if r := strings.TrimSpace(f.Extra["reviewer"]); r != "" {
+		return []string{r}
+	}
+	return nil
+}
+
+func containsReviewer(names []string, want string) bool {
+	for _, n := range names {
+		if n == want {
+			return true
+		}
+	}
+	return false
 }
 
 // validateOne checks a single finding, returning the normalized copy.
