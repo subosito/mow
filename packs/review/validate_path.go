@@ -10,6 +10,17 @@ import (
 // a report, a terminal, or a CI annotation.
 const maxTextField = 4000
 
+// maxModelReplyBytes caps raw model text before JSON extraction. A runaway reply
+// must fail the run rather than exhaust memory or look like a clean review.
+const maxModelReplyBytes = 4_000_000
+
+// maxCandidateFindings caps pass-one findings before validation. Beyond this
+// the report is unusable and the model is almost certainly enumerating noise.
+const maxCandidateFindings = 200
+
+// maxReportNotes caps validation and workflow notes attached to a report.
+const maxReportNotes = 128
+
 // ValidationOptions controls how strictly raw model output is checked.
 type ValidationOptions struct {
 	// Profile supplies the allowed taxonomy and profile-specific fields.

@@ -196,6 +196,17 @@ without changing the exit-code contract (both remain code `1`). Clean runs omit
 so a review can never modify the code it is reviewing. Sessions are disabled —
 the report is the artifact, not the conversation.
 
+Scope gathering reads only **regular files under the workspace root**. The
+workspace directory itself may be a symlink (the intended tree). Symlink paths
+*under* the workspace are rejected or skipped so a planted link cannot redirect
+reads outside it. Absolute paths and `..` forms are rejected during finding
+validation as before.
+
+Model output is bounded before it reaches the report: raw replies above 4 MiB,
+more than 200 candidate findings, or more than 128 workflow notes fail the run
+with an actionable error rather than producing a truncated or misleading report.
+Free-form finding fields are clamped to 4000 characters each.
+
 Each pass runs with `ReadOnly` + `Ephemeral` prompts and a strict per-call
 `AllowedTools` allowlist of `read`, `glob`, and `grep` only. Candidate and
 verifier engines are built with `Options.SkipExtensionSetup` and

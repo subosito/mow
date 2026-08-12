@@ -18,7 +18,7 @@ import (
 // paths, then (when the workspace is a dirty git repo) the working tree, and
 // finally the whole workspace tree.
 func ResolveScope(ctx context.Context, req ScopeRequest) (*Scope, error) {
-	return resolveScope(ctx, req, runGit, os.ReadFile)
+	return resolveScope(ctx, req, runGit, nil)
 }
 
 // readFileFunc reads a file by absolute path (swapped in tests).
@@ -49,8 +49,28 @@ func resolveScope(ctx context.Context, req ScopeRequest, git gitRunner, readFile
 	if !req.IncludeAll {
 		excludes = append(append([]string(nil), DefaultExcludes()...), req.Excludes...)
 	}
-	gather(sc, req, candidates, excludes, readFile, git, ctx)
+	rf := readFile
+	if rf == nil {
+		rf = workspaceReadFile(abs)
+	}
+	gather(sc, req, candidates, excludes, rf, git, ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("review: scope resolution cancelled")
+	}
 	return sc, nil
+}
+
+// workspaceReadFile adapts readWorkspaceFile to the absolute-path readFileFunc
+// used by gather (and tests that inject memFS).
+func workspaceReadFile(workspace string) readFileFunc {
+	ws := filepath.Clean(workspace)
+	return func(abs string) ([]byte, error) {
+		rel, err := filepath.Rel(ws, abs)
+		if err != nil {
+			return nil, fmt.Errorf("review: %w", err)
+		}
+		return readWorkspaceFile(ws, filepath.ToSlash(rel))
+	}
 }
 
 // selectCandidates produces the ordered candidate path list for the scope.
@@ -117,9 +137,12 @@ func expandPaths(workspace string, paths []string) ([]string, error) {
 			}
 		}
 		full := filepath.Join(workspace, filepath.FromSlash(rel))
-		info, err := os.Stat(full)
+		info, err := os.Lstat(full)
 		if err != nil {
 			return nil, fmt.Errorf("review: %s: %w", rel, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("review: %s: cannot review a symlink path", rel)
 		}
 		if !info.IsDir() {
 			if !seen[rel] {
@@ -131,6 +154,12 @@ func expandPaths(workspace string, paths []string) ([]string, error) {
 		err = filepath.WalkDir(full, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return nil // unreadable entries are skipped, not fatal
+			}
+			if d.Type()&os.ModeSymlink != 0 {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 			if d.IsDir() {
 				// Only .git is pruned here: it is repository metadata, never
@@ -171,6 +200,9 @@ func gather(sc *Scope, req ScopeRequest, candidates, excludes []string, readFile
 		ctxLines = 6
 	}
 	for _, rel := range candidates {
+		if err := ctx.Err(); err != nil {
+			return
+		}
 		if pat, hit := MatchAny(excludes, rel); hit {
 			sc.Excluded = append(sc.Excluded, ExcludedFile{Path: rel, Reason: "excluded by " + pat})
 			continue

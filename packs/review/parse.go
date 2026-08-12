@@ -130,9 +130,17 @@ func balancedObject(s string) (string, error) {
 // parseCandidates decodes the candidate-pass contract.
 func parseCandidates(reply string) (candidateEnvelope, error) {
 	var env candidateEnvelope
+	if len(reply) > maxModelReplyBytes {
+		return env, fmt.Errorf("review: model reply exceeds %d bytes (narrow the scope or split the review)",
+			maxModelReplyBytes)
+	}
 	obj, err := ExtractJSONObject(reply)
 	if err != nil {
 		return env, err
+	}
+	if len(obj) > maxModelReplyBytes {
+		return env, fmt.Errorf("review: extracted JSON exceeds %d bytes (narrow the scope or split the review)",
+			maxModelReplyBytes)
 	}
 	if err := requireArrayField(obj, "findings", "candidate"); err != nil {
 		return env, err
@@ -141,21 +149,37 @@ func parseCandidates(reply string) (candidateEnvelope, error) {
 	if err := dec.Decode(&env); err != nil {
 		return env, fmt.Errorf("review: candidate JSON did not match the contract: %w", err)
 	}
+	if len(env.Findings) > maxCandidateFindings {
+		return env, fmt.Errorf("review: candidate pass returned %d findings (max %d); narrow the scope",
+			len(env.Findings), maxCandidateFindings)
+	}
 	return env, nil
 }
 
 // parseVerdicts decodes the verification-pass contract.
 func parseVerdicts(reply string) (verdictEnvelope, error) {
 	var env verdictEnvelope
+	if len(reply) > maxModelReplyBytes {
+		return env, fmt.Errorf("review: model reply exceeds %d bytes (narrow the scope or split the review)",
+			maxModelReplyBytes)
+	}
 	obj, err := ExtractJSONObject(reply)
 	if err != nil {
 		return env, err
+	}
+	if len(obj) > maxModelReplyBytes {
+		return env, fmt.Errorf("review: extracted JSON exceeds %d bytes (narrow the scope or split the review)",
+			maxModelReplyBytes)
 	}
 	if err := requireArrayField(obj, "verdicts", "verdict"); err != nil {
 		return env, err
 	}
 	if err := json.Unmarshal([]byte(obj), &env); err != nil {
 		return env, fmt.Errorf("review: verdict JSON did not match the contract: %w", err)
+	}
+	if len(env.Verdicts) > maxCandidateFindings {
+		return env, fmt.Errorf("review: verification pass returned %d verdicts (max %d); narrow the scope",
+			len(env.Verdicts), maxCandidateFindings)
 	}
 	return env, nil
 }

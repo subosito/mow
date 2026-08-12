@@ -104,7 +104,7 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 	// clean bill of health.
 	if sc.Empty() {
 		rep.Summary = "No files in scope; nothing was reviewed."
-		rep.Notes = append(rep.Notes, "Review scope was empty — check the selector, excludes, or budget.")
+		appendReportNote(rep, "Review scope was empty — check the selector, excludes, or budget.")
 		finish(rep, started, now)
 		stampExit(rep, req.ExitPolicy)
 		return &Result{Report: rep, Scope: sc}, nil
@@ -134,8 +134,13 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 		candidates[i].VerificationNotes = ""
 	}
 	dropped := len(issues)
-	for _, is := range issues {
-		rep.Notes = append(rep.Notes, "pass 1: "+is.String())
+	for i, is := range issues {
+		if i < maxReportNotes {
+			appendReportNote(rep, "pass 1: "+is.String())
+		}
+	}
+	if len(issues) > maxReportNotes {
+		appendReportNote(rep, fmt.Sprintf("pass 1: %d additional validation notes omitted", len(issues)-maxReportNotes))
 	}
 
 	// --- Pass 2: verification ---
@@ -143,7 +148,7 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 	case len(candidates) == 0:
 		// Nothing survived pass 1; a verification call would have no subject.
 	case req.SkipVerification:
-		rep.Notes = append(rep.Notes, "Verification pass skipped: findings are unverified.")
+		appendReportNote(rep, "Verification pass skipped: findings are unverified.")
 	default:
 		verifier := resolveVerifier(req, rev)
 		verified, vnotes, verr := verifyPass(ctx, verifier, prof, sc, candidates, req)
@@ -151,7 +156,9 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 			return nil, verr
 		}
 		candidates = verified
-		rep.Notes = append(rep.Notes, vnotes...)
+		for _, n := range vnotes {
+			appendReportNote(rep, n)
+		}
 	}
 
 	// Unverified findings are suppressed unless asked for, since the whole
@@ -177,7 +184,7 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 	rep.Summary = buildSummary(rep, prof, cand.Summary)
 	for _, n := range cand.Notes {
 		if n = strings.TrimSpace(n); n != "" {
-			rep.Notes = append(rep.Notes, "pass 1 note: "+n)
+			appendReportNote(rep, "pass 1 note: "+n)
 		}
 	}
 	finish(rep, started, now)
@@ -196,11 +203,27 @@ func stampExit(rep *Report, policy ExitPolicy) {
 	for _, reason := range rep.Exit.Reasons {
 		switch reason {
 		case ExitReasonTruncatedScope:
-			rep.Notes = append(rep.Notes, "exit non-zero: scope was truncated (--fail-on-truncated)")
+			appendReportNote(rep, "exit non-zero: scope was truncated (--fail-on-truncated)")
 		case ExitReasonFindingSeverity:
-			rep.Notes = append(rep.Notes, "exit non-zero: finding(s) at or above --fail-on severity")
+			appendReportNote(rep, "exit non-zero: finding(s) at or above --fail-on severity")
 		}
 	}
+}
+
+// appendReportNote adds a note to the report, capping total notes so a noisy
+// validation pass cannot blow up JSON/SARIF output.
+func appendReportNote(rep *Report, note string) {
+	if rep == nil {
+		return
+	}
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return
+	}
+	if len(rep.Notes) >= maxReportNotes {
+		return
+	}
+	rep.Notes = append(rep.Notes, note)
 }
 
 // verifyPass runs the second model call and applies its verdicts.
