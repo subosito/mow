@@ -4,19 +4,38 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/subosito/mow"
 )
 
 // Store persists goal state as one JSON file per id under Dir.
+//
+// Locks are keyed by the resolved directory path (not by Store value identity),
+// so two Store values that share Dir still serialize correctly — callers often
+// pass Store{Dir: …} by value or construct ephemeral &Store{} for DefaultDir.
 type Store struct {
 	// Dir defaults to $MOW_HOME/goals (see mow.Home).
 	Dir string
+}
+
+// storeDirLocks serializes disk ops per goals directory.
+var storeDirLocks sync.Map // string → *sync.Mutex
+
+// defaultStore is used when Runner.Store is nil so concurrent nil-Store runners
+// still share one DefaultDir lock.
+var defaultStore Store
+
+func (s *Store) lock() *sync.Mutex {
+	dir := filepath.Clean(s.dir())
+	v, _ := storeDirLocks.LoadOrStore(dir, new(sync.Mutex))
+	return v.(*sync.Mutex)
 }
 
 // DefaultDir is $MOW_HOME/goals.
@@ -43,26 +62,15 @@ func (s *Store) path(id string) string {
 	return filepath.Join(s.dir(), id+".json")
 }
 
-// Save writes state atomically (temp + rename).
+// Save writes state atomically (unique temp + rename).
 func (s *Store) Save(st State) error {
 	if err := validateID(st.ID); err != nil {
 		return err
 	}
-	dir := s.dir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	st.UpdatedAt = time.Now().UTC()
-	raw, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	raw = append(raw, '\n')
-	tmp := s.path(st.ID) + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path(st.ID))
+	mu := s.lock()
+	mu.Lock()
+	defer mu.Unlock()
+	return s.saveLocked(st)
 }
 
 // Load reads a goal by id. Missing file → os.ErrNotExist.
@@ -70,15 +78,10 @@ func (s *Store) Load(id string) (State, error) {
 	if err := validateID(id); err != nil {
 		return State{}, err
 	}
-	raw, err := os.ReadFile(s.path(id))
-	if err != nil {
-		return State{}, err
-	}
-	var st State
-	if err := json.Unmarshal(raw, &st); err != nil {
-		return State{}, fmt.Errorf("goal load %s: %w", id, err)
-	}
-	return st, nil
+	mu := s.lock()
+	mu.Lock()
+	defer mu.Unlock()
+	return s.loadLocked(id)
 }
 
 // ErrGoalRunning is returned by Remove when a goal has StatusRunning and
@@ -98,14 +101,22 @@ func (s *Store) Remove(id string, force bool) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
+	mu := s.lock()
+	mu.Lock()
+	defer mu.Unlock()
 	if !force {
-		if st, err := s.Load(id); err == nil && st.Status == StatusRunning {
+		st, err := s.loadLocked(id)
+		if err == nil && st.Status == StatusRunning {
 			return fmt.Errorf("%w: %s", ErrGoalRunning, id)
 		} else if err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
-	if err := os.Remove(s.path(id)); err != nil {
+	path := s.path(id)
+	if !pathWithinRoot(s.dir(), path) {
+		return fmt.Errorf("goal: invalid goal path for id %q", id)
+	}
+	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("%w: %s", ErrGoalNotFound, id)
 		}
@@ -120,7 +131,14 @@ func (s *Store) Delete(id string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
-	err := os.Remove(s.path(id))
+	mu := s.lock()
+	mu.Lock()
+	defer mu.Unlock()
+	path := s.path(id)
+	if !pathWithinRoot(s.dir(), path) {
+		return fmt.Errorf("goal: invalid goal path for id %q", id)
+	}
+	err := os.Remove(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -131,7 +149,10 @@ func (s *Store) Delete(id string) error {
 // Keeps Goal, MaxSteps, and last Summary. Clears session, error, last_reply,
 // plan item statuses (back to pending), and current_item.
 func (s *Store) Reset(id string) (State, error) {
-	st, err := s.Load(id)
+	mu := s.lock()
+	mu.Lock()
+	defer mu.Unlock()
+	st, err := s.loadLocked(id)
 	if err != nil {
 		return State{}, err
 	}
@@ -141,13 +162,11 @@ func (s *Store) Reset(id string) (State, error) {
 	st.SessionID = ""
 	st.LastReply = ""
 	st.CurrentItem = ""
-	// Reset checklist statuses but keep item titles/ids.
 	for i := range st.Plan.Items {
 		st.Plan.Items[i].Status = ItemPending
 		st.Plan.Items[i].Note = ""
 	}
-	// keep Summary as last successful result until overwritten
-	if err := s.Save(st); err != nil {
+	if err := s.saveLocked(st); err != nil {
 		return State{}, err
 	}
 	return st, nil
@@ -155,6 +174,9 @@ func (s *Store) Reset(id string) (State, error) {
 
 // List returns all goals sorted by UpdatedAt descending.
 func (s *Store) List() ([]State, error) {
+	mu := s.lock()
+	mu.Lock()
+	defer mu.Unlock()
 	dir := s.dir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -169,7 +191,10 @@ func (s *Store) List() ([]State, error) {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".json")
-		st, err := s.Load(id)
+		if err := validateID(id); err != nil {
+			continue
+		}
+		st, err := s.loadLocked(id)
 		if err != nil {
 			continue
 		}
@@ -213,4 +238,116 @@ func (s *Store) RecentFacts(workspace string, limit int) ([]Fact, error) {
 		}
 	}
 	return out, nil
+}
+
+func ensureStoreDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("goal: store dir is not a regular directory")
+	}
+	return nil
+}
+
+func (s *Store) loadLocked(id string) (State, error) {
+	dir := s.dir()
+	path := s.path(id)
+	if !pathWithinRoot(dir, path) {
+		return State{}, fmt.Errorf("goal: invalid goal path for id %q", id)
+	}
+	raw, err := readGoalJSON(path)
+	if err != nil {
+		return State{}, err
+	}
+	var st State
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return State{}, fmt.Errorf("goal load %s: %w", id, err)
+	}
+	sanitizeState(&st)
+	return st, nil
+}
+
+func (s *Store) saveLocked(st State) error {
+	dir := s.dir()
+	if err := ensureStoreDir(dir); err != nil {
+		return err
+	}
+	final := s.path(st.ID)
+	if !pathWithinRoot(dir, final) {
+		return fmt.Errorf("goal: invalid goal path for id %q", st.ID)
+	}
+	sanitizeState(&st)
+	st.UpdatedAt = time.Now().UTC()
+	raw, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	if len(raw) > maxGoalJSONBytes {
+		return fmt.Errorf("goal: state for %q exceeds %d byte cap", st.ID, maxGoalJSONBytes)
+	}
+	raw = append(raw, '\n')
+	// Unique temp name avoids clobbering a peer write if locks ever diverge
+	// (and is safe under the directory mutex).
+	tmp, err := os.CreateTemp(dir, st.ID+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, final); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
+// readGoalJSON Lstats then opens a regular file under the size cap, re-checking
+// regularity after open (mitigates replace-with-symlink races).
+func readGoalJSON(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("goal load: not a regular file")
+	}
+	if info.Size() > maxGoalJSONBytes {
+		return nil, fmt.Errorf("goal load: file too large")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("goal load: not a regular file")
+	}
+	if st.Size() > maxGoalJSONBytes {
+		return nil, fmt.Errorf("goal load: file too large")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxGoalJSONBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxGoalJSONBytes {
+		return nil, fmt.Errorf("goal load: file too large")
+	}
+	return data, nil
 }

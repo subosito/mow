@@ -260,7 +260,9 @@ func (r *Runner) store() *Store {
 	if r.Store != nil {
 		return r.Store
 	}
-	return &Store{}
+	// Shared default so concurrent runners without an explicit Store still
+	// serialize on $MOW_HOME/goals (dir-keyed locks also cover value copies).
+	return &defaultStore
 }
 
 func (r *Runner) executor() *Executor {
@@ -271,6 +273,12 @@ func (r *Runner) executor() *Executor {
 }
 
 func (r *Runner) runState(ctx context.Context, st State) (State, error) {
+	release, err := acquireRun(st.ID)
+	if err != nil {
+		return st, err
+	}
+	defer release()
+
 	if st.Status == StatusDone {
 		r.fire(Event{Kind: EventDone, State: st, Text: "already done"})
 		return st, nil

@@ -8,6 +8,7 @@
 package goal
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -240,7 +241,37 @@ const (
 var (
 	subMu sync.Mutex
 	subs  []func(Event)
+
+	activeMu   sync.Mutex
+	activeRuns = map[string]struct{}{}
 )
+
+// ErrGoalAlreadyRunning is returned when Run/RunSpec is invoked for a goal id
+// that is already executing in this process.
+var ErrGoalAlreadyRunning = errors.New("goal already running in this process")
+
+func acquireRun(id string) (release func(), err error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("goal: empty id")
+	}
+	activeMu.Lock()
+	if _, ok := activeRuns[id]; ok {
+		activeMu.Unlock()
+		return nil, fmt.Errorf("%w: %s", ErrGoalAlreadyRunning, id)
+	}
+	activeRuns[id] = struct{}{}
+	activeMu.Unlock()
+	var once sync.Once
+	return func() {
+		// Idempotent: defer + defensive double-call must not panic or re-delete.
+		once.Do(func() {
+			activeMu.Lock()
+			delete(activeRuns, id)
+			activeMu.Unlock()
+		})
+	}, nil
+}
 
 // Subscribe registers a listener for all goal events from this process.
 // Used by optional UIs; headless runs need none. Returns unsubscribe.
@@ -262,17 +293,26 @@ func Subscribe(fn func(Event)) (unsubscribe func()) {
 }
 
 func emit(e Event, extra func(Event)) {
+	// Call callbacks outside subMu so a subscriber that re-enters
+	// Subscribe/unsubscribe cannot deadlock. Copy under lock first.
 	if extra != nil {
-		extra(e)
+		func() {
+			defer func() { _ = recover() }()
+			extra(e)
+		}()
 	}
 	subMu.Lock()
 	cp := make([]func(Event), len(subs))
 	copy(cp, subs)
 	subMu.Unlock()
 	for _, fn := range cp {
-		if fn != nil {
-			fn(e)
+		if fn == nil {
+			continue
 		}
+		func(fn func(Event)) {
+			defer func() { _ = recover() }()
+			fn(e)
+		}(fn)
 	}
 }
 

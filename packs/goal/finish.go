@@ -45,7 +45,7 @@ func (f *finishSignal) report(status, reason, summary string, plan []PlanItem, i
 	}
 	// Then item update.
 	// Evidence: append sanitized facts (dedupe by claim+source).
-	for _, ev := range evidence {
+	for _, ev := range capEvidence(evidence) {
 		claim := strings.TrimSpace(ev.Claim)
 		if claim == "" {
 			continue

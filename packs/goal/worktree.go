@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // WorkerWorktree marks a plan item to run inside its own git worktree.
@@ -23,6 +24,10 @@ const worktreeBranchPrefix = "mow-wt-"
 // human/model orientation aid, not the patch itself.
 const maxMergeDiffChars = 2000
 
+// gitCommandTimeout bounds one git invocation so a hung remote cannot stall a
+// goal step forever (parent ctx cancel still applies).
+const gitCommandTimeout = 10 * time.Minute
+
 // isWorktreeItem reports whether an item opted into worktree isolation.
 func isWorktreeItem(it PlanItem) bool {
 	return strings.EqualFold(strings.TrimSpace(it.Worker), WorkerWorktree)
@@ -30,12 +35,16 @@ func isWorktreeItem(it PlanItem) bool {
 
 // git runs one git command in dir and returns trimmed combined output.
 func git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	tctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(tctx, "git", args...)
 	cmd.Dir = dir
+	setGitProcAttr(cmd)
 	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
-		return text, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, truncateRunes(text, 400))
+		msg := redactSecrets(truncateRunes(text, 400))
+		return msg, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
 	}
 	return text, nil
 }

@@ -105,6 +105,9 @@ func (p *Plan) ReplaceItems(items []PlanItem) error {
 		p.Items = nil
 		return nil
 	}
+	if len(items) > maxPlanItems {
+		items = items[:maxPlanItems]
+	}
 	out := make([]PlanItem, 0, len(items))
 	seen := map[string]bool{}
 	for i, it := range items {
