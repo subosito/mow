@@ -12,6 +12,21 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
+func assertNoRunIDAttr(t *testing.T, name string, m metricdata.Metrics) {
+	t.Helper()
+	sum, ok := m.Data.(metricdata.Sum[int64])
+	if !ok {
+		return
+	}
+	for _, dp := range sum.DataPoints {
+		for _, kv := range dp.Attributes.ToSlice() {
+			if string(kv.Key) == "mow.run_id" {
+				t.Fatalf("%s must not carry run_id (high cardinality)", name)
+			}
+		}
+	}
+}
+
 func TestAdapterRunToolSpansAndTokens(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
@@ -60,8 +75,10 @@ func TestAdapterRunToolSpansAndTokens(t *testing.T) {
 			switch m.Name {
 			case "mow.input_tokens":
 				gotIn = true
+				assertNoRunIDAttr(t, m.Name, m)
 			case "mow.output_tokens":
 				gotOut = true
+				assertNoRunIDAttr(t, m.Name, m)
 			}
 		}
 	}

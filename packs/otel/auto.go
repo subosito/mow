@@ -22,9 +22,17 @@ func autoWire(eng *mow.Engine, raw map[string]any) error {
 		return nil
 	}
 	cfg := exportConfigFromMap(raw)
-	if !cfg.Enabled || strings.TrimSpace(cfg.Endpoint) == "" {
+	endpoint := strings.TrimSpace(cfg.Endpoint)
+	if endpoint == "" {
 		return nil
 	}
+	// Engine/config path passes endpoint without an enabled key; explicit
+	// enabled: false in YAML/map keeps telemetry off despite an endpoint.
+	if v, ok := raw["enabled"]; ok && !boolVal(v) {
+		return nil
+	}
+	cfg.Enabled = true
+	cfg.Endpoint = endpoint
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	exp, err := StartExport(ctx, cfg)

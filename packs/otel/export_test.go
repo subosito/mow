@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/subosito/mow"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 func TestSplitOTLPEndpoint(t *testing.T) {
@@ -104,6 +106,31 @@ func TestExportConfigFromMap(t *testing.T) {
 	}
 	if !strings.HasPrefix(cfg.Endpoint, "http") {
 		t.Fatal(cfg.Endpoint)
+	}
+}
+
+func TestExportRestoresPropagator(t *testing.T) {
+	t.Parallel()
+	prev := propagation.TraceContext{}
+	otel.SetTextMapPropagator(prev)
+
+	exp, err := StartExport(context.Background(), ExportConfig{
+		Enabled:  true,
+		Endpoint: "http://127.0.0.1:4318",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exp == nil {
+		t.Fatal("nil export")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := exp.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := otel.GetTextMapPropagator(); got != prev {
+		t.Fatal("Shutdown did not restore previous TextMapPropagator")
 	}
 }
 

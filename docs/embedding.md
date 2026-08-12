@@ -337,13 +337,15 @@ boundaries, so several sent during one turn arrive together, in order.
 ### Config / CLI (out of the box)
 
 Stock `mow` blank-imports `github.com/subosito/mow/packs/otel`. When user config
-(or env) sets an OTLP endpoint, `Engine.New` auto-wires the adapter and an
-OTLP/HTTP exporter; `Engine.Close` flushes. Project `.mow/config` cannot set
+(or env) sets a non-empty OTLP endpoint, `Engine.New` auto-wires the adapter and an
+OTLP/HTTP exporter; `Engine.Close` flushes and shuts down providers. Set
+`otel.enabled: false` to disable export despite an endpoint. Project `.mow/config` cannot set
 this (host/user only).
 
 ```yaml
 # $MOW_HOME/config.yaml
 otel:
+  enabled: true                     # optional; endpoint alone enables when omitted
   endpoint: http://127.0.0.1:4318   # empty = disabled
   protocol: http                    # http default; grpc reserved
   service_name: mow
@@ -353,6 +355,8 @@ otel:
 
 Env (wins over file): `MOW_OTEL_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`,
 `MOW_OTEL_PROTOCOL`, `MOW_OTEL_SERVICE_NAME` / `OTEL_SERVICE_NAME`.
+
+Programmatic `StartExport` requires `ExportConfig.Enabled: true` explicitly.
 
 ### Embed
 
@@ -364,6 +368,7 @@ import mowotel "github.com/subosito/mow/packs/otel"
 
 // Config-driven:
 exp, err := mowotel.StartExport(ctx, mowotel.ExportConfig{
+    Enabled:  true,
     Endpoint: "http://127.0.0.1:4318",
 })
 eng.AddOnEvent(exp.Adapter.OnEvent)
@@ -377,9 +382,11 @@ adapter, err := mowotel.New(mowotel.Options{
 eng.AddOnEvent(adapter.OnEvent)
 ```
 
-Mapping: `loop.run.*` → `mow.run` span + token counters; `harness.tool.*` →
+Mapping: `loop.run.*` → `mow.run` span + token counters (low-cardinality
+`mow.stop_reason` only on metrics; run id stays on spans); `harness.tool.*` →
 `mow.tool.<name>` child spans + duration histogram; `graph.goal.*` → `mow.goal`
-span with step events.
+span with step events. Error and goal summary text is redacted/truncated before
+export. Tool/goal spans without a matching end event are closed on `run.end`.
 
 ## 11. Eval / replay fixtures
 

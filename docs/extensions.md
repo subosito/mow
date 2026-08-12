@@ -368,8 +368,14 @@ embed. Blank import registers an Engine-construction hook:
 import _ "github.com/subosito/mow/packs/otel"
 ```
 
-When `otel.enabled: true` and `otel.endpoint` are configured, the hook attaches OTLP/HTTP tracing and
-metrics; no endpoint means no exporter.
+When `otel.endpoint` is set (or `MOW_OTEL_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`),
+the hook attaches OTLP/HTTP tracing and metrics. Empty endpoint means no exporter.
+A non-empty endpoint is on; set `enabled: false` in the `otel:` config section
+to force off despite the endpoint. Protocol is `http` (default);
+`grpc` is reserved. `Shutdown` is idempotent, ends leftover spans, and flushes
+queued telemetry (auto-wire cleanup uses a 5s timeout). Span error/status text
+is redacted and length-capped. URL userinfo becomes an `Authorization` header
+when none is set.
 
 ## TUI (`packs/mowi`)
 

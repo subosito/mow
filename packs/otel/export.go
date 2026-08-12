@@ -2,10 +2,13 @@ package otel
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -44,6 +47,9 @@ type Export struct {
 	Adapter *Adapter
 	tp      *sdktrace.TracerProvider
 	mp      *sdkmetric.MeterProvider
+
+	shutdownOnce sync.Once
+	shutdownErr  error
 }
 
 // StartExport builds Tracer/Meter providers that push to the OTLP endpoint and
@@ -74,6 +80,12 @@ func StartExport(ctx context.Context, cfg ExportConfig) (*Export, error) {
 	if svc == "" {
 		svc = "mow"
 	}
+	if n := utf8.RuneCountInString(svc); n > maxServiceNameRunes {
+		svc = string([]rune(svc)[:maxServiceNameRunes])
+	}
+
+	headers := copyHeaders(cfg.Headers)
+	applyEndpointUserinfo(headers, endpoint)
 
 	// Schemaless merge avoids Default() vs pinned semconv SchemaURL conflicts
 	// across OTel SDK bumps.
@@ -89,11 +101,13 @@ func StartExport(ctx context.Context, cfg ExportConfig) (*Export, error) {
 
 	traceOpts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(host),
-		otlptracehttp.WithHeaders(cfg.Headers),
+		otlptracehttp.WithHeaders(headers),
+		otlptracehttp.WithTimeout(10 * time.Second),
 	}
 	metricOpts := []otlpmetrichttp.Option{
 		otlpmetrichttp.WithEndpoint(host),
-		otlpmetrichttp.WithHeaders(cfg.Headers),
+		otlpmetrichttp.WithHeaders(headers),
+		otlpmetrichttp.WithTimeout(10 * time.Second),
 	}
 	if insecure {
 		traceOpts = append(traceOpts, otlptracehttp.WithInsecure())
@@ -128,24 +142,91 @@ func StartExport(ctx context.Context, cfg ExportConfig) (*Export, error) {
 		sdkmetric.WithResource(res),
 	)
 
-	// Set global propagator for hosts that also do outbound OTel; mow itself
-	// correlates via RunID on the event bus.
-	otel.SetTextMapPropagator(propagation.TraceContext{})
+	// Set the global propagator for hosts that also do outbound OTel; mow
+	// itself correlates via RunID on the event bus. Refcounted so concurrent
+	// Exports restore the previous propagator only when the last shuts down.
+	installPropagator()
 
 	ad, err := New(Options{
 		Tracer: tp.Tracer("mow"),
 		Meter:  mp.Meter("mow"),
 	})
 	if err != nil {
+		restorePropagator()
 		_ = tp.Shutdown(ctx)
 		_ = mp.Shutdown(ctx)
 		return nil, err
 	}
-	return &Export{Adapter: ad, tp: tp, mp: mp}, nil
+	return &Export{
+		Adapter: ad,
+		tp:      tp,
+		mp:      mp,
+	}, nil
 }
 
-// Shutdown flushes and stops providers. Safe on nil.
+// propagator refs guard the global TextMapPropagator across concurrent
+// Exports: the first install captures the previous propagator, the last
+// Shutdown restores it. Intermediate shutdowns leave the active value alone.
+var (
+	propMu   sync.Mutex
+	propRefs int
+	propPrev propagation.TextMapPropagator
+)
+
+func installPropagator() {
+	propMu.Lock()
+	defer propMu.Unlock()
+	if propRefs == 0 {
+		propPrev = otel.GetTextMapPropagator()
+		otel.SetTextMapPropagator(propagation.TraceContext{})
+	}
+	propRefs++
+}
+
+func restorePropagator() {
+	propMu.Lock()
+	defer propMu.Unlock()
+	propRefs--
+	if propRefs <= 0 {
+		propRefs = 0
+		if propPrev != nil {
+			otel.SetTextMapPropagator(propPrev)
+			propPrev = nil
+		}
+	}
+}
+
+// Shutdown flushes and stops providers. Safe on nil and idempotent.
 func (e *Export) Shutdown(ctx context.Context) error {
+	if e == nil {
+		return nil
+	}
+	e.shutdownOnce.Do(func() {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if e.Adapter != nil {
+			e.Adapter.Close()
+		}
+		var first error
+		if e.tp != nil {
+			if err := e.tp.Shutdown(ctx); err != nil && first == nil {
+				first = err
+			}
+		}
+		if e.mp != nil {
+			if err := e.mp.Shutdown(ctx); err != nil && first == nil {
+				first = err
+			}
+		}
+		restorePropagator()
+		e.shutdownErr = first
+	})
+	return e.shutdownErr
+}
+
+// ForceFlush exports queued spans and metrics without shutting down. Safe on nil.
+func (e *Export) ForceFlush(ctx context.Context) error {
 	if e == nil {
 		return nil
 	}
@@ -154,16 +235,65 @@ func (e *Export) Shutdown(ctx context.Context) error {
 	}
 	var first error
 	if e.tp != nil {
-		if err := e.tp.Shutdown(ctx); err != nil && first == nil {
+		if err := e.tp.ForceFlush(ctx); err != nil && first == nil {
 			first = err
 		}
 	}
 	if e.mp != nil {
-		if err := e.mp.Shutdown(ctx); err != nil && first == nil {
+		if err := e.mp.ForceFlush(ctx); err != nil && first == nil {
 			first = err
 		}
 	}
 	return first
+}
+
+const maxServiceNameRunes = 128
+
+func copyHeaders(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func hasAuthHeader(h map[string]string) bool {
+	for k := range h {
+		if strings.EqualFold(k, "authorization") {
+			return true
+		}
+	}
+	return false
+}
+
+// applyEndpointUserinfo copies URL userinfo into Authorization when the
+// operator put credentials in the endpoint and did not set a header.
+func applyEndpointUserinfo(headers map[string]string, endpoint string) {
+	if hasAuthHeader(headers) {
+		return
+	}
+	raw := endpoint
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return
+	}
+	user := u.User.Username()
+	pass, _ := u.User.Password()
+	if user == "" && pass == "" {
+		return
+	}
+	token := base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
+	headers["Authorization"] = "Basic " + token
 }
 
 // splitOTLPEndpoint parses base URLs like "http://127.0.0.1:4318" or

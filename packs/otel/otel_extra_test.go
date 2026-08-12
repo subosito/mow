@@ -35,6 +35,19 @@ func TestStopStatus(t *testing.T) {
 	}
 }
 
+func TestGoalKey(t *testing.T) {
+	t.Parallel()
+	if got := goalKey("run1", ""); got != "" {
+		t.Errorf("expected empty for empty id, got %q", got)
+	}
+	if got := goalKey("", "g1"); got != "g1" {
+		t.Errorf("expected g1, got %q", got)
+	}
+	if got := goalKey("run1", "g1"); got != "run1/g1" {
+		t.Errorf("expected run1/g1, got %q", got)
+	}
+}
+
 func TestToolKey(t *testing.T) {
 	t.Parallel()
 
@@ -110,18 +123,22 @@ func TestAdapterToolDeniedAndErrors(t *testing.T) {
 	ad.OnEvent(mow.Event{Type: mow.EventRunEnd, RunID: "r1", StopReason: "error", Error: "run failed", TS: ts.Add(2 * time.Millisecond)})
 }
 
-func TestAutoWireEnvVarsAndErrors(t *testing.T) {
+func TestAutoWireEngineConfigPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
-	t.Setenv("MOW_OTEL_ENDPOINT", srv.URL)
-	t.Setenv("MOW_OTEL_SERVICE_NAME", "test-env-svc")
-
 	eng := newTestEngine(t)
-	// Passing empty map should fall back to MOW_OTEL_ENDPOINT env var
-	if err := autoWire(eng, map[string]any{}); err != nil {
-		t.Fatalf("autoWire with env vars failed: %v", err)
+	// Engine passes endpoint/service_name from config; env is merged before autoWire.
+	raw := map[string]any{
+		"endpoint":     srv.URL,
+		"service_name": "test-env-svc",
+	}
+	if err := autoWire(eng, raw); err != nil {
+		t.Fatalf("autoWire with engine-shaped map failed: %v", err)
+	}
+	if err := eng.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

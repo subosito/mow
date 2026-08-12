@@ -6,7 +6,8 @@
 // Core mow never imports this package. Two ways to enable:
 //
 //  1. Config/env (stock CLI blank-imports this package): set otel.endpoint
-//     (or MOW_OTEL_ENDPOINT). Engine.New auto-wires OTLP/HTTP via StartExport.
+//     (or MOW_OTEL_ENDPOINT). Engine.New auto-wires OTLP/HTTP via StartExport
+//     when the endpoint is non-empty and otel.enabled is not explicitly false.
 //
 //  2. Embed with a custom provider:
 //
@@ -30,7 +31,9 @@ package otel
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/subosito/mow"
 	"go.opentelemetry.io/otel/attribute"
@@ -125,6 +128,33 @@ func New(opts Options) (*Adapter, error) {
 	return a, nil
 }
 
+// Close ends leftover spans so Shutdown can flush them. Safe on nil; idempotent.
+func (a *Adapter) Close() {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, rs := range a.runs {
+		if rs != nil && rs.span != nil {
+			rs.span.End()
+		}
+	}
+	for _, s := range a.tools {
+		if s != nil {
+			s.End()
+		}
+	}
+	for _, s := range a.goals {
+		if s != nil {
+			s.End()
+		}
+	}
+	a.runs = map[string]*runSpan{}
+	a.tools = map[string]trace.Span{}
+	a.goals = map[string]trace.Span{}
+}
+
 // OnEvent is the [mow.EventFunc] entry point. Register it via
 // Engine.AddOnEvent or Options.OnEvent.
 func (a *Adapter) OnEvent(ev mow.Event) {
@@ -154,6 +184,9 @@ func (a *Adapter) OnEvent(ev mow.Event) {
 // startRun opens a "mow.run" span. Even with no Tracer this still records a
 // run ctx (context.Background) so nested tool/goal spans have a parent.
 func (a *Adapter) startRun(ev mow.Event) {
+	if ev.RunID == "" {
+		return
+	}
 	ctx := context.Background()
 	attrs := []attribute.KeyValue{
 		attribute.String("mow.run_id", ev.RunID),
@@ -182,6 +215,8 @@ func (a *Adapter) endRun(ev mow.Event) {
 	a.mu.Lock()
 	rs := a.runs[ev.RunID]
 	delete(a.runs, ev.RunID)
+	a.endOrphanToolsLocked(ev.RunID, ev.TS)
+	a.endOrphanGoalsLocked(ev.RunID, ev.TS)
 	a.mu.Unlock()
 	if rs == nil {
 		// No matching run.start (host emitted directly); still record tokens.
@@ -197,11 +232,41 @@ func (a *Adapter) endRun(ev mow.Event) {
 		code, desc := stopStatus(ev.StopReason, ev.Error)
 		rs.span.SetStatus(code, desc)
 		if ev.Error != "" {
-			rs.span.RecordError(fmt.Errorf("%s", ev.Error))
+			rs.span.RecordError(fmt.Errorf("%s", clampAttr(ev.Error)))
 		}
 		rs.span.End(trace.WithTimestamp(ev.TS))
 	}
 	a.recordTokens(rs.ctx, ev)
+}
+
+// endOrphanToolsLocked ends tool spans still open for runID. Caller holds mu.
+func (a *Adapter) endOrphanToolsLocked(runID string, ts time.Time) {
+	if runID == "" {
+		return
+	}
+	prefix := runID + "/"
+	for key, span := range a.tools {
+		if strings.HasPrefix(key, prefix) {
+			span.SetStatus(codes.Error, "run ended before tool.end")
+			span.End(trace.WithTimestamp(ts))
+			delete(a.tools, key)
+		}
+	}
+}
+
+// endOrphanGoalsLocked ends goal spans still open for runID. Caller holds mu.
+func (a *Adapter) endOrphanGoalsLocked(runID string, ts time.Time) {
+	if runID == "" {
+		return
+	}
+	prefix := runID + "/"
+	for key, span := range a.goals {
+		if strings.HasPrefix(key, prefix) {
+			span.SetStatus(codes.Error, "run ended before goal completion")
+			span.End(trace.WithTimestamp(ts))
+			delete(a.goals, key)
+		}
+	}
 }
 
 func (a *Adapter) startTool(ev mow.Event) {
@@ -219,17 +284,18 @@ func (a *Adapter) startTool(ev mow.Event) {
 	if ev.ToolCallID != "" {
 		attrs = append(attrs, attribute.String("mow.tool_call_id", ev.ToolCallID))
 	}
+	key := toolKey(ev.RunID, ev.ToolCallID)
+	if key == "" {
+		return
+	}
 	_, span := a.tracer.Start(parent, fmt.Sprintf("mow.tool.%s", ev.Tool),
 		trace.WithTimestamp(ev.TS),
 		trace.WithAttributes(attrs...),
 		trace.WithSpanKind(trace.SpanKindClient),
 	)
-	key := toolKey(ev.RunID, ev.ToolCallID)
-	if key != "" {
-		a.mu.Lock()
-		a.tools[key] = span
-		a.mu.Unlock()
-	}
+	a.mu.Lock()
+	a.tools[key] = span
+	a.mu.Unlock()
 }
 
 func (a *Adapter) endTool(ev mow.Event) {
@@ -244,8 +310,8 @@ func (a *Adapter) endTool(ev mow.Event) {
 			attribute.Bool("mow.denied", ev.Denied),
 		)
 		if ev.Error != "" {
-			span.SetStatus(codes.Error, ev.Error)
-			span.RecordError(fmt.Errorf("%s", ev.Error))
+			span.SetStatus(codes.Error, clampAttr(ev.Error))
+			span.RecordError(fmt.Errorf("%s", clampAttr(ev.Error)))
 		} else if ev.Denied {
 			span.SetStatus(codes.Error, "tool denied")
 		}
@@ -262,7 +328,7 @@ func (a *Adapter) endTool(ev mow.Event) {
 
 func (a *Adapter) startGoal(ev mow.Event) {
 	g := ev.Goal
-	if g == nil || a.tracer == nil {
+	if g == nil || g.ID == "" || a.tracer == nil {
 		return
 	}
 	parent := a.runCtx(ev.RunID)
@@ -280,7 +346,7 @@ func (a *Adapter) startGoal(ev mow.Event) {
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)
 	a.mu.Lock()
-	a.goals[g.ID] = span
+	a.goals[goalKey(ev.RunID, g.ID)] = span
 	a.mu.Unlock()
 }
 
@@ -290,7 +356,7 @@ func (a *Adapter) stepGoal(ev mow.Event) {
 		return
 	}
 	a.mu.Lock()
-	span := a.goals[g.ID]
+	span := a.goals[goalKey(ev.RunID, g.ID)]
 	a.mu.Unlock()
 	if span == nil {
 		return
@@ -311,8 +377,9 @@ func (a *Adapter) endGoal(ev mow.Event) {
 		return
 	}
 	a.mu.Lock()
-	span := a.goals[g.ID]
-	delete(a.goals, g.ID)
+	key := goalKey(ev.RunID, g.ID)
+	span := a.goals[key]
+	delete(a.goals, key)
 	a.mu.Unlock()
 	if span == nil {
 		return
@@ -322,9 +389,9 @@ func (a *Adapter) endGoal(ev mow.Event) {
 	case mow.EventGoalDone:
 		span.SetStatus(codes.Ok, "")
 	case mow.EventGoalFail:
-		span.SetStatus(codes.Error, g.Summary)
+		span.SetStatus(codes.Error, clampAttr(g.Summary))
 	case mow.EventGoalPartial:
-		span.SetStatus(codes.Error, "partial: "+g.Summary)
+		span.SetStatus(codes.Error, clampAttr("partial: "+g.Summary))
 	case mow.EventGoalBlocked:
 		span.SetStatus(codes.Error, "blocked")
 	}
@@ -336,9 +403,7 @@ func (a *Adapter) recordTokens(ctx context.Context, ev mow.Event) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	attrs := []attribute.KeyValue{
-		attribute.String("mow.run_id", ev.RunID),
-	}
+	attrs := []attribute.KeyValue{}
 	if ev.StopReason != "" {
 		attrs = append(attrs, attribute.String("mow.stop_reason", ev.StopReason))
 	}
@@ -371,6 +436,16 @@ func toolKey(runID, callID string) string {
 	return runID + "/" + callID
 }
 
+func goalKey(runID, id string) string {
+	if id == "" {
+		return ""
+	}
+	if runID == "" {
+		return id
+	}
+	return runID + "/" + id
+}
+
 // stopStatus maps a mow stop_reason to an OTel span status. "completed" is OK;
 // everything else (cancelled, max_turns, stuck, truncated, error) is ERROR.
 func stopStatus(stopReason, errMsg string) (codes.Code, string) {
@@ -379,7 +454,7 @@ func stopStatus(stopReason, errMsg string) (codes.Code, string) {
 	}
 	desc := stopReason
 	if errMsg != "" {
-		desc = stopReason + ": " + errMsg
+		desc = stopReason + ": " + clampAttr(errMsg)
 	}
 	return codes.Error, desc
 }

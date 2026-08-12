@@ -4,27 +4,17 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/subosito/mow"
+	"github.com/subosito/mow/testutil"
 )
 
-// Isolate from the developer's ~/.mow (config, skills, AGENTS) for the tests
-// that construct a real Engine.
-func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "mow-home-otel-*")
-	if err != nil {
-		panic(err)
-	}
-	_ = os.Setenv("MOW_HOME", dir)
-	code := m.Run()
-	_ = os.RemoveAll(dir)
-	os.Exit(code)
-}
+// Isolate from the developer's ~/.mow and pin credentials so Engine.New works on CI.
+func TestMain(m *testing.M) { testutil.RunWithProvider(m) }
 
 func TestStrVal(t *testing.T) {
 	t.Parallel()
@@ -413,6 +403,43 @@ func TestAutoWireInvalidEndpointErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAutoWireEndpointWithoutEnabledKey(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	eng := newTestEngine(t)
+	if err := autoWire(eng, map[string]any{"endpoint": srv.URL}); err != nil {
+		t.Fatalf("autoWire: %v", err)
+	}
+	ts := time.Now()
+	eng.Emit(mow.Event{Type: mow.EventRunStart, RunID: "r-endpoint-only", TS: ts})
+	eng.Emit(mow.Event{
+		Type: mow.EventRunEnd, RunID: "r-endpoint-only", StopReason: mow.StopCompleted, TS: ts,
+	})
+	if err := eng.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if hits.Load() < 1 {
+		t.Fatalf("endpoint without enabled key should wire OTLP, got %d hits", hits.Load())
+	}
+}
+
+func TestAutoWireExplicitDisabled(t *testing.T) {
+	eng := newTestEngine(t)
+	err := autoWire(eng, map[string]any{
+		"enabled":  false,
+		"endpoint": "http://127.0.0.1:4318",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng.Emit(mow.Event{Type: mow.EventRunStart, RunID: "r-off"})
 }
 
 func TestAutoWireAttachesListenerAndCleanup(t *testing.T) {

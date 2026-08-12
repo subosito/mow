@@ -577,7 +577,9 @@ tool with `Untrusted() bool` so the agent loop frames results in
 
 ## OpenTelemetry export
 
-Optional. **Default off**. Both `otel.enabled: true` and a non-empty `otel.endpoint` are required. When set in `$MOW_HOME/config.yaml`
+Optional. **Default off**. A non-empty `otel.endpoint` enables export (set
+`enabled: false` to keep it off despite an endpoint). When set in `$MOW_HOME/config.yaml`
 or `MOW_OTEL_ENDPOINT`, the stock CLI exports spans/metrics via OTLP/HTTP to that
-collector. See [embedding.md](embedding.md) § OpenTelemetry.
+collector. `Engine.Close` shuts down the OTLP providers and flushes pending spans.
+See [embedding.md](embedding.md) § OpenTelemetry.
 
