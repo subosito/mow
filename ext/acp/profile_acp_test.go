@@ -39,6 +39,13 @@ func writeNamedProfile(t *testing.T, home, name, workspace, configBody string) {
 	}
 }
 
+func agentModelFromSpec(spec AgentSpec) string {
+	if spec.Mow != nil {
+		return strings.TrimSpace(spec.Mow.Model)
+	}
+	return agentModelFlag(spec.Command)
+}
+
 func agentModelFlag(cmd []string) string {
 	for i := 0; i+1 < len(cmd); i++ {
 		if cmd[i] == "--model" {
@@ -95,7 +102,7 @@ func TestRegisterFromConfigProfileOverridesGlobalPeerModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing deepseek agent; agents=%v", keysOf(sharedDelegate.agents))
 	}
-	got := agentModelFlag(spec.Command)
+	got := agentModelFromSpec(spec)
 	if got != profileModel {
 		t.Fatalf("deepseek --model=%q want %q (command=%v)", got, profileModel, spec.Command)
 	}
@@ -131,7 +138,7 @@ func TestRegisterFromConfigReplaceDoesNotAccumulatePeers(t *testing.T) {
 	}
 	sharedMu.Lock()
 	first := sharedDelegate
-	firstCmd := append([]string(nil), first.agents["peer-one"].Command...)
+	firstCmd := agentModelFromSpec(first.agents["peer-one"])
 	sharedMu.Unlock()
 
 	p2, _, _ := config.LoadProfile("two")
@@ -147,7 +154,7 @@ func TestRegisterFromConfigReplaceDoesNotAccumulatePeers(t *testing.T) {
 	if first == second {
 		t.Fatal("RegisterFromConfig must install a new tool instance (no shared mutable map)")
 	}
-	if agentModelFlag(firstCmd) != "model-one" {
+	if firstCmd != "model-one" {
 		t.Fatalf("first tool mutated after second RegisterFromConfig: %v", firstCmd)
 	}
 	if hasOne {
@@ -219,7 +226,7 @@ func TestEngineProfileCapturesAcpDelegateModel(t *testing.T) {
 		t.Fatal("shared acp_delegate not registered via BeforeNew")
 	}
 	spec, ok := sharedDelegate.agents["deepseek"]
-	gotModel := agentModelFlag(spec.Command)
+	gotModel := agentModelFromSpec(spec)
 	sharedMu.Unlock()
 	if !ok || gotModel != profileModel {
 		t.Fatalf("registered deepseek --model=%q want %q ok=%v", gotModel, profileModel, ok)
@@ -264,11 +271,11 @@ func TestEngineScopedDelegateIsolatesPeers(t *testing.T) {
 	if _, ok := toolB.agents["peer-one"]; ok {
 		t.Fatal("engine B leaked peer-one from engine A")
 	}
-	if agentModelFlag(toolA.agents["peer-one"].Command) != "model-one" {
-		t.Fatalf("engine A model=%v", toolA.agents["peer-one"].Command)
+	if agentModelFromSpec(toolA.agents["peer-one"]) != "model-one" {
+		t.Fatalf("engine A model=%v", toolA.agents["peer-one"])
 	}
-	if agentModelFlag(toolB.agents["peer-two"].Command) != "model-two" {
-		t.Fatalf("engine B model=%v", toolB.agents["peer-two"].Command)
+	if agentModelFromSpec(toolB.agents["peer-two"]) != "model-two" {
+		t.Fatalf("engine B model=%v", toolB.agents["peer-two"])
 	}
 	// Closing one must not clear the other (distinct instances).
 	if toolA == toolB {

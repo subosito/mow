@@ -140,7 +140,7 @@ func TestDelegateConcurrentSamePeer(t *testing.T) {
 			"fake": {Name: "fake", Command: []string{"unused"}, TimeoutSec: 30},
 		},
 		peers: map[string]*peerSlot{
-			peerKey("fake", ""): {client: c, sessionID: "s1", lastUsed: time.Now()},
+			peerKey("fake", "", []string{"unused"}, PermissionReject): {client: c, sessionID: "s1", lastUsed: time.Now()},
 		},
 	}
 	const n = 8

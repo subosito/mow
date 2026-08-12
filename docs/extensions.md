@@ -53,9 +53,24 @@ Remove an import and the associated tools/subcommand/auto-wire disappear.
 - `mow acp` / `mowi acp`: run the current host as an ACP agent.
 - `acp_delegate`: delegate to named external or native peers.
 - Native `mow_agents` support model, effort, system prefix, cwd, permissions,
-  and timeout; peer processes are reused by name.
-- ACP content supports text/media/resources and terminal methods when shell is
-  allowed.
+  and timeout. Peer processes are reused by **agent + cwd + effective argv +
+  permission_mode** (a model/policy change starts a new process). At delegate
+  time, nil `allow_write` / `allow_shell` inherit the host Engine and are capped
+  by it (never exceed host `AllowWrite` / `AllowShell`); workspace and
+  `--extra-root` jail roots flow to the peer argv. Credentials are not
+  forwarded as argv. `--read-only` is never combined with `--allow-write` /
+  `--allow-shell` (CLI rejects that pair).
+- External `agents[]` use `permission_mode: reject|allow` (default **reject**)
+  for agent→client `session/request_permission`. Reject returns ACP
+  `{outcome:{outcome:"cancelled"}}`. Allow selects an `allow_once` /
+  `allow_always` `optionId` from the request (never invents ids). Legacy peers
+  whose argv already contains `--force` still auto-allow when
+  `permission_mode` is omitted. The client answers `fs/*` and unknown methods
+  with JSON-RPC errors and responds to `cursor/*` as unsupported so peers do
+  not hang. If the peer process exits mid-RPC, the client fails immediately
+  (does not wait for `timeout_sec`).
+- On spawn/protocol failures, the last ~16KiB of peer stderr (secrets redacted)
+  is appended to the error.
 
 ```yaml
 extensions:
@@ -64,11 +79,14 @@ extensions:
       - name: peer-agent
         command: [peer-agent, --acp]
         timeout_sec: 300
+        permission_mode: reject   # default; use allow for trusted peers
     mow_agents:
       reviewer:
         model: gpt-5-mini
         effort: high
         system_prefix: "You are a reviewer."
+        allow_write: true       # capped by host; omit to inherit
+        read_only: false        # omit to inherit (!host write && !host shell)
 ```
 
 ### MCP (`ext/mcp`)

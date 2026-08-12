@@ -793,6 +793,19 @@ func (e *Engine) ExtraRoots() []string {
 	return append([]string(nil), e.pol.ExtraRoots...)
 }
 
+// WritableRoots returns explicit writable-root exceptions for a read-only workspace.
+func (e *Engine) WritableRoots() []string {
+	if e == nil || e.pol == nil {
+		return nil
+	}
+	return append([]string(nil), e.pol.WritableRoots...)
+}
+
+// ReadOnlyWorkspace reports whether the primary workspace is read-only.
+func (e *Engine) ReadOnlyWorkspace() bool {
+	return e != nil && e.pol != nil && e.pol.ReadOnly
+}
+
 // ExtraRootsReadOnly returns additional read-only FS jail roots (copy).
 func (e *Engine) ExtraRootsReadOnly() []string {
 	if e == nil || e.pol == nil || len(e.pol.ExtraRootsReadOnly) == 0 {

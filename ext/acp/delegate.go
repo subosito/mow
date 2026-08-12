@@ -31,6 +31,14 @@ type AgentSpec struct {
 	// already pass --reasoning-effort/--effort, mow appends
 	// --reasoning-effort <value> (peer CLIs that accept it).
 	Effort string `yaml:"effort" json:"effort"`
+	// PermissionMode controls agent→client session/request_permission handling.
+	// reject (default): deny peer permission prompts (non-interactive delegate).
+	// allow: auto-approve. Legacy: argv containing --force implies allow when
+	// permission_mode is omitted.
+	PermissionMode string `yaml:"permission_mode" json:"permission_mode"`
+	// Mow holds native mow_agents config when set; Command is built at delegate
+	// time from host posture (not stored in yaml for agents[] rows).
+	Mow *MowAgentSpec `yaml:"-" json:"-"`
 }
 
 // Config is the extensions.acp section.
@@ -183,11 +191,15 @@ func indexAgents(list []AgentSpec) map[string]AgentSpec {
 	m := map[string]AgentSpec{}
 	for _, a := range list {
 		name := strings.ToLower(strings.TrimSpace(a.Name))
-		if name == "" || len(a.Command) == 0 {
+		if name == "" || (len(a.Command) == 0 && a.Mow == nil) {
 			continue
 		}
 		if a.TimeoutSec <= 0 {
-			a.TimeoutSec = 300
+			if a.Mow != nil && a.Mow.TimeoutSec > 0 {
+				a.TimeoutSec = a.Mow.TimeoutSec
+			} else {
+				a.TimeoutSec = 300
+			}
 		}
 		m[name] = a
 	}
@@ -202,6 +214,8 @@ type peerSlot struct {
 	client    *Client
 	sessionID string
 	dir       string
+	// key is the full pool key (agent+dir+command fingerprint) for dropPeer.
+	key string
 	// lastUsed is guarded by delegateTool.peersMu.
 	lastUsed time.Time
 	// starting is non-nil while the peer is being spawned (reserved slot);
@@ -237,23 +251,22 @@ func (t *delegateTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"agent":{"type":"string","description":"Named agent id (alias: subagent)"},"subagent":{"type":"string","description":"Synonym for agent (other harnesses use this term)"},"prompt":{"type":"string"},"cwd":{"type":"string"}},"required":["prompt"]}`)
 }
 
-func peerKey(agent, dir string) string {
-	return strings.ToLower(agent) + "\x00" + dir
-}
-
-// peerCommand builds the peer argv, optionally injecting --reasoning-effort.
-func peerCommand(spec AgentSpec) []string {
-	cmd := append([]string(nil), spec.Command...)
-	effort := strings.TrimSpace(spec.Effort)
-	if effort == "" {
-		return cmd
-	}
+// peerKey identifies a reusable peer process. It must include the effective
+// argv and permission mode so a policy/model/cwd change never reuses a stale
+// process started under a different command (e.g. host gained write, model
+// switch, extra roots changed).
+func peerKey(agent, dir string, cmd []string, permMode string) string {
+	var b strings.Builder
+	b.WriteString(strings.ToLower(strings.TrimSpace(agent)))
+	b.WriteByte(0)
+	b.WriteString(dir)
+	b.WriteByte(0)
+	b.WriteString(normalizePermissionMode(permMode))
 	for _, a := range cmd {
-		if a == "--reasoning-effort" || a == "--effort" {
-			return cmd
-		}
+		b.WriteByte(0)
+		b.WriteString(a)
 	}
-	return append(cmd, "--reasoning-effort", effort)
+	return b.String()
 }
 
 func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
@@ -313,7 +326,11 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	pctx, cancel := context.WithTimeout(ctx, to)
 	defer cancel()
 
-	slot, err := t.getOrStart(pctx, spec, dir)
+	host := hostPolicyFromContext(ctx, t.workspace)
+	cmd := peerCommand(spec, host, dir)
+	perm := effectivePermissionMode(spec)
+	key := peerKey(spec.Name, dir, cmd, perm)
+	slot, err := t.getOrStart(pctx, spec, dir, host, cmd, perm, key)
 	if err != nil {
 		return "", err
 	}
@@ -360,17 +377,20 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	slot.lastUsed = time.Now()
 	t.peersMu.Unlock()
 	if err != nil {
-		// Cancel/timeout/dead peer: always drop so the next call does not
-		// reuse a half-dead stdio session (orphaned npx/claude trees).
-		if !slot.client.Alive() || pctx.Err() != nil ||
-			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			t.dropPeer(peerKey(spec.Name, dir), slot)
+		alive := slot.client.Alive()
+		// Cancel/timeout/dead peer or hard transport failure: drop so the next
+		// call does not reuse a half-dead stdio session.
+		drop := !alive || pctx.Err() != nil ||
+			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+			strings.Contains(err.Error(), "peer process exited")
+		if drop {
+			t.dropPeer(key, slot)
 		}
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(pctx.Err(), context.DeadlineExceeded) {
-			return "", fmt.Errorf("acp_delegate: agent %q timed out after %ds", spec.Name, spec.TimeoutSec)
+			return "", delegatePromptError(spec.Name, spec.TimeoutSec, alive, err)
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(pctx.Err(), context.Canceled) {
-			return "", fmt.Errorf("acp_delegate: agent %q cancelled", spec.Name)
+			return "", fmt.Errorf("acp_delegate: agent %q cancelled (host turn aborted; session/cancel sent)", spec.Name)
 		}
 		return "", err
 	}
@@ -433,8 +453,18 @@ func extractPeerSummary(reply string) string {
 	return out
 }
 
-func (t *delegateTool) getOrStart(ctx context.Context, spec AgentSpec, dir string) (*peerSlot, error) {
-	key := peerKey(spec.Name, dir)
+func delegatePromptError(agent string, timeoutSec int, alive bool, err error) error {
+	msg := fmt.Sprintf("acp_delegate: agent %q timed out after %ds (session/cancel sent; peer alive=%v)", agent, timeoutSec, alive)
+	if err != nil && err.Error() != "" {
+		msg += ": " + err.Error()
+	}
+	return errors.New(msg)
+}
+
+func (t *delegateTool) getOrStart(ctx context.Context, spec AgentSpec, dir string, host *hostPeerPolicy, cmd []string, perm, key string) (*peerSlot, error) {
+	if key == "" {
+		key = peerKey(spec.Name, dir, cmd, perm)
+	}
 	for {
 		t.peersMu.Lock()
 		if t.peers == nil {
@@ -468,11 +498,15 @@ func (t *delegateTool) getOrStart(ctx context.Context, spec AgentSpec, dir strin
 				slot.mu.Unlock()
 			} // busy dead slot: its user drops it when Prompt errors
 		}
-		res := &peerSlot{dir: dir, starting: make(chan struct{})}
+		res := &peerSlot{dir: dir, key: key, starting: make(chan struct{})}
 		t.peers[key] = res
 		t.peersMu.Unlock()
 
-		cl := &Client{Command: peerCommand(spec), Dir: dir}
+		cl := &Client{
+			Command:        append([]string(nil), cmd...),
+			Dir:            dir,
+			PermissionMode: perm,
+		}
 		sid, err := cl.Start(ctx)
 
 		t.peersMu.Lock()

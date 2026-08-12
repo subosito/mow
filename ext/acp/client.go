@@ -45,6 +45,9 @@ type Client struct {
 	// OnProgress receives non-answer peer activity (thoughts, tool_call status).
 	// Does not append to the Prompt reply buffer. Set via SetOnProgress.
 	OnProgress func(kind, text string)
+	// PermissionMode controls agent→client session/request_permission (reject|allow).
+	// Default reject when empty.
+	PermissionMode string
 	// sessionID from last successful Start (for reuse).
 	SessionID string
 	// procMu guards started/exited/cmd across Start, Close, and Alive.
@@ -53,6 +56,7 @@ type Client struct {
 	started bool
 	// exited is closed by the reaper goroutine once the process exits.
 	exited chan struct{}
+	stderr *stderrRing
 }
 
 // Start launches the peer process and completes initialize + session/new.
@@ -66,7 +70,7 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 		return c.SessionID, nil
 	}
 	if err := c.startProcess(); err != nil {
-		return "", err
+		return "", appendStderrHint(fmt.Errorf("acp client start: %w", err), c.stderrTail())
 	}
 
 	_, err = c.call(ctx, "initialize", map[string]any{
@@ -80,7 +84,7 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 	})
 	if err != nil {
 		_ = c.Close()
-		return "", fmt.Errorf("acp initialize: %w", err)
+		return "", appendStderrHint(fmt.Errorf("acp initialize: %w", err), c.stderrTail())
 	}
 
 	cwd := c.Dir
@@ -93,14 +97,14 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 	})
 	if err != nil {
 		_ = c.Close()
-		return "", fmt.Errorf("acp session/new: %w", err)
+		return "", appendStderrHint(fmt.Errorf("acp session/new: %w", err), c.stderrTail())
 	}
 	var out struct {
 		SessionID string `json:"sessionId"`
 	}
 	if err := json.Unmarshal(res, &out); err != nil || out.SessionID == "" {
 		_ = c.Close()
-		return "", fmt.Errorf("acp session/new: bad result %s", string(res))
+		return "", appendStderrHint(fmt.Errorf("acp session/new: bad result %s", string(res)), c.stderrTail())
 	}
 	c.SessionID = out.SessionID
 	return out.SessionID, nil
@@ -110,6 +114,7 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 // goroutine that owns cmd.Wait, so Alive() can observe process exit.
 func (c *Client) startProcess() error {
 	c.pending = map[string]chan response{}
+	c.stderr = newStderrRing(defaultStderrCap)
 	// Long-lived peer: do not use CommandContext(ctx) so Prompt timeout does not kill the process.
 	// Own process group (unix) so Close can tear down npx/node/claude trees.
 	c.cmd = exec.Command(c.Command[0], c.Command[1:]...)
@@ -128,12 +133,18 @@ func (c *Client) startProcess() error {
 	if err != nil {
 		return err
 	}
-	c.cmd.Stderr = io.Discard
+	stderrPipe, err := c.cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
 	c.stdin = stdin
 	c.stdout = stdout
 	if err := c.cmd.Start(); err != nil {
 		return fmt.Errorf("acp client start: %w", err)
 	}
+	go func() {
+		_, _ = io.Copy(c.stderr, stderrPipe)
+	}()
 	exited := make(chan struct{})
 	c.procMu.Lock()
 	c.started = true
@@ -175,7 +186,7 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) (reply stri
 		c.Cancel(sessionID)
 	})
 	if err != nil {
-		return "", "", llm.Usage{}, err
+		return "", "", llm.Usage{}, appendStderrHint(err, c.stderrTail())
 	}
 	var out struct {
 		StopReason string `json:"stopReason"`
@@ -295,6 +306,9 @@ func (c *Client) call(ctx context.Context, method string, params any, onCancel .
 	if err := c.write(req); err != nil {
 		return nil, err
 	}
+	c.procMu.Lock()
+	exited := c.exited
+	c.procMu.Unlock()
 	select {
 	case <-ctx.Done():
 		for _, fn := range onCancel {
@@ -313,14 +327,28 @@ func (c *Client) call(ctx context.Context, method string, params any, onCancel .
 			return nil, ctx.Err()
 		case <-timer.C:
 			return nil, ctx.Err()
+		case <-waitExited(exited):
+			return nil, appendStderrHint(fmt.Errorf("acp %s: peer process exited during cancel", method), c.stderrTail())
 		}
+	case <-waitExited(exited):
+		// Peer died without a response — fail fast instead of waiting for timeout.
+		return nil, appendStderrHint(fmt.Errorf("acp %s: peer process exited", method), c.stderrTail())
 	case resp := <-ch:
 		if resp.Error != nil {
-			return nil, fmt.Errorf("acp %s: %s", method, resp.Error.Message)
+			return nil, appendStderrHint(fmt.Errorf("acp %s: %s", method, resp.Error.Message), c.stderrTail())
 		}
 		raw, _ := json.Marshal(resp.Result)
 		return raw, nil
 	}
+}
+
+// waitExited returns exited, or a never-ready channel when exited is nil so
+// select arms remain valid before startProcess sets the reaper channel.
+func waitExited(exited <-chan struct{}) <-chan struct{} {
+	if exited != nil {
+		return exited
+	}
+	return nil // nil channel blocks forever in select (safe arm)
 }
 
 func (c *Client) notify(method string, params any) {
@@ -341,40 +369,44 @@ func (c *Client) write(v any) error {
 	return enc.Encode(v)
 }
 
+func (c *Client) stderrTail() string {
+	if c == nil || c.stderr == nil {
+		return ""
+	}
+	return c.stderr.tail()
+}
+
 func (c *Client) readLoop() {
 	sc := bufio.NewScanner(c.stdout)
 	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
+		line := sc.Text()
+		kind, req, resp, ok := parseIncomingLine(line)
+		if !ok {
 			continue
 		}
-		var probe map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(line), &probe); err != nil {
+		switch kind {
+		case "skip":
 			continue
-		}
-		if _, ok := probe["method"]; ok {
-			if _, hasID := probe["id"]; !hasID {
-				var n notification
-				_ = json.Unmarshal([]byte(line), &n)
+		case "notification":
+			var n notification
+			if json.Unmarshal([]byte(strings.TrimSpace(line)), &n) == nil {
 				c.onNotification(n)
-				continue
 			}
-		}
-		var resp response
-		if err := json.Unmarshal([]byte(line), &resp); err != nil {
-			continue
-		}
-		id := string(resp.ID)
-		var idStr string
-		if json.Unmarshal(resp.ID, &idStr) == nil {
-			id = idStr
-		}
-		c.pendMu.Lock()
-		ch := c.pending[id]
-		c.pendMu.Unlock()
-		if ch != nil {
-			ch <- resp
+		case "request":
+			c.handleAgentRequest(req)
+		case "response":
+			id := string(resp.ID)
+			var idStr string
+			if json.Unmarshal(resp.ID, &idStr) == nil {
+				id = idStr
+			}
+			c.pendMu.Lock()
+			ch := c.pending[id]
+			c.pendMu.Unlock()
+			if ch != nil {
+				ch <- resp
+			}
 		}
 	}
 }

@@ -73,7 +73,11 @@ default: workspace, extra-root jail, and write/shell permissions. An agent can
 only be made **more restrictive** by profile configuration; it must not gain
 write, shell, roots, credentials, or a different workspace merely because its
 profile declares a peer. Delegated processes receive only the narrowed effective
-options and use the selecting Engine's workspace as their default cwd.
+options and use the selecting Engine's workspace as their default cwd. Peer pool
+reuse is keyed by agent + cwd + built argv (model/flags) so a capability change
+cannot reuse a more-privileged process. Host `--read-only` with explicit
+`:rw` writable roots is not yet mirrored as peer `WritableRoots` (see remaining
+risks in peer-delegation audits).
 
 ## Acceptance coverage
 

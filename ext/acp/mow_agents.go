@@ -15,8 +15,9 @@ import (
 //	    mow_agents:
 //	      peer-agent:
 //	        model: gpt-5-mini
-//	        # allow_write: true   # default true
-//	        # allow_shell: true   # default true
+//	        # allow_write: true   # nil = inherit host (capped by host)
+//	        # allow_shell: true   # nil = inherit host (capped by host)
+//	        # read_only: true     # nil = inherit (!host write && !host shell)
 //	        # timeout_sec: 600    # default 600
 //	        # effort: high        # optional --effort on the peer
 //	        # dir: /abs/path      # optional peer cwd
@@ -26,10 +27,15 @@ import (
 type MowAgentSpec struct {
 	// Model is required (gateway / provider model id for the peer Engine).
 	Model string `yaml:"model" json:"model"`
-	// AllowWrite enables --allow-write on the peer (default true when omitted).
+	// AllowWrite enables --allow-write on the peer when true and the host allows
+	// write. Nil inherits the host at delegate time (never exceeds host).
 	AllowWrite *bool `yaml:"allow_write" json:"allow_write,omitempty"`
-	// AllowShell enables --allow-shell on the peer (default true when omitted).
+	// AllowShell enables --allow-shell on the peer when true and the host allows
+	// shell. Nil inherits the host at delegate time (never exceeds host).
 	AllowShell *bool `yaml:"allow_shell" json:"allow_shell,omitempty"`
+	// ReadOnly sets --read-only on the peer. Nil inherits: true when the host
+	// denies both write and shell.
+	ReadOnly *bool `yaml:"read_only" json:"read_only,omitempty"`
 	// TimeoutSec caps one delegated prompt (default 600 for mow agents).
 	TimeoutSec int `yaml:"timeout_sec" json:"timeout_sec,omitempty"`
 	// Effort sets peer reasoning intensity via --effort (mow CLI).
@@ -42,17 +48,9 @@ type MowAgentSpec struct {
 	ExtraArgs []string `yaml:"extra_args" json:"extra_args,omitempty"`
 }
 
-// Config fields for native agents (see Config.MowAgents).
-
-func boolDefaultTrue(p *bool) bool {
-	if p == nil {
-		return true
-	}
-	return *p
-}
-
-// expandMowAgents turns mow_agents map entries into AgentSpec rows.
-func expandMowAgents(m map[string]MowAgentSpec) ([]AgentSpec, error) {
+// resolveMowAgents turns mow_agents map entries into AgentSpec rows. Command
+// argv is filled at delegate time from host posture; only metadata is fixed here.
+func resolveMowAgents(m map[string]MowAgentSpec) ([]AgentSpec, error) {
 	if len(m) == 0 {
 		return nil, nil
 	}
@@ -60,10 +58,10 @@ func expandMowAgents(m map[string]MowAgentSpec) ([]AgentSpec, error) {
 	for name := range m {
 		names = append(names, name)
 	}
-	sort.Strings(names) // stable merge order
+	sort.Strings(names)
 	out := make([]AgentSpec, 0, len(names))
 	for _, name := range names {
-		spec, err := expandOneMowAgent(name, m[name])
+		spec, err := resolveOneMowAgent(name, m[name])
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +70,7 @@ func expandMowAgents(m map[string]MowAgentSpec) ([]AgentSpec, error) {
 	return out, nil
 }
 
-func expandOneMowAgent(name string, s MowAgentSpec) (AgentSpec, error) {
+func resolveOneMowAgent(name string, s MowAgentSpec) (AgentSpec, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return AgentSpec{}, fmt.Errorf("acp: mow_agents entry with empty name")
@@ -81,43 +79,124 @@ func expandOneMowAgent(name string, s MowAgentSpec) (AgentSpec, error) {
 	if model == "" {
 		return AgentSpec{}, fmt.Errorf("acp: mow_agents.%s: model is required", name)
 	}
-	// Resolve the binary that should run the `acp` subcommand. Prefer the
-	// current process's own executable (so mowi spawns `mowi acp`, mow spawns
-	// `mow acp`) — a host always speaks its own ACP dialect. Fall back to
-	// "mow" on PATH (covers callers that are not a mow binary, e.g. a test
-	// harness or an embedder that builds a custom binary without ACP).
+	timeout := s.TimeoutSec
+	if timeout <= 0 {
+		timeout = 600
+	}
+	copySpec := s
+	return AgentSpec{
+		Name:       name,
+		Dir:        strings.TrimSpace(s.Dir),
+		TimeoutSec: timeout,
+		Mow:        &copySpec,
+	}, nil
+}
+
+// buildMowAgentCommand constructs argv for a native peer at delegate time.
+// Host posture caps permissions; credentials are never forwarded via argv.
+func buildMowAgentCommand(spec MowAgentSpec, host *hostPeerPolicy, peerCwd string) []string {
 	bin := mowAgentBinary()
+	model := strings.TrimSpace(spec.Model)
 	cmd := []string{bin, "acp", "--model", model}
-	if boolDefaultTrue(s.AllowWrite) {
-		cmd = append(cmd, "--allow-write")
+
+	ws := strings.TrimSpace(peerCwd)
+	if host != nil && strings.TrimSpace(host.workspace) != "" {
+		ws = strings.TrimSpace(host.workspace)
 	}
-	if boolDefaultTrue(s.AllowShell) {
-		cmd = append(cmd, "--allow-shell")
+	if ws != "" {
+		cmd = append(cmd, "--workspace", ws)
 	}
-	if e := strings.TrimSpace(s.Effort); e != "" {
+	for _, r := range extraRootFlags(host) {
+		cmd = append(cmd, "--extra-root", r)
+	}
+
+	// CLI Validate rejects --allow-write/--allow-shell with --read-only.
+	// Prefer the more restrictive posture when both would apply.
+	ro := effectiveReadOnly(&spec, host)
+	aw := effectiveAllowWrite(&spec, host)
+	as := effectiveAllowShell(&spec, host)
+	if ro {
+		cmd = append(cmd, "--read-only")
+	} else {
+		if aw {
+			cmd = append(cmd, "--allow-write")
+		}
+		if as {
+			cmd = append(cmd, "--allow-shell")
+		}
+	}
+	if e := strings.TrimSpace(spec.Effort); e != "" {
 		cmd = append(cmd, "--effort", e)
 	}
-	if prefix := strings.TrimSpace(s.SystemPrefix); prefix != "" {
+	if prefix := strings.TrimSpace(spec.SystemPrefix); prefix != "" {
 		cmd = append(cmd, "--system-prefix", prefix)
 	}
-	for _, a := range s.ExtraArgs {
+	for _, a := range spec.ExtraArgs {
 		a = strings.TrimSpace(a)
 		if a != "" {
 			cmd = append(cmd, a)
 		}
 	}
-	timeout := s.TimeoutSec
-	if timeout <= 0 {
-		timeout = 600 // coding peers default longer than generic 300
+	return cmd
+}
+
+func extraRootFlags(host *hostPeerPolicy) []string {
+	if host == nil {
+		return nil
 	}
-	return AgentSpec{
-		Name:       name,
-		Command:    cmd,
-		Dir:        strings.TrimSpace(s.Dir),
-		TimeoutSec: timeout,
-		// Effort on AgentSpec injects --reasoning-effort for non-mow peers;
-		// mow peers already got --effort above.
-	}, nil
+	seen := map[string]bool{}
+	var out []string
+	add := func(path string, ro bool) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		flag := path
+		if ro {
+			flag = path + ":ro"
+		}
+		if seen[flag] {
+			return
+		}
+		seen[flag] = true
+		out = append(out, flag)
+	}
+	for _, r := range host.extraRoots {
+		add(r, false)
+	}
+	for _, r := range host.extraRootsRO {
+		add(r, true)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func effectiveReadOnly(spec *MowAgentSpec, host *hostPeerPolicy) bool {
+	if spec != nil && spec.ReadOnly != nil {
+		return *spec.ReadOnly
+	}
+	if host != nil {
+		return !host.allowWrite && !host.allowShell
+	}
+	return true
+}
+
+// peerCommand builds argv for one delegate call (native or external).
+func peerCommand(spec AgentSpec, host *hostPeerPolicy, peerCwd string) []string {
+	if spec.Mow != nil {
+		return buildMowAgentCommand(*spec.Mow, host, peerCwd)
+	}
+	cmd := append([]string(nil), spec.Command...)
+	effort := strings.TrimSpace(spec.Effort)
+	if effort == "" {
+		return cmd
+	}
+	for _, a := range cmd {
+		if a == "--reasoning-effort" || a == "--effort" {
+			return cmd
+		}
+	}
+	return append(cmd, "--reasoning-effort", effort)
 }
 
 // mowAgentBinary returns the executable path to use for the `acp` subcommand
@@ -138,15 +217,14 @@ func defaultMowAgentBinary() string {
 // resolveAgents merges external agents[] with expanded mow_agents.
 // Name collisions between the two lists are errors (fail closed).
 func resolveAgents(c Config) ([]AgentSpec, error) {
-	mowList, err := expandMowAgents(c.MowAgents)
+	mowList, err := resolveMowAgents(c.MowAgents)
 	if err != nil {
 		return nil, err
 	}
 	if len(c.Agents) == 0 && len(mowList) == 0 {
 		return nil, nil
 	}
-	// Collision check (case-insensitive names, same as indexAgents).
-	seen := map[string]string{} // lower name → source
+	seen := map[string]string{}
 	for _, a := range c.Agents {
 		n := strings.ToLower(strings.TrimSpace(a.Name))
 		if n == "" {
