@@ -102,6 +102,27 @@ func TestCallSkipsStaleReplyID(t *testing.T) {
 	}
 }
 
+func TestCallAcceptsStringReplyID(t *testing.T) {
+	frames := lspFrames(`{"jsonrpc":"2.0","id":"1","result":{"contents":"doc"}}`)
+	c, _ := fakeClient(frames)
+	raw, err := c.call(context.Background(), "textDocument/hover", map[string]any{})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !strings.Contains(string(raw), "doc") {
+		t.Fatalf("string id reply not matched: %s", raw)
+	}
+}
+
+func TestRpcIDEqualNumberAndString(t *testing.T) {
+	if !rpcIDEqual(json.RawMessage(`1`), 1) || !rpcIDEqual(json.RawMessage(`"1"`), 1) {
+		t.Fatal("want numeric and string id 1 to match")
+	}
+	if rpcIDEqual(json.RawMessage(`"2"`), 1) || rpcIDEqual(json.RawMessage(`null`), 1) {
+		t.Fatal("mismatched ids must not match")
+	}
+}
+
 // Notifications keep being skipped and a real error reply still surfaces.
 func TestCallSkipsNotificationAndReportsError(t *testing.T) {
 	frames := lspFrames(

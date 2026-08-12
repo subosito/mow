@@ -111,19 +111,19 @@ func TestLSPPathAndURIHelpers(t *testing.T) {
 		}
 	})
 
-	t.Run("absPath", func(t *testing.T) {
+	t.Run("resolvePath", func(t *testing.T) {
 		t.Parallel()
-		root := "/workspace"
-		res, err := absPath(root, "file.go")
+		root := t.TempDir()
+		res, err := resolvePath(root, "file.go")
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !filepath.IsAbs(res) || !strings.HasSuffix(res, "file.go") {
-			t.Errorf("unexpected absPath result: %q", res)
+			t.Errorf("unexpected resolvePath result: %q", res)
 		}
 
-		absFile := filepath.Join(os.TempDir(), "file.go")
-		res2, err := absPath(root, absFile)
+		absFile := filepath.Join(root, "file.go")
+		res2, err := resolvePath(root, absFile)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -250,13 +250,13 @@ func TestPostEditDiagnosticsHook(t *testing.T) {
 
 	hook := postEditDiagnostics(mockPull)
 
-	eng, err := mow.New(mow.Options{NoSession: true})
+	eng, err := mow.New(mow.Options{NoSession: true, Workspace: tmpDir})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	ctx := mow.ContextWithEngine(context.Background(), eng)
-	args, _ := json.Marshal(map[string]any{"path": filePath})
+	args, _ := json.Marshal(map[string]any{"path": "test.go"})
 
 	dec, err := hook(ctx, ext.PostToolEvent{
 		Name:   "write",

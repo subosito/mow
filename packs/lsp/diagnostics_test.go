@@ -243,7 +243,18 @@ func TestParseDiagnosticsShapes(t *testing.T) {
 // The emitted event is the frozen host contract (a TUI Problems panel parses
 // exactly these fields), so assert the JSON shape, not just the struct.
 func TestDiagnosticsEventPayloadShape(t *testing.T) {
-	eng := &mow.Engine{}
+	ws := t.TempDir()
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Workspace: ws,
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.Close() })
 	var got []mow.Event
 	eng.AddOnEvent(func(ev mow.Event) { got = append(got, ev) })
 	ctx := mow.ContextWithEngine(context.Background(), eng)
@@ -283,7 +294,7 @@ func TestDiagnosticsEventPayloadShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Tool != "write" || payload.Path != "internal/x/y.go" || payload.Count != 1 {
+	if payload.Tool != "write" || !strings.HasSuffix(payload.Path, "internal/x/y.go") || payload.Count != 1 {
 		t.Fatalf("payload=%+v", payload)
 	}
 	if len(payload.Diagnostics) != 1 {

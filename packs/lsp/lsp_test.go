@@ -29,19 +29,19 @@ func TestPathToURI(t *testing.T) {
 	}
 }
 
-func TestAbsPath(t *testing.T) {
+func TestResolvePath(t *testing.T) {
 	root := t.TempDir()
 	// Relative resolves against root.
-	got, err := absPath(root, "sub/x.go")
+	got, err := resolvePath(root, "sub/x.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != filepath.Join(root, "sub/x.go") {
 		t.Fatalf("relative: %q", got)
 	}
-	// Absolute passes through unchanged.
+	// Absolute under root passes through containment check.
 	abs := filepath.Join(root, "y.go")
-	got, err = absPath(root, abs)
+	got, err = resolvePath(root, abs)
 	if err != nil || got != abs {
 		t.Fatalf("absolute: %q err=%v", got, err)
 	}

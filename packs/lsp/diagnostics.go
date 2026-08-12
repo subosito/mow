@@ -47,6 +47,14 @@ func postEditDiagnostics(pull diagFunc) ext.PostToolFunc {
 		if path == "" || !supportedFile(path) {
 			return ext.PostToolDecision{}, nil
 		}
+		if eng := mow.EngineFromContext(ctx); eng != nil {
+			resolved, err := eng.ResolvePath(path)
+			if err != nil {
+				slog.Debug("lsp: post-edit diagnostics skipped", "tool", e.Name, "path", path, "err", err)
+				return ext.PostToolDecision{}, nil
+			}
+			path = resolved
+		}
 		// Own deadline, not the run's: the run context may have hours left.
 		pullCtx, cancel := context.WithTimeout(ctx, diagTimeout)
 		defer cancel()

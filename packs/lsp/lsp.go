@@ -4,13 +4,15 @@
 //  1. extensions.lsp in -config / $MOW_HOME/config.yaml
 //  2. $MOW_HOME/lsp.yaml
 //
-// On RPC failure the client restarts once and retries.
+// A dead transport (EOF, broken pipe, cancelled/expired RPC) restarts the
+// server once and retries. Application errors do not.
 package lsp
 
 import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,12 +22,26 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/extcfg"
+)
+
+const (
+	// maxLSPFrameBytes caps one inbound/outbound JSON-RPC body.
+	maxLSPFrameBytes = 1 << 20
+	// maxLSPHeaderLines bounds Content-Length header parsing.
+	maxLSPHeaderLines = 32
+	// maxLSPSkipFrames bounds how many unrelated frames call() will discard.
+	maxLSPSkipFrames = 256
+	// maxLSPDidOpenBytes caps textDocument/didOpen payload size.
+	maxLSPDidOpenBytes = 4 << 20
+	// lspInitTimeout bounds the initialize handshake.
+	lspInitTimeout = 30 * time.Second
 )
 
 // Config is extensions.lsp.
@@ -120,7 +136,50 @@ func (r *reconnecting) definition(ctx context.Context, path string, line, col in
 }
 
 func (r *reconnecting) diagnostics(ctx context.Context, path string) ([]mow.Diagnostic, error) {
-	if err := r.ensure(ctx); err != nil {
+	c, err := r.liveClient()
+	if err != nil {
+		return nil, err
+	}
+	out, err := c.diagnostics(ctx, path)
+	if err == nil || !restartable(err) {
+		return out, err
+	}
+	r.reset()
+	if err2 := r.ensure(ctx); err2 != nil {
+		return nil, fmt.Errorf("%v (reconnect: %v)", err, err2)
+	}
+	c, err2 := r.liveClient()
+	if err2 != nil {
+		return nil, fmt.Errorf("%v (reconnect: %v)", err, err2)
+	}
+	return c.diagnostics(ctx, path)
+}
+
+func (r *reconnecting) withRetry(ctx context.Context, fn func(*client) (string, error)) (string, error) {
+	c, err := r.liveClient()
+	if err != nil {
+		return "", err
+	}
+	out, err := fn(c)
+	if err == nil || !restartable(err) {
+		return out, err
+	}
+	r.reset()
+	if err2 := r.ensure(ctx); err2 != nil {
+		return "", fmt.Errorf("%v (reconnect: %v)", err, err2)
+	}
+	c, err2 := r.liveClient()
+	if err2 != nil {
+		return "", fmt.Errorf("%v (reconnect: %v)", err, err2)
+	}
+	return fn(c)
+}
+
+// liveClient snapshots the current process. The reconnecting mutex is not
+// held across RPC: a hung Read would otherwise pin r.mu and reset() could
+// never Kill the wedged server. close() is safe to race with call().
+func (r *reconnecting) liveClient() (*client, error) {
+	if err := r.ensure(context.Background()); err != nil {
 		return nil, err
 	}
 	r.mu.Lock()
@@ -129,43 +188,28 @@ func (r *reconnecting) diagnostics(ctx context.Context, path string) ([]mow.Diag
 	if c == nil {
 		return nil, fmt.Errorf("lsp: no client")
 	}
-	out, err := c.diagnostics(ctx, path)
-	if err != nil {
-		// One reconnect, same policy as withRetry.
-		r.reset()
-		if err := r.ensure(ctx); err != nil {
-			return nil, err
-		}
-		r.mu.Lock()
-		c = r.c
-		r.mu.Unlock()
-		if c == nil {
-			return nil, fmt.Errorf("lsp: no client")
-		}
-		return c.diagnostics(ctx, path)
-	}
-	return out, nil
+	return c, nil
 }
 
-func (r *reconnecting) withRetry(ctx context.Context, fn func(*client) (string, error)) (string, error) {
-	if err := r.ensure(ctx); err != nil {
-		return "", err
-	}
-	r.mu.Lock()
-	c := r.c
-	r.mu.Unlock()
-	out, err := fn(c)
+// restartable reports a dead or interrupted transport. Application errors
+// (path jail, symlink, JSON-RPC method error) must not kill gopls.
+func restartable(err error) bool {
 	if err == nil {
-		return out, nil
+		return false
 	}
-	r.reset()
-	if err2 := r.ensure(ctx); err2 != nil {
-		return "", fmt.Errorf("%v (reconnect: %v)", err, err2)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
 	}
-	r.mu.Lock()
-	c = r.c
-	r.mu.Unlock()
-	return fn(c)
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, os.ErrClosed) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	for _, p := range []string{"broken pipe", "connection reset", "use of closed", "signal:", "file already closed"} {
+		if strings.Contains(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 type client struct {
@@ -197,7 +241,9 @@ func start(cfg Config) (*client, error) {
 		return nil, err
 	}
 	c := &client{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), root: root}
-	_, err = c.call(context.Background(), "initialize", map[string]any{
+	initCtx, cancel := context.WithTimeout(context.Background(), lspInitTimeout)
+	defer cancel()
+	_, err = c.call(initCtx, "initialize", map[string]any{
 		"processId": os.Getpid(),
 		"rootUri":   pathToURI(root),
 		"capabilities": map[string]any{
@@ -215,11 +261,13 @@ func start(cfg Config) (*client, error) {
 }
 
 func (c *client) hover(ctx context.Context, path string, line, col int) (string, error) {
-	abs, err := absPath(c.root, path)
+	abs, err := c.locate(ctx, path)
 	if err != nil {
 		return "", err
 	}
-	_ = c.didOpen(abs)
+	if err := c.didOpen(ctx, abs); err != nil {
+		return "", err
+	}
 	raw, err := c.call(ctx, "textDocument/hover", map[string]any{
 		"textDocument": map[string]any{"uri": pathToURI(abs)},
 		"position":     map[string]any{"line": line, "character": col},
@@ -238,11 +286,13 @@ func (c *client) hover(ctx context.Context, path string, line, col int) (string,
 }
 
 func (c *client) definition(ctx context.Context, path string, line, col int) (string, error) {
-	abs, err := absPath(c.root, path)
+	abs, err := c.locate(ctx, path)
 	if err != nil {
 		return "", err
 	}
-	_ = c.didOpen(abs)
+	if err := c.didOpen(ctx, abs); err != nil {
+		return "", err
+	}
 	raw, err := c.call(ctx, "textDocument/definition", map[string]any{
 		"textDocument": map[string]any{"uri": pathToURI(abs)},
 		"position":     map[string]any{"line": line, "character": col},
@@ -257,11 +307,13 @@ func (c *client) definition(ctx context.Context, path string, line, col int) (st
 // notifications are not usable here: call() skips server notifications, so a
 // pull request is the reliable way to get findings for a file we just wrote.
 func (c *client) diagnostics(ctx context.Context, path string) ([]mow.Diagnostic, error) {
-	abs, err := absPath(c.root, path)
+	abs, err := c.locate(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	_ = c.didOpen(abs)
+	if err := c.didOpen(ctx, abs); err != nil {
+		return nil, err
+	}
 	raw, err := c.call(ctx, "textDocument/diagnostic", map[string]any{
 		"textDocument": map[string]any{"uri": pathToURI(abs)},
 	})
@@ -336,10 +388,38 @@ func severityName(n int) mow.DiagnosticSeverity {
 	}
 }
 
-func (c *client) didOpen(abs string) error {
-	data, err := os.ReadFile(abs)
+// locate resolves path through the engine jail (when present) and then
+// refuses anything outside this client's initialize root. One process-wide
+// language server must not didOpen a file from another workspace.
+func (c *client) locate(ctx context.Context, path string) (string, error) {
+	abs, err := resolvePathFromEngine(ctx, c.root, path)
 	if err != nil {
+		return "", err
+	}
+	if !pathWithinRoot(c.root, abs) {
+		return "", fmt.Errorf("lsp: path %q outside server root", path)
+	}
+	return abs, nil
+}
+
+func (c *client) didOpen(ctx context.Context, abs string) error {
+	if err := ctx.Err(); err != nil {
 		return err
+	}
+	f, info, err := openRegular(abs)
+	if err != nil {
+		return fmt.Errorf("lsp: open %q: %w", abs, err)
+	}
+	defer f.Close()
+	if info.Size() > maxLSPDidOpenBytes {
+		return fmt.Errorf("lsp: %q exceeds %d byte didOpen cap", abs, maxLSPDidOpenBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxLSPDidOpenBytes+1))
+	if err != nil {
+		return fmt.Errorf("lsp: read %q: %w", abs, err)
+	}
+	if int64(len(data)) > maxLSPDidOpenBytes {
+		return fmt.Errorf("lsp: %q exceeds %d byte didOpen cap", abs, maxLSPDidOpenBytes)
 	}
 	return c.notify("textDocument/didOpen", map[string]any{
 		"textDocument": map[string]any{
@@ -349,10 +429,22 @@ func (c *client) didOpen(abs string) error {
 }
 
 func (c *client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	// A cancelled/expired ctx must unblock Read on the pipe; otherwise
+	// diagnostics' 10s deadline cannot reset a wedged server.
+	if ctx != nil {
+		stop := context.AfterFunc(ctx, c.kill)
+		defer stop()
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	id := c.nextID.Add(1)
-	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxLSPFrameBytes {
+		return nil, fmt.Errorf("lsp: request exceeds %d byte frame cap", maxLSPFrameBytes)
+	}
 	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
 	if _, err := io.WriteString(c.stdin, header); err != nil {
 		return nil, err
@@ -360,15 +452,21 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 	if _, err := c.stdin.Write(body); err != nil {
 		return nil, err
 	}
+	skipped := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		var contentLen int
+		headerLines := 0
 		for {
 			line, err := c.stdout.ReadString('\n')
 			if err != nil {
 				return nil, err
+			}
+			headerLines++
+			if headerLines > maxLSPHeaderLines {
+				return nil, fmt.Errorf("lsp: frame header exceeds %d lines", maxLSPHeaderLines)
 			}
 			line = strings.TrimSpace(line)
 			if line == "" {
@@ -376,11 +474,21 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 			}
 			if strings.HasPrefix(strings.ToLower(line), "content-length:") {
 				n := strings.TrimSpace(line[len("content-length:"):])
-				contentLen, _ = strconv.Atoi(n)
+				contentLen, err = strconv.Atoi(n)
+				if err != nil || contentLen < 0 {
+					return nil, fmt.Errorf("lsp: invalid Content-Length %q", n)
+				}
 			}
 		}
 		if contentLen <= 0 {
+			skipped++
+			if skipped > maxLSPSkipFrames {
+				return nil, fmt.Errorf("lsp: too many empty frames")
+			}
 			continue
+		}
+		if contentLen > maxLSPFrameBytes {
+			return nil, fmt.Errorf("lsp: frame exceeds %d byte cap", maxLSPFrameBytes)
 		}
 		buf := make([]byte, contentLen)
 		if _, err := io.ReadFull(c.stdout, buf); err != nil {
@@ -388,6 +496,10 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		}
 		var msg rpcMessage
 		if err := json.Unmarshal(buf, &msg); err != nil {
+			skipped++
+			if skipped > maxLSPSkipFrames {
+				return nil, fmt.Errorf("lsp: exceeded %d skipped frames waiting for reply", maxLSPSkipFrames)
+			}
 			continue
 		}
 		// Server→client request: gopls issues workspace/configuration and
@@ -395,9 +507,17 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		// the answer. Skipping it deadlocks the call queued behind it.
 		if msg.isRequest() {
 			c.answerRequest(msg.ID, msg.Method)
+			skipped++
+			if skipped > maxLSPSkipFrames {
+				return nil, fmt.Errorf("lsp: exceeded %d skipped frames waiting for reply", maxLSPSkipFrames)
+			}
 			continue
 		}
 		if !msg.isReplyTo(id) {
+			skipped++
+			if skipped > maxLSPSkipFrames {
+				return nil, fmt.Errorf("lsp: exceeded %d skipped frames waiting for reply", maxLSPSkipFrames)
+			}
 			continue
 		}
 		if msg.Error != nil {
@@ -437,6 +557,9 @@ func (c *client) writeMessage(v any) error {
 	if err != nil {
 		return err
 	}
+	if len(body) > maxLSPFrameBytes {
+		return fmt.Errorf("lsp: reply exceeds %d byte frame cap", maxLSPFrameBytes)
+	}
 	if _, err := io.WriteString(c.stdin, fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))); err != nil {
 		return err
 	}
@@ -475,36 +598,62 @@ func (m rpcMessage) isReplyTo(want int64) bool {
 	if m.Method != "" || len(m.ID) == 0 {
 		return false
 	}
-	var got int64
-	if err := json.Unmarshal(m.ID, &got); err != nil {
+	return rpcIDEqual(m.ID, want)
+}
+
+// rpcIDEqual accepts a numeric id or the same digits as a JSON string.
+// Servers are supposed to echo the type we sent; some still reply "1".
+func rpcIDEqual(raw json.RawMessage, want int64) bool {
+	var n int64
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return n == want
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
 		return false
 	}
-	return got == want
+	got, err := strconv.ParseInt(s, 10, 64)
+	return err == nil && got == want
 }
 
 func (c *client) notify(method string, params any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+	if err != nil {
+		return err
+	}
+	if len(body) > maxLSPFrameBytes {
+		return fmt.Errorf("lsp: notification exceeds %d byte frame cap", maxLSPFrameBytes)
+	}
 	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
 	if _, err := io.WriteString(c.stdin, header); err != nil {
 		return err
 	}
-	_, err := c.stdin.Write(body)
+	_, err = c.stdin.Write(body)
 	return err
+}
+
+func (c *client) kill() {
+	if c == nil || c.cmd == nil || c.cmd.Process == nil {
+		return
+	}
+	_ = c.cmd.Process.Kill()
 }
 
 func (c *client) close() error {
 	_ = c.stdin.Close()
-	if c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
+	c.kill()
+	if c.cmd == nil {
+		return nil
 	}
 	return c.cmd.Wait()
 }
 
 type hoverTool struct{ c *reconnecting }
 
-func (hoverTool) Name() string { return "lsp_hover" }
+func (hoverTool) Name() string   { return "lsp_hover" }
+func (hoverTool) ReadOnly() bool { return true }
 func (hoverTool) Description() string {
 	return "LSP hover at path line/col (0-based). Args: path, line, character."
 }
@@ -522,7 +671,8 @@ func (t *hoverTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 
 type defTool struct{ c *reconnecting }
 
-func (defTool) Name() string { return "lsp_definition" }
+func (defTool) Name() string   { return "lsp_definition" }
+func (defTool) ReadOnly() bool { return true }
 func (defTool) Description() string {
 	return "LSP go-to-definition at path line/col (0-based). Args: path, line, character."
 }
@@ -558,13 +708,6 @@ func pathToURI(p string) string {
 		p = "/" + p
 	}
 	return "file://" + p
-}
-
-func absPath(root, p string) (string, error) {
-	if filepath.IsAbs(p) {
-		return p, nil
-	}
-	return filepath.Abs(filepath.Join(root, p))
 }
 
 func langID(path string) string {
