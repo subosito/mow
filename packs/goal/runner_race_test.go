@@ -15,12 +15,17 @@ func TestRunnerRejectsConcurrentSameID(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("MOW_HOME", dir)
 	block := make(chan struct{})
+	started := make(chan struct{}, 1)
 	eng, err := mow.New(mow.Options{
 		NoSession: true,
 		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
 			select {
+			case started <- struct{}{}:
+			default:
+			}
+			select {
 			case <-block:
-				return mow.Message{Role: "assistant", Content: "working"}, nil
+				return mow.Message{Role: "assistant", Content: "GOAL_DONE"}, nil
 			case <-ctx.Done():
 				return mow.Message{}, ctx.Err()
 			}
@@ -43,17 +48,33 @@ func TestRunnerRejectsConcurrentSameID(t *testing.T) {
 			errCh <- err
 		}()
 	}
-	time.Sleep(100 * time.Millisecond)
+	// Only the lock winner reaches the model. Wait for it to hold the run lock
+	// inside Chat, then require the loser to fail before we release the winner
+	// (so the second cannot simply start after the first finishes).
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for first RunSpec to reach Chat")
+	}
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, goal.ErrGoalAlreadyRunning) {
+			close(block)
+			wg.Wait()
+			t.Fatalf("expected ErrGoalAlreadyRunning from concurrent RunSpec, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		close(block)
+		wg.Wait()
+		t.Fatal("timeout waiting for concurrent RunSpec rejection")
+	}
 	close(block)
 	wg.Wait()
 	close(errCh)
-	var sawAlready bool
+	// Drain the winner's result (should not also be AlreadyRunning).
 	for err := range errCh {
 		if errors.Is(err, goal.ErrGoalAlreadyRunning) {
-			sawAlready = true
+			t.Fatal("winner should not return ErrGoalAlreadyRunning")
 		}
-	}
-	if !sawAlready {
-		t.Fatal("expected ErrGoalAlreadyRunning from concurrent RunSpec")
 	}
 }

@@ -141,6 +141,12 @@ type State struct {
 	MaxDurationMs int64 `json:"max_duration_ms,omitempty"`
 	// StartedAt is when the current run entered running (wall-clock budget).
 	StartedAt time.Time `json:"started_at,omitempty"`
+	// RunOwnerPID / RunOwnerHost / RunLeaseAt identify the process that last
+	// marked this goal StatusRunning. Used to heal stale Running after crash
+	// (owner PID gone) without blocking resume. Empty when not running.
+	RunOwnerPID  int       `json:"run_owner_pid,omitempty"`
+	RunOwnerHost string    `json:"run_owner_host,omitempty"`
+	RunLeaseAt   time.Time `json:"run_lease_at,omitempty"`
 }
 
 // NodeStatus is the frozen host contract for one goal-plan node. Hosts should
@@ -247,8 +253,8 @@ var (
 )
 
 // ErrGoalAlreadyRunning is returned when Run/RunSpec is invoked for a goal id
-// that is already executing in this process.
-var ErrGoalAlreadyRunning = errors.New("goal already running in this process")
+// that is already executing in this process or another process sharing the store.
+var ErrGoalAlreadyRunning = errors.New("goal already running")
 
 func acquireRun(id string) (release func(), err error) {
 	id = strings.TrimSpace(id)
@@ -275,19 +281,36 @@ func acquireRun(id string) (release func(), err error) {
 
 // Subscribe registers a listener for all goal events from this process.
 // Used by optional UIs; headless runs need none. Returns unsubscribe.
+// Unsubscribe compacts the slot list when many nils accumulate.
 func Subscribe(fn func(Event)) (unsubscribe func()) {
 	if fn == nil {
 		return func() {}
 	}
 	subMu.Lock()
-	subs = append(subs, fn)
-	i := len(subs) - 1
+	// Reuse a nil slot when possible.
+	i := -1
+	for j, existing := range subs {
+		if existing == nil {
+			subs[j] = fn
+			i = j
+			break
+		}
+	}
+	if i < 0 {
+		subs = append(subs, fn)
+		i = len(subs) - 1
+	}
 	subMu.Unlock()
 	return func() {
 		subMu.Lock()
 		defer subMu.Unlock()
 		if i >= 0 && i < len(subs) {
 			subs[i] = nil
+		}
+		// Drop trailing nils only — middle slots stay so other unsubscribe
+		// indices remain valid; reuse fills holes on Subscribe.
+		for len(subs) > 0 && subs[len(subs)-1] == nil {
+			subs = subs[:len(subs)-1]
 		}
 	}
 }

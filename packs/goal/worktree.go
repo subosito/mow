@@ -88,21 +88,23 @@ func addWorktree(ctx context.Context, parent, goalID, itemID string) (*worktree,
 	if err != nil {
 		return nil, err
 	}
-	repoMu.Lock()
-	defer repoMu.Unlock()
-
-	branch := worktreeBranchPrefix + slugPathPart(goalID) + "-" + slugPathPart(itemID)
-	dir, err := os.MkdirTemp("", "mow-wt-")
-	if err != nil {
-		return nil, err
-	}
-	// MkdirTemp created the path; git worktree add requires it absent.
-	path := filepath.Join(dir, "wt")
-	if _, err := git(ctx, parent, "worktree", "add", path, "-b", branch); err != nil {
-		os.RemoveAll(dir)
-		return nil, err
-	}
-	return &worktree{Dir: path, Branch: branch, Base: base, Parent: parent}, nil
+	var wt *worktree
+	err = withRepoLock(ctx, parent, func() error {
+		branch := worktreeBranchPrefix + slugPathPart(goalID) + "-" + slugPathPart(itemID)
+		dir, err := os.MkdirTemp("", "mow-wt-")
+		if err != nil {
+			return err
+		}
+		// MkdirTemp created the path; git worktree add requires it absent.
+		path := filepath.Join(dir, "wt")
+		if _, err := git(ctx, parent, "worktree", "add", path, "-b", branch); err != nil {
+			os.RemoveAll(dir)
+			return err
+		}
+		wt = &worktree{Dir: path, Branch: branch, Base: base, Parent: parent}
+		return nil
+	})
+	return wt, err
 }
 
 // commitAll stages and commits everything in the worktree. Reports whether a
@@ -136,41 +138,80 @@ type mergeResult struct {
 	Err        error
 }
 
-// repoMu serializes operations that mutate the PARENT repository: worktree
-// add/remove and merges. Worktrees isolate the *work*, but these operations
-// all touch the parent's index, HEAD or .git/worktrees, and git takes an
-// exclusive index.lock for them. Concurrent workers therefore queue at the
-// join point — this is the "manager merges" half of the branch-and-merge
-// pattern, not an accidental bottleneck. Work inside a worktree (the part
-// that actually takes time) stays fully parallel.
+// repoMu serializes in-process operations that mutate the PARENT repository.
+// Cross-process peers take .git/mow-repo.lock via withRepoLock.
 var repoMu sync.Mutex
+
+// withRepoLock holds the process mutex and a flock/O_EXCL lock under the
+// parent's git dir so two mow processes cannot merge into the same repo at once.
+// Conflicted worktrees are left on disk (cleanup is not called on conflict).
+func withRepoLock(ctx context.Context, parent string, fn func() error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	repoMu.Lock()
+	defer repoMu.Unlock()
+	gitDir := parentGitDir(ctx, parent)
+	lockPath := filepath.Join(gitDir, "mow-repo.lock")
+	// A peer may hold this across a git merge (up to gitCommandTimeout).
+	fl, err := acquireFileLockWait(ctx, lockPath, true, gitCommandTimeout+time.Minute)
+	if err != nil {
+		return err
+	}
+	defer fl.Release()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fn()
+}
+
+func parentGitDir(ctx context.Context, parent string) string {
+	out, err := git(ctx, parent, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return filepath.Join(parent, ".git")
+	}
+	return strings.TrimSpace(out)
+}
 
 // merge brings the worker branch back into the base branch with --no-ff, so
 // every worker's work is a visible, revertable merge commit.
 //
 // A conflict is never resolved here: the merge is aborted so the parent
-// workspace is left clean, and the caller escalates to a human.
+// workspace is left clean, and the caller escalates to a human. Conflicted
+// worktrees are preserved for manual inspection (cleanup is not invoked).
 func (w *worktree) merge(ctx context.Context) mergeResult {
-	repoMu.Lock()
-	defer repoMu.Unlock()
+	var result mergeResult
+	err := withRepoLock(ctx, w.Parent, func() error {
+		// Diff before merging: after a conflict abort there is nothing to show.
+		diff, _ := git(ctx, w.Parent, "diff", "--stat", w.Base+".."+w.Branch)
+		result.Diff = diff
 
-	// Diff before merging: after a conflict abort there is nothing to show.
-	diff, _ := git(ctx, w.Parent, "diff", "--stat", w.Base+".."+w.Branch)
-
-	if _, err := git(ctx, w.Parent, "checkout", w.Base); err != nil {
-		return mergeResult{Err: err, Diff: diff}
-	}
-	if _, err := git(ctx, w.Parent, "merge", "--no-ff", "-m",
-		"mow: merge "+w.Branch, w.Branch); err != nil {
-		// Distinguish a real conflict from an operational failure: only a
-		// conflict leaves MERGE_HEAD behind.
-		if _, statErr := os.Stat(filepath.Join(w.gitDir(ctx), "MERGE_HEAD")); statErr == nil {
-			_, _ = git(ctx, w.Parent, "merge", "--abort")
-			return mergeResult{Conflicted: true, Diff: diff}
+		if _, err := git(ctx, w.Parent, "checkout", w.Base); err != nil {
+			result.Err = err
+			return nil
 		}
-		return mergeResult{Err: err, Diff: diff}
+		if _, err := git(ctx, w.Parent, "merge", "--no-ff", "-m",
+			"mow: merge "+w.Branch, w.Branch); err != nil {
+			// Distinguish a real conflict from an operational failure: only a
+			// conflict leaves MERGE_HEAD behind.
+			if _, statErr := os.Stat(filepath.Join(w.gitDir(ctx), "MERGE_HEAD")); statErr == nil {
+				_, _ = git(ctx, w.Parent, "merge", "--abort")
+				result.Conflicted = true
+				return nil
+			}
+			result.Err = err
+			return nil
+		}
+		result.Merged = true
+		return nil
+	})
+	if err != nil && result.Err == nil {
+		result.Err = err
 	}
-	return mergeResult{Merged: true, Diff: diff}
+	return result
 }
 
 // gitDir resolves the parent repo's .git directory (worktrees make it indirect).
@@ -224,12 +265,12 @@ func ListWorktrees(ctx context.Context, dir string) ([]WorktreeInfo, error) {
 // cleanup removes the worktree and its branch. Callers keep conflicted
 // worktrees on disk for human inspection instead of calling this.
 func (w *worktree) cleanup(ctx context.Context) {
-	repoMu.Lock()
-	defer repoMu.Unlock()
-
-	_, _ = git(ctx, w.Parent, "worktree", "remove", "--force", w.Dir)
-	_, _ = git(ctx, w.Parent, "branch", "-D", w.Branch)
-	os.RemoveAll(filepath.Dir(w.Dir))
+	_ = withRepoLock(ctx, w.Parent, func() error {
+		_, _ = git(ctx, w.Parent, "worktree", "remove", "--force", w.Dir)
+		_, _ = git(ctx, w.Parent, "branch", "-D", w.Branch)
+		os.RemoveAll(filepath.Dir(w.Dir))
+		return nil
+	})
 }
 
 // slugPathPart makes an id safe for a branch name.

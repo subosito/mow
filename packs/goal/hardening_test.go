@@ -94,21 +94,84 @@ func TestStoreRejectsSymlinkDir(t *testing.T) {
 }
 
 func TestAcquireRunExclusive(t *testing.T) {
-	release, err := acquireRun("solo")
+	dir := t.TempDir()
+	store := &Store{Dir: dir}
+	release, err := acquireRunExclusive(store, "solo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acquireRun("solo"); err == nil {
+	if _, err := acquireRunExclusive(store, "solo"); err == nil {
 		t.Fatal("expected duplicate run error")
 	}
 	release()
-	release2, err := acquireRun("solo")
+	release2, err := acquireRunExclusive(store, "solo")
 	if err != nil {
 		t.Fatalf("after release: %v", err)
 	}
 	release2()
 	// Idempotent double-release must not leave the id stuck or panic.
 	release()
+}
+
+func TestHealStaleRunning(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: dir}
+	// Write Running with a dead PID (no process) and empty host → heal on Load.
+	mu := s.lock()
+	mu.Lock()
+	st := State{
+		ID: "h1", Goal: "g", Status: StatusRunning, MaxSteps: 3,
+		RunOwnerPID: 99999999, RunOwnerHost: "",
+	}
+	if err := s.writeGoalJSON(s.path("h1"), st); err != nil {
+		mu.Unlock()
+		t.Fatal(err)
+	}
+	mu.Unlock()
+
+	got, err := s.Load("h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusPending {
+		t.Fatalf("status=%s want pending after heal", got.Status)
+	}
+	if got.RunOwnerPID != 0 {
+		t.Fatalf("owner not cleared: %d", got.RunOwnerPID)
+	}
+}
+
+func TestRunningWithoutOwnerNotHealed(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: dir}
+	if err := s.Save(State{ID: "legacy", Goal: "g", Status: StatusRunning, MaxSteps: 1}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Load("legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusRunning {
+		t.Fatalf("legacy running without owner must stay running for Remove guard, got %s", got.Status)
+	}
+}
+
+func TestFileLockExclusive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.lock")
+	a, err := acquireFileLock(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Release()
+	if _, err := acquireFileLock(path, false); err == nil {
+		t.Fatal("expected second lock to fail")
+	}
+	a.Release()
+	b, err := acquireFileLock(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Release()
 }
 
 func TestSanitizeStateBounds(t *testing.T) {

@@ -52,6 +52,37 @@ func TestStoreRemoveNotFound(t *testing.T) {
 	}
 }
 
+func TestStoreResetRefusesRunning(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	if err := s.Save(State{ID: "r1", Status: StatusRunning, Goal: "g", MaxSteps: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Reset("r1"); !errors.Is(err, ErrGoalRunning) {
+		t.Fatalf("reset running: got %v, want ErrGoalRunning", err)
+	}
+	got, err := s.Load("r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusRunning {
+		t.Fatalf("reset must leave running goal intact, status=%s", got.Status)
+	}
+	// Healed (dead owner) Running becomes Pending on Load, then Reset works.
+	mu := s.lock()
+	mu.Lock()
+	if err := s.writeGoalJSON(s.path("h1"), State{
+		ID: "h1", Goal: "g", Status: StatusRunning, MaxSteps: 2,
+		RunOwnerPID: 99999999,
+	}); err != nil {
+		mu.Unlock()
+		t.Fatal(err)
+	}
+	mu.Unlock()
+	if _, err := s.Reset("h1"); err != nil {
+		t.Fatalf("reset after heal: %v", err)
+	}
+}
+
 func TestStoreDeleteLegacyNoErrorOnMissing(t *testing.T) {
 	s := &Store{Dir: t.TempDir()}
 	// Legacy Delete keeps "missing file is not an error" semantics.

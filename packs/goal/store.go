@@ -156,6 +156,11 @@ func (s *Store) Reset(id string) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
+	// loadLocked heals a dead owner first. A live (or legacy unowned)
+	// Running goal must not be wiped out from under the holder.
+	if st.Status == StatusRunning {
+		return State{}, fmt.Errorf("%w: %s", ErrGoalRunning, id)
+	}
 	st.Status = StatusPending
 	st.Step = 0
 	st.Error = ""
@@ -260,6 +265,17 @@ func (s *Store) loadLocked(id string) (State, error) {
 	if !pathWithinRoot(dir, path) {
 		return State{}, fmt.Errorf("goal: invalid goal path for id %q", id)
 	}
+	// Missing goal: do not create a .lock artifact.
+	if _, err := os.Lstat(path); err != nil {
+		return State{}, err
+	}
+	// Cross-process lock so multi-process Load/Save cannot tear JSON mid-read.
+	fl, err := acquireFileLock(path+".lock", true)
+	if err != nil {
+		return State{}, err
+	}
+	defer fl.Release()
+
 	raw, err := readGoalJSON(path)
 	if err != nil {
 		return State{}, err
@@ -269,6 +285,10 @@ func (s *Store) loadLocked(id string) (State, error) {
 		return State{}, fmt.Errorf("goal load %s: %w", id, err)
 	}
 	sanitizeState(&st)
+	if healStaleRunning(&st) {
+		// Persist healed status so Remove/status see Pending, not ghost Running.
+		_ = s.writeGoalJSON(path, st)
+	}
 	return st, nil
 }
 
@@ -281,6 +301,17 @@ func (s *Store) saveLocked(st State) error {
 	if !pathWithinRoot(dir, final) {
 		return fmt.Errorf("goal: invalid goal path for id %q", st.ID)
 	}
+	fl, err := acquireFileLock(final+".lock", true)
+	if err != nil {
+		return err
+	}
+	defer fl.Release()
+	return s.writeGoalJSON(final, st)
+}
+
+// writeGoalJSON marshals and atomically replaces path (caller holds locks).
+func (s *Store) writeGoalJSON(final string, st State) error {
+	dir := filepath.Dir(final)
 	sanitizeState(&st)
 	st.UpdatedAt = time.Now().UTC()
 	raw, err := json.MarshalIndent(st, "", "  ")
@@ -291,14 +322,17 @@ func (s *Store) saveLocked(st State) error {
 		return fmt.Errorf("goal: state for %q exceeds %d byte cap", st.ID, maxGoalJSONBytes)
 	}
 	raw = append(raw, '\n')
-	// Unique temp name avoids clobbering a peer write if locks ever diverge
-	// (and is safe under the directory mutex).
 	tmp, err := os.CreateTemp(dir, st.ID+".*.tmp")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 		return err
@@ -314,8 +348,8 @@ func (s *Store) saveLocked(st State) error {
 	return nil
 }
 
-// readGoalJSON Lstats then opens a regular file under the size cap, re-checking
-// regularity after open (mitigates replace-with-symlink races).
+// readGoalJSON opens a regular file under the size cap via openRegular
+// (O_NOFOLLOW on unix).
 func readGoalJSON(path string) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -327,18 +361,11 @@ func readGoalJSON(path string) ([]byte, error) {
 	if info.Size() > maxGoalJSONBytes {
 		return nil, fmt.Errorf("goal load: file too large")
 	}
-	f, err := os.Open(path)
+	f, st, err := openRegular(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !st.Mode().IsRegular() {
-		return nil, fmt.Errorf("goal load: not a regular file")
-	}
 	if st.Size() > maxGoalJSONBytes {
 		return nil, fmt.Errorf("goal load: file too large")
 	}

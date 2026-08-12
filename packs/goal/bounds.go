@@ -1,6 +1,9 @@
 package goal
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	maxPlanItems         = 64
@@ -21,6 +24,12 @@ func sanitizeState(st *State) {
 		// keep; empty treated as pending by hosts
 	default:
 		st.Status = StatusPending
+	}
+	// Owner fields only meaningful while Running.
+	if st.Status != StatusRunning {
+		st.RunOwnerPID = 0
+		st.RunOwnerHost = ""
+		st.RunLeaseAt = time.Time{}
 	}
 	st.Goal = truncateRunes(strings.TrimSpace(st.Goal), maxStateTextRunes)
 	st.Summary = truncateRunes(st.Summary, maxStateTextRunes)

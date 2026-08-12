@@ -71,3 +71,28 @@ func TestAppendEventWritesValidID(t *testing.T) {
 		t.Fatalf("event body missing: %s", raw)
 	}
 }
+
+func TestAppendEventRejectsSymlinkLog(t *testing.T) {
+	root := t.TempDir()
+	s := &Store{Dir: filepath.Join(root, "goals")}
+	dir := filepath.Join(root, "goals", "sym")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside.jsonl")
+	if err := os.WriteFile(outside, []byte("canary\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "events.jsonl")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	s.AppendEvent("sym", LogEvent{Kind: "start", Text: "must-not-append"})
+	raw, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "must-not-append") {
+		t.Fatalf("appended through symlink: %q", raw)
+	}
+}

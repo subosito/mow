@@ -2,6 +2,7 @@ package goal
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/subosito/mow"
@@ -66,5 +67,50 @@ func TestRunRaiseContinuesPastOldCap(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("chats=%d want 1", n)
+	}
+}
+
+func TestResumeAnswerDoesNotPersistUnownedRunning(t *testing.T) {
+	t.Setenv("MOW_HOME", t.TempDir())
+	store := &Store{Dir: t.TempDir()}
+	if err := store.Save(State{
+		ID: "esc", Goal: "g", Status: StatusBlocked,
+		Question: "pick one", MaxSteps: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	release, err := acquireRunExclusive(store, "esc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			t.Fatal("chat must not run while the run lock is held")
+			return mow.Message{}, errors.New("unreachable")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{Engine: eng, Store: store}
+	_, err = r.ResumeAnswer(context.Background(), "esc", "use option B")
+	if !errors.Is(err, ErrGoalAlreadyRunning) {
+		t.Fatalf("got %v, want ErrGoalAlreadyRunning", err)
+	}
+	got, err := store.Load("esc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusBlocked {
+		t.Fatalf("status=%s want blocked (answer must not leave unowned running)", got.Status)
+	}
+	if got.RunOwnerPID != 0 {
+		t.Fatalf("owner pid=%d, want 0", got.RunOwnerPID)
+	}
+	if got.Question != "pick one" {
+		t.Fatalf("question=%q, want original (lock failed before persist)", got.Question)
 	}
 }

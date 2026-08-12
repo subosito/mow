@@ -148,10 +148,8 @@ func (r *Runner) ResumeAnswer(ctx context.Context, id, answer string) (State, er
 		st.Summary = "[h: " + answer + "]"
 	}
 	st.Question = ""
-	st.Status = StatusRunning
-	if err := r.store().Save(st); err != nil {
-		return State{}, err
-	}
+	// Do not persist StatusRunning here: runState takes the run lock and
+	// stamps the owner. A pre-lock Running write is unowned and un-healable.
 	r.fire(Event{Kind: EventStep, State: st, Text: "escalation answered: " + answer})
 	r.store().AppendEvent(st.ID, LogEvent{Kind: "resume", Status: st.Status, Step: st.Step, Text: answer, Plan: planPtr(st.Plan)})
 	return r.runState(ctx, st)
@@ -273,11 +271,16 @@ func (r *Runner) executor() *Executor {
 }
 
 func (r *Runner) runState(ctx context.Context, st State) (State, error) {
-	release, err := acquireRun(st.ID)
+	release, err := acquireRunExclusive(r.store(), st.ID)
 	if err != nil {
 		return st, err
 	}
 	defer release()
+
+	// Heal stale Running left by a crashed peer before we re-enter the loop.
+	if healStaleRunning(&st) {
+		_ = r.store().Save(st)
+	}
 
 	if st.Status == StatusDone {
 		r.fire(Event{Kind: EventDone, State: st, Text: "already done"})
@@ -285,6 +288,7 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 	}
 	st.Status = StatusRunning
 	st.Error = ""
+	setRunOwner(&st)
 	if st.StartedAt.IsZero() {
 		st.StartedAt = time.Now().UTC()
 	}
