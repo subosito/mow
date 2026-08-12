@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -12,6 +13,12 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
+)
+
+const (
+	defaultHealthTimeoutSec = 5
+	maxHealthTimeoutSec     = 30
+	maxHealthBodyBytes      = 8 << 10
 )
 
 func init() {
@@ -30,10 +37,13 @@ type HealthCheck struct {
 }
 
 func (h HealthCheck) timeoutSec() int {
+	if h.Timeout > maxHealthTimeoutSec {
+		return maxHealthTimeoutSec
+	}
 	if h.Timeout > 0 {
 		return h.Timeout
 	}
-	return 5
+	return defaultHealthTimeoutSec
 }
 
 func (h HealthCheck) expectedStatus() int {
@@ -57,6 +67,9 @@ func (h HealthCheck) hostAllowed(rawURL string) (string, error) {
 	if host == "" {
 		return "", fmt.Errorf("health url has no host")
 	}
+	if ip := net.ParseIP(host); ip != nil && blockedHealthIP(ip) {
+		return "", fmt.Errorf("health url host %q is not a permitted address", host)
+	}
 	if isLoopbackHost(host) {
 		return host, nil
 	}
@@ -76,6 +89,52 @@ func isLoopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// safeHealthDial resolves addr and filters destination IPs before connect.
+// loopbackOnly: only loopback IPs (localhost cannot be rebound off-box).
+// otherwise: skip link-local / unspecified / multicast (metadata rebinding).
+func safeHealthDial(timeout time.Duration, loopbackOnly bool) func(context.Context, string, string) (net.Conn, error) {
+	d := &net.Dialer{Timeout: timeout}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		var last error
+		for _, ipa := range ips {
+			ip := ipa.IP
+			if loopbackOnly {
+				if !ip.IsLoopback() {
+					last = fmt.Errorf("resolved %s to non-loopback %s", host, ip)
+					continue
+				}
+			} else if blockedHealthIP(ip) {
+				last = fmt.Errorf("resolved %s to blocked address %s", host, ip)
+				continue
+			}
+			c, err := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+			if err == nil {
+				return c, nil
+			}
+			last = err
+		}
+		if last == nil {
+			last = fmt.Errorf("no usable address for %s", host)
+		}
+		return nil, last
+	}
+}
+
+func blockedHealthIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
 }
 
 type healthTool struct{}
@@ -129,16 +188,29 @@ func probeHealth(ctx context.Context, svcName string, h HealthCheck) (string, er
 	for k, v := range h.Headers {
 		req.Header.Set(k, v)
 	}
+	// Never honor HTTP_PROXY: a proxy would let a "loopback" probe leave the box.
+	// Loopback names may only connect to loopback IPs. Allowed hosts still
+	// resolve via DNS but cannot land on link-local/metadata (rebinding).
+	transport := &http.Transport{
+		Proxy:             nil,
+		DisableKeepAlives: true,
+		DialContext:       safeHealthDial(timeout, isLoopbackHost(host)),
+	}
 	client := &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
+		Transport: transport,
 		// Redirects must re-pass the allowlist: without this a declared
 		// loopback probe could be bounced to an arbitrary internal host.
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects")
 			}
-			if _, err := h.hostAllowed(req.URL.String()); err != nil {
+			redirHost, err := h.hostAllowed(req.URL.String())
+			if err != nil {
 				return fmt.Errorf("redirect blocked: %w", err)
+			}
+			if isLoopbackHost(host) && !isLoopbackHost(redirHost) {
+				return fmt.Errorf("redirect blocked: loopback probe left loopback")
 			}
 			return nil
 		},
@@ -149,6 +221,7 @@ func probeHealth(ctx context.Context, svcName string, h HealthCheck) (string, er
 		return fmt.Sprintf("UNHEALTHY service=%s host=%s: %v", svcName, host, err), nil
 	}
 	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxHealthBodyBytes))
 	elapsed := time.Since(start)
 	status := "HEALTHY"
 	if resp.StatusCode != h.expectedStatus() {

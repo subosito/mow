@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -99,18 +100,30 @@ func readRunbook(dir, name string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, name+".md")
-	raw, err := os.ReadFile(path)
+	f, st, err := openRegular(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("runbook %q not found", name)
 		}
 		return "", err
 	}
-	if len(raw) > maxRunbookBytes {
-		raw = raw[:maxRunbookBytes]
-		return strings.TrimSpace(string(raw)) + "\n…(truncated)", nil
+	defer f.Close()
+	limit := int64(maxRunbookBytes)
+	truncated := st.Size() > limit
+	if !truncated {
+		limit = st.Size()
 	}
-	return strings.TrimSpace(string(raw)), nil
+	raw := make([]byte, limit)
+	n, err := io.ReadFull(f, raw)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return "", err
+	}
+	raw = raw[:n]
+	body := strings.TrimSpace(string(raw))
+	if truncated {
+		return body + "\n…(truncated)", nil
+	}
+	return body, nil
 }
 
 type runbookTool struct{}

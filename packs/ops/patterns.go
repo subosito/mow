@@ -18,13 +18,14 @@ func init() {
 }
 
 // LogPattern declares a regex the tick greps for in a service's logs. When a
-// match count reaches Threshold within Window the pattern is alerting
-// (candidates for ops_incident with the pattern name as signature).
+// match count over the bounded log tail reaches Threshold the pattern is
+// alerting (candidates for ops_incident with the pattern name as signature).
+// Window is reserved config (the tail cap is the actual window).
 type LogPattern struct {
 	Name      string `yaml:"name"`
 	Regex     string `yaml:"regex"`
 	Threshold int    `yaml:"threshold"` // default 1
-	Window    string `yaml:"window"`    // e.g. "5m"; "" = whole read
+	Window    string `yaml:"window"`    // reserved; not applied
 	Severity  string `yaml:"severity"`  // info|warn|critical; default warn
 }
 
@@ -54,6 +55,11 @@ func (p LogPattern) windowDur() time.Duration {
 	return d
 }
 
+const (
+	maxPatternRegexBytes = 512
+	maxPatternCache      = 64
+)
+
 // Patterns compile once and are reused across ticks (regexes are operator
 // config, not model text).
 var (
@@ -62,6 +68,12 @@ var (
 )
 
 func compilePattern(regex string) (*regexp.Regexp, error) {
+	if strings.TrimSpace(regex) == "" {
+		return nil, fmt.Errorf("empty regex")
+	}
+	if len(regex) > maxPatternRegexBytes {
+		return nil, fmt.Errorf("regex exceeds %d bytes", maxPatternRegexBytes)
+	}
 	patternCacheMu.Lock()
 	defer patternCacheMu.Unlock()
 	if re, ok := patternCache[regex]; ok {
@@ -71,7 +83,9 @@ func compilePattern(regex string) (*regexp.Regexp, error) {
 	if err != nil {
 		return nil, err
 	}
-	patternCache[regex] = re
+	if len(patternCache) < maxPatternCache {
+		patternCache[regex] = re
+	}
 	return re, nil
 }
 
@@ -123,7 +137,7 @@ type patternTool struct{}
 func (patternTool) Name() string   { return "ops_log_pattern" }
 func (patternTool) ReadOnly() bool { return true }
 func (patternTool) Description() string {
-	return "Evaluate declared log patterns (regex + threshold) for a service or all services in an ops profile. Lines matching at/over threshold are marked ALERT — open an ops_incident with the pattern name as signature. Args: ops, service (optional; default all services)."
+	return "Evaluate declared log patterns (regex + threshold over the bounded log tail) for a service or all services in an ops profile. At/over threshold is ALERT — open an ops_incident with the pattern name as signature. Args: ops, service (optional; default all services)."
 }
 func (patternTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"ops":{"type":"string"},"service":{"type":"string"}}}`)

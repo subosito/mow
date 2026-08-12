@@ -246,9 +246,19 @@ Rules worth knowing:
 
 ### Ops (`packs/ops`)
 
-Configured service profiles: services, logs, health, declared log patterns,
-actions, incidents, dependencies, runbooks, and peer-assisted remediation.
-No profile means no ops tools.
+Configured service profiles under `$MOW_HOME/ops/<name>/`: services, logs,
+health, declared log patterns, allowlisted argv actions, incidents, dependencies,
+runbooks, and peer-assisted remediation. No profile means no ops tools.
+
+- `mow ops run NAME` uses `job.Daemon` with a fresh Engine per tick (the job
+  pack owns and Closes it). Sub-second `every` is raised to 1s by job.
+- Log reads refuse symlinks/non-regular files and redact common secret shapes.
+- Incidents are atomic JSON (fsync + rename), id-jailed, size-capped.
+- Health probes are http/https only, ignore `HTTP_PROXY`, cap timeout at 30s,
+  re-check redirects, and dial only loopback IPs for localhost/loopback URLs.
+  `allowed_hosts` still trusts DNS for those names.
+- Actions are operator argv lists (no shell). Any declared key may run, with a
+  60s timeout. `ops_action` still requires `--allow-shell`.
 
 ### LSP (`packs/lsp`)
 

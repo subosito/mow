@@ -14,16 +14,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 )
+
+const (
+	actionTimeout        = 60 * time.Second
+	maxIncidentJSONBytes = 256 << 10
+	maxIncidentText      = 4000
+	maxIncidentActions   = 64
+	maxIncidentList      = 200
+	maxActionName        = 32
+	maxActionOutput      = 16 << 10
+)
+
+// incidentMu serializes open/update/close so two parallel tool calls cannot
+// tear the same file. Cross-process writers still rely on rename atomicity.
+var incidentMu sync.Mutex
 
 func init() {
 	ext.RegisterTool(servicesTool{})
@@ -171,6 +187,9 @@ func (logsTool) Exec(ctx context.Context, args json.RawMessage) (string, error) 
 	if maxLines <= 0 {
 		maxLines = p.logMaxLines(pack)
 	}
+	if maxLines > 2000 {
+		maxLines = 2000
+	}
 	lines, err := readLogFile(src, maxLines, p.logMaxBytes(pack))
 	if err != nil {
 		return "error: " + err.Error(), nil
@@ -201,15 +220,14 @@ func logPathAllowed(svc Service, path string) bool {
 }
 
 func readLogFile(path string, maxLines, maxBytes int) ([]string, error) {
-	f, err := os.Open(path)
+	if maxBytes <= 0 {
+		maxBytes = 256 << 10
+	}
+	f, st, err := openRegular(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
 	size := st.Size()
 	var start int64
 	if size > int64(maxBytes) {
@@ -227,7 +245,7 @@ func readLogFile(path string, maxLines, maxBytes int) ([]string, error) {
 			first = false
 			continue
 		}
-		all = append(all, sc.Text())
+		all = append(all, redactSecrets(sc.Text()))
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
@@ -242,10 +260,10 @@ type actionTool struct{}
 
 func (actionTool) Name() string { return "ops_action" }
 func (actionTool) Description() string {
-	return "Run an allowlisted service action from the ops profile (actions.restart or actions.status argv — no shell). Args: ops, service, action (restart|status). Requires --allow-shell."
+	return "Run an allowlisted service action from the ops profile (argv from config — no shell). Args: ops, service, action (a key under that service's actions map). Requires --allow-shell."
 }
 func (actionTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"ops":{"type":"string"},"service":{"type":"string"},"action":{"type":"string","enum":["restart","status"]}},"required":["service","action"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"ops":{"type":"string"},"service":{"type":"string"},"action":{"type":"string","description":"declared action name (e.g. restart, status)"}},"required":["service","action"]}`)
 }
 func (actionTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
 	eng := mow.EngineFromContext(ctx)
@@ -269,13 +287,12 @@ func (actionTool) Exec(ctx context.Context, args json.RawMessage) (string, error
 	if err != nil {
 		return "error: " + err.Error(), nil
 	}
+	actx, cancel := context.WithTimeout(ctx, actionTimeout)
+	defer cancel()
 	// #nosec G204 — argv is only from operator-owned profile config, not model free text.
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := exec.CommandContext(actx, argv[0], argv[1:]...)
 	out, err := cmd.CombinedOutput()
-	text := strings.TrimSpace(string(out))
-	if len(text) > 16<<10 {
-		text = text[:16<<10] + "…"
-	}
+	text := redactSecrets(truncateLog(strings.TrimSpace(string(out)), maxActionOutput))
 	if err != nil {
 		if text == "" {
 			return fmt.Sprintf("error: ops=%s %s %s: %v", p.Name, a.Service, a.Action, err), nil
@@ -340,6 +357,8 @@ func (incidentTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 }
 
 func listIncidents(dir string) (string, error) {
+	incidentMu.Lock()
+	defer incidentMu.Unlock()
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -349,7 +368,8 @@ func listIncidents(dir string) (string, error) {
 	}
 	var ids []string
 	for _, e := range ents {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		// Skip CreateTemp leftovers (.inc-*.json) — same filter as findOpenBySignature.
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
 		ids = append(ids, strings.TrimSuffix(e.Name(), ".json"))
@@ -358,8 +378,12 @@ func listIncidents(dir string) (string, error) {
 	if len(ids) == 0 {
 		return "incidents: (none)", nil
 	}
+	total := len(ids)
+	if len(ids) > maxIncidentList {
+		ids = ids[:maxIncidentList]
+	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("incidents (%d)\n", len(ids)))
+	b.WriteString(fmt.Sprintf("incidents (%d)\n", total))
 	for _, id := range ids {
 		inc, err := readIncident(dir, id)
 		if err != nil {
@@ -368,25 +392,34 @@ func listIncidents(dir string) (string, error) {
 		}
 		b.WriteString(fmt.Sprintf("  %s [%s] %s sig=%s\n", inc.ID, inc.Status, inc.Summary, inc.Signature))
 	}
+	if total > len(ids) {
+		fmt.Fprintf(&b, "  … %d more\n", total-len(ids))
+	}
 	return strings.TrimRight(b.String(), "\n"), nil
 }
 
 func openIncident(dir, service, signature, summary, note string) (string, error) {
-	signature = strings.TrimSpace(signature)
-	summary = strings.TrimSpace(summary)
+	incidentMu.Lock()
+	defer incidentMu.Unlock()
+	signature = truncateRunes(strings.TrimSpace(signature), maxIncidentText)
+	summary = truncateRunes(strings.TrimSpace(summary), maxIncidentText)
+	note = truncateRunes(strings.TrimSpace(note), maxIncidentText)
 	if signature == "" || summary == "" {
 		return "error: open requires signature and summary", nil
 	}
 	if existing := findOpenBySignature(dir, signature); existing != nil {
 		if note != "" {
 			existing.Actions = append(existing.Actions, time.Now().UTC().Format(time.RFC3339)+" "+note)
+			if len(existing.Actions) > maxIncidentActions {
+				existing.Actions = existing.Actions[len(existing.Actions)-maxIncidentActions:]
+			}
 			existing.Updated = time.Now().UTC()
 			_ = writeIncident(dir, *existing)
 		}
 		raw, _ := json.MarshalIndent(existing, "", "  ")
 		return "existing open incident (deduped by signature):\n" + string(raw), nil
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "error: " + err.Error(), nil
 	}
 	now := time.Now().UTC()
@@ -406,7 +439,10 @@ func openIncident(dir, service, signature, summary, note string) (string, error)
 }
 
 func updateIncident(dir, id, status, note string, forceClose bool) (string, error) {
+	incidentMu.Lock()
+	defer incidentMu.Unlock()
 	id = strings.TrimSpace(id)
+	note = truncateRunes(strings.TrimSpace(note), maxIncidentText)
 	if id == "" {
 		return "error: id required", nil
 	}
@@ -427,6 +463,9 @@ func updateIncident(dir, id, status, note string, forceClose bool) (string, erro
 	}
 	if note != "" {
 		inc.Actions = append(inc.Actions, now.Format(time.RFC3339)+" "+note)
+		if len(inc.Actions) > maxIncidentActions {
+			inc.Actions = inc.Actions[len(inc.Actions)-maxIncidentActions:]
+		}
 	}
 	inc.Updated = now
 	if err := writeIncident(dir, *inc); err != nil {
@@ -481,7 +520,8 @@ func readIncident(dir, id string) (*Incident, error) {
 	if err := validateIncidentID(id); err != nil {
 		return nil, err
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, id+".json"))
+	path := filepath.Join(dir, id+".json")
+	raw, err := readRegularBounded(path, maxIncidentJSONBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -496,12 +536,15 @@ func writeIncident(dir string, inc Incident) error {
 	if err := validateIncidentID(inc.ID); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	raw, err := json.MarshalIndent(inc, "", "  ")
 	if err != nil {
 		return err
+	}
+	if len(raw) > maxIncidentJSONBytes {
+		return fmt.Errorf("incident %s exceeds %d byte cap", inc.ID, maxIncidentJSONBytes)
 	}
 	// Atomic write: temp file in same dir, then rename
 	tmp, err := os.CreateTemp(dir, ".inc-*.json")
@@ -514,11 +557,42 @@ func writeIncident(dir string, inc Incident) error {
 		os.Remove(tmpName)
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
 		return err
 	}
 	return os.Rename(tmpName, filepath.Join(dir, inc.ID+".json"))
+}
+
+func readRegularBounded(path string, max int) ([]byte, error) {
+	f, st, err := openRegular(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if st.Size() > int64(max) {
+		return nil, fmt.Errorf("ops: file exceeds %d byte cap", max)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, int64(max)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > max {
+		return nil, fmt.Errorf("ops: file exceeds %d byte cap", max)
+	}
+	return data, nil
+}
+
+func truncateRunes(s string, n int) string {
+	if n <= 0 || len([]rune(s)) <= n {
+		return s
+	}
+	return string([]rune(s)[:n]) + "…"
 }
 
 func sanitizeID(sig string) string {

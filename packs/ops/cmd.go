@@ -12,8 +12,11 @@ import (
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/packs/job"
+	"time"
 	"unicode/utf8"
 )
+
+const statusTimeout = 30 * time.Second
 
 // opsCmd is the mow ops entrypoint.
 //
@@ -360,9 +363,11 @@ func cmdStatus(opsFlag string, args []string) int {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", svcName, err)
 			return 1
 		}
-		cmd := exec.Command(argv[0], argv[1:]...)
+		ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
+		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 		out, err := cmd.CombinedOutput()
-		fmt.Printf("%s %s\n", svcName, strings.TrimSpace(string(out)))
+		cancel()
+		fmt.Printf("%s %s\n", svcName, redactSecrets(strings.TrimSpace(string(out))))
 		if err != nil {
 			return 1
 		}
@@ -458,6 +463,7 @@ func cmdRun(opsFlag string, args []string) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	// NewEngine returns a fresh engine per tick; job.Daemon owns and Closes it.
 	d := &job.Daemon{
 		Schedules: []job.Job{j},
 		NewEngine: func() (*mow.Engine, error) {

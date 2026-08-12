@@ -14,6 +14,12 @@ import (
 	"github.com/subosito/mow/extcfg"
 )
 
+const (
+	maxProfileBytes = 1 << 20 // 1 MiB
+	maxPromptBytes  = 64 << 10
+	maxServices     = 64
+)
+
 // PackConfig is extensions.ops — pack-level settings only.
 // Fleet catalogs live in named dirs: $MOW_HOME/ops/<name>/config.yaml
 type PackConfig struct {
@@ -145,6 +151,12 @@ func validateOpsName(name string) error {
 	if strings.Contains(name, "/") || strings.Contains(name, `\`) || strings.Contains(name, "..") {
 		return fmt.Errorf("ops name must be a single path segment, got %q", name)
 	}
+	if strings.ContainsAny(name, "\x00\n\r\t") {
+		return fmt.Errorf("ops name contains invalid characters")
+	}
+	if len(name) > 64 {
+		return fmt.Errorf("ops name too long")
+	}
 	return nil
 }
 
@@ -155,7 +167,7 @@ func loadProfile(name string, pack PackConfig) (Profile, error) {
 	}
 	dir := filepath.Join(pack.root(), name)
 	cfgPath := filepath.Join(dir, "config.yaml")
-	raw, err := os.ReadFile(cfgPath)
+	raw, err := readRegularBounded(cfgPath, maxProfileBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Profile{}, fmt.Errorf("ops profile %q not found (expected %s)", name, cfgPath)
@@ -168,8 +180,11 @@ func loadProfile(name string, pack PackConfig) (Profile, error) {
 	}
 	p.Name = name
 	p.Dir = dir
-	if pb, err := os.ReadFile(filepath.Join(dir, "prompt.md")); err == nil {
+	if pb, err := readRegularBounded(filepath.Join(dir, "prompt.md"), maxPromptBytes); err == nil {
 		p.Prompt = strings.TrimSpace(string(pb))
+	}
+	if len(p.Services) > maxServices {
+		p.Services = p.Services[:maxServices]
 	}
 	return p, nil
 }
@@ -280,25 +295,45 @@ func lookupAction(actions map[string][]string, key string) []string {
 	return v
 }
 
+func validateActionName(action string) error {
+	if action == "" {
+		return fmt.Errorf("action required")
+	}
+	if len(action) > maxActionName {
+		return fmt.Errorf("action name too long")
+	}
+	for _, r := range action {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return fmt.Errorf("invalid action %q (want [a-z0-9-_])", action)
+		}
+	}
+	return nil
+}
+
 func (p Profile) actionArgv(service, action string) ([]string, error) {
 	svc, ok := p.service(service)
 	if !ok {
 		return nil, fmt.Errorf("unknown service %q", service)
 	}
 	action = strings.ToLower(strings.TrimSpace(action))
-	var argv []string
-	switch action {
-	case "restart":
-		argv = lookupAction(svc.Actions, "restart")
-	case "status":
-		argv = lookupAction(svc.Actions, "status")
-	default:
-		return nil, fmt.Errorf("action %q not supported (want restart|status)", action)
+	if err := validateActionName(action); err != nil {
+		return nil, err
+	}
+	argv := lookupAction(svc.Actions, action)
+	if len(argv) == 0 {
+		for k, v := range svc.Actions {
+			if strings.EqualFold(k, action) {
+				argv = v
+				break
+			}
+		}
 	}
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("service %q has no actions.%s configured", service, action)
 	}
-	// Reject empty argv elements and bare shell metacharacters in program path.
+	// Reject empty argv elements. Argv is operator config, never model text.
 	for i, a := range argv {
 		if strings.TrimSpace(a) == "" {
 			return nil, fmt.Errorf("actions.%s has empty argv[%d]", action, i)
@@ -353,7 +388,7 @@ func (p Profile) systemAppend() string {
 		}
 		b.WriteString("Runbooks (ops_runbook get name=…): " + strings.Join(names, ", ") + ". ")
 	}
-	b.WriteString("Prefer ops_logs for evidence; ops_action only for allowlisted restart/status; ")
+	b.WriteString("Prefer ops_logs for evidence; ops_action only for allowlisted argv in the profile; ")
 	b.WriteString("ops_incident for durable work items (open/update/close with stable signatures); ")
 	b.WriteString("acp_delegate to a service's acp peer when code or config in that repo can fix the issue. ")
 	b.WriteString("Open incidents only for problems that need attention; close when fixed or stale.")
