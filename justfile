@@ -50,6 +50,12 @@ build-mowi:
 smoke-tui: build-mowi
     ./scripts/smoke-tui.sh
 
+# Deterministic shell-use smoke for diff band geometry/colours — no model.
+# Paints a fixed unified diff via the real render path and asserts per-cell
+# char/fg/bg (shared sign column, continuous bands, contrast floor).
+smoke-diff:
+    ./scripts/smoke-diff-cells.sh
+
 # Closest local approximation of a CI run: no developer credentials and an
 # empty MOW_HOME. CI has no API key, so tests that build an Engine fail there
 # while passing on a box where ~/.mow supplies one. Run this before pushing.

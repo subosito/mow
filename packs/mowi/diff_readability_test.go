@@ -1,6 +1,7 @@
 package mowi
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -12,6 +13,36 @@ import (
 func extractTrueColorFGs(s string) []string {
 	re := regexp.MustCompile(`38;2;\d+;\d+;\d+`)
 	return re.FindAllString(s, -1)
+}
+
+// extractTrueColorBGs returns 48;2;r;g;b sequences from an ANSI row.
+func extractTrueColorBGs(s string) []string {
+	re := regexp.MustCompile(`48;2;\d+;\d+;\d+`)
+	return re.FindAllString(s, -1)
+}
+
+// sgrRGBToHex turns "48;2;r;g;b" / "38;2;r;g;b" into "#rrggbb".
+func sgrRGBToHex(sgr string) string {
+	// "48;2;52;96;71" → #346047
+	parts := strings.Split(sgr, ";")
+	if len(parts) != 5 {
+		return ""
+	}
+	var rgb [3]int
+	for i := 0; i < 3; i++ {
+		n := 0
+		for _, ch := range parts[2+i] {
+			if ch < '0' || ch > '9' {
+				return ""
+			}
+			n = n*10 + int(ch-'0')
+		}
+		if n > 255 {
+			return ""
+		}
+		rgb[i] = n
+	}
+	return fmt.Sprintf("#%02x%02x%02x", rgb[0], rgb[1], rgb[2])
 }
 
 func hasBoldSGR(s string) bool {
@@ -369,6 +400,63 @@ func TestDiffSoftInkAcrossThemes(t *testing.T) {
 				t.Fatalf("harsh white in paint under %s: %q", name, painted)
 			}
 		})
+	}
+}
+
+// Painted add/del row backgrounds must clear the band floor against the theme
+// surface. This is the end-to-end check: resolveDiffBg unit tests can pass
+// while lipgloss emits a different wash if styles drift.
+func TestRenderedDiffBandContrast(t *testing.T) {
+	t.Setenv("MOW_FORCE_COLOR", "1")
+	t.Setenv("NO_COLOR", "")
+	// Pin the adaptive default so the surface is known (userBg), not
+	// catppuccin-mocha which is DefaultThemeName when unconfigured.
+	th := newThemeFrom(ThemeConfig{Name: "default"}, true)
+	src := "@@ -1,2 +1,2 @@\n-timeout := 30\n+timeout := 60\n"
+	out := renderPrettyDiffPath(th, src, "cfg.go", 72)
+	var delRow, addRow string
+	for _, ln := range strings.Split(out, "\n") {
+		plain := xansi.Strip(ln)
+		switch {
+		case strings.Contains(plain, "30") && strings.Contains(plain, "\u2212"):
+			delRow = ln
+		case strings.Contains(plain, "60") && strings.Contains(plain, "+"):
+			addRow = ln
+		}
+	}
+	if delRow == "" || addRow == "" {
+		t.Fatalf("missing del/add rows:\n%s", xansi.Strip(out))
+	}
+	delBGs := extractTrueColorBGs(delRow)
+	addBGs := extractTrueColorBGs(addRow)
+	if len(delBGs) == 0 || len(addBGs) == 0 {
+		t.Fatalf("missing band bg SGR: del=%v add=%v", delBGs, addBGs)
+	}
+	// Body band is the first background on the row (gutter is unwashed).
+	delHex := sgrRGBToHex(delBGs[0])
+	addHex := sgrRGBToHex(addBGs[0])
+	if delHex == "" || addHex == "" {
+		t.Fatalf("bad SGR parse: del=%q add=%q", delBGs[0], addBGs[0])
+	}
+	if delHex == addHex {
+		t.Fatalf("add and del share painted bg %s", addHex)
+	}
+	surface := th.palette.userBg
+	if got := contrastRatio(delHex, surface); got < minDiffBandContrast {
+		t.Errorf("del band contrast %.2f < %.2f (%s on %s)", got, minDiffBandContrast, delHex, surface)
+	}
+	if got := contrastRatio(addHex, surface); got < minDiffBandContrast {
+		t.Errorf("add band contrast %.2f < %.2f (%s on %s)", got, minDiffBandContrast, addHex, surface)
+	}
+	// Restrained syntax: no pure-white tokens on the add row.
+	for _, fg := range extractTrueColorFGs(addRow) {
+		if fg == "38;2;255;255;255" {
+			t.Fatalf("harsh white token on add row: %q", addRow)
+		}
+	}
+	// Signs still present after the stronger wash.
+	if !strings.Contains(xansi.Strip(delRow), "\u2212") || !strings.Contains(xansi.Strip(addRow), "+") {
+		t.Fatalf("signs missing:\n del=%q\n add=%q", xansi.Strip(delRow), xansi.Strip(addRow))
 	}
 }
 

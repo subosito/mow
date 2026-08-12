@@ -734,8 +734,10 @@ func diffWordStyle(c func(string) color.Color, accent, surface string, dark bool
 const (
 	// minDiffBandContrast is how far the row background must sit from the
 	// surface behind it. Below roughly 1.5 the band stops registering as a
-	// block on most displays, especially light themes.
-	minDiffBandContrast = 1.75
+	// block on most displays, especially light themes. 2.0 is a deliberate
+	// step above the old 1.75 floor: soft washes still read as tint rather
+	// than a solid block when the accent is already close to the surface.
+	minDiffBandContrast = 2.0
 	// minDiffTextContrast is the floor for the row's own text against its new
 	// background. The band must never be strengthened to the point where the
 	// +/− line itself becomes hard to read.
@@ -800,9 +802,14 @@ func resolveDiffBg(override, accent string, p palette, dark bool) string {
 	// tinted, not washed. Nothing legible sits on this colour any more, which
 	// removes the ceiling an earlier version had to respect (numbers needed
 	// 4.5:1 against the band, capping how dark it could go) and lets the wash
-	// be a quiet backing rather than a compromise between two jobs. Deeper and
-	// duller reads better behind syntax-coloured code.
-	t := 0.30
+	// be a quiet backing rather than a compromise between two jobs.
+	//
+	// Starting mix stays moderate so low-chroma chroma styles (algol, bw) keep
+	// add/del separable: raising t on light greys collapses both bands onto
+	// the same mid-tone. Strength comes from the contrast floor below — themes
+	// that were sitting on the old 1.75 line (mocha del, light defaults) get
+	// pushed until the panel reads as a block, while syntax FGs stay soft.
+	t := 0.36
 	if !dark {
 		t = 0.26
 	}
@@ -820,15 +827,15 @@ func resolveDiffBg(override, accent string, p palette, dark bool) string {
 	}
 	// When the accent is itself close to the surface, mixing the two can never
 	// escape the surface — a fully saturated wash still lands on top of it.
-	// Custom themes do hit this. Step the band toward the opposite luminance
-	// pole instead so the row separates even from a palette that gives us
-	// nothing to work with; the hue is already lost in that case, so keeping
-	// the row *findable* matters more than keeping it tinted.
+	// Custom themes do hit this. Step the band toward an accent-tinted pole
+	// (not pure white/black) so add and del keep a residual hue difference
+	// when both have to leave the surface the same way.
 	if contrastRatio(bg, base) < minDiffBandContrast {
-		pole := "#ffffff"
+		pure := "#ffffff"
 		if !dark {
-			pole = "#000000"
+			pure = "#000000"
 		}
+		pole := mixHex(pure, accent, 0.40)
 		for i := 0; i < 10 && contrastRatio(bg, base) < minDiffBandContrast; i++ {
 			bg = mixHex(bg, pole, 0.10)
 		}

@@ -139,18 +139,64 @@ func TestDiffFgHandlesEmptyInput(t *testing.T) {
 	}
 }
 
-// The shipped defaults should be comfortably clear of the floor, not sitting
-// on it. If a palette edit drags them down to the minimum, that is worth
-// noticing before a user reports "the diff is too soft" again.
+// The shipped defaults should clear the floor. Dark has natural headroom from
+// saturated accents; light sits nearer the floor after the wash, so the gate
+// is the floor itself — reporting "too soft" again means the floor dropped.
 func TestDefaultPalettesHaveHeadroom(t *testing.T) {
-	const want = 1.75
 	for _, dark := range []bool{true, false} {
 		p := defaultPalette(dark)
+		want := minDiffBandContrast
+		if dark {
+			// Saturated accents clear the floor with a little air; del is the
+			// tighter of the pair on the default palette.
+			want = 2.05
+		}
 		for _, d := range []struct{ kind, accent string }{{"add", p.add}, {"del", p.del}} {
 			bg := resolveDiffBg("", d.accent, p, dark)
 			if got := contrastRatio(bg, p.userBg); got < want {
 				t.Errorf("default dark=%v %s band contrast %.2f < %.2f", dark, d.kind, got, want)
 			}
 		}
+	}
+}
+
+// Stronger bands must still leave accent body text legible and must not
+// collapse add/del into one identical wash (direction would vanish).
+func TestStrongerDiffBandsStayLegible(t *testing.T) {
+	for _, c := range diffPalettes() {
+		t.Run(c.name, func(t *testing.T) {
+			addBg := resolveDiffBg("", c.p.add, c.p, c.dark)
+			delBg := resolveDiffBg("", c.p.del, c.p, c.dark)
+			base := c.p.userBg
+			if base == "" {
+				base = c.p.border
+			}
+			if base == "" {
+				if c.dark {
+					base = "#1e1e2e"
+				} else {
+					base = "#f3f4f6"
+				}
+			}
+			if got := contrastRatio(addBg, base); got < minDiffBandContrast {
+				t.Errorf("add band %.2f < floor %.2f", got, minDiffBandContrast)
+			}
+			if got := contrastRatio(delBg, base); got < minDiffBandContrast {
+				t.Errorf("del band %.2f < floor %.2f", got, minDiffBandContrast)
+			}
+			if addBg == delBg {
+				t.Errorf("add and del share background %s", addBg)
+			}
+			for _, d := range []struct{ kind, accent, bg string }{
+				{"add", c.p.add, addBg},
+				{"del", c.p.del, delBg},
+			} {
+				fg := diffFgOn(d.accent, d.bg, c.dark)
+				if got := contrastRatio(fg, d.bg); got < minDiffTextContrast {
+					t.Errorf("%s text %.2f < floor %.2f (fg %s on %s)",
+						d.kind, got, minDiffTextContrast, fg, d.bg)
+				}
+			}
+		})
 	}
 }
