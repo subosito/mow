@@ -12,6 +12,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -108,6 +109,8 @@ func registerAll(configPaths ...string) error {
 
 // RegisterServers starts each server and registers tools.
 func RegisterServers(servers []ServerConfig) error {
+	gen := ext.BeforeNewGeneration()
+	var registered []string
 	for _, s := range servers {
 		name := s.Name
 		if name == "" {
@@ -121,6 +124,7 @@ func RegisterServers(servers []ServerConfig) error {
 		case strings.TrimSpace(s.Command) != "":
 			rc := &reconnectingClient{cfg: s}
 			if err = rc.ensure(context.Background()); err != nil {
+				rollbackTransports(registered)
 				return fmt.Errorf("mcp %s: %w", name, err)
 			}
 			tr = rc
@@ -128,19 +132,25 @@ func RegisterServers(servers []ServerConfig) error {
 			continue
 		}
 		if err != nil {
+			rollbackTransports(registered)
 			return fmt.Errorf("mcp %s: %w", name, err)
 		}
 		// initialize for HTTP too
 		if ht, ok := tr.(*httpTransport); ok {
 			if err := ht.initialize(context.Background()); err != nil {
+				_ = tr.Close()
+				rollbackTransports(registered)
 				return fmt.Errorf("mcp %s init: %w", name, err)
 			}
 		}
 		tools, err := tr.listTools(context.Background())
 		if err != nil {
 			_ = tr.Close()
+			rollbackTransports(registered)
 			return fmt.Errorf("mcp %s list: %w", name, err)
 		}
+		registerTransport(name, gen, tr)
+		registered = append(registered, name)
 		ext.RegisterExtensionInstance("mcp", name, s.MinTurns)
 		n := 0
 		for _, t := range tools {
@@ -157,6 +167,12 @@ func RegisterServers(servers []ServerConfig) error {
 		fmt.Fprintf(os.Stderr, "mcp: registered %d tool(s) from %q\n", n, name)
 	}
 	return nil
+}
+
+func rollbackTransports(names []string) {
+	for _, name := range names {
+		unregisterTransport(name)
+	}
 }
 
 // toolTransport is stdio or HTTP.
@@ -238,6 +254,10 @@ func (r *reconnectingClient) callTool(ctx context.Context, name string, args jso
 	if err == nil {
 		return out, nil
 	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		r.reset()
+		return "", err
+	}
 	// reconnect once
 	r.reset()
 	if err2 := r.ensure(ctx); err2 != nil {
@@ -258,11 +278,14 @@ func (r *reconnectingClient) Close() error {
 }
 
 type client struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	mu     sync.Mutex
-	nextID atomic.Int64
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	stdout    *bufio.Reader
+	stderr    *stderrRing
+	mu        sync.Mutex
+	nextID    atomic.Int64
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func startServer(s ServerConfig) (*client, error) {
@@ -271,6 +294,7 @@ func startServer(s ServerConfig) (*client, error) {
 	for k, v := range s.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
+	setServerProcAttr(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -279,27 +303,30 @@ func startServer(s ServerConfig) (*client, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd.Stderr = os.Stderr
+	errOut := newStderrRing(maxStderrRetain)
+	cmd.Stderr = errOut
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	c := &client{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
+	c := &client{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), stderr: errOut}
 	_, err = c.call(context.Background(), "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "mow", "version": "0.1.0"},
 	})
 	if err != nil {
+		tail := c.stderr.tail()
 		_ = c.Close()
-		return nil, err
+		return nil, appendStderrHint(err, tail)
 	}
 	// MCP requires this notification before any other request. A write failure
 	// here means the pipe is already gone, so the server never leaves the
 	// initializing state and every later call would block or fail with a
 	// confusing error instead of naming the real cause.
 	if err := c.notify("notifications/initialized", map[string]any{}); err != nil {
+		tail := c.stderr.tail()
 		_ = c.Close()
-		return nil, fmt.Errorf("initialized notification: %w", err)
+		return nil, appendStderrHint(fmt.Errorf("initialized notification: %w", err), tail)
 	}
 	return c, nil
 }
@@ -336,16 +363,22 @@ func (c *client) callTool(ctx context.Context, name string, args json.RawMessage
 		IsError bool `json:"isError"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return string(raw), nil
+		out, limErr := aggregateToolText(string(raw))
+		if limErr != nil {
+			return "", limErr
+		}
+		return out, nil
 	}
-	var b strings.Builder
+	var texts []string
 	for _, block := range res.Content {
 		if block.Text != "" {
-			b.WriteString(block.Text)
-			b.WriteByte('\n')
+			texts = append(texts, block.Text)
 		}
 	}
-	out := strings.TrimSpace(b.String())
+	out, err := aggregateToolText(texts...)
+	if err != nil {
+		return "", err
+	}
 	if res.IsError {
 		return "", fmt.Errorf("mcp tool error: %s", out)
 	}
@@ -353,20 +386,20 @@ func (c *client) callTool(ctx context.Context, name string, args json.RawMessage
 }
 
 func (c *client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	id := c.nextID.Add(1)
 	req := map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}
 	raw, _ := json.Marshal(req)
 	raw = append(raw, '\n')
-	if _, err := c.stdin.Write(raw); err != nil {
+
+	c.mu.Lock()
+	_, err := c.stdin.Write(raw)
+	c.mu.Unlock()
+	if err != nil {
 		return nil, err
 	}
+
 	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		line, err := c.stdout.ReadBytes('\n')
+		line, err := c.readLine(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -378,7 +411,9 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		// finish our call. Ignoring it deadlocks — the server waits for a
 		// reply we never send while we wait for a response it never sends.
 		if msg.isRequest() {
+			c.mu.Lock()
 			c.rejectRequest(msg.ID, msg.Method)
+			c.mu.Unlock()
 			continue
 		}
 		if !msg.isReplyTo(id) {
@@ -389,6 +424,34 @@ func (c *client) call(ctx context.Context, method string, params any) (json.RawM
 		}
 		return msg.Result, nil
 	}
+}
+
+func (c *client) readLine(ctx context.Context) ([]byte, error) {
+	type lineResult struct {
+		line []byte
+		err  error
+	}
+	ch := make(chan lineResult, 1)
+	go func() {
+		line, err := c.stdout.ReadBytes('\n')
+		ch <- lineResult{line: line, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		c.interrupt()
+		<-ch // wait for ReadBytes to unblock after process kill
+		return nil, ctx.Err()
+	case r := <-ch:
+		if len(r.line) > maxStdioLineBytes {
+			c.interrupt()
+			return nil, fmt.Errorf("mcp: stdout line exceeds %d bytes", maxStdioLineBytes)
+		}
+		return r.line, r.err
+	}
+}
+
+func (c *client) interrupt() {
+	killServerTree(c.cmd)
 }
 
 // rejectRequest answers a server→client request we do not implement.
@@ -472,14 +535,16 @@ func (c *client) notify(method string, params any) error {
 }
 
 func (c *client) Close() error {
-	_ = c.stdin.Close()
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
-	}
-	if c.cmd != nil {
-		return c.cmd.Wait()
-	}
-	return nil
+	c.closeOnce.Do(func() {
+		if c.stdin != nil {
+			_ = c.stdin.Close()
+		}
+		killServerTree(c.cmd)
+		if c.cmd != nil {
+			c.closeErr = c.cmd.Wait()
+		}
+	})
+	return c.closeErr
 }
 
 type mcpTool struct {

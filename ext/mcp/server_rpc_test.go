@@ -30,7 +30,7 @@ func serveLines(t *testing.T, reqs ...string) []string {
 	t.Helper()
 	var out bytes.Buffer
 	in := strings.NewReader(strings.Join(reqs, "\n") + "\n")
-	if code := serve(serveTestEngine(t), in, &out); code != 0 {
+	if code := serve(context.Background(), serveTestEngine(t), in, &out); code != 0 {
 		t.Fatalf("serve code=%d", code)
 	}
 	body := strings.TrimSpace(out.String())

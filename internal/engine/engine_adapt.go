@@ -67,8 +67,9 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 	var life lifeHooks
 	hooks := opt.Hooks
 
+	loadUser := opt.LoadUserConfig
 	if !opt.DisableExtensionHooks {
-		for _, fn := range ext.PreToolHooks() {
+		for _, fn := range ext.PreToolHooksForEngine(loadUser) {
 			fn := fn
 			h.PreTool = append(h.PreTool, adaptPreToolExt(fn))
 		}
@@ -78,7 +79,7 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 		h.PreTool = append(h.PreTool, adaptPreTool(fn))
 	}
 	if !opt.DisableExtensionHooks {
-		for _, fn := range ext.PostToolHooks() {
+		for _, fn := range ext.PostToolHooksForEngine(loadUser) {
 			fn := fn
 			h.PostTool = append(h.PostTool, adaptPostToolExt(fn))
 		}
@@ -88,11 +89,11 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 		h.PostTool = append(h.PostTool, adaptPostTool(fn))
 	}
 	if !opt.DisableExtensionHooks {
-		for _, fn := range ext.PreModelHooks() {
+		for _, fn := range ext.PreModelHooksForEngine(loadUser) {
 			fn := fn
 			h.PreModel = append(h.PreModel, adaptPreModelExt(fn))
 		}
-		for _, fn := range ext.PreCompactHooks() {
+		for _, fn := range ext.PreCompactHooksForEngine(loadUser) {
 			fn := fn
 			h.PreCompact = append(h.PreCompact, adaptPreCompactExt(fn))
 		}
@@ -102,7 +103,7 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 		h.PreCompact = append(h.PreCompact, adaptPreCompact(fn))
 	}
 	if !opt.DisableExtensionHooks {
-		for _, fn := range ext.AfterTurnHooks() {
+		for _, fn := range ext.AfterTurnHooksForEngine(loadUser) {
 			fn := fn
 			h.AfterTurn = append(h.AfterTurn, func(ctx context.Context, e agent.AfterTurnEvent) {
 				fn(ctx, ext.AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
@@ -117,7 +118,7 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 	}
 
 	if !opt.DisableExtensionHooks {
-		for _, fn := range ext.SessionStartHooks() {
+		for _, fn := range ext.SessionStartHooksForEngine(loadUser) {
 			fn := fn
 			life.onSessionStart = append(life.onSessionStart, adaptSessionStartExt(fn))
 		}
@@ -127,7 +128,7 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 		life.onSessionStart = append(life.onSessionStart, fn)
 	}
 	if !opt.DisableExtensionHooks {
-		for _, fn := range ext.UserPromptHooks() {
+		for _, fn := range ext.UserPromptHooksForEngine(loadUser) {
 			fn := fn
 			life.onUserPrompt = append(life.onUserPrompt, adaptUserPromptExt(fn))
 		}
@@ -137,7 +138,7 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 		life.onUserPrompt = append(life.onUserPrompt, fn)
 	}
 	if !opt.DisableExtensionHooks {
-		for _, fn := range ext.StopHooks() {
+		for _, fn := range ext.StopHooksForEngine(loadUser) {
 			fn := fn
 			life.onStop = append(life.onStop, adaptStopExt(fn))
 		}

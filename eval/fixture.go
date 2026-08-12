@@ -64,8 +64,21 @@ type Fixture struct {
 	Cases []Case `json:"cases"`
 }
 
+// maxFixtureBytes caps on-disk fixture size (prevents accidental huge loads).
+const maxFixtureBytes = 8 << 20 // 8 MiB
+
+// maxFixtureCases caps how many cases one fixture file may declare.
+const maxFixtureCases = 500
+
 // LoadFixture reads a JSON fixture from path.
 func LoadFixture(path string) (Fixture, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return Fixture{}, err
+	}
+	if st.Size() > maxFixtureBytes {
+		return Fixture{}, fmt.Errorf("eval: fixture %q too large (%d bytes; max %d)", path, st.Size(), maxFixtureBytes)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Fixture{}, err
@@ -75,6 +88,9 @@ func LoadFixture(path string) (Fixture, error) {
 
 // ParseFixture decodes fixture JSON from bytes.
 func ParseFixture(raw []byte) (Fixture, error) {
+	if len(raw) > maxFixtureBytes {
+		return Fixture{}, fmt.Errorf("eval: fixture too large (%d bytes; max %d)", len(raw), maxFixtureBytes)
+	}
 	raw = []byte(strings.TrimSpace(string(raw)))
 	if len(raw) == 0 {
 		return Fixture{}, fmt.Errorf("eval: empty fixture")
@@ -92,6 +108,9 @@ func ParseFixture(raw []byte) (Fixture, error) {
 			}
 			if len(f.Cases) == 0 {
 				return Fixture{}, fmt.Errorf("eval: fixture has no cases")
+			}
+			if len(f.Cases) > maxFixtureCases {
+				return Fixture{}, fmt.Errorf("eval: fixture has %d cases (max %d)", len(f.Cases), maxFixtureCases)
 			}
 			return f, nil
 		}

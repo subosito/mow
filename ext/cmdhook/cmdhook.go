@@ -51,16 +51,30 @@ type PluginConfig struct {
 	HooksFile  string `yaml:"hooks_file"`
 	TimeoutSec int    `yaml:"timeout_sec"`
 	MinTurns   int    `yaml:"min_turns"`
+	// FailClosed: when true, hook timeout/failure blocks the tool/prompt
+	// (same as exit code 2). Default false = fail-open (warn only).
+	FailClosed *bool `yaml:"fail_closed"`
 }
 
 // Config is extensions.cmdhook.
 type Config struct {
-	Root       string                  `yaml:"root"`
-	HooksFile  string                  `yaml:"hooks_file"`
-	TimeoutSec int                     `yaml:"timeout_sec"`
-	MinTurns   int                     `yaml:"min_turns"`
+	Root       string `yaml:"root"`
+	HooksFile  string `yaml:"hooks_file"`
+	TimeoutSec int    `yaml:"timeout_sec"`
+	MinTurns   int    `yaml:"min_turns"`
+	// FailClosed is the default for plugins that omit fail_closed.
+	// false/omitted = fail-open on timeout or non-blocking failures (historical).
+	// true = treat timeout/exec failure as block (policy hooks).
+	FailClosed bool                    `yaml:"fail_closed"`
 	Plugins    map[string]PluginConfig `yaml:"plugins"`
 }
+
+// hookSource is the ext.ClearHookSource / Register*Source id for this pack.
+const hookSource = "cmdhook"
+
+// maxHookIOBytes caps each of stdout/stderr retained from a hook subprocess.
+// Excess is discarded so a runaway plugin cannot bloat the agent context or logs.
+const maxHookIOBytes = 64 << 10
 
 func (c Config) resolved() []PluginConfig {
 	var out []PluginConfig
@@ -84,12 +98,14 @@ func (c Config) resolved() []PluginConfig {
 		if name == "" || name == "." {
 			name = "default"
 		}
+		fc := c.FailClosed
 		out = append(out, PluginConfig{
 			Name:       name,
 			Root:       c.Root,
 			HooksFile:  c.HooksFile,
 			TimeoutSec: c.TimeoutSec,
 			MinTurns:   c.MinTurns,
+			FailClosed: &fc,
 		})
 	}
 	return out
@@ -135,15 +151,11 @@ type bridge struct {
 	root           string
 	timeout        time.Duration
 	minTurns       int
+	failClosed     bool
 	events         map[string][]compiled
 	mu             sync.Mutex
 	sessionStarted bool
 }
-
-var (
-	mu         sync.Mutex
-	registered bool
-)
 
 func init() {
 	ext.RegisterBeforeNew(func(configPaths ...string) error {
@@ -151,12 +163,14 @@ func init() {
 	})
 }
 
+// setup re-registers cmdhook from the current BeforeNew path list every time.
+// Prior registrations are cleared first so profile B cannot inherit profile A
+// hooks, and hermetic engines do not keep host plugins after a later host New.
 func setup(configPaths ...string) error {
-	mu.Lock()
-	defer mu.Unlock()
-	if registered {
-		return nil
-	}
+	// Drop previous generation's hooks/instances before loading this config.
+	ext.ClearHookSource(hookSource)
+	ext.ClearExtensionKind("cmdhook")
+
 	var c Config
 	ok, err := extcfg.DecodeSection("cmdhook", configPaths, &c)
 	if err != nil {
@@ -179,19 +193,19 @@ func setup(configPaths ...string) error {
 	if len(plugins) == 0 {
 		return nil
 	}
-	loaded := false
+	rootFailClosed := c.FailClosed
 	for _, p := range plugins {
+		if p.FailClosed == nil {
+			fc := rootFailClosed
+			p.FailClosed = &fc
+		}
 		b, err := load(p)
 		if err != nil {
 			return err
 		}
 		if b != nil {
 			b.register()
-			loaded = true
 		}
-	}
-	if loaded {
-		registered = true
 	}
 	return nil
 }
@@ -220,7 +234,14 @@ func load(p PluginConfig) (*bridge, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	b := &bridge{name: p.Name, root: root, timeout: timeout, minTurns: p.MinTurns, events: map[string][]compiled{}}
+	fc := false
+	if p.FailClosed != nil {
+		fc = *p.FailClosed
+	}
+	b := &bridge{
+		name: p.Name, root: root, timeout: timeout, minTurns: p.MinTurns,
+		failClosed: fc, events: map[string][]compiled{},
+	}
 	n := 0
 	for event, entries := range file.Hooks {
 		for _, me := range entries {
@@ -325,7 +346,8 @@ func (b *bridge) run(ctx context.Context, event, matchName string, payload map[s
 }
 
 // execOne runs a single command hook. ok=false means the run failed
-// non-blockingly (timeout, bad JSON, nonzero-but-not-2 exit) and was logged.
+// non-blockingly (timeout, bad JSON, nonzero-but-not-2 exit) and was logged,
+// unless failClosed turns the failure into a block.
 func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]any) (ho hookOut, blocked bool, reason string, ok bool) {
 	timeout := b.timeout
 	if ce.Timeout > 0 {
@@ -368,15 +390,18 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 		return ho, false, "", false
 	}
 	cmd.Stdin = bytes.NewReader(in)
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr cappedBuffer
+	stdout.max = maxHookIOBytes
+	stderr.max = maxHookIOBytes
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	runErr := cmd.Run()
+	stderrText := sanitizeHookDiag(strings.TrimSpace(stderr.String()))
 	if runErr != nil {
 		if ee, isExit := runErr.(*exec.ExitError); isExit && ee.ExitCode() == 2 {
 			// Claude contract: exit 2 blocks; stderr is the reason for the model.
-			return ho, true, strings.TrimSpace(stderr.String()), true
+			return ho, true, firstNonEmpty(stderrText, "blocked by cmdhook"), true
 		}
 		// Cancellation is not a hook failure. On Ctrl+C the whole context is
 		// torn down and every in-flight hook dies with "context canceled" —
@@ -390,16 +415,24 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 		if ctx.Err() != nil || errors.Is(runErr, context.Canceled) {
 			return ho, false, "", false
 		}
+		cmdLabel := sanitizeHookDiag(firstNonEmpty(truncate(cmdStr, 80), cmdStr))
 		if errors.Is(runErr, context.DeadlineExceeded) || tctx.Err() != nil {
-			slog.Warn("cmdhook: hook timed out (non-blocking)",
-				"command", firstNonEmpty(truncate(cmdStr, 80), cmdStr),
+			msg := "cmdhook: hook timed out"
+			if b.failClosed {
+				return ho, true, firstNonEmpty(stderrText, "cmdhook timed out"), true
+			}
+			slog.Warn(msg+" (non-blocking)",
+				"command", cmdLabel,
 				"timeout", timeout,
-				"stderr", truncate(stderr.String(), 200))
+				"stderr", truncate(stderrText, 200))
 			return ho, false, "", false
 		}
+		if b.failClosed {
+			return ho, true, firstNonEmpty(stderrText, "cmdhook failed: "+runErr.Error()), true
+		}
 		slog.Warn("cmdhook: hook failed (non-blocking)",
-			"command", firstNonEmpty(truncate(cmdStr, 80), cmdStr), "err", runErr,
-			"stderr", truncate(stderr.String(), 200))
+			"command", cmdLabel, "err", runErr,
+			"stderr", truncate(stderrText, 200))
 		return ho, false, "", false
 	}
 	body := bytes.TrimSpace(stdout.Bytes())
@@ -408,10 +441,94 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 	}
 	if err := json.Unmarshal(body, &ho); err != nil {
 		// Plain-text stdout on some events is additional context in Claude;
-		// treat it the same way.
+		// treat it the same way. Cap is already enforced by cappedBuffer.
 		ho.HookSpecificOutput.AdditionalContext = string(body)
 	}
 	return ho, false, "", true
+}
+
+// cappedBuffer retains at most max bytes while still accepting all writes so
+// the child never blocks on a full pipe.
+type cappedBuffer struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if c.max <= 0 {
+		return len(p), nil
+	}
+	remain := c.max - c.buf.Len()
+	if remain > 0 {
+		if len(p) > remain {
+			_, _ = c.buf.Write(p[:remain])
+		} else {
+			_, _ = c.buf.Write(p)
+		}
+	}
+	return len(p), nil
+}
+
+func (c *cappedBuffer) Bytes() []byte  { return c.buf.Bytes() }
+func (c *cappedBuffer) String() string { return c.buf.String() }
+
+// sanitizeHookDiag redacts common secret shapes from diagnostic log lines.
+func sanitizeHookDiag(s string) string {
+	if s == "" {
+		return s
+	}
+	// Key=value / key: value for common secret names.
+	for _, key := range []string{"api_key", "apikey", "token", "secret", "password", "authorization", "bearer"} {
+		s = redactKeyValue(s, key)
+	}
+	// sk-… style tokens
+	if i := strings.Index(s, "sk-"); i >= 0 {
+		j := i + 3
+		for j < len(s) && isSecretRune(s[j]) {
+			j++
+		}
+		if j-i > 8 {
+			s = s[:i] + "sk-[redacted]" + s[j:]
+		}
+	}
+	return s
+}
+
+func isSecretRune(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '-' || b == '_'
+}
+
+func redactKeyValue(s, key string) string {
+	lower := strings.ToLower(s)
+	k := strings.ToLower(key)
+	pos := 0
+	for pos < len(lower) {
+		i := strings.Index(lower[pos:], k)
+		if i < 0 {
+			break
+		}
+		i += pos
+		j := i + len(k)
+		for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '"' || s[j] == '\'') {
+			j++
+		}
+		if j >= len(s) || (s[j] != '=' && s[j] != ':') {
+			pos = i + 1
+			continue
+		}
+		j++
+		for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '"' || s[j] == '\'') {
+			j++
+		}
+		k2 := j
+		for k2 < len(s) && !strings.ContainsRune("&\r\n,}\"' \t", rune(s[k2])) {
+			k2++
+		}
+		s = s[:j] + "[redacted]" + s[k2:]
+		lower = strings.ToLower(s)
+		pos = j + len("[redacted]")
+	}
+	return s
 }
 
 func (b *bridge) runSessionStart(ctx context.Context) string {
@@ -459,7 +576,7 @@ func (b *bridge) register() {
 	target := "cmdhook:" + b.name
 
 	if len(b.events["PreToolUse"]) > 0 {
-		ext.RegisterPreTool(func(ctx context.Context, e ext.PreToolEvent) (ext.PreToolDecision, error) {
+		ext.RegisterPreToolSource(hookSource, func(ctx context.Context, e ext.PreToolEvent) (ext.PreToolDecision, error) {
 			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return ext.PreToolDecision{}, nil
 			}
@@ -480,14 +597,15 @@ func (b *bridge) register() {
 		})
 	}
 	if len(b.events["PostToolUse"]) > 0 {
-		ext.RegisterPostTool(func(ctx context.Context, e ext.PostToolEvent) (ext.PostToolDecision, error) {
+		ext.RegisterPostToolSource(hookSource, func(ctx context.Context, e ext.PostToolEvent) (ext.PostToolDecision, error) {
 			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return ext.PostToolDecision{}, nil
 			}
 			payload := b.basePayload(ctx, "PostToolUse")
 			payload["tool_name"] = claudeToolName(e.Name)
 			payload["tool_input"] = rawOrEmpty(e.Args)
-			payload["tool_response"] = e.Result
+			// Bound tool_response before shipping it to an untrusted shell hook.
+			payload["tool_response"] = truncate(e.Result, maxHookIOBytes)
 			out := b.run(ctx, "PostToolUse", claudeToolName(e.Name), payload)
 			if out.blocked {
 				return ext.PostToolDecision{
@@ -505,7 +623,7 @@ func (b *bridge) register() {
 		})
 	}
 	if len(b.events["UserPromptSubmit"]) > 0 {
-		ext.RegisterUserPrompt(func(ctx context.Context, e ext.UserPromptEvent) (ext.UserPromptDecision, error) {
+		ext.RegisterUserPromptSource(hookSource, func(ctx context.Context, e ext.UserPromptEvent) (ext.UserPromptDecision, error) {
 			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return ext.UserPromptDecision{}, nil
 			}
@@ -530,7 +648,7 @@ func (b *bridge) register() {
 		})
 	}
 	if len(b.events["SessionStart"]) > 0 {
-		ext.RegisterSessionStart(func(ctx context.Context, e ext.SessionStartEvent) (ext.SessionStartDecision, error) {
+		ext.RegisterSessionStartSource(hookSource, func(ctx context.Context, e ext.SessionStartEvent) (ext.SessionStartDecision, error) {
 			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return ext.SessionStartDecision{}, nil
 			}
@@ -539,7 +657,7 @@ func (b *bridge) register() {
 		})
 	}
 	if len(b.events["Stop"]) > 0 {
-		ext.RegisterStop(func(ctx context.Context, e ext.StopEvent) {
+		ext.RegisterStopSource(hookSource, func(ctx context.Context, e ext.StopEvent) {
 			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return
 			}
@@ -552,7 +670,7 @@ func (b *bridge) register() {
 		})
 	}
 	if len(b.events["PreCompact"]) > 0 {
-		ext.RegisterPreCompact(func(ctx context.Context, e ext.PreCompactEvent) (ext.PreCompactDecision, error) {
+		ext.RegisterPreCompactSource(hookSource, func(ctx context.Context, e ext.PreCompactEvent) (ext.PreCompactDecision, error) {
 			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return ext.PreCompactDecision{}, nil
 			}

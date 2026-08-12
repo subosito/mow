@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -50,6 +51,7 @@ type httpTransport struct {
 	auth    *tokenSource
 	client  *http.Client
 	nextID  atomic.Int64
+	mu      sync.Mutex
 	session string // optional Mcp-Session-Id from server
 }
 
@@ -116,16 +118,22 @@ func (h *httpTransport) callTool(ctx context.Context, name string, args json.Raw
 		IsError bool `json:"isError"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return string(raw), nil
+		out, limErr := aggregateToolText(string(raw))
+		if limErr != nil {
+			return "", limErr
+		}
+		return out, nil
 	}
-	var b strings.Builder
+	var texts []string
 	for _, block := range res.Content {
 		if block.Text != "" {
-			b.WriteString(block.Text)
-			b.WriteByte('\n')
+			texts = append(texts, block.Text)
 		}
 	}
-	out := strings.TrimSpace(b.String())
+	out, err := aggregateToolText(texts...)
+	if err != nil {
+		return "", err
+	}
 	if res.IsError {
 		return "", fmt.Errorf("mcp tool error: %s", out)
 	}
@@ -146,9 +154,11 @@ func (h *httpTransport) call(ctx context.Context, method string, params any) (js
 	for k, v := range h.headers {
 		req.Header.Set(k, v)
 	}
+	h.mu.Lock()
 	if h.session != "" {
 		req.Header.Set("Mcp-Session-Id", h.session)
 	}
+	h.mu.Unlock()
 	if err := h.auth.apply(req); err != nil {
 		return nil, err
 	}
@@ -158,7 +168,9 @@ func (h *httpTransport) call(ctx context.Context, method string, params any) (js
 	}
 	defer res.Body.Close()
 	if sid := res.Header.Get("Mcp-Session-Id"); sid != "" {
+		h.mu.Lock()
 		h.session = sid
+		h.mu.Unlock()
 	}
 	// On 401, force token refresh once for oauth2.
 	if res.StatusCode == http.StatusUnauthorized && h.auth != nil {
@@ -175,9 +187,11 @@ func (h *httpTransport) call(ctx context.Context, method string, params any) (js
 		for k, v := range h.headers {
 			req2.Header.Set(k, v)
 		}
+		h.mu.Lock()
 		if h.session != "" {
 			req2.Header.Set("Mcp-Session-Id", h.session)
 		}
+		h.mu.Unlock()
 		if err := h.auth.apply(req2); err != nil {
 			return nil, err
 		}
@@ -186,6 +200,11 @@ func (h *httpTransport) call(ctx context.Context, method string, params any) (js
 			return nil, err
 		}
 		defer res.Body.Close()
+		if sid := res.Header.Get("Mcp-Session-Id"); sid != "" {
+			h.mu.Lock()
+			h.session = sid
+			h.mu.Unlock()
+		}
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
@@ -195,7 +214,7 @@ func (h *httpTransport) call(ctx context.Context, method string, params any) (js
 	if strings.Contains(ct, "text/event-stream") {
 		return readSSEResult(res.Body, id)
 	}
-	raw, err := io.ReadAll(res.Body)
+	raw, err := io.ReadAll(io.LimitReader(res.Body, maxHTTPBodyBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -227,9 +246,11 @@ func (h *httpTransport) notify(ctx context.Context, method string, params any) e
 	for k, v := range h.headers {
 		req.Header.Set(k, v)
 	}
+	h.mu.Lock()
 	if h.session != "" {
 		req.Header.Set("Mcp-Session-Id", h.session)
 	}
+	h.mu.Unlock()
 	if err := h.auth.apply(req); err != nil {
 		return err
 	}
@@ -256,6 +277,9 @@ func readSSEResult(r io.Reader, wantID int64) (json.RawMessage, error) {
 			continue
 		}
 		if line == "" && data.Len() > 0 {
+			if data.Len() > maxHTTPBodyBytes {
+				return nil, fmt.Errorf("sse: data exceeds %d bytes", maxHTTPBodyBytes)
+			}
 			raw := []byte(data.String())
 			data.Reset()
 			var msg struct {

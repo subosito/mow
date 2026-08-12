@@ -26,7 +26,12 @@ func mustLoad(t *testing.T, c Config) *bridge {
 	if len(res) == 0 {
 		t.Fatal("no resolved plugins in config")
 	}
-	b, err := load(res[0])
+	p := res[0]
+	if p.FailClosed == nil && c.FailClosed {
+		fc := true
+		p.FailClosed = &fc
+	}
+	b, err := load(p)
 	if err != nil {
 		t.Fatal(err)
 	}

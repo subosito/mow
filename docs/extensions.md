@@ -97,7 +97,11 @@ Both directions:
 - `mow mcp` / `mowi mcp` expose `mow_prompt` as an MCP stdio server.
 
 No config means no client process. Supports stdio and streamable HTTP plus
-bearer/OAuth modes.
+bearer/OAuth modes. Stdio servers start during `BeforeNew` (host config only);
+replacing a server closes the prior subprocess, and `Engine.Close` releases
+transports for that engine's config generation. Subprocess stderr is captured
+and redacted (not forwarded raw to the terminal). Wire I/O is bounded (line,
+HTTP body, and tool text caps).
 
 ```yaml
 extensions:
@@ -112,10 +116,32 @@ extensions:
 
 ### Process / RPC / command hooks / eval
 
-- `ext/proc`: `proc_start`, `proc_status`, `proc_stop` and `mow proc`.
-- `ext/rpc`: JSON-lines prompt/event/cancel/status control plane.
-- `ext/cmdhook`: configured lifecycle shell hooks (supports single `root` or `plugins` map, plus `min_turns`).
-- `ext/eval`: eval/replay fixtures and command.
+- `ext/proc`: `proc_start`, `proc_status`, `proc_stop` and `mow proc`. Stop
+  signals the process group; log tails are size-capped.
+- `ext/rpc`: JSON-lines prompt/event/cancel/status control plane. `mow rpc`
+  always `Close`s the Engine on exit. Cancel/status use a dedicated channel so
+  a full prompt queue cannot starve control methods; event deltas and prompt
+  text are size-capped.
+- `ext/cmdhook`: Claude-style lifecycle shell hooks (`root` or `plugins` map,
+  `min_turns`). Hooks re-register on every `BeforeNew` (no first-config pin);
+  prior cmdhook hooks are cleared so profiles do not leak across Engines.
+  Hermetic engines only see the current generation of hooks. Hook stdout/stderr
+  are capped (~64KiB); diagnostics redact common secrets. Default is **fail-open**
+  on timeout/non-2 exit (warn only); set `fail_closed: true` to block like exit 2.
+- `ext/eval`: eval/replay fixtures and command (fixture size/case count capped).
+
+```yaml
+extensions:
+  cmdhook:
+    fail_closed: false   # default: timeout/fail does not block
+    root: /path/to/plugin
+    # or:
+    plugins:
+      policy:
+        root: /path/to/policy
+        fail_closed: true  # timeouts and exec errors deny the tool
+        min_turns: 0
+```
 
 ### Extension lifecycle & turn control (`mow ext` / `/ext`)
 

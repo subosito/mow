@@ -179,19 +179,28 @@ type toolEntry struct {
 	gen  int // 0 = static (init / RegisterTool outside BeforeNew); >0 = BeforeNew gen
 }
 
+// hookEntry tags a lifecycle hook with BeforeNew generation and optional source
+// pack name (e.g. "cmdhook") so packs can replace their hooks without leaking
+// prior profile registrations across Engine construction.
+type hookEntry[T any] struct {
+	fn     T
+	gen    int    // 0 = static (outside BeforeNew); >0 = BeforeNew generation
+	source string // empty for anonymous; packs use a stable id for ClearHookSource
+}
+
 var (
 	mu         sync.Mutex
 	tools      []toolEntry
 	commands   []Command
 	beforeNew  []func(configPaths ...string) error
-	preTool    []PreToolFunc
-	postTool   []PostToolFunc
-	userPrompt []UserPromptFunc
-	sessStart  []SessionStartFunc
-	preCompact []PreCompactFunc
-	preModel   []PreModelFunc
-	afterTurn  []AfterTurnFunc
-	stop       []StopFunc
+	preTool    []hookEntry[PreToolFunc]
+	postTool   []hookEntry[PostToolFunc]
+	userPrompt []hookEntry[UserPromptFunc]
+	sessStart  []hookEntry[SessionStartFunc]
+	preCompact []hookEntry[PreCompactFunc]
+	preModel   []hookEntry[PreModelFunc]
+	afterTurn  []hookEntry[AfterTurnFunc]
+	stop       []hookEntry[StopFunc]
 
 	extInstances map[string]*ExtensionState
 
@@ -199,7 +208,23 @@ var (
 	// hooks run so RegisterTool can tag config-sourced tools.
 	beforeNewGen    int
 	beforeNewActive bool
+
+	// generationRelease runs when the last Engine tied to a BeforeNew generation
+	// closes (see NoteEngineGeneration / ReleaseEngineGeneration).
+	generationRelease []func(gen int)
+	genEngineRefs     map[int]int
 )
+
+func currentRegGen() int {
+	if beforeNewActive {
+		return beforeNewGen
+	}
+	return 0
+}
+
+func keepHookGen(loadUserConfig bool, gen int) bool {
+	return loadUserConfig || gen == 0 || gen == beforeNewGen
+}
 
 // ExtensionState describes a registered extension instance (e.g. MCP server or cmdhook plugin).
 type ExtensionState struct {
@@ -256,6 +281,59 @@ func RegisterExtensionInstance(kind, name string, minTurns int) {
 		Kind:     kind,
 		MinTurns: minTurns,
 	}
+}
+
+// ClearExtensionKind removes all extension instances of the given kind
+// (e.g. "cmdhook") so a pack can re-register for a new BeforeNew generation.
+func ClearExtensionKind(kind string) {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for k, inst := range extInstances {
+		if inst != nil && strings.EqualFold(inst.Kind, kind) {
+			delete(extInstances, k)
+		}
+	}
+}
+
+// ClearHookSource removes all lifecycle hooks tagged with source (e.g. "cmdhook").
+// Used by packs that re-register on every BeforeNew so prior profile hooks do
+// not accumulate in the process-global registry.
+func ClearHookSource(source string) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	preTool = filterHookSource(preTool, source)
+	postTool = filterHookSource(postTool, source)
+	userPrompt = filterHookSource(userPrompt, source)
+	sessStart = filterHookSource(sessStart, source)
+	preCompact = filterHookSource(preCompact, source)
+	preModel = filterHookSource(preModel, source)
+	afterTurn = filterHookSource(afterTurn, source)
+	stop = filterHookSource(stop, source)
+}
+
+func filterHookSource[T any](in []hookEntry[T], source string) []hookEntry[T] {
+	if len(in) == 0 {
+		return nil
+	}
+	out := in[:0]
+	for _, e := range in {
+		if e.source != source {
+			out = append(out, e)
+		}
+	}
+	// Avoid retaining dropped entries in the underlying array.
+	if len(out) == 0 {
+		return nil
+	}
+	return append([]hookEntry[T](nil), out...)
 }
 
 // SetExtensionEnabled sets explicit enabled/disabled state for extension(s) matching target.
@@ -400,139 +478,232 @@ func ToolsForEngine(loadUserConfig bool) []Tool {
 }
 
 // RegisterPreTool appends a global pre-tool hook (deny / rewrite args / extra context).
-func RegisterPreTool(fn PreToolFunc) {
+func RegisterPreTool(fn PreToolFunc) { RegisterPreToolSource("", fn) }
+
+// RegisterPreToolSource is RegisterPreTool with a pack source id for ClearHookSource.
+func RegisterPreToolSource(source string, fn PreToolFunc) {
 	if fn == nil {
 		return
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	preTool = append(preTool, fn)
+	preTool = append(preTool, hookEntry[PreToolFunc]{fn: fn, gen: currentRegGen(), source: source})
 }
 
 // RegisterPostTool appends a global post-tool hook (rewrite result shown to model).
-func RegisterPostTool(fn PostToolFunc) {
+func RegisterPostTool(fn PostToolFunc) { RegisterPostToolSource("", fn) }
+
+// RegisterPostToolSource is RegisterPostTool with a pack source id.
+func RegisterPostToolSource(source string, fn PostToolFunc) {
 	if fn == nil {
 		return
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	postTool = append(postTool, fn)
+	postTool = append(postTool, hookEntry[PostToolFunc]{fn: fn, gen: currentRegGen(), source: source})
 }
 
 // RegisterUserPrompt appends a global user-prompt hook (rewrite text / system append).
-func RegisterUserPrompt(fn UserPromptFunc) {
+func RegisterUserPrompt(fn UserPromptFunc) { RegisterUserPromptSource("", fn) }
+
+// RegisterUserPromptSource is RegisterUserPrompt with a pack source id.
+func RegisterUserPromptSource(source string, fn UserPromptFunc) {
 	if fn == nil {
 		return
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	userPrompt = append(userPrompt, fn)
+	userPrompt = append(userPrompt, hookEntry[UserPromptFunc]{fn: fn, gen: currentRegGen(), source: source})
 }
 
 // RegisterSessionStart appends a global session-start hook (system append on Engine New).
-func RegisterSessionStart(fn SessionStartFunc) {
+func RegisterSessionStart(fn SessionStartFunc) { RegisterSessionStartSource("", fn) }
+
+// RegisterSessionStartSource is RegisterSessionStart with a pack source id.
+func RegisterSessionStartSource(source string, fn SessionStartFunc) {
 	if fn == nil {
 		return
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	sessStart = append(sessStart, fn)
+	sessStart = append(sessStart, hookEntry[SessionStartFunc]{fn: fn, gen: currentRegGen(), source: source})
 }
 
 // RegisterPreCompact appends a global pre-compact hook.
-func RegisterPreCompact(fn PreCompactFunc) {
+func RegisterPreCompact(fn PreCompactFunc) { RegisterPreCompactSource("", fn) }
+
+// RegisterPreCompactSource is RegisterPreCompact with a pack source id.
+func RegisterPreCompactSource(source string, fn PreCompactFunc) {
 	if fn == nil {
 		return
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	preCompact = append(preCompact, fn)
+	preCompact = append(preCompact, hookEntry[PreCompactFunc]{fn: fn, gen: currentRegGen(), source: source})
 }
 
 // RegisterAfterTurn appends a global after-turn hook.
-func RegisterAfterTurn(fn AfterTurnFunc) {
+func RegisterAfterTurn(fn AfterTurnFunc) { RegisterAfterTurnSource("", fn) }
+
+// RegisterAfterTurnSource is RegisterAfterTurn with a pack source id.
+func RegisterAfterTurnSource(source string, fn AfterTurnFunc) {
 	if fn == nil {
 		return
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	afterTurn = append(afterTurn, fn)
+	afterTurn = append(afterTurn, hookEntry[AfterTurnFunc]{fn: fn, gen: currentRegGen(), source: source})
 }
 
 // RegisterStop appends a global stop hook (after Prompt finishes).
-func RegisterStop(fn StopFunc) {
+func RegisterStop(fn StopFunc) { RegisterStopSource("", fn) }
+
+// RegisterStopSource is RegisterStop with a pack source id.
+func RegisterStopSource(source string, fn StopFunc) {
 	if fn == nil {
 		return
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	stop = append(stop, fn)
-}
-
-// PreToolHooks returns a copy of registered pre-tool hooks.
-func PreToolHooks() []PreToolFunc {
-	mu.Lock()
-	defer mu.Unlock()
-	return append([]PreToolFunc(nil), preTool...)
-}
-
-// PostToolHooks returns a copy of registered post-tool hooks.
-func PostToolHooks() []PostToolFunc {
-	mu.Lock()
-	defer mu.Unlock()
-	return append([]PostToolFunc(nil), postTool...)
-}
-
-// UserPromptHooks returns a copy of registered user-prompt hooks.
-func UserPromptHooks() []UserPromptFunc {
-	mu.Lock()
-	defer mu.Unlock()
-	return append([]UserPromptFunc(nil), userPrompt...)
-}
-
-// SessionStartHooks returns a copy of registered session-start hooks.
-func SessionStartHooks() []SessionStartFunc {
-	mu.Lock()
-	defer mu.Unlock()
-	return append([]SessionStartFunc(nil), sessStart...)
+	stop = append(stop, hookEntry[StopFunc]{fn: fn, gen: currentRegGen(), source: source})
 }
 
 // RegisterPreModel appends a global pre-model hook (spend gate, kill switch).
-func RegisterPreModel(fn PreModelFunc) {
+func RegisterPreModel(fn PreModelFunc) { RegisterPreModelSource("", fn) }
+
+// RegisterPreModelSource is RegisterPreModel with a pack source id.
+func RegisterPreModelSource(source string, fn PreModelFunc) {
 	if fn == nil {
 		return
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	preModel = append(preModel, fn)
+	preModel = append(preModel, hookEntry[PreModelFunc]{fn: fn, gen: currentRegGen(), source: source})
 }
 
-// PreModelHooks returns a copy of registered pre-model hooks.
+func collectHooks[T any](entries []hookEntry[T], loadUserConfig bool, filter bool) []T {
+	out := make([]T, 0, len(entries))
+	for _, e := range entries {
+		if filter && !keepHookGen(loadUserConfig, e.gen) {
+			continue
+		}
+		out = append(out, e.fn)
+	}
+	return out
+}
+
+// PreToolHooks returns every registered pre-tool hook (all generations).
+func PreToolHooks() []PreToolFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(preTool, true, false)
+}
+
+// PreToolHooksForEngine returns pre-tool hooks for Engine construction.
+// Hermetic engines (loadUserConfig=false) only see static hooks and the current
+// BeforeNew generation — matching ToolsForEngine.
+func PreToolHooksForEngine(loadUserConfig bool) []PreToolFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(preTool, loadUserConfig, true)
+}
+
+// PostToolHooks returns every registered post-tool hook.
+func PostToolHooks() []PostToolFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(postTool, true, false)
+}
+
+// PostToolHooksForEngine is the Engine-scoped filter for post-tool hooks.
+func PostToolHooksForEngine(loadUserConfig bool) []PostToolFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(postTool, loadUserConfig, true)
+}
+
+// UserPromptHooks returns every registered user-prompt hook.
+func UserPromptHooks() []UserPromptFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(userPrompt, true, false)
+}
+
+// UserPromptHooksForEngine is the Engine-scoped filter for user-prompt hooks.
+func UserPromptHooksForEngine(loadUserConfig bool) []UserPromptFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(userPrompt, loadUserConfig, true)
+}
+
+// SessionStartHooks returns every registered session-start hook.
+func SessionStartHooks() []SessionStartFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(sessStart, true, false)
+}
+
+// SessionStartHooksForEngine is the Engine-scoped filter for session-start hooks.
+func SessionStartHooksForEngine(loadUserConfig bool) []SessionStartFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(sessStart, loadUserConfig, true)
+}
+
+// PreModelHooks returns every registered pre-model hook.
 func PreModelHooks() []PreModelFunc {
 	mu.Lock()
 	defer mu.Unlock()
-	return append([]PreModelFunc(nil), preModel...)
+	return collectHooks(preModel, true, false)
 }
 
-// PreCompactHooks returns a copy of registered pre-compact hooks.
+// PreModelHooksForEngine is the Engine-scoped filter for pre-model hooks.
+func PreModelHooksForEngine(loadUserConfig bool) []PreModelFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(preModel, loadUserConfig, true)
+}
+
+// PreCompactHooks returns every registered pre-compact hook.
 func PreCompactHooks() []PreCompactFunc {
 	mu.Lock()
 	defer mu.Unlock()
-	return append([]PreCompactFunc(nil), preCompact...)
+	return collectHooks(preCompact, true, false)
 }
 
-// AfterTurnHooks returns a copy of registered after-turn hooks.
+// PreCompactHooksForEngine is the Engine-scoped filter for pre-compact hooks.
+func PreCompactHooksForEngine(loadUserConfig bool) []PreCompactFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(preCompact, loadUserConfig, true)
+}
+
+// AfterTurnHooks returns every registered after-turn hook.
 func AfterTurnHooks() []AfterTurnFunc {
 	mu.Lock()
 	defer mu.Unlock()
-	return append([]AfterTurnFunc(nil), afterTurn...)
+	return collectHooks(afterTurn, true, false)
 }
 
-// StopHooks returns a copy of registered stop hooks.
+// AfterTurnHooksForEngine is the Engine-scoped filter for after-turn hooks.
+func AfterTurnHooksForEngine(loadUserConfig bool) []AfterTurnFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(afterTurn, loadUserConfig, true)
+}
+
+// StopHooks returns every registered stop hook.
 func StopHooks() []StopFunc {
 	mu.Lock()
 	defer mu.Unlock()
-	return append([]StopFunc(nil), stop...)
+	return collectHooks(stop, true, false)
+}
+
+// StopHooksForEngine is the Engine-scoped filter for stop hooks.
+func StopHooksForEngine(loadUserConfig bool) []StopFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(stop, loadUserConfig, true)
 }
 
 // RegisterCommand adds a CLI subcommand (typically from pack init).
@@ -596,6 +767,88 @@ func RegisterBeforeNew(fn func(configPaths ...string) error) {
 	beforeNew = append(beforeNew, fn)
 }
 
+// BeforeNewGeneration returns the active config/tool generation after the most
+// recent BeforeNew call (0 if none yet). Extensions tag process-global resources
+// (MCP transports, …) with this value so Engine.Close can release them.
+func BeforeNewGeneration() int {
+	mu.Lock()
+	defer mu.Unlock()
+	return beforeNewGen
+}
+
+// RegisterGenerationRelease registers a callback when the last Engine for a
+// BeforeNew generation closes. Used by extensions that start subprocesses during
+// BeforeNew (MCP stdio servers).
+func RegisterGenerationRelease(fn func(gen int)) {
+	if fn == nil {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	generationRelease = append(generationRelease, fn)
+}
+
+// NoteEngineGeneration records that an Engine was constructed after BeforeNew
+// for gen. Pair with ReleaseEngineGeneration via Engine.RegisterCleanup.
+func NoteEngineGeneration(gen int) {
+	if gen <= 0 {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if genEngineRefs == nil {
+		genEngineRefs = make(map[int]int)
+	}
+	genEngineRefs[gen]++
+}
+
+// GenerationEngineRefs returns how many open Engines were constructed after
+// BeforeNew for gen (0 when none or gen <= 0).
+func GenerationEngineRefs(gen int) int {
+	if gen <= 0 {
+		return 0
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if genEngineRefs == nil {
+		return 0
+	}
+	return genEngineRefs[gen]
+}
+
+// ReleaseEngineGeneration drops one Engine reference for gen and invokes
+// generation release hooks when the count reaches zero.
+func ReleaseEngineGeneration(gen int) {
+	if gen <= 0 {
+		return
+	}
+	mu.Lock()
+	if genEngineRefs == nil {
+		mu.Unlock()
+		return
+	}
+	n, ok := genEngineRefs[gen]
+	if !ok {
+		mu.Unlock()
+		return
+	}
+	n--
+	if n <= 0 {
+		delete(genEngineRefs, gen)
+	} else {
+		genEngineRefs[gen] = n
+	}
+	refs := n
+	fns := append([]func(int){}, generationRelease...)
+	mu.Unlock()
+	if refs > 0 {
+		return
+	}
+	for _, fn := range fns {
+		fn(gen)
+	}
+}
+
 // BeforeNew invokes all RegisterBeforeNew hooks (best-effort; first error returned).
 // Each call bumps the tool registration generation so ToolsForEngine can
 // isolate config-sourced tools per Engine construction.
@@ -637,4 +890,7 @@ func Reset() {
 	extInstances = nil
 	beforeNewGen = 0
 	beforeNewActive = false
+	genEngineRefs = nil
+	// generationRelease is init-registered (e.g. MCP transport cleanup) and
+	// intentionally survives Reset so tests and hosts do not lose release hooks.
 }

@@ -157,6 +157,47 @@ func (w *pipeWriter) Close() error {
 	return nil
 }
 
+func TestRPCPromptErrorShape(t *testing.T) {
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{}, context.Canceled
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := strings.NewReader(`{"id":1,"method":"prompt","params":{"text":"x"}}` + "\n")
+	var out bytes.Buffer
+	srv := &rpc.Server{Engine: eng, In: in, Out: &out, StreamEvents: new(bool)}
+	if err := srv.Serve(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			continue
+		}
+		if _, ok := m["error"]; !ok {
+			continue
+		}
+		if _, ok := m["result"]; ok {
+			t.Fatalf("JSON-RPC error response must not include result: %s", line)
+		}
+		var errObj struct {
+			Data map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(m["error"], &errObj); err != nil {
+			t.Fatal(err)
+		}
+		if errObj.Data == nil {
+			t.Fatalf("expected error.data with partial prompt fields: %s", line)
+		}
+		return
+	}
+	t.Fatalf("missing prompt error line: %s", out.String())
+}
+
 func TestRPCEventJSONShape(t *testing.T) {
 	// Ensure event notification unmarshals.
 	raw := `{"method":"event","params":{"type":"run.start","run_id":"run-x","ts":"2026-01-01T00:00:00Z"}}`

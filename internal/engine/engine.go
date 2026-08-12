@@ -147,10 +147,12 @@ func New(opt Options) (*Engine, error) {
 		// (extcfg no longer falls back to Home on its own).
 		beforePaths = prependConfigPath(beforePaths, config.ConfigPath())
 	}
+	extGen := 0
 	if !opt.SkipExtensionSetup {
 		if err := ext.BeforeNew(beforePaths...); err != nil {
 			return nil, fmt.Errorf("extension init: %w", err)
 		}
+		extGen = ext.BeforeNewGeneration()
 	}
 	profileName := ""
 	if activeProfile != nil {
@@ -422,6 +424,11 @@ func New(opt Options) (*Engine, error) {
 	}
 	if opt.OnEvent != nil {
 		e.AddOnEvent(opt.OnEvent)
+	}
+	if extGen > 0 {
+		ext.NoteEngineGeneration(extGen)
+		gen := extGen
+		e.RegisterCleanup(func() { ext.ReleaseEngineGeneration(gen) })
 	}
 	var mediaClient *llm.MediaClient
 	switch {

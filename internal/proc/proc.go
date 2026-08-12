@@ -6,8 +6,10 @@
 package proc
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,7 +160,9 @@ func List(dir string) ([]Info, error) {
 	return out, nil
 }
 
-// Stop SIGTERMs then (if still alive) SIGKILLs id and removes its pid file.
+// Stop SIGTERMs then (if still alive) SIGKILLs the process group for id
+// (Setsid session leader) and removes its pid file. Falls back to the single
+// PID if the group signal fails.
 func Stop(dir, id string) (Info, error) {
 	id = SanitizeID(id)
 	pid, err := readPID(dir, id)
@@ -167,9 +171,12 @@ func Stop(dir, id string) (Info, error) {
 	}
 	alive := pidAlive(pid)
 	if alive {
+		// Process was started with Setsid: negative PID targets the session/group.
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
 		_ = syscall.Kill(pid, syscall.SIGTERM)
 		time.Sleep(200 * time.Millisecond)
 		if pidAlive(pid) {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 		}
 	}
@@ -177,9 +184,15 @@ func Stop(dir, id string) (Info, error) {
 	return Info{ID: id, PID: pid, Alive: false}, nil
 }
 
+// maxTailBytes caps how much of a log file is read for Tail (then line-sliced).
+const maxTailBytes = 1 << 20 // 1 MiB
+
 // Tail returns the last n lines of id's log ("" when no log yet).
+// Only the last maxTailBytes of the file are considered so a huge log cannot
+// fill memory when the agent polls proc_status.
 func Tail(dir, id string, n int) (string, error) {
-	raw, err := os.ReadFile(logPathFor(dir, SanitizeID(id)))
+	path := logPathFor(dir, SanitizeID(id))
+	raw, err := readTailBytes(path, maxTailBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
@@ -191,6 +204,44 @@ func Tail(dir, id string, n int) (string, error) {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+func readTailBytes(path string, max int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	size := st.Size()
+	if size <= 0 {
+		return nil, nil
+	}
+	if max <= 0 {
+		max = maxTailBytes
+	}
+	var start int64
+	if size > int64(max) {
+		start = size - int64(max)
+	}
+	if _, err := f.Seek(start, 0); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, size-start)
+	_, err = io.ReadFull(f, buf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
+	// If we skipped a prefix, drop a partial first line.
+	if start > 0 {
+		if i := bytes.IndexByte(buf, '\n'); i >= 0 {
+			buf = buf[i+1:]
+		}
+	}
+	return buf, nil
 }
 
 func logPathFor(dir, id string) string { return filepath.Join(dir, id+".log") }

@@ -25,6 +25,15 @@ func TestHelperProcess(t *testing.T) {
 	}
 	defer os.Exit(0)
 
+	switch os.Getenv("MCP_HELPER_MODE") {
+	case "marker":
+		runHelperMarker()
+		return
+	case "hang_call":
+		runHelperHangCall()
+		return
+	}
+
 	sc := bufio.NewScanner(os.Stdin)
 	for sc.Scan() {
 		line := sc.Bytes()
@@ -74,6 +83,74 @@ func TestHelperProcess(t *testing.T) {
 			fmt.Println(string(res))
 		}
 	}
+}
+
+func runHelperMarker() {
+	sc := bufio.NewScanner(os.Stdin)
+	for sc.Scan() {
+		line := sc.Bytes()
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if json.Unmarshal(line, &req) != nil || len(req.ID) == 0 {
+			continue
+		}
+		switch req.Method {
+		case "initialize":
+			writeHelperJSON(map[string]any{
+				"jsonrpc": "2.0", "id": req.ID,
+				"result": map[string]any{"protocolVersion": "2024-11-05"},
+			})
+		case "tools/list":
+			writeHelperJSON(map[string]any{
+				"jsonrpc": "2.0", "id": req.ID,
+				"result": map[string]any{"tools": []any{}},
+			})
+			if marker := os.Getenv("MCP_MARKER"); marker != "" {
+				_ = os.WriteFile(marker, []byte(fmt.Sprintf("%d", os.Getpid())), 0o600)
+			}
+			select {}
+		}
+	}
+}
+
+func runHelperHangCall() {
+	sc := bufio.NewScanner(os.Stdin)
+	for sc.Scan() {
+		line := sc.Bytes()
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if json.Unmarshal(line, &req) != nil || len(req.ID) == 0 {
+			continue
+		}
+		switch req.Method {
+		case "initialize":
+			writeHelperJSON(map[string]any{
+				"jsonrpc": "2.0", "id": req.ID,
+				"result": map[string]any{"protocolVersion": "2024-11-05"},
+			})
+		case "tools/list":
+			writeHelperJSON(map[string]any{
+				"jsonrpc": "2.0", "id": req.ID,
+				"result": map[string]any{
+					"tools": []any{map[string]any{
+						"name": "slow", "description": "hangs",
+						"inputSchema": map[string]any{"type": "object"},
+					}},
+				},
+			})
+		case "tools/call":
+			select {}
+		}
+	}
+}
+
+func writeHelperJSON(v any) {
+	raw, _ := json.Marshal(v)
+	fmt.Println(string(raw))
 }
 
 func TestSafeOAuthErrorBodyExtra(t *testing.T) {
@@ -563,7 +640,7 @@ func TestMCPServerCmdAndLifecycle(t *testing.T) {
 			`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"mow_prompt","arguments":{"prompt":""}}}` + "\n",
 	)
 	var out bytes.Buffer
-	code := serve(eng, in, &out)
+	code := serve(context.Background(), eng, in, &out)
 	if code != 0 {
 		t.Fatalf("serve returned code %d, want 0", code)
 	}

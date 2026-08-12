@@ -51,7 +51,8 @@ func serveCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "mow mcp: %v\n", err)
 		return 1
 	}
-	return serve(eng, os.Stdin, os.Stdout)
+	defer eng.Close()
+	return serve(context.Background(), eng, os.Stdin, os.Stdout)
 }
 
 func printMCPUsage() {
@@ -74,11 +75,14 @@ See docs/extensions.md.
 }
 
 // serve runs the newline-delimited JSON-RPC 2.0 loop until stdin closes.
-func serve(eng *mow.Engine, in io.Reader, out io.Writer) int {
+func serve(ctx context.Context, eng *mow.Engine, in io.Reader, out io.Writer) int {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	r := bufio.NewReader(in)
 	enc := json.NewEncoder(out) // Encode appends '\n' → one message per line
 	for {
-		line, err := r.ReadBytes('\n')
+		line, err := readServeLine(ctx, r)
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) > 0 {
 			var req struct {
@@ -93,18 +97,40 @@ func serve(eng *mow.Engine, in io.Reader, out io.Writer) int {
 				_ = enc.Encode(replyErr(json.RawMessage("null"), -32700, "parse error"))
 			} else if len(req.ID) > 0 {
 				// Notifications (no id) get no response.
-				if resp := serveHandle(eng, req.ID, req.Method, req.Params); resp != nil {
+				if resp := serveHandle(ctx, eng, req.ID, req.Method, req.Params); resp != nil {
 					_ = enc.Encode(resp)
 				}
 			}
 		}
 		if err != nil {
+			cancel()
 			return 0 // EOF or read error: stdin closed, exit cleanly
 		}
 	}
 }
 
-func serveHandle(eng *mow.Engine, id json.RawMessage, method string, params json.RawMessage) any {
+func readServeLine(ctx context.Context, r *bufio.Reader) ([]byte, error) {
+	type lineResult struct {
+		line []byte
+		err  error
+	}
+	ch := make(chan lineResult, 1)
+	go func() {
+		line, err := r.ReadBytes('\n')
+		ch <- lineResult{line: line, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if len(res.line) > maxStdioLineBytes {
+			return nil, fmt.Errorf("request line exceeds %d bytes", maxStdioLineBytes)
+		}
+		return res.line, res.err
+	}
+}
+
+func serveHandle(ctx context.Context, eng *mow.Engine, id json.RawMessage, method string, params json.RawMessage) any {
 	switch method {
 	case "initialize":
 		return reply(id, map[string]any{
@@ -117,7 +143,7 @@ func serveHandle(eng *mow.Engine, id json.RawMessage, method string, params json
 	case "tools/list":
 		return reply(id, map[string]any{"tools": []any{promptTool()}})
 	case "tools/call":
-		return serveCallTool(eng, id, params)
+		return serveCallTool(ctx, eng, id, params)
 	default:
 		return replyErr(id, -32601, "method not found: "+method)
 	}
@@ -138,7 +164,7 @@ func promptTool() map[string]any {
 	}
 }
 
-func serveCallTool(eng *mow.Engine, id json.RawMessage, params json.RawMessage) any {
+func serveCallTool(ctx context.Context, eng *mow.Engine, id json.RawMessage, params json.RawMessage) any {
 	var p struct {
 		Name      string `json:"name"`
 		Arguments struct {
@@ -153,7 +179,7 @@ func serveCallTool(eng *mow.Engine, id json.RawMessage, params json.RawMessage) 
 	if strings.TrimSpace(p.Arguments.Prompt) == "" {
 		return toolResult(id, "error: prompt required", true)
 	}
-	res, err := eng.PromptWith(context.Background(), p.Arguments.Prompt, mow.PromptOpts{ReadOnly: p.Arguments.ReadOnly})
+	res, err := eng.PromptWith(ctx, p.Arguments.Prompt, mow.PromptOpts{ReadOnly: p.Arguments.ReadOnly})
 	if err != nil {
 		return toolResult(id, "error: "+err.Error(), true)
 	}

@@ -648,8 +648,7 @@ func TestRegisterUserPromptAllow(t *testing.T) {
 func setupReset(t *testing.T) {
 	t.Helper()
 	ext.Reset()
-	registered = false
-	t.Cleanup(func() { registered = false; ext.Reset() })
+	t.Cleanup(ext.Reset)
 }
 
 func TestSetupFromConfigPaths(t *testing.T) {
@@ -666,18 +665,15 @@ func TestSetupFromConfigPaths(t *testing.T) {
 	if err := setup(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if !registered {
-		t.Fatal("setup should mark registered")
-	}
 	if len(ext.PreToolHooks()) != 1 {
-		t.Fatalf("PreTool hooks = %d", len(ext.PreToolHooks()))
+		t.Fatalf("PreTool hooks = %d want 1", len(ext.PreToolHooks()))
 	}
-	// Second call short-circuits.
+	// Second call replaces (idempotent), does not accumulate.
 	if err := setup(cfg); err != nil {
 		t.Fatal(err)
 	}
 	if len(ext.PreToolHooks()) != 1 {
-		t.Fatalf("double registration: %d", len(ext.PreToolHooks()))
+		t.Fatalf("replace registration: %d want 1", len(ext.PreToolHooks()))
 	}
 }
 
@@ -695,7 +691,7 @@ func TestSetupFallbackFile(t *testing.T) {
 	if err := setup(filepath.Join(mow.Home(), "config.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	if !registered {
+	if len(ext.PreToolHooks()) != 1 {
 		t.Fatal("fallback cmdhook.yaml should register")
 	}
 }
@@ -706,8 +702,8 @@ func TestSetupNoConfig(t *testing.T) {
 	if err := setup(); err != nil {
 		t.Fatal(err)
 	}
-	if registered {
-		t.Fatal("no config should not register")
+	if n := len(ext.PreToolHooks()); n != 0 {
+		t.Fatalf("no config should not register hooks, got %d", n)
 	}
 }
 
@@ -725,8 +721,54 @@ func TestSetupEmptyBridge(t *testing.T) {
 	if err := setup(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if registered {
-		t.Fatal("empty bridge should not register")
+	if n := len(ext.PreToolHooks()); n != 0 {
+		t.Fatalf("empty bridge should not register hooks, got %d", n)
+	}
+}
+
+func TestSetupReplacesAcrossConfigs(t *testing.T) {
+	setupReset(t)
+	t.Setenv("MOW_HOME", t.TempDir())
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	writeHooksJSON(t, rootA, oneEntry("", scriptAt(t, rootA, "a.sh", "true")))
+	writeHooksJSON(t, rootB, oneEntry("", scriptAt(t, rootB, "b.sh", "true")))
+	cfgA := filepath.Join(t.TempDir(), "a.yaml")
+	cfgB := filepath.Join(t.TempDir(), "b.yaml")
+	if err := os.WriteFile(cfgA, []byte("extensions:\n  cmdhook:\n    root: "+rootA+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgB, []byte("extensions:\n  cmdhook:\n    root: "+rootB+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := setup(cfgA); err != nil {
+		t.Fatal(err)
+	}
+	if err := setup(cfgB); err != nil {
+		t.Fatal(err)
+	}
+	// Only one generation of hooks remains (B replaced A).
+	if n := len(ext.PreToolHooks()); n != 1 {
+		t.Fatalf("hooks after replace = %d want 1", n)
+	}
+}
+
+func TestFailClosedTimeoutBlocks(t *testing.T) {
+	root := t.TempDir()
+	slow := scriptAt(t, root, "slow.sh", `sleep 5`)
+	writeHooksJSON(t, root, oneEntry("", slow))
+	b := mustLoad(t, Config{Root: root, TimeoutSec: 1, FailClosed: true})
+	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
+	if !out.blocked {
+		t.Fatalf("fail_closed timeout must block: %+v", out)
+	}
+}
+
+func TestSanitizeHookDiag(t *testing.T) {
+	in := "api_key=supersecret token=abc Bearer xyz sk-abcdefghij"
+	out := sanitizeHookDiag(in)
+	if strings.Contains(out, "supersecret") || strings.Contains(out, "sk-abcdefghij") {
+		t.Fatalf("leaked secret: %q", out)
 	}
 }
 
@@ -771,7 +813,7 @@ func TestSetupErrors(t *testing.T) {
 	if err := setup(hostPaths...); err != nil {
 		t.Fatal(err)
 	}
-	if registered {
-		t.Fatal("empty root should not register")
+	if n := len(ext.PreToolHooks()); n != 0 {
+		t.Fatalf("empty root should not register, hooks=%d", n)
 	}
 }

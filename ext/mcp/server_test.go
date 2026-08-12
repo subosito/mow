@@ -27,7 +27,7 @@ func TestMCPServeFlow(t *testing.T) {
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mow_prompt","arguments":{"prompt":"do a thing"}}}`,
 	}, "\n") + "\n")
 	var out bytes.Buffer
-	if code := serve(eng, in, &out); code != 0 {
+	if code := serve(context.Background(), eng, in, &out); code != 0 {
 		t.Fatalf("serve code=%d", code)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")

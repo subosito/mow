@@ -1,6 +1,7 @@
 package ext_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/subosito/mow/ext"
@@ -53,5 +54,118 @@ func TestBeforeNew(t *testing.T) {
 	}
 	if len(saw) != 1 || saw[0] != "a.yaml" {
 		t.Fatalf("%v", saw)
+	}
+}
+
+func TestHookSourceClearAndHermeticFilter(t *testing.T) {
+	ext.Reset()
+	t.Cleanup(ext.Reset)
+
+	// Static hook (outside BeforeNew).
+	ext.RegisterPreTool(func(ctx context.Context, e ext.PreToolEvent) (ext.PreToolDecision, error) {
+		return ext.PreToolDecision{}, nil
+	})
+	// Config-sourced hooks during BeforeNew.
+	ext.RegisterBeforeNew(func(paths ...string) error {
+		ext.ClearHookSource("cmdhook")
+		ext.RegisterPreToolSource("cmdhook", func(ctx context.Context, e ext.PreToolEvent) (ext.PreToolDecision, error) {
+			return ext.PreToolDecision{Deny: true, Message: "cfg"}, nil
+		})
+		return nil
+	})
+	if err := ext.BeforeNew("x.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(ext.PreToolHooks()); n != 2 {
+		t.Fatalf("all hooks=%d want 2", n)
+	}
+	// Hermetic: static + current gen only (both present).
+	if n := len(ext.PreToolHooksForEngine(false)); n != 2 {
+		t.Fatalf("hermetic hooks=%d want 2", n)
+	}
+	// Second BeforeNew replaces cmdhook source, does not accumulate.
+	if err := ext.BeforeNew("y.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(ext.PreToolHooks()); n != 2 {
+		t.Fatalf("after replace all=%d want 2 (static+one cmdhook)", n)
+	}
+	ext.ClearHookSource("cmdhook")
+	if n := len(ext.PreToolHooks()); n != 1 {
+		t.Fatalf("after clear cmdhook=%d want 1 static", n)
+	}
+}
+
+func TestBeforeNewGenerationRelease(t *testing.T) {
+	ext.Reset()
+	t.Cleanup(ext.Reset)
+
+	var released []int
+	ext.RegisterGenerationRelease(func(gen int) {
+		released = append(released, gen)
+	})
+	ext.RegisterBeforeNew(func(...string) error { return nil })
+	if err := ext.BeforeNew(); err != nil {
+		t.Fatal(err)
+	}
+	gen := ext.BeforeNewGeneration()
+	ext.NoteEngineGeneration(gen)
+	ext.ReleaseEngineGeneration(gen)
+	if len(released) != 1 || released[0] != gen {
+		t.Fatalf("released=%v want [%d]", released, gen)
+	}
+	// Extra release without a matching NoteEngineGeneration is a no-op.
+	ext.ReleaseEngineGeneration(gen)
+	if len(released) != 1 {
+		t.Fatalf("expected single release, got %v", released)
+	}
+}
+
+func TestGenerationEngineRefs(t *testing.T) {
+	ext.Reset()
+	t.Cleanup(ext.Reset)
+
+	if ext.GenerationEngineRefs(1) != 0 {
+		t.Fatal("expected zero refs for unknown gen")
+	}
+	ext.RegisterBeforeNew(func(...string) error { return nil })
+	if err := ext.BeforeNew(); err != nil {
+		t.Fatal(err)
+	}
+	gen := ext.BeforeNewGeneration()
+	ext.NoteEngineGeneration(gen)
+	if ext.GenerationEngineRefs(gen) != 1 {
+		t.Fatalf("refs=%d want 1", ext.GenerationEngineRefs(gen))
+	}
+	ext.ReleaseEngineGeneration(gen)
+	if ext.GenerationEngineRefs(gen) != 0 {
+		t.Fatalf("refs after release=%d want 0", ext.GenerationEngineRefs(gen))
+	}
+}
+
+func TestResetPreservesGenerationRelease(t *testing.T) {
+	ext.Reset()
+	t.Cleanup(ext.Reset)
+
+	var released []int
+	ext.RegisterGenerationRelease(func(gen int) {
+		released = append(released, gen)
+	})
+	ext.RegisterBeforeNew(func(...string) error { return nil })
+	if err := ext.BeforeNew(); err != nil {
+		t.Fatal(err)
+	}
+	gen := ext.BeforeNewGeneration()
+	ext.NoteEngineGeneration(gen)
+	ext.Reset()
+	ext.RegisterBeforeNew(func(...string) error { return nil })
+	if err := ext.BeforeNew(); err != nil {
+		t.Fatal(err)
+	}
+	gen2 := ext.BeforeNewGeneration()
+	ext.NoteEngineGeneration(gen2)
+	ext.ReleaseEngineGeneration(gen2)
+	if len(released) != 1 || released[0] != gen2 {
+		t.Fatalf("released=%v want [%d]", released, gen2)
 	}
 }
