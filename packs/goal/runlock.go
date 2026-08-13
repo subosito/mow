@@ -50,8 +50,9 @@ func clearRunOwner(st *State) {
 
 // healStaleRunning converts StatusRunning → Pending when a recorded owner
 // process is gone so the goal can be resumed without --force. Goals marked
-// Running with no owner metadata are left as-is (legacy files; Remove still
-// guards them; a new run takes the run lock and re-stamps ownership).
+// Running with no owner metadata are left as-is (legacy files; non-force
+// Remove still guards them; --force deletes them only after the run lock is
+// acquired; a new run takes the run lock and re-stamps ownership).
 func healStaleRunning(st *State) bool {
 	if st == nil || st.Status != StatusRunning {
 		return false

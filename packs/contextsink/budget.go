@@ -35,9 +35,13 @@ func getRecoveryBudget(key string) *recoveryBudget {
 }
 
 // acquireRecoveryBudget returns the per-session budget with its mutex held.
-// The registry lock is not held while fn runs, but eviction skips entries
-// whose budget mutex is held so an in-flight search cannot be detached from
-// the map (which would reset its cumulative budget).
+//
+// Lock order: never block on b.mu while holding budgetRegistryMu.
+//   - registry then TryLock(b.mu) is allowed (eviction)
+//   - b.mu then registry is allowed (this function's identity check, chargeBudgetLocked)
+//
+// Eviction skips in-flight entries (TryLock fail) so a search cannot be
+// detached from the map (which would reset its cumulative budget).
 func acquireRecoveryBudget(key string) (b *recoveryBudget, release func()) {
 	for {
 		budgetRegistryMu.Lock()
@@ -50,11 +54,18 @@ func acquireRecoveryBudget(key string) (b *recoveryBudget, release func()) {
 		} else {
 			touchBudgetLRU(key)
 		}
-		if b.mu.TryLock() {
+		budgetRegistryMu.Unlock()
+
+		// Block rather than spin: a search holds b.mu across archive I/O, and
+		// a parallel context_search of the same session must wait, not peg a CPU.
+		b.mu.Lock()
+		budgetRegistryMu.Lock()
+		if budgetByKey[key] == b {
 			budgetRegistryMu.Unlock()
 			return b, func() { b.mu.Unlock() }
 		}
 		budgetRegistryMu.Unlock()
+		b.mu.Unlock()
 	}
 }
 

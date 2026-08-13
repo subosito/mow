@@ -66,10 +66,12 @@ matches intent. Because the default varies with worktree state, the scope header
 always discloses what was actually selected.
 
 Every skipped file carries a **reason** (excluded glob, vendored, generated,
-binary, too large, budget exhausted); `--verbose` prints them. `--budget
-small|medium|large` caps files, bytes, per-file bytes, and turns; a truncated
-scope is flagged in every format so a partial review cannot look like a complete
-clean scan.
+binary, too large, budget exhausted); `--verbose` prints them. The skip list is
+capped at 256 entries. `--budget small|medium|large` caps files, bytes, per-file
+bytes, and turns. Path walks SkipDir default-exclude trees (`node_modules`,
+`vendor`, …) unless `--include-all`. Walks stop after 4096 remaining files so a
+vendored tree cannot hide source. A truncated scope is flagged in every format
+so a partial review cannot look like a complete clean scan.
 
 ## Command defaults
 

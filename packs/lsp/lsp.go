@@ -4,8 +4,10 @@
 //  1. extensions.lsp in -config / $MOW_HOME/config.yaml
 //  2. $MOW_HOME/lsp.yaml
 //
-// A dead transport (EOF, broken pipe, cancelled/expired RPC) restarts the
-// server once and retries. Application errors do not.
+// A dead transport (EOF, broken pipe) restarts the server once and retries
+// when the caller context is still live. A cancelled or expired RPC kills the
+// wedged process and returns; the next call starts a fresh server. Application
+// errors do not restart.
 package lsp
 
 import (
@@ -40,6 +42,8 @@ const (
 	maxLSPSkipFrames = 256
 	// maxLSPDidOpenBytes caps textDocument/didOpen payload size.
 	maxLSPDidOpenBytes = 4 << 20
+	// maxLSPConfigBytes caps $MOW_HOME/lsp.yaml (and similarly sized operator files).
+	maxLSPConfigBytes = 1 << 20
 	// lspInitTimeout bounds the initialize handshake.
 	lspInitTimeout = 30 * time.Second
 )
@@ -71,7 +75,7 @@ func registerAll(configPaths ...string) error {
 			return nil
 		}
 		path := filepath.Join(mow.Home(), "lsp.yaml")
-		raw, rerr := os.ReadFile(path)
+		raw, rerr := readConfigYAML(path)
 		if rerr != nil {
 			return nil
 		}
@@ -92,6 +96,22 @@ func registerAll(configPaths ...string) error {
 	cmd := strings.TrimSpace(c.Command)
 	fmt.Fprintf(os.Stderr, "lsp: registered hover + definition via %q\n", cmd)
 	return nil
+}
+
+func readConfigYAML(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxLSPConfigBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxLSPConfigBytes {
+		return nil, fmt.Errorf("lsp: %s exceeds %d bytes", path, maxLSPConfigBytes)
+	}
+	return data, nil
 }
 
 type reconnecting struct {
@@ -136,6 +156,9 @@ func (r *reconnecting) definition(ctx context.Context, path string, line, col in
 }
 
 func (r *reconnecting) diagnostics(ctx context.Context, path string) ([]mow.Diagnostic, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	c, err := r.liveClient()
 	if err != nil {
 		return nil, err
@@ -145,6 +168,9 @@ func (r *reconnecting) diagnostics(ctx context.Context, path string) ([]mow.Diag
 		return out, err
 	}
 	r.reset()
+	if ctx.Err() != nil {
+		return nil, err
+	}
 	if err2 := r.ensure(ctx); err2 != nil {
 		return nil, fmt.Errorf("%v (reconnect: %v)", err, err2)
 	}
@@ -156,6 +182,9 @@ func (r *reconnecting) diagnostics(ctx context.Context, path string) ([]mow.Diag
 }
 
 func (r *reconnecting) withRetry(ctx context.Context, fn func(*client) (string, error)) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	c, err := r.liveClient()
 	if err != nil {
 		return "", err
@@ -165,6 +194,9 @@ func (r *reconnecting) withRetry(ctx context.Context, fn func(*client) (string, 
 		return out, err
 	}
 	r.reset()
+	if ctx.Err() != nil {
+		return out, err
+	}
 	if err2 := r.ensure(ctx); err2 != nil {
 		return "", fmt.Errorf("%v (reconnect: %v)", err, err2)
 	}
@@ -642,7 +674,12 @@ func (c *client) kill() {
 }
 
 func (c *client) close() error {
-	_ = c.stdin.Close()
+	if c == nil {
+		return nil
+	}
+	if c.stdin != nil {
+		_ = c.stdin.Close()
+	}
 	c.kill()
 	if c.cmd == nil {
 		return nil

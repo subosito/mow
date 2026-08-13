@@ -91,6 +91,9 @@ func listRunbooks(dir string) ([]string, error) {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	if len(names) > maxRunbookList {
+		names = names[:maxRunbookList]
+	}
 	return names, nil
 }
 

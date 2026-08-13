@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -126,5 +127,42 @@ func TestRestartableErrors(t *testing.T) {
 	}
 	if !restartable(context.DeadlineExceeded) {
 		t.Fatal("deadline should restart")
+	}
+}
+
+func TestWithRetryDoesNotRetryWhenContextDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rc := &reconnecting{c: &client{root: t.TempDir()}}
+	calls := 0
+	_, err := rc.withRetry(ctx, func(*client) (string, error) {
+		calls++
+		return "", context.Canceled
+	})
+	if calls != 0 {
+		t.Fatalf("canceled ctx must not enter RPC: calls=%d", calls)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestWithRetryDoesNotReconnectAfterCanceledRPC(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	rc := &reconnecting{c: &client{root: t.TempDir()}}
+	calls := 0
+	_, err := rc.withRetry(ctx, func(*client) (string, error) {
+		calls++
+		cancel()
+		return "", context.Canceled
+	})
+	if calls != 1 {
+		t.Fatalf("retried canceled RPC: calls=%d", calls)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	if rc.c != nil {
+		t.Fatal("dead client should be reset")
 	}
 }

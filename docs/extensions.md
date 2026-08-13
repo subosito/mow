@@ -181,6 +181,10 @@ events. State lives under `$MOW_HOME/goals`:
   in-process directory locks.
 - One run per goal id across processes via `<id>.run.lock` and owner PID/host
   metadata; dead owners heal `StatusRunning` → `Pending` for safe resume.
+  `Remove`, `Reset`, and deprecated `Delete` take that run lock so they cannot
+  clobber a live run. `--force` on Remove only bypasses leftover
+  `StatusRunning` after the lock is acquired. `Remove` also deletes the
+  per-goal `events.jsonl` dir.
 - Event logs (`events.jsonl`) rotate at ~4MiB; conflicted worktrees stay for
   manual inspection; parent-repo merges take `.git/mow-repo.lock`.
 
@@ -271,7 +275,9 @@ Paths resolve through the engine path jail when available (same boundary as
 `read`/`write`); hosts without an engine in context fall back to containment
 under the configured `root`. RPC framing is bounded (1 MiB frames, capped
 header lines and skipped frames); `didOpen` rejects symlinks/non-regular files
-and caps file bodies at 4 MiB.
+and caps file bodies at 4 MiB. `$MOW_HOME/lsp.yaml` is capped at 1 MiB.
+A cancelled or expired RPC kills a wedged server and returns without retrying
+on the dead context; the next call starts a fresh process.
 
 Diagnostics are sorted by severity, capped at `mow.MaxLSPDiagnostics`, attached
 to successful write/edit results, and emitted as `harness.lsp.diagnostics`.

@@ -12,6 +12,15 @@ import (
 // above any --budget override, so a huge blob cannot be ReadAll'd.
 const maxScopeFileRead = 8 << 20
 
+// maxExpandCandidates caps filepath.WalkDir results so a huge tree cannot
+// allocate an unbounded candidate list before gather applies MaxFiles.
+// Default-exclude directories are SkipDir'd unless IncludeAll.
+var maxExpandCandidates = 4096
+
+// maxExcludedFiles caps Scope.Excluded so a truncated walk cannot emit an
+// unbounded skip list into the report.
+const maxExcludedFiles = 256
+
 // pathWithinWorkspace reports whether path is workspace or a descendant after
 // cleaning. Symlinks are not followed; pair with rejectSymlinkComponents before
 // open so intermediate directory links cannot escape the workspace jail.
@@ -102,5 +111,12 @@ func readWorkspaceFile(workspace, rel string) ([]byte, error) {
 	if st.Size() > maxScopeFileRead {
 		return nil, fmt.Errorf("review: file exceeds %d byte read cap", maxScopeFileRead)
 	}
-	return io.ReadAll(io.LimitReader(f, maxScopeFileRead+1))
+	data, err := io.ReadAll(io.LimitReader(f, maxScopeFileRead+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxScopeFileRead {
+		return nil, fmt.Errorf("review: file exceeds %d byte read cap", maxScopeFileRead)
+	}
+	return data, nil
 }

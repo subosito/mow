@@ -100,7 +100,12 @@ func selectCandidates(ctx context.Context, sc *Scope, req ScopeRequest, git gitR
 	case len(req.Paths) > 0:
 		sc.Mode = "paths"
 		sc.Selector = strings.Join(req.Paths, " ")
-		return expandPaths(sc.Workspace, req.Paths)
+		files, skipped, truncated, err := expandPaths(sc.Workspace, req.Paths, walkExcludes(req))
+		recordSkippedDirs(sc, skipped)
+		if truncated {
+			markExpandCap(sc)
+		}
+		return files, err
 
 	case sc.Git.Available && sc.Git.Dirty:
 		// No selector on a dirty repo: reviewing uncommitted work is the
@@ -118,36 +123,76 @@ func selectCandidates(ctx context.Context, sc *Scope, req ScopeRequest, git gitR
 
 	default:
 		sc.Mode, sc.Selector = "paths", "."
-		return expandPaths(sc.Workspace, []string{"."})
+		files, skipped, truncated, err := expandPaths(sc.Workspace, []string{"."}, walkExcludes(req))
+		recordSkippedDirs(sc, skipped)
+		if truncated {
+			markExpandCap(sc)
+		}
+		return files, err
+	}
+}
+
+func walkExcludes(req ScopeRequest) []string {
+	if req.IncludeAll {
+		return req.Excludes
+	}
+	return append(append([]string(nil), DefaultExcludes()...), req.Excludes...)
+}
+
+func markExpandCap(sc *Scope) {
+	if sc == nil {
+		return
+	}
+	sc.Truncated = true
+	if sc.TruncReason == "" {
+		sc.TruncReason = fmt.Sprintf("path walk reached %d file cap", maxExpandCandidates)
+	}
+}
+
+func recordSkippedDirs(sc *Scope, skipped []ExcludedFile) {
+	for _, e := range skipped {
+		recordExcluded(sc, e.Path, e.Reason)
 	}
 }
 
 // expandPaths walks explicit files/directories into a sorted file list.
-func expandPaths(workspace string, paths []string) ([]string, error) {
+// excludes, when non-empty, SkipDir directories whose children would match
+// (node_modules, vendor, …) so a walk cap cannot hide source behind a
+// default-excluded tree. IncludeAll passes only caller excludes.
+func expandPaths(workspace string, paths, excludes []string) ([]string, []ExcludedFile, bool, error) {
 	var out []string
+	var skipped []ExcludedFile
 	seen := map[string]bool{}
+	truncated := false
 	for _, p := range paths {
+		if truncated {
+			break
+		}
 		rel, err := NormalizePath(p, workspace)
 		if err != nil {
 			// "." means the whole workspace.
 			if strings.TrimSpace(p) == "." || strings.TrimSpace(p) == "./" {
 				rel = "."
 			} else {
-				return nil, fmt.Errorf("review: %w", err)
+				return nil, nil, false, fmt.Errorf("review: %w", err)
 			}
 		}
 		full := filepath.Join(workspace, filepath.FromSlash(rel))
 		info, err := os.Lstat(full)
 		if err != nil {
-			return nil, fmt.Errorf("review: %s: %w", rel, err)
+			return nil, nil, false, fmt.Errorf("review: %s: %w", rel, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("review: %s: cannot review a symlink path", rel)
+			return nil, nil, false, fmt.Errorf("review: %s: cannot review a symlink path", rel)
 		}
 		if !info.IsDir() {
 			if !seen[rel] {
 				seen[rel] = true
 				out = append(out, rel)
+			}
+			if len(out) > maxExpandCandidates {
+				out = out[:maxExpandCandidates]
+				truncated = true
 			}
 			continue
 		}
@@ -163,12 +208,21 @@ func expandPaths(workspace string, paths []string) ([]string, error) {
 			}
 			if d.IsDir() {
 				// Only .git is pruned here: it is repository metadata, never
-				// reviewable source. vendor/node_modules deliberately fall
-				// through to the exclusion pass in gather(), so they are
-				// reported with a reason and --include-all can override them.
-				// Pruning them here made those skips invisible and permanent.
+				// reviewable source. vendor/node_modules are SkipDir'd when they
+				// match walk excludes so a file-count cap cannot hide src/
+				// behind a vendored tree; --include-all still descends them.
 				if d.Name() == ".git" {
 					return filepath.SkipDir
+				}
+				if r, rerr := filepath.Rel(workspace, p); rerr == nil {
+					r = filepath.ToSlash(r)
+					if pat, ok := skipExcludedDir(r, excludes); ok {
+						skipped = append(skipped, ExcludedFile{
+							Path:   r,
+							Reason: "excluded by " + pat,
+						})
+						return filepath.SkipDir
+					}
 				}
 				return nil
 			}
@@ -181,14 +235,44 @@ func expandPaths(workspace string, paths []string) ([]string, error) {
 				seen[r] = true
 				out = append(out, r)
 			}
+			if len(out) > maxExpandCandidates {
+				out = out[:maxExpandCandidates]
+				truncated = true
+				return fs.SkipAll
+			}
 			return nil
 		})
 		if err != nil {
-			return nil, fmt.Errorf("review: walk %s: %w", rel, err)
+			return nil, nil, false, fmt.Errorf("review: walk %s: %w", rel, err)
 		}
 	}
 	sort.Strings(out)
-	return out, nil
+	return out, skipped, truncated, nil
+}
+
+func skipExcludedDir(rel string, excludes []string) (string, bool) {
+	if rel == "" || rel == "." || len(excludes) == 0 {
+		return "", false
+	}
+	// Directory patterns are "name/**"; the dir itself does not match, a child does.
+	return MatchAny(excludes, rel+"/x")
+}
+
+func recordExcluded(sc *Scope, rel, reason string) {
+	if sc == nil {
+		return
+	}
+	if len(sc.Excluded) >= maxExcludedFiles {
+		return
+	}
+	if len(sc.Excluded) == maxExcludedFiles-1 {
+		sc.Excluded = append(sc.Excluded, ExcludedFile{
+			Path:   "…",
+			Reason: fmt.Sprintf("skip list capped at %d entries", maxExcludedFiles),
+		})
+		return
+	}
+	sc.Excluded = append(sc.Excluded, ExcludedFile{Path: rel, Reason: reason})
 }
 
 // gather applies excludes and budgets, then loads content/diffs for the files
@@ -203,12 +287,15 @@ func gather(sc *Scope, req ScopeRequest, candidates, excludes []string, readFile
 		if err := ctx.Err(); err != nil {
 			return
 		}
+		if len(sc.Files) >= sc.Budget.MaxFiles && len(sc.Excluded) >= maxExcludedFiles {
+			return
+		}
 		if pat, hit := MatchAny(excludes, rel); hit {
-			sc.Excluded = append(sc.Excluded, ExcludedFile{Path: rel, Reason: "excluded by " + pat})
+			recordExcluded(sc, rel, "excluded by "+pat)
 			continue
 		}
 		if len(sc.Files) >= sc.Budget.MaxFiles {
-			sc.Excluded = append(sc.Excluded, ExcludedFile{Path: rel, Reason: "over budget (max files)"})
+			recordExcluded(sc, rel, "over budget (max files)")
 			sc.Truncated = true
 			sc.TruncReason = fmt.Sprintf("budget %s: file limit %d reached", sc.Budget.Name, sc.Budget.MaxFiles)
 			continue
@@ -216,20 +303,20 @@ func gather(sc *Scope, req ScopeRequest, candidates, excludes []string, readFile
 		full := filepath.Join(sc.Workspace, filepath.FromSlash(rel))
 		raw, err := readFile(full)
 		if err != nil {
-			sc.Excluded = append(sc.Excluded, ExcludedFile{Path: rel, Reason: "unreadable: " + err.Error()})
+			recordExcluded(sc, rel, "unreadable: "+err.Error())
 			continue
 		}
 		if len(raw) > sc.Budget.MaxFileBytes {
-			sc.Excluded = append(sc.Excluded, ExcludedFile{Path: rel, Reason: fmt.Sprintf("file too large (%d bytes)", len(raw))})
+			recordExcluded(sc, rel, fmt.Sprintf("file too large (%d bytes)", len(raw)))
 			continue
 		}
 		if isBinary(raw) {
-			sc.Excluded = append(sc.Excluded, ExcludedFile{Path: rel, Reason: "binary file"})
+			recordExcluded(sc, rel, "binary file")
 			continue
 		}
 		text := string(raw)
 		if !req.IncludeAll && LooksGenerated(head(text)) {
-			sc.Excluded = append(sc.Excluded, ExcludedFile{Path: rel, Reason: "generated file"})
+			recordExcluded(sc, rel, "generated file")
 			continue
 		}
 
@@ -250,7 +337,7 @@ func gather(sc *Scope, req ScopeRequest, candidates, excludes []string, readFile
 				f.Content = ""
 				cost = len(f.Diff)
 			} else {
-				sc.Excluded = append(sc.Excluded, ExcludedFile{Path: rel, Reason: "over budget (max bytes)"})
+				recordExcluded(sc, rel, "over budget (max bytes)")
 				sc.Truncated = true
 				sc.TruncReason = fmt.Sprintf("budget %s: byte limit %d reached", sc.Budget.Name, sc.Budget.MaxBytes)
 				continue
@@ -258,7 +345,7 @@ func gather(sc *Scope, req ScopeRequest, candidates, excludes []string, readFile
 		}
 		if f.Diff == "" && f.Content == "" {
 			// Nothing to show the model: don't spend a scope slot on it.
-			sc.Excluded = append(sc.Excluded, ExcludedFile{Path: rel, Reason: "no diff or content available"})
+			recordExcluded(sc, rel, "no diff or content available")
 			continue
 		}
 		sc.TotalBytes += cost

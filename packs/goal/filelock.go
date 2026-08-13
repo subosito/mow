@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -124,14 +125,30 @@ func writeLockOwner(f *os.File) error {
 // reclaim it when PID liveness cannot be probed portably.
 const staleLockMaxAge = 72 * time.Hour
 
+// maxLockMetaBytes bounds PID/host metadata reads so a planted lock file
+// cannot be ReadFile'd unbounded during stale reclaim.
+const maxLockMetaBytes = 4096
+
+func readLockMeta(path string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, maxLockMetaBytes))
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
+}
+
 // clearStaleLockFile removes path when it appears to be an abandoned lock
 // (owner PID dead or unreadable). Returns true if the file was removed.
 func clearStaleLockFile(path string) bool {
-	raw, err := os.ReadFile(path)
-	if err != nil {
+	meta, ok := readLockMeta(path)
+	if !ok {
 		return false
 	}
-	meta := string(raw)
 	pid := parseLockPID(meta)
 	host := parseLockHost(meta)
 	currentHost, _ := os.Hostname()

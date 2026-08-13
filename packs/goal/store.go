@@ -44,10 +44,14 @@ func DefaultDir() string {
 }
 
 func (s *Store) dir() string {
+	d := DefaultDir()
 	if s != nil && strings.TrimSpace(s.Dir) != "" {
-		return s.Dir
+		d = s.Dir
 	}
-	return DefaultDir()
+	if abs, err := filepath.Abs(d); err == nil {
+		return abs
+	}
+	return d
 }
 
 // DirPath returns the resolved goals directory (for error messages).
@@ -84,61 +88,83 @@ func (s *Store) Load(id string) (State, error) {
 	return s.loadLocked(id)
 }
 
-// ErrGoalRunning is returned by Remove when a goal has StatusRunning and
-// force is false. Callers may retry with force=true to delete anyway.
-var ErrGoalRunning = errors.New("goal is running; stop it first or use force")
+// ErrGoalRunning is returned when a live run holds the lock, or when Remove
+// is called without force on leftover StatusRunning (legacy/unowned). --force
+// deletes leftover StatusRunning after the run lock is acquired; it cannot
+// override a live holder.
+var ErrGoalRunning = errors.New("goal is running; stop it first")
 
 // ErrGoalNotFound is returned by Remove when no goal file exists for id.
 // (Delete keeps its legacy "missing file is not an error" semantics.)
 var ErrGoalNotFound = errors.New("goal not found")
 
-// Remove deletes a goal by id. A running goal is refused unless force is true.
-// Other statuses (blocked, partial, failed, done) are removed: blocked is not
-// actively executing, so the file is safe to delete, but callers should prompt
-// the operator to prune any leftover worktree separately. A missing goal file
-// is an error (use Delete for the legacy not-found-is-noop behavior).
+// Remove deletes a goal by id. A live run (same-process or cross-process) is
+// always refused. --force only bypasses leftover StatusRunning after the run
+// lock is acquired (legacy files with no owner, or a dead owner already
+// healed to Pending). Other statuses (blocked, partial, failed, done) are
+// removed without force: blocked is not actively executing, so the file is
+// safe to delete, but callers should prompt the operator to prune any leftover
+// worktree separately. A missing goal file is an error (use Delete for the
+// legacy not-found-is-noop behavior).
 func (s *Store) Remove(id string, force bool) error {
 	if err := validateID(id); err != nil {
 		return err
-	}
-	mu := s.lock()
-	mu.Lock()
-	defer mu.Unlock()
-	if !force {
-		st, err := s.loadLocked(id)
-		if err == nil && st.Status == StatusRunning {
-			return fmt.Errorf("%w: %s", ErrGoalRunning, id)
-		} else if err != nil && !os.IsNotExist(err) {
-			return err
-		}
 	}
 	path := s.path(id)
 	if !pathWithinRoot(s.dir(), path) {
 		return fmt.Errorf("goal: invalid goal path for id %q", id)
 	}
-	if err := os.Remove(path); err != nil {
+	// Cheap existence check so a missing id does not create a .run.lock.
+	if _, err := os.Lstat(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("%w: %s", ErrGoalNotFound, id)
 		}
 		return err
 	}
-	return nil
+	release, err := s.withRunLock(id)
+	if err != nil {
+		return err
+	}
+	defer release()
+	mu := s.lock()
+	mu.Lock()
+	defer mu.Unlock()
+	return s.removeHoldingStoreLock(id, path, force)
 }
 
 // Delete removes a goal file by id. Missing file is not an error (legacy).
-// Deprecated: prefer Remove, which guards against deleting running goals.
+// Deprecated: prefer Remove. Delete takes the same non-blocking run lock as
+// Remove so it cannot unlink JSON from under a live run; leftover
+// StatusRunning with no holder is still deleted (legacy unguarded-status
+// behavior). Events under <id>/ are left in place.
 func (s *Store) Delete(id string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
-	mu := s.lock()
-	mu.Lock()
-	defer mu.Unlock()
 	path := s.path(id)
 	if !pathWithinRoot(s.dir(), path) {
 		return fmt.Errorf("goal: invalid goal path for id %q", id)
 	}
-	err := os.Remove(path)
+	if _, err := os.Lstat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	release, err := s.withRunLock(id)
+	if err != nil {
+		return err
+	}
+	defer release()
+	mu := s.lock()
+	mu.Lock()
+	defer mu.Unlock()
+	fl, err := acquireFileLock(path+".lock", true)
+	if err != nil {
+		return err
+	}
+	defer fl.Release()
+	err = os.Remove(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -149,15 +175,37 @@ func (s *Store) Delete(id string) error {
 // Keeps Goal, MaxSteps, and last Summary. Clears session, error, last_reply,
 // plan item statuses (back to pending), and current_item.
 func (s *Store) Reset(id string) (State, error) {
-	mu := s.lock()
-	mu.Lock()
-	defer mu.Unlock()
-	st, err := s.loadLocked(id)
+	if err := validateID(id); err != nil {
+		return State{}, err
+	}
+	path := s.path(id)
+	if !pathWithinRoot(s.dir(), path) {
+		return State{}, fmt.Errorf("goal: invalid goal path for id %q", id)
+	}
+	if _, err := os.Lstat(path); err != nil {
+		return State{}, err
+	}
+	release, err := s.withRunLock(id)
 	if err != nil {
 		return State{}, err
 	}
-	// loadLocked heals a dead owner first. A live (or legacy unowned)
-	// Running goal must not be wiped out from under the holder.
+	defer release()
+	mu := s.lock()
+	mu.Lock()
+	defer mu.Unlock()
+	fl, err := acquireFileLock(path+".lock", true)
+	if err != nil {
+		return State{}, err
+	}
+	defer fl.Release()
+	st, err := s.decodeGoalFile(path)
+	if err != nil {
+		return State{}, err
+	}
+	healStaleRunning(&st)
+	// A live (or legacy unowned) Running goal must not be wiped out from
+	// under the holder. Holding the run lock already excludes a live Run;
+	// StatusRunning here is the unowned-legacy case.
 	if st.Status == StatusRunning {
 		return State{}, fmt.Errorf("%w: %s", ErrGoalRunning, id)
 	}
@@ -171,7 +219,7 @@ func (s *Store) Reset(id string) (State, error) {
 		st.Plan.Items[i].Status = ItemPending
 		st.Plan.Items[i].Note = ""
 	}
-	if err := s.saveLocked(st); err != nil {
+	if err := s.writeGoalJSON(path, st); err != nil {
 		return State{}, err
 	}
 	return st, nil
@@ -259,6 +307,67 @@ func ensureStoreDir(dir string) error {
 	return nil
 }
 
+// withRunLock takes the in-process + cross-process run lock. A live holder
+// surfaces as ErrGoalRunning so Remove (including force), Reset, and Delete
+// share the runner's vocabulary.
+func (s *Store) withRunLock(id string) (func(), error) {
+	release, err := acquireRunExclusive(s, id)
+	if err != nil {
+		if errors.Is(err, ErrGoalAlreadyRunning) {
+			return nil, fmt.Errorf("%w: %s", ErrGoalRunning, id)
+		}
+		return nil, err
+	}
+	return release, nil
+}
+
+func (s *Store) removeHoldingStoreLock(id, path string, force bool) error {
+	fl, err := acquireFileLock(path+".lock", true)
+	if err != nil {
+		return err
+	}
+	defer fl.Release()
+	// Caller already holds the run lock, so a live Run cannot be in this
+	// process or another. --force skips leftover StatusRunning; without it
+	// unowned Running is still refused.
+	if !force {
+		st, err := s.decodeGoalFile(path)
+		if err == nil && st.Status == StatusRunning && !healStaleRunning(&st) {
+			return fmt.Errorf("%w: %s", ErrGoalRunning, id)
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", ErrGoalNotFound, id)
+		}
+		return err
+	}
+	s.removeGoalArtifacts(id)
+	return nil
+}
+
+func (s *Store) removeGoalArtifacts(id string) {
+	eventsDir := filepath.Join(s.dir(), id)
+	if pathWithinRoot(s.dir(), eventsDir) {
+		_ = os.RemoveAll(eventsDir)
+	}
+}
+
+func (s *Store) decodeGoalFile(path string) (State, error) {
+	raw, err := readGoalJSON(path)
+	if err != nil {
+		return State{}, err
+	}
+	var st State
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return State{}, fmt.Errorf("goal load: %w", err)
+	}
+	sanitizeState(&st)
+	return st, nil
+}
+
 func (s *Store) loadLocked(id string) (State, error) {
 	dir := s.dir()
 	path := s.path(id)
@@ -276,15 +385,10 @@ func (s *Store) loadLocked(id string) (State, error) {
 	}
 	defer fl.Release()
 
-	raw, err := readGoalJSON(path)
+	st, err := s.decodeGoalFile(path)
 	if err != nil {
 		return State{}, err
 	}
-	var st State
-	if err := json.Unmarshal(raw, &st); err != nil {
-		return State{}, fmt.Errorf("goal load %s: %w", id, err)
-	}
-	sanitizeState(&st)
 	if healStaleRunning(&st) {
 		// Persist healed status so Remove/status see Pending, not ghost Running.
 		_ = s.writeGoalJSON(path, st)

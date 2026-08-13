@@ -137,6 +137,136 @@ func TestResolveScopeSkipsSymlinkInTree(t *testing.T) {
 	}
 }
 
+func TestExpandPathsCapsCandidates(t *testing.T) {
+	prev := maxExpandCandidates
+	maxExpandCandidates = 4
+	t.Cleanup(func() { maxExpandCandidates = prev })
+
+	root := t.TempDir()
+	for i := 0; i < 8; i++ {
+		name := filepath.Join(root, fmt.Sprintf("f%d.go", i))
+		if err := os.WriteFile(name, []byte("package p\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sc, err := ResolveScope(context.Background(), ScopeRequest{
+		Workspace: root, Paths: []string{"."}, Budget: "large",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sc.Truncated {
+		t.Fatal("expected truncated scope when walk hits candidate cap")
+	}
+	if len(sc.Paths()) > 4 {
+		t.Fatalf("paths=%d want <=4", len(sc.Paths()))
+	}
+}
+
+func TestExpandPathsDoesNotHideSourceBehindNodeModules(t *testing.T) {
+	prev := maxExpandCandidates
+	maxExpandCandidates = 8
+	t.Cleanup(func() { maxExpandCandidates = prev })
+
+	root := t.TempDir()
+	nm := filepath.Join(root, "node_modules", "pkg")
+	if err := os.MkdirAll(nm, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		if err := os.WriteFile(filepath.Join(nm, fmt.Sprintf("m%d.js", i)), []byte("module.exports=1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sc, err := ResolveScope(context.Background(), ScopeRequest{
+		Workspace: root, Paths: []string{"."}, Budget: "large",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(sc.Paths(), " "), "src/main.go") {
+		t.Fatalf("source hidden behind node_modules: paths=%v truncated=%v", sc.Paths(), sc.Truncated)
+	}
+	if sc.Truncated {
+		t.Fatal("default excludes should SkipDir node_modules; one source file must not truncate")
+	}
+}
+
+func TestExpandPathsExactCapIsNotTruncated(t *testing.T) {
+	prev := maxExpandCandidates
+	maxExpandCandidates = 4
+	t.Cleanup(func() { maxExpandCandidates = prev })
+
+	root := t.TempDir()
+	for i := 0; i < 4; i++ {
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("f%d.go", i)), []byte("package p\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sc, err := ResolveScope(context.Background(), ScopeRequest{
+		Workspace: root, Paths: []string{"."}, Budget: "large",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sc.Truncated {
+		t.Fatal("exactly maxExpandCandidates files must not set Truncated")
+	}
+	if len(sc.Paths()) != 4 {
+		t.Fatalf("paths=%d want 4", len(sc.Paths()))
+	}
+}
+
+func TestExpandPathsIncludeAllStillCaps(t *testing.T) {
+	prev := maxExpandCandidates
+	maxExpandCandidates = 8
+	t.Cleanup(func() { maxExpandCandidates = prev })
+
+	root := t.TempDir()
+	nm := filepath.Join(root, "node_modules", "pkg")
+	if err := os.MkdirAll(nm, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		if err := os.WriteFile(filepath.Join(nm, fmt.Sprintf("m%d.js", i)), []byte("module.exports=1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sc, err := ResolveScope(context.Background(), ScopeRequest{
+		Workspace: root, Paths: []string{"."}, Budget: "large", IncludeAll: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sc.Truncated {
+		t.Fatal("IncludeAll must still honor the walk cap inside node_modules")
+	}
+	if len(sc.Paths()) > 8 {
+		t.Fatalf("paths=%d want <=8", len(sc.Paths()))
+	}
+}
+
+func TestRecordExcludedCapsList(t *testing.T) {
+	sc := &Scope{}
+	for i := 0; i < maxExcludedFiles+10; i++ {
+		recordExcluded(sc, fmt.Sprintf("f%d.go", i), "over budget (max files)")
+	}
+	if len(sc.Excluded) != maxExcludedFiles {
+		t.Fatalf("excluded=%d want %d", len(sc.Excluded), maxExcludedFiles)
+	}
+	last := sc.Excluded[len(sc.Excluded)-1]
+	if last.Path != "…" || !strings.Contains(last.Reason, "capped") {
+		t.Fatalf("last entry = %+v", last)
+	}
+}
+
 func TestResolveScopeCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

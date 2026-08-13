@@ -1,11 +1,13 @@
 package goal
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestStoreConcurrentSave(t *testing.T) {
@@ -198,5 +200,89 @@ func TestRedactGitSecrets(t *testing.T) {
 	out := redactSecrets(in)
 	if strings.Contains(out, "secret-token") {
 		t.Fatalf("leaked: %q", out)
+	}
+}
+
+func TestStoreRemoveResetDoesNotDeadlockWithSaveLoad(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	ids := []string{"a", "b", "c"}
+	for _, id := range ids {
+		if err := s.Save(State{ID: id, Goal: "g", Status: StatusPending, MaxSteps: 2}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const rounds = 40
+	var wg sync.WaitGroup
+	errCh := make(chan error, 16)
+
+	// Mimic Runner.runState: run lock, then Save/Load/List/AppendEvent.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			id := ids[i%len(ids)]
+			release, err := acquireRunExclusive(s, id)
+			if err != nil {
+				continue
+			}
+			if _, err := s.Load(id); err != nil && !os.IsNotExist(err) {
+				errCh <- err
+			}
+			_ = s.Save(State{ID: id, Goal: "g", Status: StatusPending, MaxSteps: 2})
+			s.AppendEvent(id, LogEvent{Kind: "start"})
+			_, _ = s.List()
+			release()
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			id := ids[i%len(ids)]
+			err := s.Remove(id, i%2 == 0)
+			if err != nil && !errors.Is(err, ErrGoalRunning) && !errors.Is(err, ErrGoalNotFound) {
+				errCh <- err
+			}
+			if err := s.Delete(id); err != nil && !errors.Is(err, ErrGoalRunning) {
+				errCh <- err
+			}
+			_ = s.Save(State{ID: id, Goal: "g", Status: StatusPending, MaxSteps: 2})
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			id := ids[i%len(ids)]
+			_, err := s.Reset(id)
+			if err != nil && !errors.Is(err, ErrGoalRunning) && !os.IsNotExist(err) {
+				errCh <- err
+			}
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			id := ids[i%len(ids)]
+			_, _ = s.Load(id)
+			_, _ = s.List()
+			_ = s.Save(State{ID: id, Goal: "g", Status: StatusPending, MaxSteps: 2})
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("Remove/Reset deadlocked with Save/Load/run lock")
+	}
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
 	}
 }

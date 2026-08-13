@@ -355,10 +355,9 @@ func (m *model) handleGoalSlash(parts []string) tea.Cmd {
 			}
 		}
 		// Refuse to delete the goal currently driving this TUI session: its
-		// runner is live in a goroutine and deleting the file under it leaves
-		// a dangling run and a stale live chip.
-		if !force && m.goalLive != nil && m.goalLive.ID == id && m.goalLive.Status == goal.StatusRunning {
-			m.add(kindError, fmt.Sprintf("goal · %s is running in this session — cancel it or use /goal remove %s --force", id, id))
+		// runner holds the run lock. --force cannot override a live holder.
+		if m.goalLive != nil && m.goalLive.ID == id && m.goalLive.Status == goal.StatusRunning {
+			m.add(kindError, fmt.Sprintf("goal · %s is running in this session — cancel it first", id))
 			m.refreshVP()
 			return nil
 		}
@@ -372,7 +371,11 @@ func (m *model) handleGoalSlash(parts []string) tea.Cmd {
 		if err := store.Remove(id, force); err != nil {
 			cause := err.Error()
 			if errors.Is(err, goal.ErrGoalRunning) {
-				cause = fmt.Sprintf("goal · %s is running — stop it (Ctrl-C / /goal run resume finishes) or use /goal remove %s --force", id, id)
+				if force {
+					cause = fmt.Sprintf("goal · %s is running — a live run holds the lock; stop it first", id)
+				} else {
+					cause = fmt.Sprintf("goal · %s is running — stop it, or use /goal remove %s --force if StatusRunning is leftover (no live run)", id, id)
+				}
 			} else if errors.Is(err, goal.ErrGoalNotFound) {
 				cause = fmt.Sprintf("goal · %s not found — /goal list shows ids", id)
 			}

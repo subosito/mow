@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/subosito/mow"
 )
@@ -284,6 +285,43 @@ func TestRecoveryBudgetNotResetWhileHeld(t *testing.T) {
 	release()
 	if budgetUsedForTest(key) != contextSearchMaxRetrieved-100 {
 		t.Fatalf("after release used=%d", budgetUsedForTest(key))
+	}
+}
+
+func TestAcquireRecoveryBudgetConcurrentSameKey(t *testing.T) {
+	resetBudgetRegistryForTest()
+	t.Cleanup(resetBudgetRegistryForTest)
+	const workers = 8
+	const rounds = 40
+	var wg sync.WaitGroup
+	wg.Add(workers + 1)
+	for w := 0; w < workers; w++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < rounds; i++ {
+				b, release := acquireRecoveryBudget("sess-hot")
+				chargeBudgetLocked("sess-hot", b, 1)
+				release()
+				_ = budgetRemaining("sess-hot")
+				chargeBudgetForTest("sess-hot", 1)
+			}
+		}()
+	}
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds*8; i++ {
+			chargeBudgetForTest(fmt.Sprintf("other-%d", i%(contextSearchMaxBudgetSessions+8)), 1)
+		}
+	}()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("acquireRecoveryBudget deadlocked with eviction")
 	}
 }
 

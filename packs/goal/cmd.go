@@ -217,7 +217,7 @@ func cmdList(args []string) int {
 func cmdDelete(args []string) int {
 	fs := cliutil.NewFlagSet("goal delete")
 	id := fs.String("id", "", "goal id")
-	force := fs.Bool("force", false, "delete even if the goal is running")
+	force := fs.Bool("force", false, "delete leftover StatusRunning when no live run holds the lock")
 	dir := fs.String("dir", "", "store dir")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -230,7 +230,11 @@ func cmdDelete(args []string) int {
 	if err := store.Remove(*id, *force); err != nil {
 		fmt.Fprintf(os.Stderr, "mow goal delete: %v\n", err)
 		if errors.Is(err, ErrGoalRunning) {
-			fmt.Fprintln(os.Stderr, "  rerun with --force to delete anyway")
+			if *force {
+				fmt.Fprintln(os.Stderr, "  a live run holds the lock; stop it first")
+			} else {
+				fmt.Fprintln(os.Stderr, "  stop the run, or rerun with --force if StatusRunning is leftover (no live lock)")
+			}
 		}
 		return 1
 	}
