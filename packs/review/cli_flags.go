@@ -32,7 +32,6 @@ type CLIFlags struct {
 	Reviewers          []string
 	ReviewerParallel   int
 	VerifierModel      string
-	verifierModelAlias string
 	FailOnTruncated    bool
 }
 
@@ -58,22 +57,13 @@ func (f *CLIFlags) Bind(fs *flag.FlagSet) {
 	fs.Var((*repeatable)(&f.Reviewers), "reviewers", "alias of --reviewer")
 	fs.IntVar(&f.ReviewerParallel, "reviewer-parallel", 0, "maximum concurrent candidate reviewers (0=all)")
 	fs.StringVar(&f.VerifierModel, "verifier", "", "pass-two verifier model (one model; default: first reviewer)")
-	fs.StringVar(&f.verifierModelAlias, "verifier-model", "", "alias of --verifier")
 	fs.BoolVar(&f.FailOnTruncated, "fail-on-truncated", false, "exit non-zero when scope was truncated")
 }
 
-// normalizeVerifier accepts --verifier (preferred) or --verifier-model (alias).
-// Pass two is a single judge: a comma list is rejected rather than becoming
-// a second ensemble.
+// normalizeVerifier keeps pass two a single judge: a comma list is rejected
+// rather than becoming a second ensemble.
 func (f *CLIFlags) normalizeVerifier() error {
 	primary := strings.TrimSpace(f.VerifierModel)
-	alias := strings.TrimSpace(f.verifierModelAlias)
-	switch {
-	case primary != "" && alias != "" && !strings.EqualFold(primary, alias):
-		return fmt.Errorf("--verifier and --verifier-model disagree (%q vs %q)", primary, alias)
-	case primary == "":
-		primary = alias
-	}
 	if strings.Contains(primary, ",") {
 		return fmt.Errorf("--verifier takes one model (got %q); pass two is a single judge", primary)
 	}

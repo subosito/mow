@@ -103,40 +103,16 @@ func TestResolveRejectsVerifierModelWithNoVerify(t *testing.T) {
 	}
 }
 
-func TestNormalizeVerifierPrefersPrimaryAndAlias(t *testing.T) {
-	var rf CLIFlags
-	rf.VerifierModel = "claude-sonnet-4"
-	rf.verifierModelAlias = "claude-sonnet-4"
+func TestNormalizeVerifierRejectsList(t *testing.T) {
+	rf := CLIFlags{VerifierModel: "a,b"}
+	if err := rf.normalizeVerifier(); err == nil || !strings.Contains(err.Error(), "one model") {
+		t.Fatalf("comma list: %v", err)
+	}
+	rf = CLIFlags{VerifierModel: "claude-sonnet-4"}
 	if err := rf.normalizeVerifier(); err != nil {
 		t.Fatal(err)
 	}
 	if rf.VerifierModel != "claude-sonnet-4" {
 		t.Fatalf("got %q", rf.VerifierModel)
-	}
-
-	rf = CLIFlags{verifierModelAlias: "gpt-5-mini"}
-	if err := rf.normalizeVerifier(); err != nil {
-		t.Fatal(err)
-	}
-	if rf.VerifierModel != "gpt-5-mini" {
-		t.Fatalf("alias not copied: %q", rf.VerifierModel)
-	}
-
-	rf = CLIFlags{VerifierModel: "a", verifierModelAlias: "b"}
-	if err := rf.normalizeVerifier(); err == nil {
-		t.Fatal("disagreeing flags should fail")
-	}
-	rf = CLIFlags{VerifierModel: "a,b"}
-	if err := rf.normalizeVerifier(); err == nil || !strings.Contains(err.Error(), "one model") {
-		t.Fatalf("comma list: %v", err)
-	}
-}
-
-func TestResolveAcceptsVerifierAliasWithNoVerify(t *testing.T) {
-	var rf CLIFlags
-	rf.NoVerify = true
-	rf.verifierModelAlias = "claude-sonnet-4"
-	if _, _, _, err := rf.Resolve(GeneralProfile(), "/ws", nil); err == nil || !strings.Contains(err.Error(), "--verifier") {
-		t.Fatalf("alias + --no-verify: %v", err)
 	}
 }
