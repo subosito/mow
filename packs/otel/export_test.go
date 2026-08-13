@@ -110,13 +110,19 @@ func TestExportConfigFromMap(t *testing.T) {
 }
 
 func TestExportRestoresPropagator(t *testing.T) {
-	t.Parallel()
+	// Mutates the process-global TextMapPropagator; must not run in parallel
+	// with other StartExport tests.
 	prev := propagation.TraceContext{}
 	otel.SetTextMapPropagator(prev)
 
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
 	exp, err := StartExport(context.Background(), ExportConfig{
 		Enabled:  true,
-		Endpoint: "http://127.0.0.1:4318",
+		Endpoint: srv.URL,
 	})
 	if err != nil {
 		t.Fatal(err)
