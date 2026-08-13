@@ -17,9 +17,9 @@ Customization modes:
 |---|---|---|
 | Public Engine | `github.com/subosito/mow` | `Engine`, `Run`, hooks, events, providers |
 | Registration | `github.com/subosito/mow/ext` | `RegisterTool`, `RegisterCommand`, lifecycle hooks |
-| Core extensions | `github.com/subosito/mow/ext/<name>` | acp, mcp, proc, rpc, cmdhook, eval |
-| Optional packs | `github.com/subosito/mow/packs/<name>` | goal, review, ops, lsp, job, contextsink |
-| Heavy optional | `github.com/subosito/mow/packs/otel`, `…/packs/mowi` | OTLP and TUI |
+| Core extensions | `github.com/subosito/mow/ext/<name>` | acp, mcp, proc, rpc, cmdhook, eval — one-pager in each `ext/<name>/README.md` |
+| Optional packs | `github.com/subosito/mow/packs/<name>` | goal, review, ops, lsp, job, contextsink — `packs/<name>/README.md` |
+| Heavy optional | `github.com/subosito/mow/packs/otel`, `…/packs/mowi` | OTLP and TUI — `packs/otel/README.md`, `packs/mowi/README.md` |
 
 ```go
 import (
@@ -199,7 +199,12 @@ mowi goal run --goal "Make CI green"
 Read-only two-pass code/security review (`review` and `sec` commands), with
 text/JSON/JSONL/SARIF output and validated finding scope. Also registers
 `/review` and `/sec` as interactive slash commands (see below). See
-[review.md](review.md).
+[review.md](review.md) and [packs/review/README.md](../packs/review/README.md).
+
+CLI ensemble: `--reviewer` (repeatable or comma-separated; `--reviewers` is an
+alias) for pass-one models, `--verifier` for the single pass-two judge.
+Slash `/review` and `/sec` run against the session engine only — they do not
+start an ensemble. ACP / `acp_delegate` is denied in the review jail.
 
 ## Interactive slash commands (`slash`)
 

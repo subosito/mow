@@ -130,8 +130,9 @@ Docs: [docs/extensions.md](docs/extensions.md).
 | [docs/architecture.md](docs/architecture.md) | Public/internal and module boundaries |
 | [docs/embedding.md](docs/embedding.md) | Embed in Go: options, events, custom tools/providers, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config |
-| [docs/review.md](docs/review.md) | Shared review workflow, scope, formats, and CI |
+| [docs/review.md](docs/review.md) | Shared review workflow, `--reviewer` / `--verifier`, scope, formats, CI |
 | [docs/sec.md](docs/sec.md) | Read-only security review and evidence model |
+| [packs/*/README.md](packs/), [ext/*/README.md](ext/) | Per-pack / per-extension one-pagers |
 | [docs/extensions.md](docs/extensions.md) | Core extensions, optional packs, ACP, MCP/LSP, media |
 
 ## License

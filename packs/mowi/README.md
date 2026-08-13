@@ -56,6 +56,15 @@ The screen is a **document**, not a chat log:
 The welcome splash dismisses itself on any key. Long sessions stay fast:
 older transcript content is virtualized and re-rendered lazily as you scroll.
 
+## Pack slash commands
+
+Linked packs register slash commands the same way they register CLI
+subcommands. With the stock `mowi` binary that includes `/review` and `/sec`
+(from `packs/review`): same scope flags as `mow review` / `mow sec`, but they
+run against **this session's model**. They do not start a `--reviewer`
+ensemble. Exclusive — wait for the current turn to finish. See
+[packs/review/README.md](../review/README.md).
+
 ## Trust & permissions
 
 mowi runs tools on **your** machine. By default only read-only tools

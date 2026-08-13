@@ -92,6 +92,8 @@ Embedder / cmd/mow / cmd/mowi / packs
 
 ### Optional packs (`packs/` module)
 
+One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.md`).
+
 - `packs/goal`: durable outer-loop goals
 - `packs/review`: code/security review workflows
 - `packs/ops`: ops profiles, logs, actions, incidents, runbooks

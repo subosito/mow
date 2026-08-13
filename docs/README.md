@@ -19,9 +19,11 @@
 | [harness.md](harness.md) | Implementers | Loop, tools, config, sessions, policy |
 | [extensions.md](extensions.md) | Integrators | `ext/` packs, CLI ownership, ACP, media, decisions |
 | [context.md](context.md) | Implementers | Design: tool-result side-channel store + search (sink in the loop, per-session archive) |
-| [review.md](review.md) | CI + reviewers | Shared review scope, two-pass workflow, schema, formats, budgets, exit codes |
+| [review.md](review.md) | CI + reviewers | Shared review scope, two-pass workflow, `--reviewer` / `--verifier`, schema, formats, budgets, exit codes |
 | [sec.md](sec.md) | Security reviewers | `mow sec`: evidence fields, safety contract, evidence levels, future stages |
 | [workspace-profiles.md](workspace-profiles.md) | CLI operators | Named workspace topology, config, skills, instructions, and scoped peers |
+
+Per-pack / per-extension one-pagers live next to the code (`ext/*/README.md`, `packs/*/README.md`). Longer how-tos stay here.
 
 ## Dev shell
 

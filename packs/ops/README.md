@@ -23,17 +23,17 @@ Profile name is always explicit (first arg after the verb, or `-p`/`--ops`, or `
 
 ```bash
 mow ops list
-mow ops show fleet
-mow ops check fleet
-mow ops run fleet --every 5m
-mow ops run fleet --once
+mow ops show prod
+mow ops check prod
+mow ops run prod --every 5m
+mow ops run prod --once
 ```
 
 `ops_action` requires `--allow-shell` (forced on for `mow ops run`). Actions are operator argv lists (no shell), 60s timeout. When `MOW_OPS` is set, the profile’s `acp.agents` are merged into `acp_delegate`.
 
 ## Config (`extensions.ops`)
 
-Pack-level only. Fleet catalogs live in `$MOW_HOME/ops/<name>/` (`config.yaml`, optional `prompt.md`, `incidents/`).
+Pack-level only. Profile catalogs live in `$MOW_HOME/ops/<name>/` (`config.yaml`, optional `prompt.md`, `incidents/`).
 
 ```yaml
 extensions:

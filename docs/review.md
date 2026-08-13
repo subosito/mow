@@ -39,8 +39,9 @@ may only rule on ids that already exist — it cannot introduce a new finding. O
 returns them explicitly in `evidence_fields`.
 
 Use `--verifier` to run pass two with a different read-only model than pass
-one (default unchanged: same engine, or the first ensemble member when using
-`--reviewer`/`--reviewers`).
+one (default: same engine, or the first `--reviewer` when using an ensemble).
+`--reviewers` is an alias of `--reviewer`. Slash `/review` and `/sec` use the
+session model only and do not start an ensemble.
 
 Rules that follow from this:
 
