@@ -121,7 +121,11 @@ extensions:
 - `ext/rpc`: JSON-lines prompt/event/cancel/status control plane. `mow rpc`
   always `Close`s the Engine on exit. Cancel/status use a dedicated channel so
   a full prompt queue cannot starve control methods; event deltas and prompt
-  text are size-capped.
+  text are size-capped. RPC `"3"` adds the host methods an external UI needs
+  without embedding Engine: `sessions`, `transcript`, `steer`, `slash.list`,
+  `slash`, and a permission gate (`perm.set` / `perm.decide` answering
+  `perm.ask` notifications for `write`, `edit`, `bash`). The gate is fail-open
+  until a UI selects ask mode, so headless scripts are unchanged.
 - `ext/cmdhook`: Claude-style lifecycle shell hooks (`root` or `plugins` map,
   `min_turns`). Hooks re-register on every `BeforeNew` (no first-config pin);
   prior cmdhook hooks are cleared so profiles do not leak across Engines.

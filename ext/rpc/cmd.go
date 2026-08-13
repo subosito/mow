@@ -57,15 +57,28 @@ func printUsage() {
 
 Methods:
 
-  prompt   {"id":1,"method":"prompt","params":{"text":"…"}}
-  cancel   {"id":2,"method":"cancel"}
-  status   {"id":3,"method":"status"}
-  session  {"id":4,"method":"session"}
-  version  {"id":5,"method":"version"}
-  ping     {"id":6,"method":"ping"}
+  prompt      {"id":1,"method":"prompt","params":{"text":"…"}}
+  cancel      {"id":2,"method":"cancel"}
+  status      {"id":3,"method":"status"}
+  session     {"id":4,"method":"session"}
+  version     {"id":5,"method":"version"}
+  ping        {"id":6,"method":"ping"}
+
+Host methods (for an external UI):
+
+  sessions    {"id":7,"method":"sessions"}
+  transcript  {"id":8,"method":"transcript"}
+  steer       {"id":9,"method":"steer","params":{"text":"…"}}
+  slash.list  {"id":10,"method":"slash.list"}
+  slash       {"id":11,"method":"slash","params":{"name":"review","args":[]}}
+  perm.set    {"id":12,"method":"perm.set","params":{"mode":"ask"}}
+  perm.decide {"id":13,"method":"perm.decide","params":{"id":"perm-1","decision":"allow"}}
 
 During prompt, unsolicited events may appear (no id):
   {"method":"event","params":{"type":"loop.token"|"harness.tool.start"|…}}
+
+In ask mode, write/edit/bash pause and emit:
+  {"method":"perm.ask","params":{"id":"perm-1","name":"write","args":{…}}}
 
 tool.end includes duration_ms. Cancel/status stay responsive while a prompt runs.
 

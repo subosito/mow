@@ -25,6 +25,12 @@
 // Cancel/status are handled concurrently so a host can abort an in-flight prompt.
 // Control methods use a dedicated channel so a full prompt queue cannot starve cancel.
 //
+// Beyond the core methods, a UI process (an external TUI that does not embed
+// Engine) can drive the whole session over the same pipe: sessions, transcript,
+// steer, slash.list, slash, and a permission gate (perm.set / perm.decide with
+// perm.ask notifications). The gate is fail-open until a UI opts into ask mode,
+// so existing headless scripts are unaffected. See README.md for the table.
+//
 // Note: Serve uses Engine.AddOnEvent so existing host listeners keep receiving events.
 package rpc
 
@@ -62,6 +68,15 @@ type Server struct {
 	StreamEvents *bool
 
 	encMu sync.Mutex
+
+	// Permission gate state (see perm.go). Zero value is fail-open: until a
+	// UI sends perm.set {"mode":"ask"}, every tool call is allowed, so
+	// headless scripts behave exactly as before.
+	permMu      sync.Mutex
+	askMode     bool
+	alwaysAllow map[string]bool
+	pending     map[string]pendingPerm
+	permSeq     int64
 }
 
 // jsonRPCVersion tags every response and notification; requests may omit it
@@ -120,7 +135,10 @@ func (s *Server) notify(method string, params any) {
 
 func isControlMethod(method string) bool {
 	switch strings.ToLower(strings.TrimSpace(method)) {
-	case "cancel", "status", "session", "session_id", "ping", "version":
+	case "cancel", "status", "session", "session_id", "ping", "version",
+		"sessions", "transcript", "steer",
+		"slash", "slash.list",
+		"perm.set", "perm.decide":
 		return true
 	default:
 		return false
@@ -149,6 +167,11 @@ func (s *Server) Serve(ctx context.Context) error {
 		})
 		defer unsub()
 	}
+
+	// The permission gate is installed once, always: it is inert (allow) until
+	// a UI switches the server into ask mode with perm.set.
+	unsubPre := s.Engine.AddPreTool(s.preTool)
+	defer unsubPre()
 
 	// Control channel is preferred so cancel is never blocked behind a full
 	// prompt queue. Prompt channel has a modest buffer; overflow returns an error.
@@ -262,7 +285,27 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 		s.Engine.Cancel()
 		s.reply(req.ID, map[string]any{"ok": true})
 	case "status":
-		s.reply(req.ID, s.Engine.Status())
+		s.reply(req.ID, s.statusResult())
+	case "sessions":
+		s.handleSessions(req)
+	case "transcript":
+		s.handleTranscript(req)
+	case "steer":
+		s.handleSteer(req)
+	case "slash.list":
+		s.handleSlashList(req)
+	case "slash":
+		// A slash command may run for a while (it can drive the engine), so
+		// serve it off the loop like prompt — cancel stays responsive.
+		promptWG.Add(1)
+		go func(req request) {
+			defer promptWG.Done()
+			s.handleSlash(ctx, req)
+		}(req)
+	case "perm.set":
+		s.handlePermSet(req)
+	case "perm.decide":
+		s.handlePermDecide(req)
 	case "session", "session_id":
 		s.reply(req.ID, map[string]any{
 			"session_id": s.Engine.SessionID(),
@@ -276,7 +319,7 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 		s.reply(req.ID, map[string]any{
 			"name":    "mow",
 			"version": mow.VersionString(),
-			"rpc":     "2",
+			"rpc":     "3",
 			"package": "github.com/subosito/mow",
 		})
 	default:
@@ -310,6 +353,10 @@ func (s *Server) handlePrompt(ctx context.Context, req request) {
 	}
 	s.reply(req.ID, map[string]any{
 		"text": res.Text, "session_id": res.SessionID, "run_id": res.RunID, "stop_reason": res.StopReason,
+		"usage": map[string]any{
+			"input_tokens":  res.Usage.InputTokens,
+			"output_tokens": res.Usage.OutputTokens,
+		},
 	})
 }
 

@@ -60,8 +60,13 @@ func TestRPCStatusAndVersion(t *testing.T) {
 	if err := srv.Serve(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), `"busy"`) || !strings.Contains(out.String(), `"rpc":"2"`) {
+	if !strings.Contains(out.String(), `"busy"`) || !strings.Contains(out.String(), `"rpc":"3"`) {
 		t.Fatalf("out=%s", out.String())
+	}
+	for _, want := range []string{`"allow_write"`, `"allow_shell"`, `"ask_mode"`, `"pending_perm"`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("status missing %s: %s", want, out.String())
+		}
 	}
 }
 
