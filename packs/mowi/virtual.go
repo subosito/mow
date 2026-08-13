@@ -281,11 +281,13 @@ func (m *model) afterScrollPretty() tea.Cmd {
 			e.plain = true
 		}
 	}
+	// Always rebuild now: off-screen rows are blank placeholders, and a
+	// resumed session starts pinned to the bottom. Waiting for pretty jobs
+	// would leave the newly visible band empty until they land.
+	m.historyDirty = true
+	m.applyVPContent()
 	if len(cmds) == 0 {
-		m.historyDirty = true
-		m.applyVPContent()
 		return nil
 	}
-	m.historyDirty = true
 	return tea.Batch(cmds...)
 }

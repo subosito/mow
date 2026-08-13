@@ -15,6 +15,12 @@ const (
 )
 
 func (m *model) gcOldEntryText() {
+	// seedTranscript runs before the first WindowSize. Without a viewport,
+	// every entry looks off-screen and a long resume would stub itself
+	// into unreadable GC markers before the user can scroll.
+	if !m.ready {
+		return
+	}
 	n := len(m.entries)
 	if n <= entryTextKeepFull {
 		return

@@ -467,6 +467,11 @@ func newModel(eng *mow.Engine, stream, ask bool) *model {
 		nl = []string{"ctrl+j"}
 	}
 	km.InsertNewline = key.NewBinding(key.WithKeys(nl...), key.WithHelp(keys.Primary(keys.Newline), "newline"))
+	// ctrl+u / ctrl+d belong to the transcript (half-page scroll). The
+	// default textarea map binds ctrl+u to delete-to-line-start, which
+	// swallows the key while the editor is focused — resume then looks
+	// like it cannot scroll.
+	km.DeleteBeforeCursor = key.NewBinding()
 	ta.KeyMap = km
 	_ = ta.Focus() // arms cursor blink
 
