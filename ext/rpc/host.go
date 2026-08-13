@@ -152,7 +152,6 @@ func (s *Server) handleSlash(ctx context.Context, req request) {
 	s.reply(req.ID, map[string]any{"title": res.Title, "body": res.Body})
 }
 
-
 func (s *Server) handleModelList(ctx context.Context, req request) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -196,4 +195,42 @@ func (s *Server) handleModelSet(req request) {
 		return
 	}
 	s.reply(req.ID, map[string]any{"ok": true, "model": s.Engine.Model()})
+}
+
+func (s *Server) handleEffortList(req request) {
+	cur := s.Engine.Effort()
+	efforts := s.Engine.Efforts()
+	list := make([]map[string]any, 0, len(efforts))
+	for _, e := range efforts {
+		list = append(list, map[string]any{
+			"id":      e,
+			"current": strings.EqualFold(e, cur),
+		})
+	}
+	s.reply(req.ID, map[string]any{
+		"efforts": list,
+		"current": cur,
+		"default": s.Engine.DefaultEffort(),
+	})
+}
+
+func (s *Server) handleEffortSet(req request) {
+	var p struct {
+		ID     string `json:"id"`
+		Effort string `json:"effort"`
+	}
+	_ = json.Unmarshal(req.Params, &p)
+	id := strings.TrimSpace(p.ID)
+	if id == "" {
+		id = strings.TrimSpace(p.Effort)
+	}
+	if id == "" {
+		s.replyErr(req.ID, codeInvalidRequest, "effort.set requires params.id")
+		return
+	}
+	if err := s.Engine.SetEffort(id); err != nil {
+		s.replyErr(req.ID, codeInvalidRequest, err.Error())
+		return
+	}
+	s.reply(req.ID, map[string]any{"ok": true, "effort": s.Engine.Effort()})
 }

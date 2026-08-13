@@ -513,7 +513,6 @@ func (b *syncBuf) String() string {
 	return b.buf.String()
 }
 
-
 func TestRPCModelListAndSet(t *testing.T) {
 	eng := newEcho(t, mow.Options{})
 	msgs := serveLines(t, eng,
@@ -528,5 +527,37 @@ func TestRPCModelListAndSet(t *testing.T) {
 	}
 	if _, rerr := resultOf(t, msgs, "2"); rerr == nil {
 		t.Fatal("empty model.set must error")
+	}
+}
+
+func TestRPCEffortListAndSet(t *testing.T) {
+	eng := newEcho(t, mow.Options{})
+	msgs := serveLines(t, eng,
+		`{"id":1,"method":"effort.list"}`,
+		`{"id":2,"method":"effort.set","params":{"id":""}}`,
+	)
+	res, err := resultOf(t, msgs, "1")
+	if err != nil {
+		t.Fatalf("effort.list: %v", err)
+	}
+	var out struct {
+		Efforts []struct {
+			ID      string `json:"id"`
+			Current bool   `json:"current"`
+		} `json:"efforts"`
+		Current string `json:"current"`
+	}
+	if json.Unmarshal(res, &out) != nil {
+		t.Fatalf("shape %s", res)
+	}
+	// The injected test Chat has no effort catalog; the contract under test is
+	// that effort.list answers with the {efforts,current} shape, not -32601.
+	for _, e := range out.Efforts {
+		if strings.TrimSpace(e.ID) == "" {
+			t.Fatalf("empty effort id: %s", res)
+		}
+	}
+	if _, rerr := resultOf(t, msgs, "2"); rerr == nil {
+		t.Fatal("empty effort.set must error")
 	}
 }
