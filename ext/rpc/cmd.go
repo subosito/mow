@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/ext"
 )
@@ -32,7 +33,11 @@ func runCmd(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	eng, err := ef.NewEngineCLI()
+	// NOT NewEngineCLI: that installs the stderr tool-progress printer
+	// ("→ bash …"), which a TUI host inherits and which lands on the terminal
+	// outside its frame, corrupting the display. Tool activity reaches the
+	// client as event notifications on stdout instead.
+	eng, err := mow.New(ef.Options())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mow rpc: %v\n", err)
 		return 1
