@@ -30,7 +30,7 @@ Methods (requests may omit `"jsonrpc":"2.0"`):
 | `transcript` | user/assistant turns for resume: `{messages:[{role, content}]}` (each content capped at 32k runes) |
 | `steer` | `params.text` injected into the running turn; empty text is an invalid request |
 | `slash.list` | `{commands:[{name, summary, exclusive, aliases}]}` — only the packs linked into this binary; `usage` is omitted (fetch it with `slash` + `help`) |
-| `slash` | `params {name, args[], color}`; result `{title, body}`. `args:["help"]` returns usage without running. An `exclusive` command is refused while a turn is in flight |
+| `slash` | `params {name, args[], color}`; result `{title, body}` and optional `error` for user-level Run failures (bad flags). `args:["help"]` returns usage without running. An `exclusive` command is refused while a turn is in flight |
 | `perm.set` | `params.mode` `"ask"` or `"auto"` |
 | `perm.decide` | `params {id, decision}` where decision is `allow`, `deny` or `always` |
 | `version` | `rpc` is `"3"` for this method set |

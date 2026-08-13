@@ -139,8 +139,14 @@ func (s *Server) handleSlash(ctx context.Context, req request) {
 		Workspace: s.Engine.Workspace(),
 		Color:     p.Color,
 	})
+	// Run errors are user-level (bad flags, empty scope) — same as mowi
+	// painting an error entry, not a transport failure.
 	if err != nil {
-		s.replyErr(req.ID, codeInternalError, err.Error())
+		s.reply(req.ID, map[string]any{
+			"title": res.Title,
+			"body":  res.Body,
+			"error": err.Error(),
+		})
 		return
 	}
 	s.reply(req.ID, map[string]any{"title": res.Title, "body": res.Body})

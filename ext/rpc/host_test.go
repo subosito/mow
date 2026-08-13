@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -248,6 +249,33 @@ func TestRPCSlash(t *testing.T) {
 
 	if _, rerr := resultOf(t, msgs, "4"); rerr == nil {
 		t.Fatal("missing slash name must error")
+	}
+}
+
+func TestRPCSlashRunErrorIsEnvelope(t *testing.T) {
+	slash.Register(slash.Command{
+		Name:    "rpcfail",
+		Summary: "returns a user-level error",
+		Run: func(ctx context.Context, req slash.Request) (slash.Result, error) {
+			return slash.Result{Title: "rpcfail · empty"}, fmt.Errorf("nothing in scope")
+		},
+	})
+	eng := newEcho(t, mow.Options{})
+	msgs := serveLines(t, eng, `{"id":1,"method":"slash","params":{"name":"rpcfail"}}`)
+	res, rerr := resultOf(t, msgs, "1")
+	if rerr != nil {
+		t.Fatalf("Run error must not be a transport error: %v", rerr)
+	}
+	var out struct {
+		Title string
+		Body  string
+		Error string
+	}
+	if err := json.Unmarshal(res, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Title != "rpcfail · empty" || out.Error != "nothing in scope" {
+		t.Fatalf("envelope=%s", res)
 	}
 }
 
