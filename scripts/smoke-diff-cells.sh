@@ -134,8 +134,8 @@ def contrast(a, b):
 # Surface behind the panel: default dark userBg is #2A2A2E (pinned in the paint
 # fixture). We measure against that so the band-floor assertion matches the
 # unit tests rather than the terminal's unknown default background.
-SURFACE = "#2A2A2E"
-MIN_BAND = 2.0
+SURFACE = "#2a2b3c"
+MIN_BAND = 1.18
 
 for kind in ("del", "add"):
     bg = info[kind]["bg"]

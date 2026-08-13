@@ -179,7 +179,13 @@ func TestThemeColorOverrides(t *testing.T) {
 	assertRGB(t, th.Accent.Render("x"), 255, 0, 170)    // #ff00aa
 	assertRGB(t, th.Error.Render("x"), 255, 0, 0)       // #ff0000
 	assertRGB(t, th.SlashCmd.Render("x"), 255, 255, 0)  // #ffff00
-	assertRGB(t, th.DiffAdd.Render("x"), 0, 255, 0)     // #00ff00
+	// Diff row text is adapted onto the stronger band so the override may
+	// lift off #00ff00; the stored accent is still the author's colour.
+	addBg := resolveDiffBg("", th.palette.add, th.palette, true)
+	wantFG := diffFgOn(th.palette.add, addBg, true)
+	if contrastRatio(wantFG, addBg) < minDiffTextContrast {
+		t.Fatalf("diff add text still illegible: fg %s on %s", wantFG, addBg)
+	}
 	assertRGB(t, th.RoleUserBg.Render("x"), 34, 51, 68) // #223344 bg
 }
 

@@ -21,9 +21,8 @@ func TestDiffSmokePaintForShellUse(t *testing.T) {
 	t.Setenv("MOW_FORCE_COLOR", "1")
 	t.Setenv("NO_COLOR", "")
 
-	// Pin adaptive default dark so expected band hex is stable across hosts
-	// (DefaultThemeName is catppuccin-mocha and would drift with chroma).
-	th := newThemeFrom(ThemeConfig{Name: "default"}, true)
+	// Default TUI theme is mocha; pin it so smoke matches what users see.
+	th := newThemeFrom(ThemeConfig{Name: "catppuccin-mocha"}, true)
 	src := "" +
 		"@@ -3,4 +3,4 @@\n" +
 		" func New() *Client {\n" +

@@ -79,7 +79,7 @@ func TestChromaBackgroundCarriedDiffColors(t *testing.T) {
 
 // A style that carries its diff colours on the foreground must keep using
 // them: the background-channel fix must not override styles that were already
-// correct.
+// correct. Pastel pairs (nord) are replaced later by vividDiffAccents.
 func TestChromaForegroundDiffColorsPreserved(t *testing.T) {
 	for _, name := range []string{"monokai", "nord", "github-dark"} {
 		t.Run(name, func(t *testing.T) {
@@ -91,6 +91,37 @@ func TestChromaForegroundDiffColorsPreserved(t *testing.T) {
 			wantAdd := s.Get(chroma.GenericInserted).Colour.String()
 			if p.add != wantAdd {
 				t.Errorf("add = %s, want the style's own %s", p.add, wantAdd)
+			}
+		})
+	}
+}
+
+// Pastel chrome themes (mocha, nord) keep their own add/del accents.
+// Flashdiff-style sunk bands make those pastels readable; replacing them
+// with neon green/red was the previous workaround and looked off-theme.
+func TestPastelChromaStylesKeepOwnAccents(t *testing.T) {
+	for _, name := range []string{"catppuccin-mocha", "nord"} {
+		t.Run(name, func(t *testing.T) {
+			p, dark, ok := paletteFromChroma(name)
+			if !ok {
+				t.Skipf("%s unavailable", name)
+			}
+			s := chromastyles.Get(name)
+			wantAdd := s.Get(chroma.GenericInserted).Colour.String()
+			wantDel := s.Get(chroma.GenericDeleted).Colour.String()
+			if p.add != wantAdd || p.del != wantDel {
+				t.Errorf("add/del = %s/%s, want chroma %s/%s", p.add, p.del, wantAdd, wantDel)
+			}
+			addBg := resolveDiffBg("", p.add, p, dark)
+			delBg := resolveDiffBg("", p.del, p, dark)
+			if colorDistance(addBg, delBg) < minDiffBandSeparation {
+				t.Errorf("sunk bands too close: %s vs %s", addBg, delBg)
+			}
+			if contrastRatio(diffFgOn(p.add, addBg, dark), addBg) < minDiffTextContrast {
+				t.Errorf("%s add text unreadable on %s", name, addBg)
+			}
+			if contrastRatio(diffFgOn(p.del, delBg, dark), delBg) < minDiffTextContrast {
+				t.Errorf("%s del text unreadable on %s", name, delBg)
 			}
 		})
 	}

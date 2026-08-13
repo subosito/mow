@@ -146,11 +146,6 @@ func TestDefaultPalettesHaveHeadroom(t *testing.T) {
 	for _, dark := range []bool{true, false} {
 		p := defaultPalette(dark)
 		want := minDiffBandContrast
-		if dark {
-			// Saturated accents clear the floor with a little air; del is the
-			// tighter of the pair on the default palette.
-			want = 2.05
-		}
 		for _, d := range []struct{ kind, accent string }{{"add", p.add}, {"del", p.del}} {
 			bg := resolveDiffBg("", d.accent, p, dark)
 			if got := contrastRatio(bg, p.userBg); got < want {

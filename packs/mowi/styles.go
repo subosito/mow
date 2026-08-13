@@ -271,7 +271,13 @@ func paletteFromChroma(name string) (p palette, dark, ok bool) {
 	// magenta for each). Honouring that literally would render add and del as
 	// the same band, so a diff would show that something changed but not
 	// which way. Fall back to conventional green/red, tuned to the page.
-	if !distinctAccents(addAccent, delAccent) {
+	//
+	// Styles that do not distinguish add from del (or whose washed bands
+	// collapse) fall back to conventional green/red. Pastel chrome tokens
+	// (mocha, nord) stay — the flashdiff-style sunk band keeps them readable.
+	userBg := mixHex(background, fg, 0.07)
+	border := borderForChrome(background, fg)
+	if !distinctAccents(addAccent, delAccent) || greyishDiffAccents(addAccent, delAccent) {
 		addAccent, delAccent = fallbackDiffAccents(dark)
 	}
 	p = palette{
@@ -279,10 +285,10 @@ func paletteFromChroma(name string) (p palette, dark, ok bool) {
 		muted:  tok(chroma.Comment, dimFg),
 		accent: tok(chroma.Keyword, fg),
 		user:   tok(chroma.NameFunction, tok(chroma.GenericInserted, fg)),
-		userBg: mixHex(background, fg, 0.07), // block just off the terminal bg
+		userBg: userBg,
 		err:    tok(chroma.GenericDeleted, tok(chroma.Error, fg)),
 		warn:   tok(chroma.NameDecorator, tok(chroma.LiteralString, fg)),
-		border: borderForChrome(background, fg),
+		border: border,
 		add:    addAccent,
 		del:    delAccent,
 		meta:   tok(chroma.LiteralNumber, tok(chroma.KeywordType, fg)),
@@ -336,6 +342,32 @@ func distinctAccents(add, del string) bool {
 		return false
 	}
 	return colorDistance(add, del) >= minDiffAccentSeparation
+}
+
+// vividDiffAccents reports whether both accents are saturated enough to wash
+// into a readable review band. Channel distance only sees hue: mocha's
+// #a6e3a1 / #f38ba8 are clearly different and still pastel, so the derived
+// bands land olive/mauve on the surface. Review rows need conventional
+// green/red more than they need the chrome theme's muted GenericInserted.
+func vividDiffAccents(add, del string) bool {
+	return hexSaturation(add) >= minDiffAccentSaturation && hexSaturation(del) >= minDiffAccentSaturation
+}
+
+// greyishDiffAccents reports a pair that is distinct by luminance but not
+// by hue — algol's two greys, not mocha's green/pink.
+func greyishDiffAccents(add, del string) bool {
+	return hexSaturation(add) < 0.25 && hexSaturation(del) < 0.25
+}
+
+// hexSaturation is HSV saturation in [0,1] (0 = grey, 1 = a pure primary).
+func hexSaturation(s string) float64 {
+	r, g, b := parseHexRGB(s)
+	maxc := math.Max(float64(r), math.Max(float64(g), float64(b)))
+	minc := math.Min(float64(r), math.Min(float64(g), float64(b)))
+	if maxc == 0 {
+		return 0
+	}
+	return (maxc - minc) / maxc
 }
 
 // colorDistance is Euclidean distance in RGB (0 = identical, ~441 = black to
@@ -682,17 +714,15 @@ func diffDelStyle(c func(string) color.Color, p palette, dark bool) lipgloss.Sty
 	return st
 }
 
-// diffSoftSegStyle is the shared-token style on a changed row: same band as
-// the full line, but ink pulled toward the band so unchanged words recede.
+// diffSoftSegStyle is the shared-token style on a changed row: same band
+// and the same accent ink as the rest of the line (flashdiff). Changed
+// tokens are the inverted chip; fading the rest into the band made mocha
+// unreadable.
 func diffSoftSegStyle(c func(string) color.Color, accent, overrideBg string, p palette, dark bool) lipgloss.Style {
 	bg := resolveDiffBg(overrideBg, accent, p, dark)
 	st := lipgloss.NewStyle()
 	if accent != "" {
-		fg := diffFgOn(accent, bg, dark)
-		if bg != "" && fg != "" {
-			fg = mixHex(fg, bg, 0.40)
-		}
-		st = st.Foreground(c(fg))
+		st = st.Foreground(c(diffFgOn(accent, bg, dark)))
 	}
 	if bg != "" {
 		st = st.Background(c(bg))
@@ -733,23 +763,18 @@ func diffWordStyle(c func(string) color.Color, accent, surface string, dark bool
 // produces wildly different results per theme.
 const (
 	// minDiffBandContrast is how far the row background must sit from the
-	// surface behind it. Below roughly 1.5 the band stops registering as a
-	// block on most displays, especially light themes. 2.0 is a deliberate
-	// step above the old 1.75 floor: soft washes still read as tint rather
-	// than a solid block when the accent is already close to the surface.
-	minDiffBandContrast = 2.0
-	// minDiffTextContrast is the floor for the row's own text against its new
-	// background. The band must never be strengthened to the point where the
-	// +/− line itself becomes hard to read.
-	minDiffTextContrast = 2.6
-	// minDiffNumContrast is the floor for gutter line numbers on a band. It is
-	// the strictest of the three (WCAG AA for normal text): numbers are small,
-	// dense, and the thing you navigate by, so "technically visible" is not
-	// enough.
-	minDiffNumContrast = 4.5
-	// diffNumHeadroom is aimed for above the hard floor so a later palette or
-	// band tweak degrades toward the minimum instead of straight through it.
-	diffNumHeadroom = 0.35
+	// surface behind it. Flashdiff-style review rows are a dark (or light)
+	// tinted surface, not a mid-tone panel — the band only has to read as a
+	// block. Text contrast, not band contrast, is what makes the line
+	// readable. 1.18 matches flashdiff's mocha add/del washes (~1.12–1.21).
+	minDiffBandContrast = 1.18
+	// minDiffTextContrast is the floor for the row's own text against its
+	// band. Flashdiff puts the theme accent on a sunk surface (~6–9:1);
+	// 4.5 is WCAG AA for body text and still leaves pastel accents alone.
+	minDiffTextContrast = 4.5
+	// (No gutter-contrast floor: the gutter carries no wash. Changed rows tint
+	// the digits with the row accent on the terminal background — see
+	// diffNumTint in render.go — so there is no band to measure against.)
 	// minChromaAccentContrast decides whether a chroma style's diff colour
 	// carries information. A value this close to the page background is the
 	// style saying "no colour here" (gruvbox paints inserted text in the page
@@ -762,13 +787,19 @@ const (
 	// merely close ones — 40 catches those without rejecting palettes whose
 	// green and red are subtle.
 	minDiffAccentSeparation = 40.0
+	// minDiffAccentSaturation is how colourful a chroma GenericInserted /
+	// GenericDeleted pair must be before we trust it on a review band.
+	// Catppuccin/nord sit around 0.26–0.44 and wash into olive/mauve;
+	// github-dark's salmon is ~0.40 so the floor sits just under that,
+	// and conventional green/red (0.54+) always pass.
+	minDiffAccentSaturation = 0.38
 	// minDiffBandSeparation is the same idea for the derived backgrounds.
 	// Bands are washes, so they converge toward the surface and sit closer
 	// together than the accents they came from; holding them to the accent
 	// threshold would reject palettes that render perfectly well. The band
 	// only has to avoid reading as one block — direction is carried by the
 	// tinted line numbers and the +/− glyph, not by the wash alone.
-	minDiffBandSeparation = 15.0
+	minDiffBandSeparation = 8.0
 )
 
 // resolveDiffBg prefers an explicit override; otherwise washes accent into the
@@ -798,49 +829,40 @@ func resolveDiffBg(override, accent string, p palette, dark bool) string {
 			base = "#f3f4f6"
 		}
 	}
-	// The band backs the content only: line numbers and the change glyph are
-	// tinted, not washed. Nothing legible sits on this colour any more, which
-	// removes the ceiling an earlier version had to respect (numbers needed
-	// 4.5:1 against the band, capping how dark it could go) and lets the wash
-	// be a quiet backing rather than a compromise between two jobs.
-	//
-	// Starting mix stays moderate so low-chroma chroma styles (algol, bw) keep
-	// add/del separable: raising t on light greys collapses both bands onto
-	// the same mid-tone. Strength comes from the contrast floor below — themes
-	// that were sitting on the old 1.75 line (mocha del, light defaults) get
-	// pushed until the panel reads as a block, while syntax FGs stay soft.
-	t := 0.36
+	// Flashdiff recipe: sink the surface toward black/white, then wash a
+	// little accent in. The row stays a dark (or light) tinted block and
+	// the accent itself stays free to be the text colour — mid-tone mixes
+	// ate that contrast and made mocha unreadable.
+	sink := 0.55
+	t := 0.14
 	if !dark {
-		t = 0.26
+		sink = 0.22
+		t = 0.14
 	}
-	bg := mixHex(base, accent, t)
-	// Guarantee the band is actually visible against the surface it sits on,
-	// whatever the theme's colors happen to be. Without this floor a palette
-	// whose accent sits close to its surface (light themes, low-contrast
-	// chroma styles) renders diff rows as plain text.
+	ground := mixHex(base, poleFor(!dark), sink)
+	bg := mixHex(ground, accent, t)
 	for i := 0; i < 8 && contrastRatio(bg, base) < minDiffBandContrast; i++ {
-		t += 0.08
-		if t > 0.92 {
+		t += 0.04
+		if t > 0.36 {
 			break
 		}
-		bg = mixHex(base, accent, t)
+		bg = mixHex(ground, accent, t)
 	}
-	// When the accent is itself close to the surface, mixing the two can never
-	// escape the surface — a fully saturated wash still lands on top of it.
-	// Custom themes do hit this. Step the band toward an accent-tinted pole
-	// (not pure white/black) so add and del keep a residual hue difference
-	// when both have to leave the surface the same way.
 	if contrastRatio(bg, base) < minDiffBandContrast {
-		pure := "#ffffff"
-		if !dark {
-			pure = "#000000"
-		}
-		pole := mixHex(pure, accent, 0.40)
+		pure := poleFor(dark)
+		pole := mixHex(pure, accent, 0.35)
 		for i := 0; i < 10 && contrastRatio(bg, base) < minDiffBandContrast; i++ {
-			bg = mixHex(bg, pole, 0.10)
+			bg = mixHex(bg, pole, 0.08)
 		}
 	}
 	return bg
+}
+
+func poleFor(towardWhite bool) string {
+	if towardWhite {
+		return "#ffffff"
+	}
+	return "#000000"
 }
 
 // diffFgOn returns a readable foreground for a diff row painted on bg.
@@ -864,8 +886,8 @@ func diffFgOn(accent, bg string, dark bool) string {
 		pole = "#000000"
 	}
 	fg := accent
-	for i := 0; i < 8; i++ {
-		fg = mixHex(fg, pole, 0.18)
+	for i := 0; i < 10; i++ {
+		fg = mixHex(fg, pole, 0.22)
 		if contrastRatio(fg, bg) >= minDiffTextContrast {
 			break
 		}

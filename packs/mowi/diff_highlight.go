@@ -173,19 +173,30 @@ func paintDiffBody(th theme, hl *diffHighlighter, path, body string, base lipglo
 	}
 	body = expandDiffTabs(body, 4)
 	painted := ""
-	if hl != nil && path != "" {
+	// Flashdiff only syntax-highlights context. Add/del rows keep a single
+	// accent on the sunk band — seating muted token greys on those rows is
+	// what made mocha unreadable.
+	if hl != nil && path != "" && isDiffCtxStyle(th, base) {
 		painted = hl.paintSeated(path, body, base)
 	}
 	if painted == "" {
 		painted = base.Render(body)
 	}
-	if width > 0 {
-		if pad := width - xansi.StringWidth(painted); pad > 0 {
-			painted += base.Render(strings.Repeat(" ", pad))
-		}
+	if width <= 0 {
+		return painted
 	}
-	_ = th
+	// Pad to width so the band is a rectangle, not a stripe.
+	vis := xansi.StringWidth(xansi.Strip(painted))
+	if pad := width - vis; pad > 0 {
+		painted += base.Render(strings.Repeat(" ", pad))
+	}
 	return painted
+}
+
+func isDiffCtxStyle(th theme, base lipgloss.Style) bool {
+	// Context has no wash; add/del always carry a band background.
+	_ = th
+	return base.GetBackground() == nil
 }
 
 // paintDiffBodySegs paints a body from word-diff segments: changed tokens use

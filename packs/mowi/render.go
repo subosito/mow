@@ -366,15 +366,6 @@ func formatDiffRow(th theme, g diffGutter, bodyStyle lipgloss.Style, oldN, newN,
 	return formatDiffRowPre(th, g, bodyStyle, oldN, newN, sign, bodyStyle.Render(body), width)
 }
 
-// diffNumOnBand is the line-number ink for a changed row.
-//
-// DiffNum is muted + dim, which reads correctly against the terminal
-// background but collapses once the row carries an add/del wash: measured on a
-// real terminal it came out at 1.65:1 on the add band and 1.90:1 on the del
-// band, i.e. numbers that are effectively invisible in exactly the surface
-// where you navigate by them. This tone clears 4.5:1 on both bands while
-// staying quieter than body text, and drops `dim` because terminals implement
-// faint inconsistently.
 // diffNumTint is the line-number style for a changed row: the row's own accent
 // colour on no background.
 //
