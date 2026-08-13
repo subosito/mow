@@ -46,7 +46,7 @@ func (s *Server) statusResult() map[string]any {
 func (s *Server) handleSessions(req request) {
 	infos, err := s.Engine.Sessions()
 	if err != nil {
-		s.replyErr(req.ID, codeInternalError, err.Error())
+		s.replyErrTo(req, codeInternalError, err.Error())
 		return
 	}
 	list := make([]map[string]any, 0, len(infos))
@@ -57,7 +57,7 @@ func (s *Server) handleSessions(req request) {
 			"preview": trimRunes(in.Preview, maxTranscriptRunes),
 		})
 	}
-	s.reply(req.ID, map[string]any{"sessions": list})
+	s.replyTo(req, map[string]any{"sessions": list})
 }
 
 func (s *Server) handleTranscript(req request) {
@@ -70,7 +70,7 @@ func (s *Server) handleTranscript(req request) {
 		}
 		list = append(list, map[string]any{"role": m.Role, "content": content})
 	}
-	s.reply(req.ID, map[string]any{"messages": list})
+	s.replyTo(req, map[string]any{"messages": list})
 }
 
 func (s *Server) handleSteer(req request) {
@@ -79,15 +79,15 @@ func (s *Server) handleSteer(req request) {
 	}
 	_ = json.Unmarshal(req.Params, &p)
 	if strings.TrimSpace(p.Text) == "" {
-		s.replyErr(req.ID, codeInvalidRequest, "steer requires params.text")
+		s.replyErrTo(req, codeInvalidRequest, "steer requires params.text")
 		return
 	}
 	if utf8.RuneCountInString(p.Text) > maxPromptTextRunes {
-		s.replyErr(req.ID, codeInvalidRequest, "steer text too long")
+		s.replyErrTo(req, codeInvalidRequest, "steer text too long")
 		return
 	}
 	s.Engine.Steer(p.Text)
-	s.reply(req.ID, map[string]any{"ok": true})
+	s.replyTo(req, map[string]any{"ok": true})
 }
 
 // handleSlashList reports the slash commands linked into this binary. Usage is
@@ -103,7 +103,7 @@ func (s *Server) handleSlashList(req request) {
 			"aliases":   append([]string{}, c.Aliases...),
 		})
 	}
-	s.reply(req.ID, map[string]any{"commands": list})
+	s.replyTo(req, map[string]any{"commands": list})
 }
 
 func (s *Server) handleSlash(ctx context.Context, req request) {
@@ -115,20 +115,20 @@ func (s *Server) handleSlash(ctx context.Context, req request) {
 	_ = json.Unmarshal(req.Params, &p)
 	token := strings.TrimSpace(p.Name)
 	if token == "" {
-		s.replyErr(req.ID, codeInvalidRequest, "slash requires params.name")
+		s.replyErrTo(req, codeInvalidRequest, "slash requires params.name")
 		return
 	}
 	cmd, ok := slash.Lookup(token)
 	if !ok {
-		s.replyErr(req.ID, codeMethodNotFound, "unknown slash command "+token)
+		s.replyErrTo(req, codeMethodNotFound, "unknown slash command "+token)
 		return
 	}
 	if slash.IsHelpArgs(p.Args) {
-		s.reply(req.ID, map[string]any{"title": "/" + cmd.Name, "body": cmd.Usage})
+		s.replyTo(req, map[string]any{"title": "/" + cmd.Name, "body": cmd.Usage})
 		return
 	}
 	if cmd.Exclusive && s.Engine.Status().Busy {
-		s.replyErr(req.ID, codeInvalidRequest, "exclusive slash command cannot run while a turn is in flight")
+		s.replyErrTo(req, codeInvalidRequest, "exclusive slash command cannot run while a turn is in flight")
 		return
 	}
 	res, err := cmd.Run(ctx, slash.Request{
@@ -142,14 +142,14 @@ func (s *Server) handleSlash(ctx context.Context, req request) {
 	// Run errors are user-level (bad flags, empty scope) — same as mowi
 	// painting an error entry, not a transport failure.
 	if err != nil {
-		s.reply(req.ID, map[string]any{
+		s.replyTo(req, map[string]any{
 			"title": res.Title,
 			"body":  res.Body,
 			"error": err.Error(),
 		})
 		return
 	}
-	s.reply(req.ID, map[string]any{"title": res.Title, "body": res.Body})
+	s.replyTo(req, map[string]any{"title": res.Title, "body": res.Body})
 }
 
 func (s *Server) handleModelList(ctx context.Context, req request) {
@@ -158,7 +158,7 @@ func (s *Server) handleModelList(ctx context.Context, req request) {
 	}
 	infos, err := s.Engine.ListModels(ctx)
 	if err != nil {
-		s.replyErr(req.ID, codeInternalError, err.Error())
+		s.replyErrTo(req, codeInternalError, err.Error())
 		return
 	}
 	cur := s.Engine.Model()
@@ -173,7 +173,7 @@ func (s *Server) handleModelList(ctx context.Context, req request) {
 		}
 		list = append(list, row)
 	}
-	s.reply(req.ID, map[string]any{"models": list, "current": cur})
+	s.replyTo(req, map[string]any{"models": list, "current": cur})
 }
 
 func (s *Server) handleModelSet(req request) {
@@ -187,14 +187,14 @@ func (s *Server) handleModelSet(req request) {
 		id = strings.TrimSpace(p.Name)
 	}
 	if id == "" {
-		s.replyErr(req.ID, codeInvalidRequest, "model.set requires params.id")
+		s.replyErrTo(req, codeInvalidRequest, "model.set requires params.id")
 		return
 	}
 	if err := s.Engine.SetModel(id); err != nil {
-		s.replyErr(req.ID, codeInternalError, err.Error())
+		s.replyErrTo(req, codeInternalError, err.Error())
 		return
 	}
-	s.reply(req.ID, map[string]any{"ok": true, "model": s.Engine.Model()})
+	s.replyTo(req, map[string]any{"ok": true, "model": s.Engine.Model()})
 }
 
 func (s *Server) handleEffortList(req request) {
@@ -207,7 +207,7 @@ func (s *Server) handleEffortList(req request) {
 			"current": strings.EqualFold(e, cur),
 		})
 	}
-	s.reply(req.ID, map[string]any{
+	s.replyTo(req, map[string]any{
 		"efforts": list,
 		"current": cur,
 		"default": s.Engine.DefaultEffort(),
@@ -225,14 +225,14 @@ func (s *Server) handleEffortSet(req request) {
 		id = strings.TrimSpace(p.Effort)
 	}
 	if id == "" {
-		s.replyErr(req.ID, codeInvalidRequest, "effort.set requires params.id")
+		s.replyErrTo(req, codeInvalidRequest, "effort.set requires params.id")
 		return
 	}
 	if err := s.Engine.SetEffort(id); err != nil {
-		s.replyErr(req.ID, codeInvalidRequest, err.Error())
+		s.replyErrTo(req, codeInvalidRequest, err.Error())
 		return
 	}
-	s.reply(req.ID, map[string]any{"ok": true, "effort": s.Engine.Effort()})
+	s.replyTo(req, map[string]any{"ok": true, "effort": s.Engine.Effort()})
 }
 
 // handleContext reports context-window usage so a UI can paint a gauge
@@ -252,7 +252,7 @@ func (s *Server) handleContext(req request) {
 	if lim.OutputPrice > 0 {
 		out["output_price"] = lim.OutputPrice
 	}
-	s.reply(req.ID, out)
+	s.replyTo(req, out)
 }
 
 // handleCompact shrinks the transcript in place. maxChars <= 0 lets the
@@ -264,10 +264,10 @@ func (s *Server) handleCompact(req request) {
 	_ = json.Unmarshal(req.Params, &p)
 	rep, err := s.Engine.Compact(p.MaxChars)
 	if err != nil {
-		s.replyErr(req.ID, codeInvalidRequest, err.Error())
+		s.replyErrTo(req, codeInvalidRequest, err.Error())
 		return
 	}
-	s.reply(req.ID, map[string]any{
+	s.replyTo(req, map[string]any{
 		"layer":           rep.Layer,
 		"chars_before":    rep.CharsBefore,
 		"chars_after":     rep.CharsAfter,
@@ -283,12 +283,12 @@ func (s *Server) handleCompact(req request) {
 // can refill its input box for an edit-and-resend.
 func (s *Server) handleRewind(req request) {
 	last, ok := s.Engine.Rewind()
-	s.reply(req.ID, map[string]any{"ok": ok, "last_user": last})
+	s.replyTo(req, map[string]any{"ok": ok, "last_user": last})
 }
 
 func (s *Server) handleSkillList(req request) {
 	names := s.Engine.AvailableSkills()
-	s.reply(req.ID, map[string]any{"skills": append([]string{}, names...)})
+	s.replyTo(req, map[string]any{"skills": append([]string{}, names...)})
 }
 
 func (s *Server) handleSkillActivate(req request) {
@@ -302,11 +302,11 @@ func (s *Server) handleSkillActivate(req request) {
 		names = []string{p.Name}
 	}
 	if len(names) == 0 {
-		s.replyErr(req.ID, codeInvalidRequest, "skill.activate requires params.names")
+		s.replyErrTo(req, codeInvalidRequest, "skill.activate requires params.names")
 		return
 	}
 	activated, unknown := s.Engine.ActivateSkills(names...)
-	s.reply(req.ID, map[string]any{
+	s.replyTo(req, map[string]any{
 		"activated": append([]string{}, activated...),
 		"unknown":   append([]string{}, unknown...),
 	})

@@ -97,13 +97,13 @@ func (s *Server) handlePermSet(req request) {
 	switch mode {
 	case "ask", "auto":
 	default:
-		s.replyErr(req.ID, codeInvalidRequest, `perm.set requires params.mode "ask" or "auto"`)
+		s.replyErrTo(req, codeInvalidRequest, `perm.set requires params.mode "ask" or "auto"`)
 		return
 	}
 	s.permMu.Lock()
 	s.askMode = mode == "ask"
 	s.permMu.Unlock()
-	s.reply(req.ID, map[string]any{"ok": true, "ask_mode": mode == "ask"})
+	s.replyTo(req, map[string]any{"ok": true, "ask_mode": mode == "ask"})
 }
 
 func (s *Server) handlePermDecide(req request) {
@@ -116,7 +116,7 @@ func (s *Server) handlePermDecide(req request) {
 	switch decision {
 	case "allow", "deny", "always":
 	default:
-		s.replyErr(req.ID, codeInvalidRequest, `perm.decide requires params.decision "allow", "deny" or "always"`)
+		s.replyErrTo(req, codeInvalidRequest, `perm.decide requires params.decision "allow", "deny" or "always"`)
 		return
 	}
 	s.permMu.Lock()
@@ -129,12 +129,12 @@ func (s *Server) handlePermDecide(req request) {
 	}
 	s.permMu.Unlock()
 	if !ok {
-		s.replyErr(req.ID, codeInvalidRequest, "unknown permission id "+p.ID)
+		s.replyErrTo(req, codeInvalidRequest, "unknown permission id "+p.ID)
 		return
 	}
 	select {
 	case p2.ch <- decision:
 	default:
 	}
-	s.reply(req.ID, map[string]any{"ok": true})
+	s.replyTo(req, map[string]any{"ok": true})
 }

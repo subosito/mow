@@ -97,6 +97,30 @@ type request struct {
 	ID      json.RawMessage `json:"id"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params"`
+
+	// notification is true when the request carried no "id" member at all.
+	// JSON-RPC 2.0 §4.1: a server MUST NOT reply to a notification. Note this
+	// is distinct from an explicit "id":null, which is a (malformed but
+	// answerable) request — hence a separate flag rather than len(ID) == 0.
+	notification bool
+}
+
+// UnmarshalJSON records whether "id" was present so notifications can be
+// answered with silence instead of a stray response line.
+func (r *request) UnmarshalJSON(b []byte) error {
+	type raw request
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(b, &probe); err != nil {
+		return err
+	}
+	var out raw
+	if err := json.Unmarshal(b, &out); err != nil {
+		return err
+	}
+	_, hasID := probe["id"]
+	out.notification = !hasID
+	*r = request(out)
+	return nil
 }
 
 type response struct {
@@ -127,6 +151,22 @@ func (s *Server) reply(id json.RawMessage, result any) {
 
 func (s *Server) replyErr(id json.RawMessage, code int, msg string) {
 	s.write(response{JSONRPC: jsonRPCVersion, ID: id, Error: &rpcError{Code: code, Message: msg}})
+}
+
+// replyTo/replyErrTo are the request-aware forms: silent for notifications
+// (JSON-RPC 2.0 §4.1), otherwise identical to reply/replyErr.
+func (s *Server) replyTo(req request, result any) {
+	if req.notification {
+		return
+	}
+	s.reply(req.ID, result)
+}
+
+func (s *Server) replyErrTo(req request, code int, msg string) {
+	if req.notification {
+		return
+	}
+	s.replyErr(req.ID, code, msg)
 }
 
 func (s *Server) notify(method string, params any) {
@@ -190,7 +230,14 @@ func (s *Server) Serve(ctx context.Context) error {
 			}
 			var req request
 			if err := json.Unmarshal([]byte(line), &req); err != nil {
-				s.replyErr(nil, codeParseError, "invalid json: "+err.Error())
+				// A JSON array is a batch: well-formed JSON, but unsupported
+				// here (a stdio control plane has no round trip to amortize),
+				// so it is an invalid request rather than a parse error.
+				code, msg := codeParseError, "invalid json: "+err.Error()
+				if strings.HasPrefix(strings.TrimSpace(line), "[") {
+					code, msg = codeInvalidRequest, "batch requests are not supported; send one object per line"
+				}
+				s.replyErr(nil, code, msg)
 				continue
 			}
 			if isControlMethod(req.Method) {
@@ -209,7 +256,7 @@ func (s *Server) Serve(ctx context.Context) error {
 				return
 			default:
 				// Do not block the reader: cancel must stay readable.
-				s.replyErr(req.ID, codeInternalError, "request queue full; retry after current prompts finish")
+				s.replyErrTo(req, codeInternalError, "request queue full; retry after current prompts finish")
 			}
 		}
 		if err := sc.Err(); err != nil {
@@ -273,7 +320,7 @@ func (s *Server) Serve(ctx context.Context) error {
 
 func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitGroup) {
 	if strings.TrimSpace(req.Method) == "" {
-		s.replyErr(req.ID, codeInvalidRequest, "missing method")
+		s.replyErrTo(req, codeInvalidRequest, "missing method")
 		return
 	}
 	switch strings.ToLower(req.Method) {
@@ -285,9 +332,9 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 		}(req)
 	case "cancel":
 		s.Engine.Cancel()
-		s.reply(req.ID, map[string]any{"ok": true})
+		s.replyTo(req, map[string]any{"ok": true})
 	case "status":
-		s.reply(req.ID, s.statusResult())
+		s.replyTo(req, s.statusResult())
 	case "sessions":
 		s.handleSessions(req)
 	case "transcript":
@@ -327,23 +374,23 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 	case "skill.activate":
 		s.handleSkillActivate(req)
 	case "session", "session_id":
-		s.reply(req.ID, map[string]any{
+		s.replyTo(req, map[string]any{
 			"session_id": s.Engine.SessionID(),
 			"workspace":  s.Engine.Workspace(),
 			"model":      s.Engine.Model(),
 			"wire":       s.Engine.Wire(),
 		})
 	case "ping":
-		s.reply(req.ID, "pong")
+		s.replyTo(req, "pong")
 	case "version":
-		s.reply(req.ID, map[string]any{
+		s.replyTo(req, map[string]any{
 			"name":    "mow",
 			"version": mow.VersionString(),
 			"rpc":     "4",
 			"package": "github.com/subosito/mow",
 		})
 	default:
-		s.replyErr(req.ID, codeMethodNotFound, "unknown method "+req.Method)
+		s.replyErrTo(req, codeMethodNotFound, "unknown method "+req.Method)
 	}
 }
 
@@ -353,7 +400,7 @@ func (s *Server) handlePrompt(ctx context.Context, req request) {
 	}
 	_ = json.Unmarshal(req.Params, &p)
 	if utf8.RuneCountInString(p.Text) > maxPromptTextRunes {
-		s.replyErr(req.ID, codeInvalidRequest, fmt.Sprintf("prompt text exceeds %d runes", maxPromptTextRunes))
+		s.replyErrTo(req, codeInvalidRequest, fmt.Sprintf("prompt text exceeds %d runes", maxPromptTextRunes))
 		return
 	}
 
@@ -371,7 +418,7 @@ func (s *Server) handlePrompt(ctx context.Context, req request) {
 		})
 		return
 	}
-	s.reply(req.ID, map[string]any{
+	s.replyTo(req, map[string]any{
 		"text": res.Text, "session_id": res.SessionID, "run_id": res.RunID, "stop_reason": res.StopReason,
 		"usage": map[string]any{
 			"input_tokens":  res.Usage.InputTokens,

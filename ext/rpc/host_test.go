@@ -607,3 +607,59 @@ func TestRPCContextRewindSkills(t *testing.T) {
 		t.Fatal("skill.activate without names must error")
 	}
 }
+
+// JSON-RPC 2.0 §4.1: a request without an "id" member is a notification and
+// the server must not answer it. An explicit "id":null is NOT a notification.
+func TestRPCNotificationsGetNoReply(t *testing.T) {
+	eng := newEcho(t, mow.Options{})
+	msgs := serveLines(t, eng,
+		`{"jsonrpc":"2.0","method":"ping"}`,
+		`{"jsonrpc":"2.0","method":"nope"}`,
+		`{"jsonrpc":"2.0","id":1,"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":null,"method":"ping"}`,
+	)
+	var responses int
+	for _, m := range msgs {
+		if _, isPush := m["method"]; isPush {
+			continue // server-push notification (events), not a response
+		}
+		responses++
+	}
+	// Exactly two: id=1 and id=null. The two notifications are silent.
+	if responses != 2 {
+		t.Fatalf("want 2 responses (id=1, id=null), got %d: %+v", responses, msgs)
+	}
+	if _, err := resultOf(t, msgs, "1"); err != nil {
+		t.Fatalf("id=1 ping: %v", err)
+	}
+}
+
+func TestRPCBatchIsInvalidRequestNotParseError(t *testing.T) {
+	eng := newEcho(t, mow.Options{})
+	msgs := serveLines(t, eng, `[{"jsonrpc":"2.0","id":1,"method":"ping"}]`)
+	if len(msgs) == 0 {
+		t.Fatal("no response to a batch request")
+	}
+	var got struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	var found bool
+	for _, m := range msgs {
+		raw, ok := m["error"]
+		if !ok {
+			continue
+		}
+		if json.Unmarshal(raw, &got) == nil {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("batch must be rejected: %+v", msgs)
+	}
+	// Well-formed JSON, unsupported shape: -32600 (invalid request), not -32700.
+	if got.Code != -32600 {
+		t.Fatalf("batch code = %d, want -32600: %s", got.Code, got.Message)
+	}
+}
