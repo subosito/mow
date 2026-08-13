@@ -561,3 +561,49 @@ func TestRPCEffortListAndSet(t *testing.T) {
 		t.Fatal("empty effort.set must error")
 	}
 }
+
+func TestRPCContextRewindSkills(t *testing.T) {
+	eng := newEcho(t, mow.Options{})
+	msgs := serveLines(t, eng,
+		`{"id":1,"method":"context"}`,
+		`{"id":2,"method":"rewind"}`,
+		`{"id":3,"method":"skill.list"}`,
+		`{"id":4,"method":"skill.activate","params":{}}`,
+	)
+	res, err := resultOf(t, msgs, "1")
+	if err != nil {
+		t.Fatalf("context: %v", err)
+	}
+	var ctxOut struct {
+		Tokens int `json:"tokens"`
+	}
+	if json.Unmarshal(res, &ctxOut) != nil {
+		t.Fatalf("context shape %s", res)
+	}
+	if ctxOut.Tokens < 0 {
+		t.Fatalf("negative tokens: %s", res)
+	}
+
+	res, err = resultOf(t, msgs, "2")
+	if err != nil {
+		t.Fatalf("rewind: %v", err)
+	}
+	var rw struct {
+		OK bool `json:"ok"`
+	}
+	if json.Unmarshal(res, &rw) != nil {
+		t.Fatalf("rewind shape %s", res)
+	}
+
+	res, err = resultOf(t, msgs, "3")
+	if err != nil {
+		t.Fatalf("skill.list: %v", err)
+	}
+	if !strings.Contains(string(res), "skills") {
+		t.Fatalf("skill.list shape %s", res)
+	}
+
+	if _, rerr := resultOf(t, msgs, "4"); rerr == nil {
+		t.Fatal("skill.activate without names must error")
+	}
+}

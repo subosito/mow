@@ -234,3 +234,80 @@ func (s *Server) handleEffortSet(req request) {
 	}
 	s.reply(req.ID, map[string]any{"ok": true, "effort": s.Engine.Effort()})
 }
+
+// handleContext reports context-window usage so a UI can paint a gauge
+// without replaying the transcript itself.
+func (s *Server) handleContext(req request) {
+	used := s.Engine.ContextTokens()
+	lim := s.Engine.Limits()
+	out := map[string]any{"tokens": used}
+	if lim.ContextWindow > 0 {
+		out["context_window"] = lim.ContextWindow
+		out["remaining"] = max(lim.ContextWindow-used, 0)
+		out["percent"] = float64(used) / float64(lim.ContextWindow) * 100
+	}
+	if lim.InputPrice > 0 {
+		out["input_price"] = lim.InputPrice
+	}
+	if lim.OutputPrice > 0 {
+		out["output_price"] = lim.OutputPrice
+	}
+	s.reply(req.ID, out)
+}
+
+// handleCompact shrinks the transcript in place. maxChars <= 0 lets the
+// engine pick its own budget.
+func (s *Server) handleCompact(req request) {
+	var p struct {
+		MaxChars int `json:"max_chars"`
+	}
+	_ = json.Unmarshal(req.Params, &p)
+	rep, err := s.Engine.Compact(p.MaxChars)
+	if err != nil {
+		s.replyErr(req.ID, codeInvalidRequest, err.Error())
+		return
+	}
+	s.reply(req.ID, map[string]any{
+		"layer":           rep.Layer,
+		"chars_before":    rep.CharsBefore,
+		"chars_after":     rep.CharsAfter,
+		"chars_saved":     rep.CharsSaved,
+		"messages_before": rep.MessagesBefore,
+		"messages_after":  rep.MessagesAfter,
+		"over_budget":     rep.OverBudget,
+		"tokens":          s.Engine.ContextTokens(),
+	})
+}
+
+// handleRewind drops the last exchange and hands the user text back so a UI
+// can refill its input box for an edit-and-resend.
+func (s *Server) handleRewind(req request) {
+	last, ok := s.Engine.Rewind()
+	s.reply(req.ID, map[string]any{"ok": ok, "last_user": last})
+}
+
+func (s *Server) handleSkillList(req request) {
+	names := s.Engine.AvailableSkills()
+	s.reply(req.ID, map[string]any{"skills": append([]string{}, names...)})
+}
+
+func (s *Server) handleSkillActivate(req request) {
+	var p struct {
+		Names []string `json:"names"`
+		Name  string   `json:"name"`
+	}
+	_ = json.Unmarshal(req.Params, &p)
+	names := p.Names
+	if len(names) == 0 && strings.TrimSpace(p.Name) != "" {
+		names = []string{p.Name}
+	}
+	if len(names) == 0 {
+		s.replyErr(req.ID, codeInvalidRequest, "skill.activate requires params.names")
+		return
+	}
+	activated, unknown := s.Engine.ActivateSkills(names...)
+	s.reply(req.ID, map[string]any{
+		"activated": append([]string{}, activated...),
+		"unknown":   append([]string{}, unknown...),
+	})
+}

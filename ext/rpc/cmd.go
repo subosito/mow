@@ -72,7 +72,8 @@ Host methods (for an external UI):
   slash.list  {"id":10,"method":"slash.list"}
   slash       {"id":11,"method":"slash","params":{"name":"review","args":[]}}
   perm.set    {"id":12,"method":"perm.set","params":{"mode":"ask"}}
-  perm.decide  model.list  model.set  effort.list  effort.set {"id":13,"method":"perm.decide","params":{"id":"perm-1","decision":"allow"}}
+  perm.decide  model.list  model.set  effort.list  effort.set
+    context  compact  rewind  skill.list  skill.activate {"id":13,"method":"perm.decide","params":{"id":"perm-1","decision":"allow"}}
 
 During prompt, unsolicited events may appear (no id):
   {"method":"event","params":{"type":"loop.token"|"harness.tool.start"|…}}

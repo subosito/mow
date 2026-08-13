@@ -139,7 +139,8 @@ func isControlMethod(method string) bool {
 		"sessions", "transcript", "steer",
 		"slash", "slash.list",
 		"perm.set", "perm.decide", "model.list", "model.set",
-		"effort.list", "effort.set":
+		"effort.list", "effort.set",
+		"context", "rewind", "skill.list", "skill.activate":
 		return true
 	default:
 		return false
@@ -315,6 +316,16 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 		s.handleEffortList(req)
 	case "effort.set":
 		s.handleEffortSet(req)
+	case "context":
+		s.handleContext(req)
+	case "compact":
+		s.handleCompact(req)
+	case "rewind":
+		s.handleRewind(req)
+	case "skill.list":
+		s.handleSkillList(req)
+	case "skill.activate":
+		s.handleSkillActivate(req)
 	case "session", "session_id":
 		s.reply(req.ID, map[string]any{
 			"session_id": s.Engine.SessionID(),
@@ -328,7 +339,7 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 		s.reply(req.ID, map[string]any{
 			"name":    "mow",
 			"version": mow.VersionString(),
-			"rpc":     "3",
+			"rpc":     "4",
 			"package": "github.com/subosito/mow",
 		})
 	default:

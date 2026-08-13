@@ -34,10 +34,15 @@ Methods (requests may omit `"jsonrpc":"2.0"`):
 | `perm.set` | `params.mode` `"ask"` or `"auto"` |
 | `model.list` | `{models:[{id, current, wire?}], current}` |
 | `model.set` | `params {id}` → `{ok, model}` |
+| `context` | `{tokens, context_window?, remaining?, percent?}` |
+| `compact` | `params {max_chars?}` → compaction report |
+| `rewind` | `{ok, last_user}` — drop last exchange, refill input |
+| `skill.list` | `{skills:[name]}` |
+| `skill.activate` | `params {names[]}` → `{activated, unknown}` |
 | `effort.list` | `{efforts:[{id,current}], current, default}` |
 | `effort.set` | `params {id}` → `{ok, effort}` |
 | `perm.decide` | `params {id, decision}` where decision is `allow`, `deny` or `always` |
-| `version` | `rpc` is `"3"` for this method set |
+| `version` | `rpc` is `"4"`; clients should accept `>=` their minimum |
 | `ping` | |
 
 Everything except `prompt` and `slash` is a control method: it is answered on a
