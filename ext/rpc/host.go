@@ -151,3 +151,49 @@ func (s *Server) handleSlash(ctx context.Context, req request) {
 	}
 	s.reply(req.ID, map[string]any{"title": res.Title, "body": res.Body})
 }
+
+
+func (s *Server) handleModelList(ctx context.Context, req request) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	infos, err := s.Engine.ListModels(ctx)
+	if err != nil {
+		s.replyErr(req.ID, codeInternalError, err.Error())
+		return
+	}
+	cur := s.Engine.Model()
+	list := make([]map[string]any, 0, len(infos))
+	for _, m := range infos {
+		row := map[string]any{
+			"id":      m.ID,
+			"current": strings.EqualFold(m.ID, cur),
+		}
+		if m.Wire != "" {
+			row["wire"] = m.Wire
+		}
+		list = append(list, row)
+	}
+	s.reply(req.ID, map[string]any{"models": list, "current": cur})
+}
+
+func (s *Server) handleModelSet(req request) {
+	var p struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(req.Params, &p)
+	id := strings.TrimSpace(p.ID)
+	if id == "" {
+		id = strings.TrimSpace(p.Name)
+	}
+	if id == "" {
+		s.replyErr(req.ID, codeInvalidRequest, "model.set requires params.id")
+		return
+	}
+	if err := s.Engine.SetModel(id); err != nil {
+		s.replyErr(req.ID, codeInternalError, err.Error())
+		return
+	}
+	s.reply(req.ID, map[string]any{"ok": true, "model": s.Engine.Model()})
+}

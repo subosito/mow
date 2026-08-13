@@ -512,3 +512,21 @@ func (b *syncBuf) String() string {
 	defer b.mu.Unlock()
 	return b.buf.String()
 }
+
+
+func TestRPCModelListAndSet(t *testing.T) {
+	eng := newEcho(t, mow.Options{})
+	msgs := serveLines(t, eng,
+		`{"id":1,"method":"model.list"}`,
+		`{"id":2,"method":"model.set","params":{"id":""}}`,
+	)
+	// Injected Chat has no catalog: list may error or return {models,current}.
+	// Either way it must be a JSON-RPC response, not an unknown method.
+	_, listErr := resultOf(t, msgs, "1")
+	if listErr != nil && listErr.Code == -32601 {
+		t.Fatalf("model.list not registered: %v", listErr)
+	}
+	if _, rerr := resultOf(t, msgs, "2"); rerr == nil {
+		t.Fatal("empty model.set must error")
+	}
+}

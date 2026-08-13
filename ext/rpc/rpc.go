@@ -138,7 +138,7 @@ func isControlMethod(method string) bool {
 	case "cancel", "status", "session", "session_id", "ping", "version",
 		"sessions", "transcript", "steer",
 		"slash", "slash.list",
-		"perm.set", "perm.decide":
+		"perm.set", "perm.decide", "model.list", "model.set":
 		return true
 	default:
 		return false
@@ -306,6 +306,10 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 		s.handlePermSet(req)
 	case "perm.decide":
 		s.handlePermDecide(req)
+	case "model.list":
+		s.handleModelList(ctx, req)
+	case "model.set":
+		s.handleModelSet(req)
 	case "session", "session_id":
 		s.reply(req.ID, map[string]any{
 			"session_id": s.Engine.SessionID(),
