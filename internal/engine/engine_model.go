@@ -296,6 +296,9 @@ func (e *Engine) SetModelWithWire(id, wire string) error {
 }
 
 // Effort returns the canonical reasoning effort (none|low|medium|high), or "" if unset.
+// This is the session/user setting hosts should show in chrome. A running Prompt
+// may send a cheaper tier (see Event.Effort on loop.run.start) without changing
+// this value.
 func (e *Engine) Effort() string {
 	if e == nil {
 		return ""
@@ -400,8 +403,9 @@ func SuggestEffortForPrompt(text, current string, allowed []string) string {
 }
 
 // applyAutoEffort temporarily downshifts high/max effort for a simple prompt.
-// Session runtime is left unchanged (caller should append runtime first).
-// Restores the previous effort and pin state when the returned func runs.
+// The cheaper tier is stored in runEffort so the request clone can send it
+// without mutating Engine.Effort() (header/status/session stay on the user's
+// selected tier). Restores by clearing the override.
 func (e *Engine) applyAutoEffort(text string) (restore func()) {
 	noop := func() {}
 	if e == nil {
@@ -421,28 +425,39 @@ func (e *Engine) applyAutoEffort(text string) (restore func()) {
 		e.mu.Unlock()
 		return noop
 	}
-	prevEffort := cur
-	prevPinned := false
-	if e.client != nil {
-		prevPinned = e.client.EffortPinned
-		e.client.Effort = want
-		// Temporary: do not pin so model switches still treat the session default.
-	}
-	if e.cfg != nil {
-		e.cfg.LLM.Effort = want
-	}
+	e.runEffort = want
 	e.mu.Unlock()
 	return func() {
 		e.mu.Lock()
-		defer e.mu.Unlock()
-		if e.client != nil {
-			e.client.Effort = prevEffort
-			e.client.EffortPinned = prevPinned
-		}
-		if e.cfg != nil {
-			e.cfg.LLM.Effort = prevEffort
-		}
+		e.runEffort = ""
+		e.mu.Unlock()
 	}
+}
+
+// requestEffortLocked returns the effort that will be sent on the current
+// request. Callers must hold e.mu.
+func (e *Engine) requestEffortLocked() string {
+	if e.runEffort != "" {
+		return e.runEffort
+	}
+	if e.client != nil {
+		return e.client.Effort
+	}
+	if e.cfg != nil {
+		return e.cfg.LLM.Effort
+	}
+	return ""
+}
+
+// requestEffort is the in-flight request effort (after any auto-downshift),
+// or the session setting when idle. Hosts displaying chrome should use Effort().
+func (e *Engine) requestEffort() string {
+	if e == nil {
+		return ""
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.requestEffortLocked()
 }
 
 // Efforts returns catalog-advertised effort levels for the active model, or nil

@@ -62,6 +62,11 @@ type Engine struct {
 	// lastCtxTokens is the most recent LLM call's input tokens ≈ current context
 	// size (for a context-window fullness indicator). 0 until the first call.
 	lastCtxTokens int
+	// runEffort is a per-Prompt wire override (auto-downshift for short
+	// mechanical prompts). Empty means use client/cfg effort. Effort() never
+	// returns this — hosts show the session/user setting while the request
+	// may send a cheaper tier.
+	runEffort string
 	// wireExplicit: user pinned wire (yaml/env/SetWire). When false, catalog
 	// preferred wire for the active model is applied after ListModels / SetModel.
 	wireExplicit bool
@@ -541,7 +546,7 @@ func New(opt Options) (*Engine, error) {
 			// publishes refreshed catalogs under the same lock, so a running call
 			// never shares maps or slices with model switching/catalog refresh.
 			e.mu.Lock()
-			c := cloneLLMClient(e.client)
+			c := cloneRequestClient(e.client, e.runEffort)
 			e.mu.Unlock()
 			msg, err := c.ChatWithStream(ctx, messages, tools, hooks)
 			if err == nil && msg.Usage.InputTokens > 0 {

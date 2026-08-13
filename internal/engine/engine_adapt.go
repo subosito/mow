@@ -476,6 +476,16 @@ func otelCfgMap(cfg *config.File) map[string]any {
 	return m
 }
 
+// cloneRequestClient snapshots the live client for one chat call and applies a
+// per-Prompt effort override without mutating Engine.Effort().
+func cloneRequestClient(src *llm.Client, runEffort string) llm.Client {
+	c := cloneLLMClient(src)
+	if strings.TrimSpace(runEffort) != "" {
+		c.Effort = runEffort
+	}
+	return c
+}
+
 // cloneLLMClient snapshots mutable client state for one request/catalog call.
 // Callers hold Engine.mu while cloning; maps and slices need deep copies because
 // a shallow struct copy would still race with ListModels or SetModel.

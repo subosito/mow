@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -170,6 +172,84 @@ func TestHeaderFormatsModelEffort(t *testing.T) {
 	if !strings.Contains(hdr, "gpt-5-mini (high)") {
 		t.Fatalf("header should format model (effort): %q", hdr)
 	}
+}
+
+// Header chrome reads Engine.Effort() (session/user setting). A short prompt
+// may auto-downshift the in-flight request to medium; busy paints (heartbeat,
+// peer progress) must not flicker the header high → medium → high.
+func TestHeaderEffortStableDuringSimplePrompt(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Model:     "gpt-5-mini",
+		Effort:    "high",
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			close(started)
+			<-release
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.SetEffort("high"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(eng, false, false)
+	m.width, m.height = 120, 24
+	m.layout()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := m.eng.Prompt(context.Background(), "thanks")
+		errCh <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt")
+	}
+	var releaseOnce sync.Once
+	releaseNow := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseNow()
+
+	assertHigh := func(when string) {
+		t.Helper()
+		if got := m.eng.Effort(); got != "high" {
+			t.Fatalf("%s Effort()=%q want high", when, got)
+		}
+		hdr := xansi.Strip(m.renderHeader())
+		if !strings.Contains(hdr, "(high)") {
+			t.Fatalf("%s header missing (high): %q", when, hdr)
+		}
+		if strings.Contains(hdr, "(medium)") {
+			t.Fatalf("%s header flickered to medium: %q", when, hdr)
+		}
+	}
+
+	m.busy = true
+	um, _ := m.Update(busyHeartbeatMsg{})
+	m = um.(*model)
+	assertHigh("busy heartbeat")
+
+	um, _ = m.Update(toolUIMsg{
+		start:        true,
+		peerAgent:    "peer",
+		peerProgress: "tool",
+		name:         "peer: grep",
+		line:         "peer: grep",
+	})
+	m = um.(*model)
+	assertHigh("peer progress")
+
+	releaseNow()
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	m.busy = false
+	assertHigh("after prompt")
 }
 
 func TestHeaderTokensWithoutGatewayLimits(t *testing.T) {

@@ -55,7 +55,7 @@ func TestIsHighCostEffort(t *testing.T) {
 	}
 }
 
-func TestApplyAutoEffort_restoresAfterSimplePrompt(t *testing.T) {
+func TestApplyAutoEffort_doesNotMutatePublicEffort(t *testing.T) {
 	eng, err := New(Options{
 		NoSession: true,
 		Effort:    "high",
@@ -73,20 +73,31 @@ func TestApplyAutoEffort_restoresAfterSimplePrompt(t *testing.T) {
 	}
 	eng.cfg.LLM.Effort = "high"
 
-	// Without a live client, applyAutoEffort still rewrites cfg for the call.
 	restore := eng.applyAutoEffort("thanks")
-	if got := eng.Effort(); got != "medium" {
-		t.Fatalf("during simple prompt effort=%q want medium", got)
+	if got := eng.Effort(); got != "high" {
+		t.Fatalf("during simple prompt Effort()=%q want high (session setting)", got)
+	}
+	if got := eng.requestEffort(); got != "medium" {
+		t.Fatalf("during simple prompt requestEffort=%q want medium", got)
+	}
+	if eng.cfg.LLM.Effort != "high" {
+		t.Fatalf("cfg effort mutated to %q", eng.cfg.LLM.Effort)
 	}
 	restore()
 	if got := eng.Effort(); got != "high" {
-		t.Fatalf("after restore effort=%q want high", got)
+		t.Fatalf("after restore Effort()=%q want high", got)
+	}
+	if got := eng.requestEffort(); got != "high" {
+		t.Fatalf("after restore requestEffort=%q want high", got)
 	}
 
 	// Complex short prompt must not downshift.
 	restore = eng.applyAutoEffort("debug the flaky test")
 	if got := eng.Effort(); got != "high" {
-		t.Fatalf("complex prompt effort=%q want high", got)
+		t.Fatalf("complex prompt Effort()=%q want high", got)
+	}
+	if got := eng.requestEffort(); got != "high" {
+		t.Fatalf("complex prompt requestEffort=%q want high", got)
 	}
 	restore()
 }

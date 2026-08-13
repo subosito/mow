@@ -193,7 +193,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	defer restoreEffort()
 
 	e.log().Debug("mow run start", "run_id", runID, "session_id", sid, "workspace", ws)
-	e.Emit(Event{Type: EventRunStart, RunID: runID, SessionID: sid, Text: text})
+	e.Emit(Event{Type: EventRunStart, RunID: runID, SessionID: sid, Text: text, Model: model, Effort: e.requestEffort()})
 
 	// Stream callbacks: fan-out to OnToken/OnReasoning and Event stream.
 	e.onTokenMu.Lock()

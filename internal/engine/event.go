@@ -204,6 +204,12 @@ type Event struct {
 
 	// Prompt text (run.start) or final assistant text (run.end).
 	Text string `json:"text,omitempty"`
+	// Model and Effort on loop.run.start are the request selection for this
+	// turn. Effort is the value sent on the wire after any auto-downshift;
+	// Engine.Effort() remains the session/user setting hosts should show in
+	// chrome (so a short "thanks" does not flicker the header to medium).
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 	// Streaming deltas (token / reasoning / delegate.chunk / delegate.progress).
 	Delta string `json:"delta,omitempty"`
 
