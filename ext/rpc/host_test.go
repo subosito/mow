@@ -663,3 +663,39 @@ func TestRPCBatchIsInvalidRequestNotParseError(t *testing.T) {
 		t.Fatalf("batch code = %d, want -32600: %s", got.Code, got.Message)
 	}
 }
+
+// A parse error must not overtake replies to lines that arrived before it:
+// the reader goroutine runs ahead of dispatch, so the error has to travel the
+// same queue rather than being written inline.
+func TestRPCParseErrorKeepsArrivalOrder(t *testing.T) {
+	eng := newEcho(t, mow.Options{})
+	msgs := serveLines(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"ping"}`,
+		`not json`,
+		`{"jsonrpc":"2.0","id":2,"method":"ping"}`,
+	)
+	var order []string
+	for _, m := range msgs {
+		if _, isPush := m["method"]; isPush {
+			continue
+		}
+		if _, bad := m["error"]; bad {
+			if _, hasID := m["id"]; !hasID {
+				order = append(order, "parse-error")
+				continue
+			}
+		}
+		if raw, ok := m["id"]; ok {
+			order = append(order, strings.Trim(string(raw), `"`))
+		}
+	}
+	want := []string{"1", "parse-error", "2"}
+	if len(order) != len(want) {
+		t.Fatalf("got %v, want %v", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("out of order: got %v, want %v", order, want)
+		}
+	}
+}

@@ -84,6 +84,11 @@ type Server struct {
 // works unchanged.
 const jsonRPCVersion = "2.0"
 
+// rpcProtocolVersion is mow's own method-surface version, distinct from the
+// JSON-RPC envelope version. It is additive: clients should accept any value
+// >= the minimum they need rather than pinning equality.
+const rpcProtocolVersion = "4"
+
 // Standard JSON-RPC 2.0 error codes.
 const (
 	codeParseError     = -32700
@@ -97,6 +102,11 @@ type request struct {
 	ID      json.RawMessage `json:"id"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params"`
+
+	// parseErr, when set, marks a line that failed to decode. It travels the
+	// same channel as real requests so its error reply lands in arrival order
+	// instead of jumping ahead of replies to earlier lines.
+	parseErr *rpcError
 
 	// notification is true when the request carried no "id" member at all.
 	// JSON-RPC 2.0 §4.1: a server MUST NOT reply to a notification. Note this
@@ -173,6 +183,55 @@ func (s *Server) notify(method string, params any) {
 	s.write(notification{JSONRPC: jsonRPCVersion, Method: method, Params: params})
 }
 
+// streamEvents reports whether event notifications are pushed during prompt
+// (default true; StreamEvents=false makes prompt return only its final result).
+func (s *Server) streamEvents() bool {
+	if s.StreamEvents == nil {
+		return true
+	}
+	return *s.StreamEvents
+}
+
+// methodNames is the served method surface, in dispatch order. It is the
+// source of truth for capability discovery: a client reads this from
+// `version` (or `capabilities`) and feature-detects up front instead of
+// probing and handling -32601. Keep it in sync when adding a case to dispatch
+// — TestRPCCapabilitiesMatchDispatch fails otherwise.
+var methodNames = []string{
+	"prompt", "cancel", "status", "session", "sessions", "transcript", "steer",
+	"slash", "slash.list",
+	"perm.set", "perm.decide",
+	"model.list", "model.set",
+	"effort.list", "effort.set",
+	"context", "compact", "rewind",
+	"skill.list", "skill.activate",
+	"ping", "version", "capabilities",
+}
+
+// capabilitiesResult describes what this build can do. Booleans are for
+// behavior a client cannot infer from a method name alone.
+func (s *Server) capabilitiesResult() map[string]any {
+	methods := append([]string{}, methodNames...)
+	control := make([]string, 0, len(methods))
+	for _, m := range methods {
+		if isControlMethod(m) {
+			control = append(control, m)
+		}
+	}
+	return map[string]any{
+		"rpc":     rpcProtocolVersion,
+		"methods": methods,
+		// Control methods are answered while a prompt is in flight.
+		"control_methods": control,
+		"features": map[string]any{
+			"streaming_events": s.streamEvents(),
+			"permission_gate":  true,
+			"batch":            false,
+			"notifications":    true,
+		},
+	}
+}
+
 func isControlMethod(method string) bool {
 	switch strings.ToLower(strings.TrimSpace(method)) {
 	case "cancel", "status", "session", "session_id", "ping", "version",
@@ -180,7 +239,8 @@ func isControlMethod(method string) bool {
 		"slash", "slash.list",
 		"perm.set", "perm.decide", "model.list", "model.set",
 		"effort.list", "effort.set",
-		"context", "rewind", "skill.list", "skill.activate":
+		"context", "rewind", "skill.list", "skill.activate",
+		"capabilities":
 		return true
 	default:
 		return false
@@ -199,11 +259,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		return fmt.Errorf("rpc: nil out")
 	}
 
-	stream := true
-	if s.StreamEvents != nil {
-		stream = *s.StreamEvents
-	}
-	if stream {
+	if s.streamEvents() {
 		unsub := s.Engine.AddOnEvent(func(ev mow.Event) {
 			s.notify("event", capEvent(ev))
 		})
@@ -234,13 +290,15 @@ func (s *Server) Serve(ctx context.Context) error {
 				// here (a stdio control plane has no round trip to amortize),
 				// so it is an invalid request rather than a parse error.
 				code, msg := codeParseError, "invalid json: "+err.Error()
-				if strings.HasPrefix(strings.TrimSpace(line), "[") {
+				if strings.HasPrefix(line, "[") {
 					code, msg = codeInvalidRequest, "batch requests are not supported; send one object per line"
 				}
-				s.replyErr(nil, code, msg)
-				continue
+				// Queue it rather than writing here: the reader runs ahead of
+				// the dispatch loop, so a direct write would print this error
+				// before the replies to lines that arrived earlier.
+				req = request{parseErr: &rpcError{Code: code, Message: msg}}
 			}
-			if isControlMethod(req.Method) {
+			if req.parseErr != nil || isControlMethod(req.Method) {
 				select {
 				case controlCh <- req:
 				case <-ctx.Done():
@@ -319,6 +377,11 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitGroup) {
+	if req.parseErr != nil {
+		// Undecodable line: no id to echo, so reply with a null id (§5).
+		s.write(response{JSONRPC: jsonRPCVersion, Error: req.parseErr})
+		return
+	}
 	if strings.TrimSpace(req.Method) == "" {
 		s.replyErrTo(req, codeInvalidRequest, "missing method")
 		return
@@ -380,15 +443,16 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 			"model":      s.Engine.Model(),
 			"wire":       s.Engine.Wire(),
 		})
+	case "capabilities":
+		s.replyTo(req, s.capabilitiesResult())
 	case "ping":
 		s.replyTo(req, "pong")
 	case "version":
-		s.replyTo(req, map[string]any{
-			"name":    "mow",
-			"version": mow.VersionString(),
-			"rpc":     "4",
-			"package": "github.com/subosito/mow",
-		})
+		out := s.capabilitiesResult()
+		out["name"] = "mow"
+		out["version"] = mow.VersionString()
+		out["package"] = "github.com/subosito/mow"
+		s.replyTo(req, out)
 	default:
 		s.replyErrTo(req, codeMethodNotFound, "unknown method "+req.Method)
 	}

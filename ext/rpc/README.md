@@ -42,6 +42,7 @@ Methods (requests may omit `"jsonrpc":"2.0"`):
 | `effort.list` | `{efforts:[{id,current}], current, default}` |
 | `effort.set` | `params {id}` → `{ok, effort}` |
 | `perm.decide` | `params {id, decision}` where decision is `allow`, `deny` or `always` |
+| `capabilities` | `{rpc, methods[], control_methods[], features{}}` — feature-detect here |
 | `version` | `rpc` is `"4"`; clients should accept `>=` their minimum |
 | `ping` | |
 
