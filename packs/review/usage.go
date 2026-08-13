@@ -59,10 +59,10 @@ CI:
 Other:
 
   --no-verify              skip the verification pass (faster, noisier)
-  --reviewer MODEL         add a model to the candidate-review group (repeatable)
-  --reviewers MODELS       comma-separated candidate-review models
+  --reviewer MODEL         candidate reviewer (repeatable or comma-separated)
+  --reviewers MODELS       alias of --reviewer
   --reviewer-parallel N    concurrent candidate reviewers (default: all)
-  --verifier-model MODEL   pass-two verifier model (default: same reviewer)
+  --verifier MODEL         pass-two verifier (one model; default: first reviewer)
   [engine flags]           --model --base-url --workspace --config …
 
 Examples:
@@ -131,10 +131,10 @@ CI:
 Other:
 
   --no-verify              skip the verification pass (faster, noisier)
-  --reviewer MODEL         add a model to the candidate-review group (repeatable)
-  --reviewers MODELS       comma-separated candidate-review models
+  --reviewer MODEL         candidate reviewer (repeatable or comma-separated)
+  --reviewers MODELS       alias of --reviewer
   --reviewer-parallel N    concurrent candidate reviewers (default: all)
-  --verifier-model MODEL   pass-two verifier model (default: same reviewer)
+  --verifier MODEL         pass-two verifier (one model; default: first reviewer)
   [engine flags]           --model --base-url --workspace --config …
 
 Examples:

@@ -38,7 +38,7 @@ may only rule on ids that already exist — it cannot introduce a new finding. O
 `mow sec`, it may correct or clear pass-one structured evidence fields when it
 returns them explicitly in `evidence_fields`.
 
-Use `--verifier-model` to run pass two with a different read-only model than pass
+Use `--verifier` to run pass two with a different read-only model than pass
 one (default unchanged: same engine, or the first ensemble member when using
 `--reviewer`/`--reviewers`).
 
@@ -314,13 +314,13 @@ first, and raise the budget when the scope is genuinely irreducible.
 ## Group review
 
 Pass one can use several independently configured models. Repeat `--reviewer`
-or use `--reviewers` with a comma-separated list; the listed order is retained
-and the first reviewer runs the existing verification pass:
+or pass a comma-separated list; `--reviewers` is an alias. The listed order is
+retained and the first reviewer runs the existing verification pass:
 
 ```bash
 mow review --reviewer gpt-5-mini --reviewer claude-sonnet-4 --reviewer-parallel 2
-mow sec --reviewers gpt-5-mini,claude-sonnet-4 --diff main...HEAD
-mow sec --reviewers gpt-5-mini,claude-sonnet-4 --verifier-model claude-sonnet-4
+mow sec --reviewer gpt-5-mini,claude-sonnet-4 --diff main...HEAD
+mow sec --reviewer gpt-5-mini,claude-sonnet-4 --verifier claude-sonnet-4
 ```
 
 Each selected model receives its own read-only, ephemeral engine. Candidate JSON
@@ -340,8 +340,7 @@ candidate model when an ensemble is used. Provenance extras:
 
 When several reviewers report the same fingerprint, a `reviewers` field lists every
 model that surfaced it. Without reviewer flags, review uses its existing single
-engine. By default the first listed reviewer also runs pass two; `--verifier-model`
-overrides that with a dedicated verifier.
+engine. By default the first listed reviewer also runs pass two; `--verifier` overrides that with a dedicated verifier. Pass two is always one model — a list is rejected.
 
 Programmatic callers may likewise use `NewEnsembleReviewer` with named,
 read-only `Reviewer` values, or pass `Request.Verifier` for a dedicated pass-two

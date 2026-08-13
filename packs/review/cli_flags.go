@@ -29,10 +29,11 @@ type CLIFlags struct {
 	ExitZero         bool
 	NoColor          bool
 	Quiet            bool
-	Reviewers        []string
-	ReviewerParallel int
-	VerifierModel    string
-	FailOnTruncated  bool
+	Reviewers          []string
+	ReviewerParallel   int
+	VerifierModel      string
+	verifierModelAlias string
+	FailOnTruncated    bool
 }
 
 // Bind registers the review flags on fs.
@@ -53,11 +54,31 @@ func (f *CLIFlags) Bind(fs *flag.FlagSet) {
 	fs.BoolVar(&f.ExitZero, "exit-zero", false, "always exit 0 on a successful run (advisory CI)")
 	fs.BoolVar(&f.NoColor, "no-color", false, "disable ANSI color in text output")
 	fs.BoolVar(&f.Quiet, "quiet", false, "suppress progress output on stderr")
-	fs.Var((*repeatable)(&f.Reviewers), "reviewer", "candidate reviewer model (repeatable)")
-	fs.Var((*repeatable)(&f.Reviewers), "reviewers", "comma-separated candidate reviewer models")
+	fs.Var((*repeatable)(&f.Reviewers), "reviewer", "candidate reviewer model (repeatable or comma-separated)")
+	fs.Var((*repeatable)(&f.Reviewers), "reviewers", "alias of --reviewer")
 	fs.IntVar(&f.ReviewerParallel, "reviewer-parallel", 0, "maximum concurrent candidate reviewers (0=all)")
-	fs.StringVar(&f.VerifierModel, "verifier-model", "", "model for pass-two verification (default: same as candidate reviewer)")
+	fs.StringVar(&f.VerifierModel, "verifier", "", "pass-two verifier model (one model; default: first reviewer)")
+	fs.StringVar(&f.verifierModelAlias, "verifier-model", "", "alias of --verifier")
 	fs.BoolVar(&f.FailOnTruncated, "fail-on-truncated", false, "exit non-zero when scope was truncated")
+}
+
+// normalizeVerifier accepts --verifier (preferred) or --verifier-model (alias).
+// Pass two is a single judge: a comma list is rejected rather than becoming
+// a second ensemble.
+func (f *CLIFlags) normalizeVerifier() error {
+	primary := strings.TrimSpace(f.VerifierModel)
+	alias := strings.TrimSpace(f.verifierModelAlias)
+	switch {
+	case primary != "" && alias != "" && !strings.EqualFold(primary, alias):
+		return fmt.Errorf("--verifier and --verifier-model disagree (%q vs %q)", primary, alias)
+	case primary == "":
+		primary = alias
+	}
+	if strings.Contains(primary, ",") {
+		return fmt.Errorf("--verifier takes one model (got %q); pass two is a single judge", primary)
+	}
+	f.VerifierModel = primary
+	return nil
 }
 
 // repeatable is an append-on-Set string slice flag.
@@ -127,8 +148,11 @@ func (f *CLIFlags) Resolve(prof *Profile, workspace string, paths []string) (Req
 		policy.FailOn = v
 	}
 
+	if err := f.normalizeVerifier(); err != nil {
+		return req, "", ExitPolicy{}, err
+	}
 	if f.NoVerify && strings.TrimSpace(f.VerifierModel) != "" {
-		return req, "", ExitPolicy{}, fmt.Errorf("--verifier-model cannot be used with --no-verify")
+		return req, "", ExitPolicy{}, fmt.Errorf("--verifier cannot be used with --no-verify")
 	}
 
 	req = Request{
@@ -160,3 +184,4 @@ func boolCount(bs ...bool) int {
 	}
 	return n
 }
+

@@ -150,12 +150,12 @@ false clean result.
 The shared ensemble behavior is described in [review.md](review.md#group-review). Candidate discovery can use multiple models:
 
 ```bash
-mow sec --reviewers gpt-5-mini,claude-sonnet-4 --reviewer-parallel 2
+mow sec --reviewer gpt-5-mini,claude-sonnet-4 --reviewer-parallel 2
 ```
 
 Each reviewer analyzes the same scope independently. Candidates are merged and
 then passed through one verification stage (by default the first listed reviewer,
-or `--verifier-model` when set). Optional finding extras record ensemble
+or `--verifier` when set). Optional finding extras record ensemble
 provenance (`reviewer_count`, `reviewer_consensus`, `reviewers`) and pass-two
 agreement on kept findings (`verifier_agreement`, e.g. `confirmed_independent`
 when multiple reviewers surfaced the same fingerprint and the verifier confirmed
