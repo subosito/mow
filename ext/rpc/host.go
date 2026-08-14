@@ -3,10 +3,13 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"os/exec"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/subosito/mow"
 	"github.com/subosito/mow/slash"
 )
 
@@ -41,7 +44,52 @@ func (s *Server) statusResult() map[string]any {
 		out["wire"] = st.Wire
 	}
 	out["pending_perm"] = s.pendingCount()
+	out["extra_roots"] = extraRootResult(s.Engine)
+	if git := gitWorkspaceResult(st.Workspace); git != nil {
+		out["git"] = git
+	}
 	return out
+}
+
+func extraRootResult(eng *mow.Engine) []map[string]any {
+	rows := make([]map[string]any, 0)
+	if eng == nil {
+		return rows
+	}
+	for _, path := range eng.ExtraRoots() {
+		rows = append(rows, map[string]any{"path": path, "read_only": false})
+	}
+	for _, path := range eng.ExtraRootsReadOnly() {
+		rows = append(rows, map[string]any{"path": path, "read_only": true})
+	}
+	return rows
+}
+
+// gitWorkspaceResult is evaluated only on status requests, never per TUI
+// frame. A short deadline bounds pathological repositories and unavailable git.
+func gitWorkspaceResult(workspace string) map[string]any {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", workspace, "status", "--porcelain=v1", "--branch", "--untracked-files=normal")
+	cmd.Stderr = io.Discard
+	data, err := cmd.Output()
+	if err != nil || ctx.Err() != nil {
+		return nil
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 0 || !strings.HasPrefix(lines[0], "## ") {
+		return nil
+	}
+	head := strings.TrimPrefix(lines[0], "## ")
+	branch := strings.TrimSpace(strings.SplitN(head, "...", 2)[0])
+	if branch == "HEAD (no branch)" {
+		branch = "detached"
+	}
+	return map[string]any{"branch": branch, "dirty": len(lines) > 1}
 }
 
 func (s *Server) handleSessions(req request) {
