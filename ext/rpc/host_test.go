@@ -280,6 +280,39 @@ func TestRPCAdvertisesLinkedGoalSlash(t *testing.T) {
 	t.Fatalf("slash.list did not advertise goal: %s", res)
 }
 
+func TestRPCCapabilitiesAdvertisesLinkedOptionalFeature(t *testing.T) {
+	eng := newEcho(t, mow.Options{})
+	msgs := serveLines(t, eng, `{"id":1,"method":"capabilities"}`)
+	res, err := resultOf(t, msgs, "1")
+	if err != nil {
+		t.Fatalf("capabilities: %v", err)
+	}
+	var out struct {
+		Optional *struct {
+			Features []struct {
+				ID     string   `json:"id"`
+				Linked bool     `json:"linked"`
+				Events []string `json:"events"`
+			} `json:"features"`
+		} `json:"optional"`
+	}
+	if err := json.Unmarshal(res, &out); err != nil {
+		t.Fatalf("capabilities shape: %v: %s", err, res)
+	}
+	if out.Optional == nil {
+		t.Fatalf("linked goal feature missing: %s", res)
+	}
+	for _, feature := range out.Optional.Features {
+		if feature.ID == "goal" {
+			if !feature.Linked || len(feature.Events) == 0 {
+				t.Fatalf("invalid goal feature: %+v", feature)
+			}
+			return
+		}
+	}
+	t.Fatalf("goal feature missing: %s", res)
+}
+
 func TestRPCSlashRunErrorIsEnvelope(t *testing.T) {
 	slash.Register(slash.Command{
 		Name:    "rpcfail",

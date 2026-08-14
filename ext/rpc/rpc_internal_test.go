@@ -80,6 +80,14 @@ func TestRPCSessionAndMethods(t *testing.T) {
 	if !strings.Contains(res, `"session_id"`) || !strings.Contains(res, `"model":"test-model"`) {
 		t.Fatalf("unexpected session output: %s", res)
 	}
+	if !strings.Contains(res, `"extra_roots"`) ||
+		!strings.Contains(res, `"extra_roots_rw"`) ||
+		!strings.Contains(res, `"extra_roots_ro"`) {
+		t.Fatalf("session missing extra-root metadata: %s", res)
+	}
+	if strings.Contains(res, `"git"`) {
+		t.Fatalf("session must not expose Git presentation metadata: %s", res)
+	}
 }
 
 func TestRPCHandlePromptError(t *testing.T) {

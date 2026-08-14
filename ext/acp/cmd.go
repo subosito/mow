@@ -14,6 +14,10 @@ import (
 
 func init() {
 	ext.RegisterBeforeNew(RegisterFromConfig)
+	ext.RegisterOptionalFeature(ext.OptionalFeature{
+		ID:     "acp",
+		Events: []string{"harness.delegate.chunk", "harness.delegate.progress", "harness.delegate.usage"},
+	})
 	ext.RegisterCommand(ext.Command{
 		Name:    "acp",
 		Summary: "ACP agent on stdin/stdout (editors)",

@@ -3,8 +3,6 @@ package rpc
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"os/exec"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -44,10 +42,7 @@ func (s *Server) statusResult() map[string]any {
 		out["wire"] = st.Wire
 	}
 	out["pending_perm"] = s.pendingCount()
-	out["extra_roots"] = extraRootResult(s.Engine)
-	if git := gitWorkspaceResult(st.Workspace); git != nil {
-		out["git"] = git
-	}
+	addExtraRootMetadata(out, s.Engine)
 	return out
 }
 
@@ -65,31 +60,15 @@ func extraRootResult(eng *mow.Engine) []map[string]any {
 	return rows
 }
 
-// gitWorkspaceResult is evaluated only on status requests, never per TUI
-// frame. A short deadline bounds pathological repositories and unavailable git.
-func gitWorkspaceResult(workspace string) map[string]any {
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return nil
+func addExtraRootMetadata(out map[string]any, eng *mow.Engine) {
+	out["extra_roots"] = extraRootResult(eng)
+	if eng == nil {
+		out["extra_roots_rw"] = 0
+		out["extra_roots_ro"] = 0
+		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", workspace, "status", "--porcelain=v1", "--branch", "--untracked-files=normal")
-	cmd.Stderr = io.Discard
-	data, err := cmd.Output()
-	if err != nil || ctx.Err() != nil {
-		return nil
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) == 0 || !strings.HasPrefix(lines[0], "## ") {
-		return nil
-	}
-	head := strings.TrimPrefix(lines[0], "## ")
-	branch := strings.TrimSpace(strings.SplitN(head, "...", 2)[0])
-	if branch == "HEAD (no branch)" {
-		branch = "detached"
-	}
-	return map[string]any{"branch": branch, "dirty": len(lines) > 1}
+	out["extra_roots_rw"] = len(eng.ExtraRoots())
+	out["extra_roots_ro"] = len(eng.ExtraRootsReadOnly())
 }
 
 func (s *Server) handleSessions(req request) {

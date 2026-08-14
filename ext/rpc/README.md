@@ -25,8 +25,8 @@ Methods (requests may omit `"jsonrpc":"2.0"`):
 |---|---|
 | `prompt` | `params {text, ephemeral?}`; jail-safe `@path` refs are attached for the model; result includes `text`, `session_id`, `run_id`, `stop_reason`, `usage`, `ephemeral`, `attached[]` |
 | `cancel` | abort the in-flight prompt |
-| `status` | `busy`, `allow_write`, `allow_shell`, `ask_mode`, `pending_perm`, session/model fields |
-| `session` | alias `session_id` |
+| `status` | `busy`, `allow_write`, `allow_shell`, `ask_mode`, `pending_perm`, session/model fields, and security-scoped `extra_roots` metadata |
+| `session` | alias `session_id`; includes the same `extra_roots` metadata |
 | `sessions` | stored sessions for this project: `{sessions:[{id, updated, preview}]}` |
 | `transcript` | user/assistant turns for resume: `{messages:[{role, content}]}` (each content capped at 32k runes) |
 | `steer` | `params.text` injected into the running turn; empty text is an invalid request |
@@ -43,13 +43,26 @@ Methods (requests may omit `"jsonrpc":"2.0"`):
 | `effort.list` | `{efforts:[{id,current}], current, default}` |
 | `effort.set` | `params {id}` → `{ok, effort}` |
 | `perm.decide` | `params {id, decision}` where decision is `allow`, `deny` or `always` |
-| `capabilities` | `{rpc, methods[], control_methods[], features{}}` — feature-detect here |
+| `capabilities` | `{rpc, methods[], control_methods[], features{}, optional?:{features[]}}` — feature-detect here |
 | `version` | `rpc` is `"4"`; clients should accept `>=` their minimum |
 | `ping` | |
 
 Everything except `prompt` and `slash` is a control method: it is answered on a
 dedicated channel, so `cancel`, `status` or `perm.decide` stay responsive while
 a prompt runs.
+
+`status` and `session` expose `extra_roots` as `{path, read_only}` rows, plus
+the configured counts `extra_roots_rw` and `extra_roots_ro`. The primary
+workspace is not counted. These are security metadata only; no Git or repository
+presentation data is included.
+
+`capabilities.optional.features` is present only when linked optional packages
+register host-facing facilities. Each entry is
+`{id, linked:true, events?:string[]}`. The list is dynamic and does not assume
+the stock binary's imports. `slash.list` remains the source of truth for
+optional slash commands; they are intentionally not duplicated in this
+catalog. A linked feature may still require configuration before it produces
+events (for example, LSP).
 
 ## Permission gating
 

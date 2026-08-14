@@ -56,6 +56,10 @@ type Config struct {
 }
 
 func init() {
+	ext.RegisterOptionalFeature(ext.OptionalFeature{
+		ID:     "lsp",
+		Events: []string{"harness.lsp.diagnostics"},
+	})
 	ext.RegisterBeforeNew(func(configPaths ...string) error {
 		return registerAll(configPaths...)
 	})

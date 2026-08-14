@@ -126,7 +126,12 @@ extensions:
   without embedding Engine: `sessions`, `transcript`, `steer`, `slash.list`,
   `slash`, and a permission gate (`perm.set` / `perm.decide` answering
   `perm.ask` notifications for `write`, `edit`, `bash`). The gate is fail-open
-  until a UI selects ask mode, so headless scripts are unchanged.
+  until a UI selects ask mode, so headless scripts are unchanged. `status` and
+  `session` include `extra_roots` security metadata and configured
+  `extra_roots_rw` / `extra_roots_ro` counts; they do not include repository
+  presentation metadata. `capabilities.optional.features` dynamically lists
+  optional packages that register host-facing facilities and their event
+  types. Optional slash commands remain discoverable through `slash.list`.
 - `ext/cmdhook`: Claude-style lifecycle shell hooks (`root` or `plugins` map,
   `min_turns`). Hooks re-register on every `BeforeNew` (no first-config pin);
   prior cmdhook hooks are cleared so profiles do not leak across Engines.

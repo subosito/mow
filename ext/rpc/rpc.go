@@ -45,6 +45,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/subosito/mow"
+	"github.com/subosito/mow/ext"
 )
 
 // maxLineBytes is the maximum stdin line accepted (scanner buffer).
@@ -52,7 +53,8 @@ const maxLineBytes = 1 << 20 // 1 MiB
 
 // maxEventDeltaRunes caps streamed text fields on event notifications so a
 // long token stream cannot grow unbounded in the host reader.
-const maxEventDeltaRunes = 8 << 10 // 8k runes
+const maxEventDeltaRunes = 8 << 10  // 8k runes
+const maxToolResultRunes = 64 << 10 // live write/edit diff cards
 
 // maxPromptTextRunes caps prompt params text accepted over RPC.
 const maxPromptTextRunes = 512 << 10 // 512k runes
@@ -218,7 +220,7 @@ func (s *Server) capabilitiesResult() map[string]any {
 			control = append(control, m)
 		}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"rpc":     rpcProtocolVersion,
 		"methods": methods,
 		// Control methods are answered while a prompt is in flight.
@@ -228,10 +230,23 @@ func (s *Server) capabilitiesResult() map[string]any {
 			"ephemeral_prompt": true,
 			"prompt_file_refs": true,
 			"permission_gate":  true,
+			"extra_roots":      true,
 			"batch":            false,
 			"notifications":    true,
 		},
 	}
+	if features := ext.OptionalFeatures(); len(features) > 0 {
+		optional := make([]map[string]any, 0, len(features))
+		for _, feature := range features {
+			row := map[string]any{"id": feature.ID, "linked": true}
+			if len(feature.Events) > 0 {
+				row["events"] = append([]string(nil), feature.Events...)
+			}
+			optional = append(optional, row)
+		}
+		out["optional"] = map[string]any{"features": optional}
+	}
+	return out
 }
 
 func isControlMethod(method string) bool {
@@ -439,12 +454,14 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 	case "skill.activate":
 		s.handleSkillActivate(req)
 	case "session", "session_id":
-		s.replyTo(req, map[string]any{
+		out := map[string]any{
 			"session_id": s.Engine.SessionID(),
 			"workspace":  s.Engine.Workspace(),
 			"model":      s.Engine.Model(),
 			"wire":       s.Engine.Wire(),
-		})
+		}
+		addExtraRootMetadata(out, s.Engine)
+		s.replyTo(req, out)
 	case "capabilities":
 		s.replyTo(req, s.capabilitiesResult())
 	case "ping":
@@ -499,6 +516,12 @@ func (s *Server) handlePrompt(ctx context.Context, req request) {
 
 // capEvent trims large string fields on streamed events for host safety.
 func capEvent(ev mow.Event) mow.Event {
+	// Tool results carry write/edit diffs. Keep enough of those results for an
+	// external TUI to paint a useful live review card; ordinary event fields
+	// remain under the smaller delta cap.
+	if utf8.RuneCountInString(ev.Result) > maxToolResultRunes {
+		ev.Result = trimRunes(ev.Result, maxToolResultRunes) + "…"
+	}
 	if utf8.RuneCountInString(ev.Delta) > maxEventDeltaRunes {
 		ev.Delta = trimRunes(ev.Delta, maxEventDeltaRunes) + "…"
 	}

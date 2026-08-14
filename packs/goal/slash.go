@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/slash"
 )
 
@@ -13,6 +14,10 @@ import (
 // Engine, and Runner.fire emits the graph.goal.* events that hosts already
 // receive through Engine.AddOnEvent.
 func init() {
+	ext.RegisterOptionalFeature(ext.OptionalFeature{
+		ID:     "goal",
+		Events: []string{"graph.goal.start", "graph.goal.step", "graph.goal.done", "graph.goal.fail", "graph.goal.partial", "graph.goal.blocked"},
+	})
 	slash.Register(slash.Command{
 		Name:      "goal",
 		Summary:   "Multi-step goals — list | new | run | status | …",

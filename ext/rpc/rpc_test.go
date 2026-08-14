@@ -68,6 +68,14 @@ func TestRPCStatusAndVersion(t *testing.T) {
 			t.Fatalf("status missing %s: %s", want, out.String())
 		}
 	}
+	for _, want := range []string{`"extra_roots"`, `"extra_roots_rw"`, `"extra_roots_ro"`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("status missing %s: %s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), `"git"`) {
+		t.Fatalf("status/version must not expose Git presentation metadata: %s", out.String())
+	}
 }
 
 func TestRPCCancel(t *testing.T) {

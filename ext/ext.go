@@ -189,18 +189,19 @@ type hookEntry[T any] struct {
 }
 
 var (
-	mu         sync.Mutex
-	tools      []toolEntry
-	commands   []Command
-	beforeNew  []func(configPaths ...string) error
-	preTool    []hookEntry[PreToolFunc]
-	postTool   []hookEntry[PostToolFunc]
-	userPrompt []hookEntry[UserPromptFunc]
-	sessStart  []hookEntry[SessionStartFunc]
-	preCompact []hookEntry[PreCompactFunc]
-	preModel   []hookEntry[PreModelFunc]
-	afterTurn  []hookEntry[AfterTurnFunc]
-	stop       []hookEntry[StopFunc]
+	mu               sync.Mutex
+	tools            []toolEntry
+	commands         []Command
+	optionalFeatures []OptionalFeature
+	beforeNew        []func(configPaths ...string) error
+	preTool          []hookEntry[PreToolFunc]
+	postTool         []hookEntry[PostToolFunc]
+	userPrompt       []hookEntry[UserPromptFunc]
+	sessStart        []hookEntry[SessionStartFunc]
+	preCompact       []hookEntry[PreCompactFunc]
+	preModel         []hookEntry[PreModelFunc]
+	afterTurn        []hookEntry[AfterTurnFunc]
+	stop             []hookEntry[StopFunc]
 
 	extInstances map[string]*ExtensionState
 
@@ -241,6 +242,14 @@ type ExtensionStatus struct {
 	MinTurns int    `json:"min_turns"`
 	Active   bool   `json:"active"`
 	Status   string `json:"status"`
+}
+
+// OptionalFeature describes an optional package linked into a host. Features
+// are registered by the package itself, so capability discovery does not
+// assume which optional packs a binary imports.
+type OptionalFeature struct {
+	ID     string
+	Events []string
 }
 
 type turnKey struct{}
@@ -756,6 +765,47 @@ func DefaultInteractiveCommand() (Command, bool) {
 	return Command{}, false
 }
 
+// RegisterOptionalFeature advertises an optional host-facing facility.
+// Re-registering an ID replaces the earlier entry.
+func RegisterOptionalFeature(f OptionalFeature) {
+	f.ID = strings.ToLower(strings.TrimSpace(f.ID))
+	if f.ID == "" {
+		return
+	}
+	events := make([]string, 0, len(f.Events))
+	seen := map[string]bool{}
+	for _, event := range f.Events {
+		event = strings.TrimSpace(event)
+		if event == "" || seen[event] {
+			continue
+		}
+		seen[event] = true
+		events = append(events, event)
+	}
+	f.Events = events
+	mu.Lock()
+	defer mu.Unlock()
+	for i := range optionalFeatures {
+		if optionalFeatures[i].ID == f.ID {
+			optionalFeatures[i] = f
+			return
+		}
+	}
+	optionalFeatures = append(optionalFeatures, f)
+}
+
+// OptionalFeatures returns optional host-facing facilities sorted by ID.
+func OptionalFeatures() []OptionalFeature {
+	mu.Lock()
+	defer mu.Unlock()
+	out := append([]OptionalFeature(nil), optionalFeatures...)
+	for i := range out {
+		out[i].Events = append([]string(nil), out[i].Events...)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 // RegisterBeforeNew runs before mow.New when building engines from CLI packs
 // (e.g. acp.RegisterFromConfig so tools exist in the registry).
 func RegisterBeforeNew(fn func(configPaths ...string) error) {
@@ -878,6 +928,7 @@ func Reset() {
 	defer mu.Unlock()
 	tools = nil
 	commands = nil
+	optionalFeatures = nil
 	beforeNew = nil
 	preTool = nil
 	postTool = nil
