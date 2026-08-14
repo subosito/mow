@@ -277,8 +277,19 @@ func (r *reconnectingClient) Close() error {
 	return nil
 }
 
+// processPID is the OS pid captured at cmd.Start, or 0 if no client is live.
+func (r *reconnectingClient) processPID() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.c == nil {
+		return 0
+	}
+	return r.c.pid
+}
+
 type client struct {
 	cmd       *exec.Cmd
+	pid       int // OS pid at cmd.Start; stable identity for the live process
 	stdin     io.WriteCloser
 	stdout    *bufio.Reader
 	stderr    *stderrRing
@@ -308,7 +319,11 @@ func startServer(s ServerConfig) (*client, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	c := &client{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), stderr: errOut}
+	pid := 0
+	if cmd.Process != nil {
+		pid = cmd.Process.Pid
+	}
+	c := &client{cmd: cmd, pid: pid, stdin: stdin, stdout: bufio.NewReader(stdout), stderr: errOut}
 	_, err = c.call(context.Background(), "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},

@@ -7,8 +7,8 @@ import (
 )
 
 var (
-	registryMu   sync.Mutex
-	transports   = map[string]*transportSlot{}
+	registryMu    sync.Mutex
+	transports    = map[string]*transportSlot{}
 	orphanedByGen = map[int][]toolTransport{}
 )
 
@@ -72,6 +72,23 @@ func releaseEngineGeneration(gen int) {
 	for _, tr := range toClose {
 		_ = tr.Close()
 	}
+}
+
+// registeredStdioPID returns the OS pid of the current stdio transport for
+// name, or 0 if none. Identity is the pid captured at cmd.Start, not a
+// side-channel marker the child writes later.
+func registeredStdioPID(name string) int {
+	registryMu.Lock()
+	slot := transports[name]
+	registryMu.Unlock()
+	if slot == nil {
+		return 0
+	}
+	rc, ok := slot.tr.(*reconnectingClient)
+	if !ok {
+		return 0
+	}
+	return rc.processPID()
 }
 
 func resetRegistryForTest() {

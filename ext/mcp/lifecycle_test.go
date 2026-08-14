@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,22 +53,84 @@ func helperConfig(t *testing.T, name, mode string) ServerConfig {
 	}
 }
 
-func readMarkerPID(t *testing.T, cfg ServerConfig) int {
+func mustStdioPID(t *testing.T, name string) int {
 	t.Helper()
-	marker := cfg.Env["MCP_MARKER"]
-	deadline := time.Now().Add(3 * time.Second)
+	pid := registeredStdioPID(name)
+	if pid <= 0 {
+		t.Fatalf("no stdio pid registered for %q", name)
+	}
+	return pid
+}
+
+func waitPIDDead(t *testing.T, pid int, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		raw, err := os.ReadFile(marker)
-		if err == nil {
-			pid, err := strconv.Atoi(string(raw))
-			if err == nil && pid > 0 {
-				return pid
-			}
+		if !pidAlive(pid) {
+			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("marker pid not written")
-	return 0
+	t.Fatal(msg)
+}
+
+// closeProbe is a toolTransport that only records Close. Used to test
+// generation retirement without spawning a process or racing a pid marker.
+type closeProbe struct {
+	closed atomic.Bool
+}
+
+func (p *closeProbe) listTools(context.Context) ([]toolInfo, error) { return nil, nil }
+func (p *closeProbe) callTool(context.Context, string, json.RawMessage) (string, error) {
+	return "", nil
+}
+func (p *closeProbe) Close() error {
+	p.closed.Store(true)
+	return nil
+}
+
+func TestRegisterTransportKeepsPriorGenAliveWhileEngineOpen(t *testing.T) {
+	setupMCPTest(t)
+	old, cur := &closeProbe{}, &closeProbe{}
+
+	gen1 := bumpBeforeNewGen(t)
+	registerTransport("peer", gen1, old)
+	ext.NoteEngineGeneration(gen1)
+
+	gen2 := bumpBeforeNewGen(t)
+	registerTransport("peer", gen2, cur)
+
+	if old.closed.Load() {
+		t.Fatal("prior gen transport closed while engine still open")
+	}
+	if cur.closed.Load() {
+		t.Fatal("current transport closed during replace")
+	}
+
+	ext.ReleaseEngineGeneration(gen1)
+	if !old.closed.Load() {
+		t.Fatal("prior gen transport not closed after last engine released")
+	}
+	if cur.closed.Load() {
+		t.Fatal("current gen transport closed when a prior gen was released")
+	}
+}
+
+func TestRegisterTransportClosesPriorWhenNoEngineRefs(t *testing.T) {
+	setupMCPTest(t)
+	old, cur := &closeProbe{}, &closeProbe{}
+
+	gen1 := bumpBeforeNewGen(t)
+	registerTransport("peer", gen1, old)
+
+	gen2 := bumpBeforeNewGen(t)
+	registerTransport("peer", gen2, cur)
+	if !old.closed.Load() {
+		t.Fatal("unreferenced prior transport not closed on replace")
+	}
+	if cur.closed.Load() {
+		t.Fatal("current transport closed during replace")
+	}
 }
 
 func TestRegisterServersReplacesClosesPriorProcess(t *testing.T) {
@@ -80,7 +141,7 @@ func TestRegisterServersReplacesClosesPriorProcess(t *testing.T) {
 	if err := RegisterServers([]ServerConfig{cfg}); err != nil {
 		t.Fatal(err)
 	}
-	oldPID := readMarkerPID(t, cfg)
+	oldPID := mustStdioPID(t, "peer")
 	if !pidAlive(oldPID) {
 		t.Fatalf("helper pid %d not alive", oldPID)
 	}
@@ -89,18 +150,11 @@ func TestRegisterServersReplacesClosesPriorProcess(t *testing.T) {
 	if err := RegisterServers([]ServerConfig{cfg}); err != nil {
 		t.Fatal(err)
 	}
-	newPID := readMarkerPID(t, cfg)
+	newPID := mustStdioPID(t, "peer")
 	if newPID == oldPID {
 		t.Fatalf("expected new helper process, still pid %d", oldPID)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !pidAlive(oldPID) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("replaced helper pid %d still alive; new pid %d", oldPID, newPID)
+	waitPIDDead(t, oldPID, fmt.Sprintf("replaced helper pid %d still alive; new pid %d", oldPID, newPID))
 }
 
 func TestRegisterServersKeepsPriorGenAliveWhileEngineOpen(t *testing.T) {
@@ -111,14 +165,14 @@ func TestRegisterServersKeepsPriorGenAliveWhileEngineOpen(t *testing.T) {
 	if err := RegisterServers([]ServerConfig{cfg}); err != nil {
 		t.Fatal(err)
 	}
-	pid1 := readMarkerPID(t, cfg)
+	pid1 := mustStdioPID(t, "peer")
 	ext.NoteEngineGeneration(gen1)
 
 	bumpBeforeNewGen(t)
 	if err := RegisterServers([]ServerConfig{cfg}); err != nil {
 		t.Fatal(err)
 	}
-	pid2 := readMarkerPID(t, cfg)
+	pid2 := mustStdioPID(t, "peer")
 	if pid2 == pid1 {
 		t.Fatalf("expected new helper process, still pid %d", pid1)
 	}
@@ -126,14 +180,7 @@ func TestRegisterServersKeepsPriorGenAliveWhileEngineOpen(t *testing.T) {
 		t.Fatalf("gen1 transport closed while engine still open (pid %d dead)", pid1)
 	}
 	ext.ReleaseEngineGeneration(gen1)
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !pidAlive(pid1) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("gen1 release did not close pid %d", pid1)
+	waitPIDDead(t, pid1, fmt.Sprintf("gen1 release did not close pid %d", pid1))
 }
 
 func TestReleaseEngineGenerationClosesStdioServer(t *testing.T) {
@@ -144,18 +191,11 @@ func TestReleaseEngineGenerationClosesStdioServer(t *testing.T) {
 	if err := RegisterServers([]ServerConfig{cfg}); err != nil {
 		t.Fatal(err)
 	}
-	pid := readMarkerPID(t, cfg)
+	pid := mustStdioPID(t, "peer")
 	ext.NoteEngineGeneration(gen)
 	ext.ReleaseEngineGeneration(gen)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !pidAlive(pid) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("generation release left helper pid %d alive", pid)
+	waitPIDDead(t, pid, fmt.Sprintf("generation release left helper pid %d alive", pid))
 }
 
 func TestStdioCallCancelUnblocks(t *testing.T) {

@@ -65,12 +65,34 @@ func TestRPCControlMethodsAreServed(t *testing.T) {
 			t.Errorf("isControlMethod(%q) is case sensitive", m)
 		}
 	}
-	for _, m := range []string{"cancel", "status", "capabilities"} {
+	for _, m := range []string{"cancel", "status", "capabilities", "extension.config"} {
 		if !isControlMethod(m) {
 			t.Errorf("%q must stay answerable mid-turn", m)
 		}
 	}
-	if isControlMethod("prompt") {
-		t.Error("prompt must not be a control method (it is the turn itself)")
+	// Worker-queue methods: routed off the control channel so a full
+	// prompt/compact queue cannot starve cancel/status. slash is control-
+	// routed but still runs in a goroutine (see dispatch).
+	for _, m := range []string{"prompt", "compact"} {
+		if isControlMethod(m) {
+			t.Errorf("%q must remain a worker method, not control", m)
+		}
+	}
+	if !isControlMethod("slash") {
+		t.Error("slash must stay control-routed so it never hits the worker queue-full path")
+	}
+}
+
+// Epoch 1 is the first public wire contract. A wrong constant here would
+// break mowi and every other external host overnight.
+func TestRPCCompatibilityEpochIs1(t *testing.T) {
+	if rpcProtocolVersion != "1" {
+		t.Fatalf("rpcProtocolVersion=%q; epoch 1 is the public contract", rpcProtocolVersion)
+	}
+	// capabilitiesResult must surface the same constant clients gate on.
+	srv := &Server{}
+	caps := srv.capabilitiesResult()
+	if got, _ := caps["rpc"].(string); got != "1" {
+		t.Fatalf("capabilities rpc=%v; want \"1\"", caps["rpc"])
 	}
 }

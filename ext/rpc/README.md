@@ -44,12 +44,13 @@ Methods (requests may omit `"jsonrpc":"2.0"`):
 | `effort.set` | `params {id}` → `{ok, effort}` |
 | `perm.decide` | `params {id, decision}` where decision is `allow`, `deny` or `always` |
 | `capabilities` | `{rpc, methods[], control_methods[], features{}, optional?:{features[]}}` — feature-detect here |
-| `version` | `rpc` is `"4"`; clients should accept `>=` their minimum |
+| `version` | `rpc` is `"1"` (compatibility epoch); clients require exact epoch match, then feature-detect |
 | `ping` | |
 
-Everything except `prompt` and `slash` is a control method: it is answered on a
-dedicated channel, so `cancel`, `status` or `perm.decide` stay responsive while
-a prompt runs.
+Worker-queue methods are `prompt` and `compact` (depth 4; may return
+"request queue full"). Everything else is control-routed on a dedicated
+channel so `cancel`, `status` or `perm.decide` stay responsive while a prompt
+runs. `slash` is control-routed but still executes in a goroutine.
 
 `status` and `session` expose `extra_roots` as `{path, read_only}` rows, plus
 the configured counts `extra_roots_rw` and `extra_roots_ro`. The primary
@@ -97,5 +98,6 @@ None. There is no `extensions.rpc` section. Engine flags are the same as `mow ru
 
 `version.rpc` is the method-surface compatibility epoch (currently `"1"`),
 separate from both JSON-RPC `2.0` and the mow release in `version.version`.
-Clients gate wire compatibility on the epoch, then feature-detect additive
-methods from `methods`; they should not require a particular mow release.
+Clients require an exact epoch match, then feature-detect additive methods
+from `methods` / `control_methods` / `features`; they should not require a
+particular mow release. Pre-release numbers 2–4 were never published epochs.

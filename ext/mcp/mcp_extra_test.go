@@ -86,6 +86,12 @@ func TestHelperProcess(t *testing.T) {
 }
 
 func runHelperMarker() {
+	// Publish identity before the handshake so the parent never observes a
+	// stale prior-generation pid in this file. RegisterServers returns after
+	// tools/list; writing only then races the parent read under -race load.
+	if marker := os.Getenv("MCP_MARKER"); marker != "" {
+		_ = os.WriteFile(marker, []byte(fmt.Sprintf("%d", os.Getpid())), 0o600)
+	}
 	sc := bufio.NewScanner(os.Stdin)
 	for sc.Scan() {
 		line := sc.Bytes()
@@ -107,9 +113,6 @@ func runHelperMarker() {
 				"jsonrpc": "2.0", "id": req.ID,
 				"result": map[string]any{"tools": []any{}},
 			})
-			if marker := os.Getenv("MCP_MARKER"); marker != "" {
-				_ = os.WriteFile(marker, []byte(fmt.Sprintf("%d", os.Getpid())), 0o600)
-			}
 			select {}
 		}
 	}
