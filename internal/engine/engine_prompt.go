@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/contextload"
@@ -296,9 +297,9 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 			e.prior = res.Messages
 		}
 		// Keep in-memory transcript aligned with what we append to the session file.
-		e.transcript = append(e.transcript, Message{Role: "user", Content: text})
+		e.transcript = append(e.transcript, Message{Role: "user", Content: text, Timestamp: time.Now().UTC()})
 		if strings.TrimSpace(res.Text) != "" {
-			e.transcript = append(e.transcript, Message{Role: "assistant", Content: res.Text})
+			e.transcript = append(e.transcript, Message{Role: "assistant", Content: res.Text, Timestamp: time.Now().UTC()})
 		}
 		e.mu.Unlock()
 

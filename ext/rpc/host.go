@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/subosito/mow/slash"
@@ -68,7 +69,11 @@ func (s *Server) handleTranscript(req request) {
 		if utf8.RuneCountInString(content) > maxTranscriptRunes {
 			content = trimRunes(content, maxTranscriptRunes) + "…"
 		}
-		list = append(list, map[string]any{"role": m.Role, "content": content})
+		row := map[string]any{"role": m.Role, "content": content}
+		if !m.Timestamp.IsZero() {
+			row["ts"] = m.Timestamp.UTC().Format(time.RFC3339)
+		}
+		list = append(list, row)
 	}
 	s.replyTo(req, map[string]any{"messages": list})
 }

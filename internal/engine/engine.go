@@ -688,11 +688,14 @@ func New(opt Options) (*Engine, error) {
 				return nil, fmt.Errorf("session load: %w", err)
 			}
 			e.prior = prior
-			turns, err := store.LoadTranscript()
+			turns, err := store.LoadTranscriptEvents()
 			if err != nil {
 				return nil, fmt.Errorf("session transcript: %w", err)
 			}
-			e.transcript = toPublicMessages(turns)
+			e.transcript = make([]Message, 0, len(turns))
+			for _, turn := range turns {
+				e.transcript = append(e.transcript, Message{Role: turn.Role, Content: turn.Content, Timestamp: turn.TS})
+			}
 		}
 		e.sid = sid
 		e.sess = &session.Store{Dir: sessDir, ID: sid}

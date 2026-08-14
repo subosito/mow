@@ -264,6 +264,32 @@ func repairToolCalls(msgs []llm.Message) []llm.Message {
 
 // LoadTranscript returns user/assistant turns for UI display (no tool dumps,
 // no system prompts). Uses the simple type=user/assistant events written each turn.
+// LoadTranscriptEvents preserves event timestamps for external UI resume.
+func (s *Store) LoadTranscriptEvents() ([]Event, error) {
+	path, err := s.resolvedPath()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var turns []Event
+	for _, line := range splitLines(string(raw)) {
+		var ev Event
+		if line == "" || json.Unmarshal([]byte(line), &ev) != nil {
+			continue
+		}
+		if ev.Message == nil && len(ev.Messages) == 0 && (ev.Role == "user" || ev.Role == "assistant") && strings.TrimSpace(ev.Content) != "" {
+			turns = append(turns, ev)
+		}
+	}
+	return turns, nil
+}
+
 func (s *Store) LoadTranscript() ([]llm.Message, error) {
 	path, err := s.resolvedPath()
 	if err != nil {

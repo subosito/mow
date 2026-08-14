@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/policy"
@@ -44,6 +45,7 @@ type Tool interface {
 // Message is a chat message for injectable Chat funcs (tests / custom LLM).
 type Message struct {
 	Role       string     `json:"role"`
+	Timestamp  time.Time  `json:"ts,omitempty"`
 	Content    string     `json:"content,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
