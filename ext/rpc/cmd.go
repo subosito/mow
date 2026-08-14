@@ -67,7 +67,9 @@ Methods:
   status      {"id":3,"method":"status"}
   session     {"id":4,"method":"session"}
   version     {"id":5,"method":"version"}
+  capabilities {"id":6,"method":"capabilities"}  (methods, controls, optional linked features)
   ping        {"id":6,"method":"ping"}
+  extension.config {"id":7,"method":"extension.config","params":{"name":"mowi"}}
 
 Host methods (for an external UI):
 

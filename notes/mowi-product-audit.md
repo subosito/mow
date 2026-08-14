@@ -36,7 +36,7 @@ input (rule + textarea, grows to cap 12)
   virtualized pretty window (`virtual.go`), single-flight live glamour,
   100 ms heartbeat, entry-text GC (`gc.go`), and a freeze-test budget of
   25 ms per busy `Update` (`freeze_test.go`).
-- Extensibility: `extensions.tui` config (welcome, prompt, theme, keys —
+- Extensibility: `extensions.mowi` config (welcome, prompt, theme, keys —
   `config.go`), pack-registered slash commands surface in help automatically
   (`helpCard`, `packslash.go`).
 
@@ -149,7 +149,7 @@ input (rule + textarea, grows to cap 12)
   always-on elapsed ticker. Do not trade this away for richer chrome.
 
 ### 11. Extensibility
-- `extensions.tui` (welcome/prompt/theme/keys) + registry-driven slash/help is
+- `extensions.mowi` (welcome/prompt/theme/keys) + registry-driven slash/help is
   the right shape. Missing: layout/density options (focus mode, chrome level),
   which blocks host-specific tuning without forking the render path.
 
@@ -165,7 +165,7 @@ need a new frame.
 
 ## Proposed changes (concrete, no rewrite)
 
-### Layout variants (all behind `extensions.tui`, default unchanged)
+### Layout variants (all behind `extensions.mowi`, default unchanged)
 1. **Zen/focus chrome** (`chrome: focus`): hide header and rule until state
    changes (perm prompt, error, mode toggle) or a key press (`ctrl+.`
    chrome-toggle). Gives the transcript +2 rows — matters most at 80×24
@@ -199,7 +199,7 @@ need a new frame.
 
 ### Onboarding
 - **README in `packs/mowi/`**: what it is, the trust model in 5 lines,
-  keymap table, `extensions.tui` reference, accessibility statement
+  keymap table, `extensions.mowi` reference, accessibility statement
   (NO_COLOR/MOW_NO_ANIM/MOW_MOUSE; alt-screen limitation).
 - **First-run welcome upgrade**: keep the quiet splash, add three faint example
   prompts and one safety line ("file/shell actions ask before running —
@@ -244,7 +244,7 @@ need a new frame.
 - **Perf**: any always-on chrome (bottom bar) re-enters the busy `Update`
   path; must stay under the 25 ms budget on a flooded stream (`freeze_test.go`
   is the gate).
-- **Config surface**: new `extensions.tui` keys are additive-only; renaming
+- **Config surface**: new `extensions.mowi` keys are additive-only; renaming
   existing keys breaks user configs (they resolve via `Resolve()` — keep
   defaults stable).
 - **Module boundary**: nothing here may pull TUI deps into root/`internal`

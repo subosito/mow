@@ -28,7 +28,7 @@ Methods (requests may omit `"jsonrpc":"2.0"`):
 | `status` | `busy`, `allow_write`, `allow_shell`, `ask_mode`, `pending_perm`, session/model fields, and security-scoped `extra_roots` metadata |
 | `session` | alias `session_id`; includes the same `extra_roots` metadata |
 | `sessions` | stored sessions for this project: `{sessions:[{id, updated, preview}]}` |
-| `transcript` | user/assistant turns for resume: `{messages:[{role, content}]}` (each content capped at 32k runes) |
+| `transcript` | user/assistant turns for resume: `{messages:[{role, content, ts?}]}` (each content capped at 32k runes) |
 | `steer` | `params.text` injected into the running turn; empty text is an invalid request |
 | `slash.list` | `{commands:[{name, summary, exclusive, aliases}]}` — only the packs linked into this binary; `usage` is omitted (fetch it with `slash` + `help`) |
 | `slash` | `params {name, args[], color}`; result `{title, body}` and optional `error` for user-level Run failures (bad flags). `args:["help"]` returns usage without running. An `exclusive` command is refused while a turn is in flight |
@@ -92,3 +92,10 @@ None. There is no `extensions.rpc` section. Engine flags are the same as `mow ru
 - [docs/extensions.md](../../docs/extensions.md)
 - [docs/harness.md](../../docs/harness.md)
 - [docs/architecture.md](../../docs/architecture.md)
+
+## Compatibility
+
+`version.rpc` is the method-surface compatibility epoch (currently `"1"`),
+separate from both JSON-RPC `2.0` and the mow release in `version.version`.
+Clients gate wire compatibility on the epoch, then feature-detect additive
+methods from `methods`; they should not require a particular mow release.

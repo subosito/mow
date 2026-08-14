@@ -389,7 +389,7 @@ Workspace, power tools, stream, media models → **yaml** and/or **CLI flags** (
 | Source | How |
 |--------|-----|
 | CLI | `--extra-root /path` (repeatable for multiple roots) |
-| CLI | `--workspace NAME` — a named set in `$MOW_HOME/workspaces.yaml` (hybrid: name or path) |
+| CLI | `--workspace NAME` — a named set in `$MOW_HOME/workspaces/<name>/` (hybrid: name or path) |
 | User config | `policy.extra_roots: [/path, …]` in `$MOW_HOME/config.yaml` or `--config` |
 | Embed | `Options.ExtraRoots` / `Options.Workspace` (set name) |
 | Project `.mow/config` | **Not allowed** (stripped like credentials / power tools) |
@@ -414,7 +414,7 @@ extra_roots:
 ```
 
 `--workspace` is hybrid: a profile name selects this bundle; an existing
-directory remains a plain workspace path. The legacy `$MOW_HOME/workspaces.yaml`
+directory remains a plain workspace path. The legacy `$MOW_HOME/workspaces/<name>/`
 registry is no longer loaded. Profile `config.yaml` is operator-controlled and
 may configure normal host settings including profile-scoped `extensions.acp`
 `agents` and `mow_agents`. Profile skills take precedence over global/configured

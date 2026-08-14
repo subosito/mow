@@ -4,7 +4,7 @@ mow is a public library plus detachable extensions and optional hosts. The
 interactive TUI is the Rust `mowi` sibling project, which drives `mow rpc`;
 do not move TUI dependencies into the root module or `internal/engine`.
 
-mow is **standalone**: one Go module, OpenAI/Anthropic-compatible HTTP. No other
+mow is **standalone**: a Go workspace (root, packs, and packs/otel modules), OpenAI/Anthropic-compatible HTTP. No other
 repo, gateway product, or host is required to build, test, or run. The Rust
 `mowi` sibling project is an external TUI that drives `mow rpc`.
 

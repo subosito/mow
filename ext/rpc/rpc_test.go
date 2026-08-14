@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +62,7 @@ func TestRPCStatusAndVersion(t *testing.T) {
 	if err := srv.Serve(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), `"busy"`) || !strings.Contains(out.String(), `"rpc":"4"`) {
+	if !strings.Contains(out.String(), `"busy"`) || !strings.Contains(out.String(), `"rpc":"1"`) {
 		t.Fatalf("out=%s", out.String())
 	}
 	for _, want := range []string{`"allow_write"`, `"allow_shell"`, `"ask_mode"`, `"pending_perm"`} {
@@ -75,6 +77,54 @@ func TestRPCStatusAndVersion(t *testing.T) {
 	}
 	if strings.Contains(out.String(), `"git"`) {
 		t.Fatalf("status/version must not expose Git presentation metadata: %s", out.String())
+	}
+}
+
+func TestRPCExtensionConfigExposesOnlyMowiAllowlist(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfg, []byte(`extensions:
+  mowi:
+    permission_mode: auto
+    theme: gruvbox-dark
+    welcome: false
+    welcome_message: hello
+    prompt: "$"
+    token: must-not-leak
+  private:
+    token: secret
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := mow.New(mow.Options{
+		NoSession:   true,
+		ConfigPaths: []string{cfg},
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := strings.NewReader(
+		`{"id":1,"method":"extension.config","params":{"name":"mowi"}}` + "\n" +
+			`{"id":2,"method":"extension.config","params":{"name":"private"}}` + "\n",
+	)
+	var out bytes.Buffer
+	if err := (&rpc.Server{Engine: eng, In: in, Out: &out}).Serve(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{`"permission_mode":"auto"`, `"theme":"gruvbox-dark"`, `"welcome":false`, `"welcome_message":"hello"`, `"prompt":"$"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %s: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "must-not-leak") || strings.Contains(got, "secret") {
+		t.Fatalf("extension config leaked an unapproved field: %s", got)
+	}
+	if !strings.Contains(got, "only extension mowi is exposed") {
+		t.Fatalf("private extension was not rejected: %s", got)
 	}
 }
 

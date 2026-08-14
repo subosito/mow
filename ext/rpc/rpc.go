@@ -86,10 +86,13 @@ type Server struct {
 // works unchanged.
 const jsonRPCVersion = "2.0"
 
-// rpcProtocolVersion is mow's own method-surface version, distinct from the
-// JSON-RPC envelope version. It is additive: clients should accept any value
-// >= the minimum they need rather than pinning equality.
-const rpcProtocolVersion = "4"
+// rpcProtocolVersion is mow's method-surface compatibility epoch, distinct
+// from JSON-RPC 2.0 and the mow release version. It changes only for a breaking
+// wire change; additive methods are discovered through capabilities.
+//
+// Version 1 is the first public contract for external hosts. Pre-release values
+// 2–4 were never published compatibility epochs.
+const rpcProtocolVersion = "1"
 
 // Standard JSON-RPC 2.0 error codes.
 const (
@@ -207,7 +210,7 @@ var methodNames = []string{
 	"effort.list", "effort.set",
 	"context", "compact", "rewind",
 	"skill.list", "skill.activate",
-	"ping", "version", "capabilities",
+	"ping", "version", "capabilities", "extension.config",
 }
 
 // capabilitiesResult describes what this build can do. Booleans are for
@@ -257,7 +260,7 @@ func isControlMethod(method string) bool {
 		"perm.set", "perm.decide", "model.list", "model.set",
 		"effort.list", "effort.set",
 		"context", "rewind", "skill.list", "skill.activate",
-		"capabilities":
+		"capabilities", "extension.config":
 		return true
 	default:
 		return false
@@ -464,6 +467,8 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 		s.replyTo(req, out)
 	case "capabilities":
 		s.replyTo(req, s.capabilitiesResult())
+	case "extension.config":
+		s.handleExtensionConfig(req)
 	case "ping":
 		s.replyTo(req, "pong")
 	case "version":
@@ -475,6 +480,36 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 	default:
 		s.replyErrTo(req, codeMethodNotFound, "unknown method "+req.Method)
 	}
+}
+
+// mowiConfig is intentionally a presentation-only allowlist. The RPC does not
+// expose arbitrary extension sections, where operators may keep credentials.
+type mowiConfig struct {
+	PermissionMode string `yaml:"permission_mode" json:"permission_mode,omitempty"`
+	Theme          string `yaml:"theme" json:"theme,omitempty"`
+	Welcome        *bool  `yaml:"welcome" json:"welcome,omitempty"`
+	WelcomeMessage string `yaml:"welcome_message" json:"welcome_message,omitempty"`
+	Prompt         string `yaml:"prompt" json:"prompt,omitempty"`
+}
+
+func (s *Server) handleExtensionConfig(req request) {
+	var p struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		s.replyErrTo(req, codeInvalidRequest, "invalid extension.config params")
+		return
+	}
+	if strings.TrimSpace(p.Name) != "mowi" {
+		s.replyErrTo(req, codeInvalidRequest, "only extension mowi is exposed")
+		return
+	}
+	var out mowiConfig
+	if err := s.Engine.Extension("mowi", &out); err != nil {
+		s.replyErrTo(req, codeInternalError, "decode extensions.mowi: "+err.Error())
+		return
+	}
+	s.replyTo(req, out)
 }
 
 func (s *Server) handlePrompt(ctx context.Context, req request) {
