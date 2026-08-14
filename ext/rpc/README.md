@@ -22,7 +22,7 @@ Methods (requests may omit `"jsonrpc":"2.0"`):
 
 | Method | Notes |
 |---|---|
-| `prompt` | `params.text`; result includes `text`, `session_id`, `run_id`, `stop_reason`, `usage` |
+| `prompt` | `params {text, ephemeral?}`; jail-safe `@path` refs are attached for the model; result includes `text`, `session_id`, `run_id`, `stop_reason`, `usage`, `ephemeral`, `attached[]` |
 | `cancel` | abort the in-flight prompt |
 | `status` | `busy`, `allow_write`, `allow_shell`, `ask_mode`, `pending_perm`, session/model fields |
 | `session` | alias `session_id` |

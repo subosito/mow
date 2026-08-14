@@ -225,6 +225,8 @@ func (s *Server) capabilitiesResult() map[string]any {
 		"control_methods": control,
 		"features": map[string]any{
 			"streaming_events": s.streamEvents(),
+			"ephemeral_prompt": true,
+			"prompt_file_refs": true,
 			"permission_gate":  true,
 			"batch":            false,
 			"notifications":    true,
@@ -460,7 +462,8 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 
 func (s *Server) handlePrompt(ctx context.Context, req request) {
 	var p struct {
-		Text string `json:"text"`
+		Text      string `json:"text"`
+		Ephemeral bool   `json:"ephemeral"`
 	}
 	_ = json.Unmarshal(req.Params, &p)
 	if utf8.RuneCountInString(p.Text) > maxPromptTextRunes {
@@ -468,7 +471,8 @@ func (s *Server) handlePrompt(ctx context.Context, req request) {
 		return
 	}
 
-	res, err := s.Engine.Prompt(ctx, p.Text)
+	text, attached := s.expandPromptFileRefs(p.Text)
+	res, err := s.Engine.PromptWith(ctx, text, mow.PromptOpts{Ephemeral: p.Ephemeral})
 	if err != nil {
 		s.write(response{JSONRPC: jsonRPCVersion, ID: req.ID,
 			Error: &rpcError{
@@ -488,6 +492,8 @@ func (s *Server) handlePrompt(ctx context.Context, req request) {
 			"input_tokens":  res.Usage.InputTokens,
 			"output_tokens": res.Usage.OutputTokens,
 		},
+		"ephemeral": p.Ephemeral,
+		"attached":  attached,
 	})
 }
 
