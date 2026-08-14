@@ -11,7 +11,8 @@ import (
 )
 
 // Interactive `/review` and `/sec`. Registering here is what makes the two
-// commands appear in every interactive host (`mow tty`, the mowi TUI) purely
+// commands appear in every interactive host (`mow tty`, the Rust mowi TUI over
+// `mow rpc`) purely
 // because this pack is linked: no host names the review pack, and dropping the
 // blank import removes the commands from both hosts at once.
 //

@@ -8,13 +8,14 @@ Named service profiles under `$MOW_HOME/ops/<name>/`: logs, health, allowlisted 
 import _ "github.com/subosito/mow/packs/ops"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package. Ops uses job for daemon ticks.
+Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
+displays its RPC-driven results. Ops uses job for daemon ticks.
 
 ## Commands and tools
 
 | Surface | Name |
 |---|---|
-| CLI | `ops` (`mow ops` / `mowi ops`) |
+| CLI | `ops` (`mow ops`) |
 | Tools | `ops_services`, `ops_logs`, `ops_action`, `ops_incident`, `ops_health`, `ops_log_pattern`, `ops_runbook` |
 
 No slash commands. CLI verbs: `list` (`profiles`, `ls`), `show` (`info`), `check` (`validate`), `services`, `status`, `incidents`, `run` (`serve`, `watch`).

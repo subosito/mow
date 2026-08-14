@@ -1,12 +1,12 @@
 # AGENTS.md — working in the mow repo
 
 mow is a public library plus detachable extensions and optional hosts. The
-interactive TUI is `packs/mowi/`, a nested module whose dependency direction
-is toward the root public API; do not move TUI dependencies into the root
-module or `internal/engine`.
+interactive TUI is the Rust `mowi` sibling project, which drives `mow rpc`;
+do not move TUI dependencies into the root module or `internal/engine`.
 
 mow is **standalone**: one Go module, OpenAI/Anthropic-compatible HTTP. No other
-repo, gateway product, or host is required to build, test, or run.
+repo, gateway product, or host is required to build, test, or run. The Rust
+`mowi` sibling project is an external TUI that drives `mow rpc`.
 
 ## Build, test, run
 
@@ -17,9 +17,7 @@ Requires **Go 1.26.4+** (pinned in `go.mod`). Prefer `devenv shell` (sets
 devenv shell -- just verify    # vet + go test -race + build  — gate before commit
 devenv shell -- just verify-ci # same, but with no credentials and an empty MOW_HOME
 devenv shell -- just build     # → bin/mow
-devenv shell -- just build-mowi # → bin/mowi (nested module)
 devenv shell -- just test      # fast inner loop (no race detector)
-devenv shell -- just smoke-tui # drive bin/mowi in a PTY (needs a model endpoint)
 ```
 
 `just verify` mirrors `.github/workflows/ci.yml` step for step, so a green
@@ -38,14 +36,6 @@ fail on CI. `verify-ci` runs the suite with credentials unset and a throwaway
 collector, database, or peer; a hard-coded `127.0.0.1:PORT` passes only on a
 box that happens to run that service. Start an `httptest.NewServer` and use
 its URL. `verify-ci` does not sandbox the network, so this one is on review.
-
-**`just smoke-tui` is opt-in, not part of `verify`.** It drives the real
-`bin/mowi` in a PTY via `shell-use` (pinned in `devenv.nix`) and asserts on the
-painted grid — per-cell char/fg/bg — rather than on the ANSI string a renderer
-returns. That is the only way to catch column geometry: the diff sign glyphs
-once sat 6 columns apart with every Go test passing. It needs a model endpoint
-and a network round trip, so CI cannot run it. Use it when touching mowi
-rendering.
 
 No separate lint step. Format with `gofmt`. Do not invent Make/npm scripts.
 
@@ -81,9 +71,8 @@ Source of truth for modules and public/internal: [docs/architecture.md](docs/arc
 | `ext/` | Registration (`ext.go`) + core extensions: acp, mcp, proc, rpc, cmdhook, eval |
 | `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): goal, review, ops, lsp, job, contextsink |
 | `packs/otel/` | OTLP export (nested submodule `github.com/subosito/mow/packs/otel`; config-driven) |
-| `packs/mowi/` | Interactive TUI (nested submodule `github.com/subosito/mow/packs/mowi`; full binary) |
 | `internal/` | Implementation — **not** an integrator import surface |
-| `cmd/mow/` | Thin CLI; blank-imports packs |
+| `cmd/mow/` | Sole full pack host; blank-imports packs |
 | `docs/` | architecture, harness, extensions |
 
 Public vs internal: if integrators need something in `internal/`, re-export —
@@ -189,9 +178,9 @@ Also apply **Public samples (OSS)** above when the commit includes docs or fixtu
 - Always `devenv shell --` for go/just when `devenv.nix` is present.
 - Engine split under `internal/engine/`: `engine.go` (New), `engine_prompt.go`,
   `engine_model.go`, `engine_control.go`, `engine_adapt.go`, `run.go` (Options/Run).
-- The root module stays headless and lean. Interactive UI code lives in the
-  nested `packs/mowi` module, which depends on the public root API; never import
-  TUI dependencies from the root module.
+- The root module stays headless and lean. The Rust `mowi` sibling project is
+  the interactive UI and drives `mow rpc`; never import TUI dependencies into
+  the root module.
 - Tests isolate `$MOW_HOME` via `TestMain` + `github.com/subosito/mow/testutil`;
   do not rely on the developer’s real `~/.mow`.
 

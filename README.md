@@ -1,6 +1,6 @@
 # mow
 
-**Minimal, secure-by-default agentic harness** (Go). The **library is the product API**; protocol extensions, workflow packs, telemetry, and the TUI are detachable modules.
+**Minimal, secure-by-default agentic harness** (Go). The **library is the product API**; protocol extensions and workflow packs are detachable modules. The Rust `mowi` sibling project is the TUI host over mow's RPC interface.
 
 ```text
 Embedder / tests ──┐
@@ -11,8 +11,8 @@ ext + packs ──────┘     (acp · mcp · goal · review · …)
 **Why mow:** the core module has two runtime dependencies (pty, yaml) — no SDK,
 no framework; any OpenAI- or Anthropic-compatible endpoint over plain HTTP;
 extensions detach by removing a blank import; secure defaults (read-only tools,
-workspace path jail, out-of-band project trust). Heavy OpenTelemetry and TUI
-dependencies live in nested modules and never enter a library-only embed.
+workspace path jail, out-of-band project trust). OpenTelemetry remains optional
+and never enters a library-only embed.
 
 > Pre-1.0: the `mow`, `ext`, and packs APIs may change between minor versions.
 
@@ -52,12 +52,9 @@ Full walkthrough with code: **[docs/embedding.md](docs/embedding.md)**.
 ```bash
 devenv shell -- just verify
 devenv shell -- just build    # → bin/mow
-# Build the full TUI binary:
-devenv shell -- bash -c 'cd packs/mowi && go build -o ../../bin/mowi ./cmd/mowi'
 
 # Or with plain Go:
 go build -o bin/mow ./cmd/mow
-(cd packs/mowi && go build -o ../../bin/mowi ./cmd/mowi)
 
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_API_KEY=sk-…
@@ -76,10 +73,6 @@ export OPENAI_MODEL=gpt-5-mini
 ./bin/mow rpc                                 # ext/rpc — JSON-lines
 ./bin/mow help                                # linked commands, dynamically
 
-./bin/mowi                                    # interactive TUI
-./bin/mowi trust .                            # same trust store as mow
-./bin/mowi acp --model gpt-5-mini             # same pack commands as mow
-./bin/mowi help
 ```
 
 **Pack-owned subcommands:** stock binaries blank-import linked packs. Remove an
@@ -93,7 +86,7 @@ itself), and never set credentials, endpoints, or power tools.
 
 ## Modules and layout
 
-Four Go modules (`go.work` wires them for local dev). Full public/internal map:
+Three Go modules (`go.work` wires them for local dev). Full public/internal map:
 [docs/architecture.md](docs/architecture.md).
 
 | Path / module | Role |
@@ -101,8 +94,8 @@ Four Go modules (`go.work` wires them for local dev). Full public/internal map:
 | `mow.go` + `internal/` | Public API re-export and implementation |
 | `ext/` + `cliutil/` + `extcfg/` | Core extensions, CLI helpers, extension config decode |
 | `packs/` | Optional packs: goal, review, ops, lsp, job |
-| `packs/otel/`, `packs/mowi/` | Nested OTLP and TUI modules |
-| `cmd/mow/` | Stock CLI (links ext + optional packs; no TUI) |
+| `packs/otel/` | Nested OTLP module |
+| `cmd/mow/` | Sole full pack host (links ext + optional packs and OTEL) |
 
 ## Pick extensions when embedding
 

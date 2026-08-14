@@ -8,7 +8,7 @@ Optional OTLP/HTTP tracing and metrics. Nested module so OpenTelemetry/grpc/prot
 import _ "github.com/subosito/mow/packs/otel"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package. The import registers `mow.SetOTELAuto`; `Engine.New` attaches the exporter when an endpoint is set. Empty endpoint means no exporter.
+Stock `cmd/mow` blank-imports this package. The import registers `mow.SetOTELAuto`; `Engine.New` attaches the exporter when an endpoint is set. Empty endpoint means no exporter.
 
 ## Commands and tools
 

@@ -8,13 +8,15 @@ MCP in both directions: configured client servers become tools, and `mow mcp` ex
 import _ "github.com/subosito/mow/ext/mcp"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package. No config means no client process.
+Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
+uses its RPC server mode when it needs MCP-backed sessions. No config means no
+client process.
 
 ## Commands and tools
 
 | Surface | Name |
 |---|---|
-| CLI | `mcp` (`mow mcp` / `mowi mcp`) — MCP server on stdin/stdout |
+| CLI | `mcp` (`mow mcp`) — MCP server on stdin/stdout |
 | Server tool | `mow_prompt` — prompt (required), optional `read_only` bool |
 | Client tools | `mcp_<server>_<tool>` — one per tool listed by each configured server |
 

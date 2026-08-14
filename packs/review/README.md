@@ -8,14 +8,15 @@ Read-only two-pass code review (`review`) and adversarial security review (`sec`
 import _ "github.com/subosito/mow/packs/review"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package.
+Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
+displays its RPC-driven results.
 
 ## Commands
 
 | Surface | Name |
 |---|---|
-| CLI | `review`, `sec` (`mow review` / `mow sec`; same on `mowi`) |
-| Slash | `/review`, `/sec` (`mow tty` and the mowi TUI) |
+| CLI | `review`, `sec` (`mow review` / `mow sec`) |
+| Slash | `/review`, `/sec` (`mow tty` and the Rust `mowi` TUI over `mow rpc`) |
 
 No tools. Slash commands are exclusive (hosts refuse them mid-turn).
 

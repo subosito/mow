@@ -8,7 +8,7 @@ Per-session side channel for oversized tool results: store the body beside the s
 import _ "github.com/subosito/mow/packs/contextsink"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package. Library embeds that omit the import keep results inline and have no search tool.
+Stock `cmd/mow` blank-imports this package. Library embeds that omit the import keep results inline and have no search tool. The Rust `mowi` sibling project displays the resulting RPC events.
 
 ## Commands and tools
 

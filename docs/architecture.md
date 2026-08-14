@@ -6,8 +6,8 @@
 ## One-liner
 
 **mow** is a secure-by-default Go agent harness: tool loop + sessions + config,
-extended by detachable protocol extensions, workflow packs, telemetry, and an
-interactive TUI.
+extended by detachable protocol extensions, workflow packs, and telemetry. The
+Rust `mowi` sibling project provides the interactive TUI over `mow rpc`.
 
 LLM access is plain OpenAI-compatible or Anthropic-compatible HTTP. No gateway,
 broker, host UI, or sibling repository is required for `mow.Engine`.
@@ -16,7 +16,7 @@ broker, host UI, or sibling repository is required for `mow.Engine`.
 
 1. **Library first** — public API is `github.com/subosito/mow` (`Engine` / `Run`).
 2. **Thin public root** — `mow.go` re-exports the API; implementation and behavior tests live in `internal/engine/`.
-3. **Minimal core module** — no TUI or OpenTelemetry dependencies enter a library-only embed.
+3. **Minimal core module** — no OpenTelemetry or UI dependencies enter a library-only embed.
 4. **Detachable features** — core extensions live in `ext/`; optional/domain packs live in `packs/`.
 5. **Packs own commands** — `ext.RegisterCommand`; blank import controls what a binary ships.
 6. **Secure by default** — read-only default tools, path jail, explicit write/shell trust.
@@ -28,9 +28,8 @@ broker, host UI, or sibling repository is required for `mow.Engine`.
 | `github.com/subosito/mow` | root | Public API, `internal/engine`, registration, core extensions, `cmd/mow` |
 | `github.com/subosito/mow/packs` | `packs/` | Optional workflow/domain packs: goal, review, ops, lsp, job |
 | `github.com/subosito/mow/packs/otel` | `packs/otel/` | Optional OTLP auto-wire/export module |
-| `github.com/subosito/mow/packs/mowi` | `packs/mowi/` | Optional Bubble Tea TUI + `cmd/mowi` full binary |
 
-`go.work` wires all four modules for local development. Import direction is
+`go.work` wires the three Go modules for local development. Import direction is
 one-way: nested modules depend on the root public API, never the reverse.
 
 ## Public vs internal
@@ -44,7 +43,6 @@ one-way: nested modules depend on the root public API, never the reverse.
 | `github.com/subosito/mow/ext/<name>` | Core protocol/runtime extensions: acp, mcp, proc, rpc, cmdhook, eval |
 | `github.com/subosito/mow/packs/<name>` | Optional packs: goal, review, ops, lsp, job, contextsink |
 | `github.com/subosito/mow/packs/otel` | Optional OTLP integration |
-| `github.com/subosito/mow/packs/mowi` | Optional TUI host library |
 | `github.com/subosito/mow/cliutil` | CLI flags → Engine |
 | `github.com/subosito/mow/extcfg` | Decode `extensions.<name>` |
 
@@ -67,7 +65,7 @@ behavior, the root public package re-exports a narrow API (for example
 `mow.Proc*`).
 
 ```text
-Embedder / cmd/mow / cmd/mowi / packs
+Embedder / cmd/mow / packs
                   │
                   ▼
         mow.go (public aliases/wrappers)
@@ -105,19 +103,17 @@ One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.m
 ### Heavy nested modules
 
 - `packs/otel`: OpenTelemetry dependencies stay isolated unless imported
-- `packs/mowi`: TUI dependencies stay isolated unless imported
+- Rust `mowi`: external TUI host that drives `mow rpc`
 
 ## Binaries
 
 | Binary | Source | Ships |
 |---|---|---|
-| `mow` | `cmd/mow` | Core CLI + ext + optional packs + OTEL, no TUI |
-| `mowi` | `packs/mowi/cmd/mowi` | Interactive TUI + the same pack command surface |
+| `mow` | `cmd/mow` | Full CLI host: core extensions + optional packs + OTEL |
+| Rust `mowi` | sibling project/repository | Interactive TUI over `mow rpc` |
 
-`mowi` dispatches `acp`, `goal`, `review`, `ops`, `mcp`, etc. via the same
-registration surface as `mow`. Native `mow_agents` spawn the current executable
-using `os.Executable()`, so either binary works standalone: `mow` spawns
-`mow acp`, while `mowi` spawns `mowi acp`.
+The Rust `mowi` host launches `mow rpc` and owns terminal presentation; pack
+commands and tools remain registered in the `mow` host.
 
 ## Catalog behavior
 

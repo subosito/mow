@@ -113,7 +113,7 @@ type lifeHooks struct {
 // Hermetic by default: Options.LoadUserConfig is false, so New does not read
 // or use $MOW_HOME user state (global config, workspace profiles, trust,
 // global AGENTS/skills, user sessions, extension home fallbacks). Stock CLI
-// and mowi set LoadUserConfig true via cliutil. Explicit ConfigPaths always
+// and the stock CLI sets LoadUserConfig true via cliutil. Explicit ConfigPaths always
 // load when provided (defaults → paths → env → Options), without implicit
 // global config when LoadUserConfig is false.
 func New(opt Options) (*Engine, error) {

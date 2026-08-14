@@ -191,7 +191,7 @@ type ModelInfo struct {
 }
 
 // FilterChatModels keeps catalog rows suitable for agent chat pickers
-// (mow REPL /model, mowi, ACP). Rules:
+// (mow REPL /model, the Rust mowi TUI over RPC, ACP). Rules:
 //   - facet set → keep only empty or "chat" (gateway capability; do not parse
 //     ":" from the model id — some providers use colon in the id)
 //   - no wire metadata → keep (plain OpenAI-style catalogs are chat models)

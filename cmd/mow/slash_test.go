@@ -8,8 +8,9 @@ import (
 	"github.com/subosito/mow/slash"
 )
 
-// mow tty and the mowi TUI must offer the same commands: same names, same
-// flags, same behavior — only the presentation differs. That property comes
+// mow tty and the Rust mowi TUI over mow rpc must offer the same commands:
+// same names, same flags, same behavior — only the presentation differs. That
+// property comes
 // from both hosts dispatching through the registry rather than each keeping a
 // switch, so these tests assert the dispatch path, not any one pack.
 

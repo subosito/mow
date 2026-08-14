@@ -8,13 +8,14 @@ CLI for running JSON fixture suites through the `github.com/subosito/mow/eval` h
 import _ "github.com/subosito/mow/ext/eval"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package.
+Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
+displays its RPC-driven results.
 
 ## Commands and tools
 
 | Surface | Name |
 |---|---|
-| CLI | `eval` (`mow eval` / `mowi eval`) |
+| CLI | `eval` (`mow eval`) |
 
 Subcommand: `run FIXTURE.json`. No tools and no slash commands.
 

@@ -201,8 +201,8 @@ func peerCommand(spec AgentSpec, host *hostPeerPolicy, peerCwd string) []string 
 
 // mowAgentBinary returns the executable path to use for the `acp` subcommand
 // in mow_agents. It prefers os.Executable() so the host spawns itself
-// (mowi → mowi acp, mow → mow acp) and falls back to "mow" when the
-// executable path cannot be resolved (e.g. test harness or a custom binary).
+// (mow → mow acp) and falls back to "mow" when the executable path cannot be
+// resolved (e.g. test harness or a custom binary).
 var mowAgentBinary = defaultMowAgentBinary
 
 func defaultMowAgentBinary() string {

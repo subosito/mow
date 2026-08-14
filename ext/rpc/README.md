@@ -8,13 +8,14 @@ JSON-lines control plane for embedders: one JSON object per stdin line; response
 import _ "github.com/subosito/mow/ext/rpc"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package.
+Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
+launches `mow rpc` as its TUI backend.
 
 ## Commands and tools
 
 | Surface | Name |
 |---|---|
-| CLI | `rpc` (`mow rpc` / `mowi rpc`) |
+| CLI | `rpc` (`mow rpc`) |
 
 No tools and no slash commands. `mow rpc` always `Close`s the Engine on exit.
 

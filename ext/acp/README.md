@@ -4,7 +4,7 @@ Agent Client Protocol (ACP) over JSON-RPC 2.0: run this host as an ACP agent, an
 
 ## Link
 
-Blank-import into a binary. Stock `cmd/mow` and `packs/mowi/cmd/mowi` both do:
+Blank-import into a binary. Stock `cmd/mow` does:
 
 ```go
 import _ "github.com/subosito/mow/ext/acp"
@@ -16,12 +16,14 @@ Drop the import and `mow acp` / `acp_delegate` disappear.
 
 | Surface | Name |
 |---|---|
-| CLI | `acp` (`mow acp` / `mowi acp`) — ACP agent on stdin/stdout |
+| CLI | `acp` (`mow acp`) — ACP agent on stdin/stdout |
 | Tool | `acp_delegate` — registered only when `agents` and/or `mow_agents` is non-empty |
 
 No slash commands.
 
-`mow acp` speaks ACP on stdio for an editor. Native `mow_agents` spawn the current executable (`os.Executable()`), so `mow` starts `mow acp` and `mowi` starts `mowi acp`. Peer processes are reused by agent + cwd + effective argv + permission mode.
+`mow acp` speaks ACP on stdio for an editor. Native `mow_agents` spawn the
+current executable (`os.Executable()`), so the full `mow` host starts `mow acp`.
+Peer processes are reused by agent + cwd + effective argv + permission mode.
 
 ## Config (`extensions.acp`)
 

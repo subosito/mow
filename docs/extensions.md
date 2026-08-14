@@ -3,7 +3,8 @@
 **Rule:** if a capability is not required for a read-only agent over compatible
 LLM HTTP, it is detachable. Core protocols/runtime adapters live under `ext/`;
 workflow/domain integrations live in the separate `packs/` module; heavy OTEL
-and TUI dependencies live in nested modules.
+dependencies live in a nested module. The Rust `mowi` sibling project is the
+external TUI over `mow rpc`.
 
 Customization modes:
 
@@ -19,7 +20,7 @@ Customization modes:
 | Registration | `github.com/subosito/mow/ext` | `RegisterTool`, `RegisterCommand`, lifecycle hooks |
 | Core extensions | `github.com/subosito/mow/ext/<name>` | acp, mcp, proc, rpc, cmdhook, eval — one-pager in each `ext/<name>/README.md` |
 | Optional packs | `github.com/subosito/mow/packs/<name>` | goal, review, ops, lsp, job, contextsink — `packs/<name>/README.md` |
-| Heavy optional | `github.com/subosito/mow/packs/otel`, `…/packs/mowi` | OTLP and TUI — `packs/otel/README.md`, `packs/mowi/README.md` |
+| Heavy optional | `github.com/subosito/mow/packs/otel` | OTLP — `packs/otel/README.md` |
 
 ```go
 import (
@@ -37,12 +38,12 @@ Remove an import and the associated tools/subcommand/auto-wire disappear.
 
 ## Linked binaries
 
-- `cmd/mow` links core extensions, goal/review/ops/lsp/job, and OTEL; no TUI.
-- `packs/mowi/cmd/mowi` links the full TUI and the same registered commands.
-- `mowi acp`, `mowi goal`, `mowi review`, `mowi ops`, etc. dispatch through
-  `ext.LookupCommand`, just like `mow`.
+- `cmd/mow` is the sole full pack host: it links core extensions,
+  goal/review/ops/lsp/job, and OTEL.
+- The Rust `mowi` sibling project launches `mow rpc`, owns terminal
+  presentation, and receives the registered command/tool events over RPC.
 - `mow_agents` start the currently running executable (`os.Executable()`), so
-  either binary works standalone for native ACP peers.
+  native ACP peers remain self-contained.
 
 ## Core extensions (`ext/`)
 
@@ -50,7 +51,7 @@ Remove an import and the associated tools/subcommand/auto-wire disappear.
 
 [Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0:
 
-- `mow acp` / `mowi acp`: run the current host as an ACP agent.
+- `mow acp`: run the current host as an ACP agent.
 - `acp_delegate`: delegate to named external or native peers.
 - Native `mow_agents` support model, effort, system prefix, cwd, permissions,
   and timeout. Peer processes are reused by **agent + cwd + effective argv +
@@ -94,7 +95,7 @@ extensions:
 Both directions:
 
 - configured client servers contribute `mcp_<server>_<tool>` tools;
-- `mow mcp` / `mowi mcp` expose `mow_prompt` as an MCP stdio server.
+- `mow mcp` exposes `mow_prompt` as an MCP stdio server.
 
 No config means no client process. Supports stdio and streamable HTTP plus
 bearer/OAuth modes. Stdio servers start during `BeforeNew` (host config only);
@@ -195,7 +196,7 @@ events. State lives under `$MOW_HOME/goals`:
 ```bash
 mow goal run --goal "Make CI green"
 mow goal status --id NAME
-mowi goal run --goal "Make CI green"
+mow goal run --goal "Make CI green"
 ```
 
 ### Review (`packs/review`)
@@ -214,7 +215,7 @@ start an ensemble. ACP / `acp_delegate` is denied in the review jail.
 
 A pack can own a command a user types into an interactive session. Registering
 one in `init` is all it takes: every host that dispatches through the registry
-— `mow tty` and the mowi TUI — gains the command because the pack is linked,
+— `mow tty` and the Rust `mowi` TUI over `mow rpc` — gains the command because the pack is linked,
 and loses it when the blank import is dropped. No host names a pack.
 
 ```go
@@ -238,9 +239,9 @@ func init() {
 
 The contract is presentation-free on purpose. `Run` returns text; the host
 decides how to paint it — `mow tty` prints the title on stderr and the body on
-stdout (so a piped stdout stays the report), while mowi paints a status chip
-and a framed transcript section and sets `Color: false` so raw ANSI does not
-fight its layout. One behavior, two presentations, no duplicated flag parsing.
+stdout (so a piped stdout stays the report), while the Rust `mowi` host paints
+the RPC events in its own terminal layout. One behavior, two presentations, no
+duplicated flag parsing.
 
 Rules worth knowing:
 
@@ -363,8 +364,8 @@ model context, and compare that with `recovered_bytes` to see how much was
 brought back on demand. When the OTEL pack is configured, it exports these as
 `mow.contextsink.stored_results`, `mow.contextsink.saved_bytes`, and
 `mow.contextsink.recovered_bytes` counters. Without the pack,
-results simply stay inline and no search tool exists. Stock binaries (`mow`,
-`mowi`) link it; library embeds opt in by blank-importing it. Config key
+results simply stay inline and no search tool exists. The stock `mow` binary
+links it; library embeds opt in by blank-importing it. Config key
 `extensions.contextsink`.
 
 ```yaml
@@ -392,19 +393,12 @@ queued telemetry (auto-wire cleanup uses a 5s timeout). Span error/status text
 is redacted and length-capped. URL userinfo becomes an `Authorization` header
 when none is set.
 
-## TUI (`packs/mowi`)
+## TUI host
 
-Nested module so Bubble Tea/Lip Gloss/Chroma/Goldmark dependencies remain
-optional. Build/install:
-
-```bash
-(cd packs/mowi && go build -o ../../bin/mowi ./cmd/mowi)
-go install github.com/subosito/mow/packs/mowi/cmd/mowi@latest
-```
-
-The TUI supports sessions, streaming, model/effort pickers, tool approval,
-peer streams, goal/review integration, and the same pack command surface as
-`mow`.
+The Rust `mowi` sibling project/repository is the interactive terminal host.
+It launches `mow rpc` and renders sessions, streaming, model/effort pickers,
+tool approval, peer streams, and pack command results. See that project for
+installation and release instructions.
 
 ## Configuration
 

@@ -8,13 +8,14 @@ Background-process tools and CLI: start a long-lived process (dev server, watche
 import _ "github.com/subosito/mow/ext/proc"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package.
+Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
+displays its RPC-driven results.
 
 ## Commands and tools
 
 | Surface | Name |
 |---|---|
-| CLI | `proc` (`mow proc` / `mowi proc`) |
+| CLI | `proc` (`mow proc`) |
 | Tools | `proc_start`, `proc_status`, `proc_stop` |
 
 CLI subcommands: `list` (alias `ls`, default), `stop <id>`, `stop-all`, `logs <id> [n]` (alias `log`).

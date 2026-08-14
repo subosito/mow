@@ -8,13 +8,14 @@ Interval or cron jobs that invoke a saved goal or a one-shot prompt. Job depends
 import _ "github.com/subosito/mow/packs/job"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package.
+Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
+displays its RPC-driven results.
 
 ## Commands and tools
 
 | Surface | Name |
 |---|---|
-| CLI | `job` (`mow job` / `mowi job`) |
+| CLI | `job` (`mow job`) |
 
 Subcommands: `run` (alias `serve`; default if no verb), `list` (`ls`), `check` (`validate`). No tools and no slash commands.
 

@@ -97,7 +97,6 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `packs/review` | `mow review` / `mow sec` advisory review |
 | `packs/ops` | Ops profiles, health, runbooks |
 | `packs/otel` | Optional OTLP export (nested module) |
-| `packs/mowi` | Interactive TUI + `cmd/mowi` (nested module) |
 | `cmd/mow` | Thin shell: core commands + blank-import packs |
 
 ### Internal

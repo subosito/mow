@@ -308,8 +308,8 @@ func handleTtySlash(ctx context.Context, eng *mow.Engine, line string) (handled 
 
 // ttyRunSlash executes a pack-registered slash command and prints it for a
 // plain terminal: status line on stderr (so a piped stdout stays the report),
-// body on stdout. The same command in mowi paints a chip and a transcript
-// entry — one behavior, two presentations.
+// body on stdout. The Rust mowi RPC host provides the other presentation — one
+// behavior, two presentations.
 func ttyRunSlash(ctx context.Context, eng *mow.Engine, c slash.Command, parts []string) error {
 	ws := ""
 	if eng != nil {

@@ -8,7 +8,8 @@ Opt-in language-server tools (`lsp_hover`, `lsp_definition`) and post-edit `text
 import _ "github.com/subosito/mow/packs/lsp"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package.
+Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
+displays its RPC-driven results.
 
 ## Commands and tools
 

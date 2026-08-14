@@ -8,13 +8,14 @@ Durable outer loop over `Engine.Prompt`: checklist state, evidence, budgets, opt
 import _ "github.com/subosito/mow/packs/goal"
 ```
 
-Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package. Job depends on goal.
+Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
+displays its RPC-driven results. Job depends on goal.
 
 ## Commands and tools
 
 | Surface | Name |
 |---|---|
-| CLI | `goal` (`mow goal` / `mowi goal`) |
+| CLI | `goal` (`mow goal`) |
 | Interactive / RPC | `/goal` (also listed by `slash.list`) |
 
 Subcommands: `list`, `new`, `run`, `status`, `reset`, `delete`. The interactive

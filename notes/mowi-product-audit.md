@@ -1,4 +1,7 @@
-# mowi product audit — terminal product for a first-time user
+# Legacy — mowi product audit — terminal product for a first-time user
+
+> Historical audit of the retired Go TUI in `packs/mowi/`. The active TUI is
+> the Rust `mowi` sibling project, which drives `mow rpc`.
 
 Scope: `packs/mowi/` as a standalone interactive product. Audit only — no code
 changes. Sources cited per finding.

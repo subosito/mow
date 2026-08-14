@@ -4,5 +4,4 @@ use (
 	.
 	./packs
 	./packs/otel
-	./packs/mowi
 )

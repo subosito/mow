@@ -144,8 +144,8 @@ func (s *Server) handleSlash(ctx context.Context, req request) {
 		Workspace: s.Engine.Workspace(),
 		Color:     p.Color,
 	})
-	// Run errors are user-level (bad flags, empty scope) — same as mowi
-	// painting an error entry, not a transport failure.
+	// Run errors are user-level (bad flags, empty scope) — the external TUI
+	// paints them as an error entry, not a transport failure.
 	if err != nil {
 		s.replyTo(req, map[string]any{
 			"title": res.Title,

@@ -17,8 +17,8 @@ integrate against; the CLI and every pack are thin shells over it. So:
   re-export it deliberately rather than leaking the internal path.
 - A frontend, protocol, or heavy optional feature → a **core extension** under
   `ext/` or an **optional pack** under `packs/` (blank-imported into `cmd/mow`),
-  or an external host that imports mow. The interactive TUI is
-  `packs/mowi/` (nested module). Do not grow a TUI into the root module.
+  or an external host that imports mow. The Rust `mowi` sibling project is the
+  interactive TUI and drives `mow rpc`.
 
 Read [docs/architecture.md](docs/architecture.md) once for the public/internal
 line, then [docs/embedding.md](docs/embedding.md) to see the API from an
@@ -55,7 +55,7 @@ Layout and module boundaries: [docs/architecture.md](docs/architecture.md)
 | A core extension (acp, mcp, proc, rpc, cmdhook, eval) | `ext/<name>/` |
 | An optional pack (goal, review, ops, lsp, job) | `packs/<name>/` |
 | OTLP export | `packs/otel/` |
-| Interactive TUI | `packs/mowi/` |
+| Interactive TUI | Rust `mowi` sibling project over `mow rpc` |
 
 Engine construction is `internal/engine/engine.go` (`New`); prompt/model/control
 split across `engine_prompt.go`, `engine_model.go`, `engine_control.go`,

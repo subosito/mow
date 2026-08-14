@@ -1,4 +1,7 @@
-# mowi TUI: future-user review
+# Legacy — mowi TUI: future-user review
+
+> Historical review of the retired Go TUI in `packs/mowi/`. The active TUI is
+> the Rust `mowi` sibling project, which drives `mow rpc`.
 
 This review combines independent audits by GLM and Qwen with a first-principles product synthesis. It is a discussion document, not an implementation plan.
 
