@@ -16,6 +16,7 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext/rpc"
+	_ "github.com/subosito/mow/packs/goal"
 	"github.com/subosito/mow/slash"
 )
 
@@ -250,6 +251,33 @@ func TestRPCSlash(t *testing.T) {
 	if _, rerr := resultOf(t, msgs, "4"); rerr == nil {
 		t.Fatal("missing slash name must error")
 	}
+}
+
+func TestRPCAdvertisesLinkedGoalSlash(t *testing.T) {
+	eng := newEcho(t, mow.Options{})
+	msgs := serveLines(t, eng, `{"id":1,"method":"slash.list"}`)
+	res, err := resultOf(t, msgs, "1")
+	if err != nil {
+		t.Fatalf("slash.list: %v", err)
+	}
+	var out struct {
+		Commands []struct {
+			Name      string `json:"name"`
+			Exclusive bool   `json:"exclusive"`
+		} `json:"commands"`
+	}
+	if json.Unmarshal(res, &out) != nil {
+		t.Fatalf("slash.list shape: %s", res)
+	}
+	for _, command := range out.Commands {
+		if command.Name == "goal" {
+			if !command.Exclusive {
+				t.Fatal("goal must be exclusive")
+			}
+			return
+		}
+	}
+	t.Fatalf("slash.list did not advertise goal: %s", res)
 }
 
 func TestRPCSlashRunErrorIsEnvelope(t *testing.T) {

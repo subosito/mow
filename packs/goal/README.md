@@ -15,8 +15,11 @@ Stock `cmd/mow` and `packs/mowi/cmd/mowi` blank-import this package. Job depends
 | Surface | Name |
 |---|---|
 | CLI | `goal` (`mow goal` / `mowi goal`) |
+| Interactive / RPC | `/goal` (also listed by `slash.list`) |
 
-Subcommands: `list`, `new`, `run`, `status`, `reset`, `delete`. No slash commands.
+Subcommands: `list`, `new`, `run`, `status`, `reset`, `delete`. The interactive
+form runs against the current session Engine; `run` and one-shot goals emit
+`graph.goal.*` notifications through the generic RPC event stream.
 
 Goal-step tools are **not** globally registered. They are injected via `PromptOpts.ExtraTools` for the in-flight step only:
 
