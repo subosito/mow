@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +134,36 @@ func TestBashOutputIsBoundedWhileRunning(t *testing.T) {
 	}
 	if len(out) > 101_000 {
 		t.Fatalf("bash output grew past cap: %d", len(out))
+	}
+}
+
+func TestBashListingExecIsClamped(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 150; i++ {
+		name := filepath.Join(root, "f"+strconv.Itoa(i)+".txt")
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := &policy.Policy{Workspace: root, AllowShell: true}
+	reg := tools.Registry(p, []string{"bash"})
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"ls -1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "listing cap") {
+		t.Fatalf("ls of 150 files must hit the listing cap, got %d bytes:\n%.200s", len(out), out)
+	}
+	// A non-listing dump stays on the 100 KiB head+tail path, not the 100-line cap.
+	seq, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"seq 1 200"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(seq, "listing cap") {
+		t.Fatal("seq must not be treated as a listing")
+	}
+	if !strings.Contains(seq, "200") {
+		t.Fatalf("seq lost the tail: %.80q", seq)
 	}
 }
 

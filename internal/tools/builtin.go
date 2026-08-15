@@ -571,16 +571,118 @@ func (b *cappedBuffer) String() string {
 
 func (b *cappedBuffer) Truncated() bool { return b.total > maxBashOutputBytes }
 
+// bashSkipListingClamp leaves test/build pipelines alone (go test | rg FAIL
+// must keep the tail). Listing-only rg/ls/find is clamped separately.
+func bashSkipListingClamp(cmd string) bool {
+	c := strings.ToLower(cmd)
+	for _, p := range []string{
+		"go test", "go build", "go vet", "go generate",
+		"cargo test", "cargo build", "npm test", "npm run", "pnpm ", "yarn ",
+		"pytest", "python -m pytest",
+		"just ", "make ", "task ",
+	} {
+		if strings.Contains(c, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func bashSegments(cmd string) []string {
+	raw := strings.NewReplacer("&&", "\n", "||", "\n", ";", "\n", "|", "\n").Replace(cmd)
+	var segs []string
+	for _, s := range strings.Split(raw, "\n") {
+		if t := strings.TrimSpace(s); t != "" {
+			segs = append(segs, t)
+		}
+	}
+	if len(segs) == 0 {
+		return []string{cmd}
+	}
+	return segs
+}
+
+func pythonLooksLikeListing(low string) bool {
+	for _, p := range []string{"os.walk", "os.listdir", "os.scandir", "pathlib", "glob.glob", "rglob"} {
+		if strings.Contains(low, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func segmentIsListingOrSearch(seg string) bool {
+	fields := strings.Fields(seg)
+	i := 0
+	for i < len(fields) && strings.Contains(fields[i], "=") && !strings.HasPrefix(fields[i], "-") {
+		i++
+	}
+	if i >= len(fields) {
+		return false
+	}
+	switch strings.ToLower(filepath.Base(fields[i])) {
+	case "rg", "grep", "egrep", "fgrep", "find", "ls", "tree", "awk":
+		return true
+	case "python", "python3":
+		return pythonLooksLikeListing(strings.ToLower(seg))
+	default:
+		return false
+	}
+}
+
+// isListingOrSearchBash reports repo-survey commands whose stdout should be
+// grep-sized (hit list), not a 100 KiB dump. Test/build pipelines are excluded.
+func isListingOrSearchBash(cmd string) bool {
+	if bashSkipListingClamp(cmd) {
+		return false
+	}
+	// Check the whole command first: `python3 -c "…; os.walk(…)"` contains
+	// semicolons that are not shell separators.
+	if pythonLooksLikeListing(strings.ToLower(cmd)) &&
+		(strings.Contains(strings.ToLower(cmd), "python3") || strings.Contains(strings.ToLower(cmd), "python")) {
+		return true
+	}
+	for _, seg := range bashSegments(cmd) {
+		if segmentIsListingOrSearch(seg) {
+			return true
+		}
+	}
+	return false
+}
+
+// clampListingOutput applies the grep tool's line/match caps so bash rg/ls/find
+// cannot dump the tree into history. First hits stay; the rest is a notice.
+func clampListingOutput(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1]
+	}
+	var b strings.Builder
+	for i, line := range lines {
+		if i >= grepMaxMatches {
+			fmt.Fprintf(&b, "…(%d-line listing cap; use the grep tool or narrow the command — do not re-run to dump the rest)\n", grepMaxMatches)
+			return b.String()
+		}
+		b.WriteString(clampGrepLine(line))
+		b.WriteByte('\n')
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 type bashTool struct{ p *policy.Policy }
 
 func (t *bashTool) Name() string    { return "bash" }
 func (t *bashTool) Untrusted() bool { return true }
 func (t *bashTool) Description() string {
 	return "Run a shell command with cwd=workspace (default timeout 300s). Args: command, " +
-		"optional timeout_sec for slow builds/test suites. Do NOT start long-lived servers " +
-		"in the foreground, and do NOT nest another full `mow run/goal` inside bash (it will " +
-		"block the tool until timeout). For a smoke server: start with `&`, redirect logs, " +
-		"sleep briefly, curl once, exit."
+		"optional timeout_sec for slow builds/test suites. For repo search prefer the grep tool " +
+		"(bounded hits). bash rg/find/ls/awk listings are capped — do not reprint them; cite " +
+		"paths and edit. Do NOT start long-lived servers in the foreground, and do NOT nest " +
+		"another full `mow run/goal` inside bash (it will block the tool until timeout). " +
+		"For a smoke server: start with `&`, redirect logs, sleep briefly, curl once, exit."
 }
 func (t *bashTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"timeout_sec":{"type":"integer","description":"override the default timeout for one slow command (e.g. a full test suite)"}},"required":["command"]}`)
@@ -654,6 +756,9 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	}
 
 	out := buf.String()
+	if isListingOrSearchBash(a.Command) {
+		out = clampListingOutput(out)
+	}
 	if err != nil {
 		if cctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
 			msg := fmt.Sprintf(

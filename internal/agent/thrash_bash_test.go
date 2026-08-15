@@ -76,6 +76,8 @@ func TestBashReadPaths(t *testing.T) {
 		{`go test ./...`, nil},
 		{`cat a.go && cat b.go`, []string{"a.go", "b.go"}},
 		{`grep -n "func" internal/foo.go`, []string{"internal/foo.go"}},
+		{`awk '{print}' internal/foo.go`, []string{"internal/foo.go"}},
+		{`rg context_search`, nil},
 	}
 	for _, c := range cases {
 		got := bashReadPaths(c.cmd)
@@ -191,6 +193,42 @@ func TestReadAndBashSharePathDedupe(t *testing.T) {
 	stub, ok := s.maybeDedupeBash(bashArgs)
 	if !ok || !strings.Contains(stub, "already viewed") {
 		t.Fatalf("bash cat after read should stub: ok=%v %q", ok, stub)
+	}
+}
+
+func TestInventoryKey_rgAndPythonListing(t *testing.T) {
+	if got := inventoryKey(`rg context_search`); got != "rg" {
+		t.Fatalf("rg: %q", got)
+	}
+	if got := inventoryKey(`cd "$(pwd)" && rg -n foo`); got != "rg" {
+		t.Fatalf("rg after cd: %q", got)
+	}
+	if got := inventoryKey(`grep -n foo`); got != "grep" {
+		t.Fatalf("grep: %q", got)
+	}
+	if got := inventoryKey(`python3 -c "import os; os.walk('.')"`); got != "python-list" {
+		t.Fatalf("python walk: %q", got)
+	}
+	if got := inventoryKey(`python3 -c "print(1+1)"`); got != "" {
+		t.Fatalf("plain python must not be inventory: %q", got)
+	}
+	if got := inventoryKey(`go test ./... | rg FAIL`); got != "" {
+		t.Fatalf("productive test pipeline must not inventory-stub: %q", got)
+	}
+}
+
+func TestMaybeDedupeBash_rgInventory(t *testing.T) {
+	s := newThrashState("")
+	for i := 0; i < inventoryLimit; i++ {
+		args, _ := json.Marshal(map[string]string{"command": "rg leftover"})
+		if stub, ok := s.maybeDedupeBash(args); ok {
+			t.Fatalf("rg %d should run: %q", i+1, stub)
+		}
+	}
+	args, _ := json.Marshal(map[string]string{"command": `rg -n leftover src`})
+	stub, ok := s.maybeDedupeBash(args)
+	if !ok || !strings.Contains(stub, "inventory") {
+		t.Fatalf("third rg should inventory-stub: ok=%v %q", ok, stub)
 	}
 }
 

@@ -14,7 +14,7 @@ import (
 // Soft exploration helpers — no hard kill on explore streak. Long runs stop on
 // model finish, ctx cancel, or MaxTurns. These:
 //  1. stub re-reads (read + bash cat/sed/head/tail/grep of same unchanged paths)
-//  2. stub repeated inventory (git status/log/ls/find)
+//  2. stub repeated inventory (git status/log/ls/find/rg)
 //  3. soft-block destructive git/rm that discards WIP
 //  4. treat test/build/commit bash as productive (resets explore streak)
 //  5. warn every turn after exploreWarnEvery consecutive explore turns
@@ -214,8 +214,8 @@ func (s *thrashState) maybeDedupeBash(args json.RawMessage) (string, bool) {
 		shown = shown[:3]
 	}
 	return fmt.Sprintf(
-		"(already viewed %s this prompt — content unchanged; do not re-cat/sed/grep the same files. "+
-			"Use the earlier result, then act (edit/write) or finish.)",
+		"(already viewed %s this prompt — content unchanged; do not re-cat/sed/grep the same files "+
+			"or reprint that output. Act with edit/write, or finish.)",
 		strings.Join(shown, ", "),
 	), true
 }
@@ -289,6 +289,9 @@ func (s *thrashState) pathKey(p string) string {
 // inventoryKey groups repeated listing/status commands that thrash without
 // changing code. Empty = not inventory (path-viewer or other).
 func inventoryKey(cmd string) string {
+	if isProductiveBash(cmd) {
+		return ""
+	}
 	c := normalizeBashCmd(cmd)
 	low := strings.ToLower(c)
 	// File viewers are handled by path dedupe, not inventory class.
@@ -311,6 +314,15 @@ func inventoryKey(cmd string) string {
 		return "git-branch"
 	case looksLikeFind(low):
 		return "find"
+	case looksLikeSearch(low):
+		if hasCmdToken(low, "rg") {
+			return "rg"
+		}
+		return "grep"
+	case looksLikeAWK(low):
+		return "awk"
+	case looksLikePythonListing(low):
+		return "python-list"
 	case looksLikeLS(low):
 		return "ls"
 	case strings.Contains(low, "tree "):
@@ -349,8 +361,38 @@ func looksLikeFind(low string) bool {
 	return strings.Contains(low, "find ") || strings.HasPrefix(low, "find ") || low == "find"
 }
 
+func looksLikeSearch(low string) bool {
+	return hasCmdToken(low, "rg") || hasCmdToken(low, "grep") || hasCmdToken(low, "egrep") || hasCmdToken(low, "fgrep")
+}
+
+func looksLikeAWK(low string) bool {
+	return hasCmdToken(low, "awk")
+}
+
+func looksLikePythonListing(low string) bool {
+	if !hasCmdToken(low, "python") && !hasCmdToken(low, "python3") {
+		return false
+	}
+	for _, p := range []string{"os.walk", "os.listdir", "os.scandir", "pathlib", "glob.glob", "rglob"} {
+		if strings.Contains(low, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCmdToken(low, name string) bool {
+	for _, f := range strings.Fields(low) {
+		if strings.ToLower(filepath.Base(f)) == name {
+			return true
+		}
+	}
+	return false
+}
+
 func looksLikeListing(low string) bool {
-	return looksLikeLS(low) || looksLikeFind(low) || strings.Contains(low, "git status") || strings.Contains(low, "git log")
+	return looksLikeLS(low) || looksLikeFind(low) || looksLikeSearch(low) || looksLikeAWK(low) ||
+		looksLikePythonListing(low) || strings.Contains(low, "git status") || strings.Contains(low, "git log")
 }
 
 func normalizeBashCmd(cmd string) string {
@@ -417,7 +459,7 @@ func bashReadPaths(cmd string) []string {
 					i++
 				}
 				i--
-			case "sed":
+			case "sed", "awk":
 				i++
 				for i < len(fields) && strings.HasPrefix(fields[i], "-") && fields[i] != "--" {
 					i++
