@@ -28,7 +28,8 @@ type CompactReport struct {
 // automatic compaction: snip bulky tool results first, then drop+summarize
 // old turns with task anchors. Raw session JSONL is never touched — this only
 // rewrites the in-memory projection. maxChars <= 0 uses the default budget.
-// Emits a loop.compact event. No-op (empty report) when there is no history.
+// Emits loop.compact.start then loop.compact. No-op (empty report) when there
+// is no history.
 func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	if e == nil {
 		return CompactReport{}, fmt.Errorf("engine: nil")
@@ -141,6 +142,7 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	if targetRaw < 1 {
 		targetRaw = 1
 	}
+	e.Emit(Event{Type: EventCompactStart, Auto: false})
 	res := agent.CompactTiered(prior, targetRaw, "", toolLim)
 	if res.Messages == nil {
 		return CompactReport{}, fmt.Errorf("engine: compact failed (nil result)")

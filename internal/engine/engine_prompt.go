@@ -405,6 +405,7 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 			Type: EventCompact, RunID: runID, SessionID: sid, Layer: CompactLayer(ev.Layer),
 			CharsBefore: ev.CharsBefore, CharsAfter: ev.CharsAfter, CharsSaved: ev.CharsSaved,
 			MessagesBefore: ev.MessagesBefore, MessagesAfter: ev.MessagesAfter, OverBudget: ev.OverBudget,
+			Auto: true,
 		})
 	}}, compact...)
 	after = append([]agent.AfterTurnFunc{func(ctx context.Context, ev agent.AfterTurnEvent) {
@@ -418,6 +419,9 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 	// Archive pre-compact history so recall can recover dropped turns.
 	preC := append([]agent.PreCompactFunc(nil), h.PreCompact...)
 	preC = append(preC, func(ctx context.Context, ev agent.PreCompactEvent) (agent.PreCompactDecision, error) {
+		// Tell hosts a compact is starting before archive / optional summary
+		// so the TUI can show "auto-compact…" even when the work is instant.
+		e.Emit(Event{Type: EventCompactStart, RunID: runID, SessionID: sid, Auto: true})
 		if e.sess != nil && len(ev.Messages) > 0 {
 			if _, err := e.sess.ArchiveCompact(ev.Messages, "auto", 0); err != nil {
 				e.log().Warn("context archive", "err", err)

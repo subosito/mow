@@ -128,6 +128,40 @@ func TestEngineCompactRefreshesContextTokens(t *testing.T) {
 	}
 }
 
+// Manual Compact emits start then end so hosts can show in-progress chrome.
+func TestEngineCompactEmitsStartThenEnd(t *testing.T) {
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var types []mow.EventType
+	eng.AddOnEvent(func(ev mow.Event) {
+		if ev.Type == mow.EventCompactStart || ev.Type == mow.EventCompact {
+			types = append(types, ev.Type)
+			if ev.Type == mow.EventCompactStart && ev.Auto {
+				t.Error("manual compact start should not set auto")
+			}
+			if ev.Type == mow.EventCompact && ev.Auto {
+				t.Error("manual compact end should not set auto")
+			}
+		}
+	})
+	if _, err := eng.Prompt(context.Background(), strings.Repeat("x", 200)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Compact(0); err != nil {
+		t.Fatal(err)
+	}
+	if len(types) < 2 || types[0] != mow.EventCompactStart || types[len(types)-1] != mow.EventCompact {
+		t.Fatalf("compact events %v, want start then end", types)
+	}
+}
+
 // Compact on an empty transcript is a no-op, not an error.
 func TestEngineCompactEmptyNoop(t *testing.T) {
 	eng, err := mow.New(mow.Options{

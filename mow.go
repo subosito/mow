@@ -80,6 +80,7 @@ var (
 const (
 	EventRunStart           = engine.EventRunStart
 	EventRunEnd             = engine.EventRunEnd
+	EventCompactStart       = engine.EventCompactStart
 	EventCompact            = engine.EventCompact
 	EventGoalStart          = engine.EventGoalStart
 	EventGoalStep           = engine.EventGoalStep

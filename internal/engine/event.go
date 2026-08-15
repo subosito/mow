@@ -45,6 +45,9 @@ const (
 	EventToken     EventType = "loop.token"     // answer content delta
 	EventReasoning EventType = "loop.reasoning" // reasoning delta (UI/host optional)
 	EventTurn      EventType = "loop.turn"      // assistant message after LLM step
+	// EventCompactStart fires when a compact is about to run (manual or auto).
+	// Hosts use it for in-progress chrome; the algorithm itself is unchanged.
+	EventCompactStart EventType = "loop.compact.start"
 	// EventCompact reports projection-only context reduction. See CompactLayer.
 	EventCompact EventType = "loop.compact"
 	// EventStall is emitted once when the loop stops early because consecutive
@@ -248,8 +251,10 @@ type Event struct {
 	// Delegate
 	Agent string `json:"agent,omitempty"`
 
-	// Context compaction (loop.compact). Counts are raw characters/messages;
-	// OverBudget means all layers ran but the projection still exceeds target.
+	// Context compaction (loop.compact / loop.compact.start). Counts are raw
+	// characters/messages; OverBudget means all layers ran but the projection
+	// still exceeds target. Auto is true when the loop triggered compaction
+	// (over budget), false for an explicit Engine.Compact / RPC compact.
 	Layer          CompactLayer `json:"layer,omitempty"`
 	CharsBefore    int          `json:"chars_before,omitempty"`
 	CharsAfter     int          `json:"chars_after,omitempty"`
@@ -257,6 +262,7 @@ type Event struct {
 	MessagesBefore int          `json:"messages_before,omitempty"`
 	MessagesAfter  int          `json:"messages_after,omitempty"`
 	OverBudget     bool         `json:"over_budget,omitempty"`
+	Auto           bool         `json:"auto,omitempty"`
 
 	// Goal Event Payload (graph.goal.*)
 	//

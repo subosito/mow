@@ -158,3 +158,16 @@ func TestCompactEventPayload(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactStartEventPayload(t *testing.T) {
+	raw, err := json.Marshal(mow.Event{Type: mow.EventCompactStart, Auto: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	for _, want := range []string{`"type":"loop.compact.start"`, `"auto":true`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("payload %s missing %s", got, want)
+		}
+	}
+}
