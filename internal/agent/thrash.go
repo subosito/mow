@@ -13,11 +13,12 @@ import (
 
 // Soft exploration helpers — no hard kill on explore streak. Long runs stop on
 // model finish, ctx cancel, or MaxTurns. These:
-//  1. stub re-reads (read + bash cat/sed/head/tail/grep of same paths)
+//  1. stub re-reads (read + bash cat/sed/head/tail/grep of same unchanged paths)
 //  2. stub repeated inventory (git status/log/ls/find)
 //  3. soft-block destructive git/rm that discards WIP
 //  4. treat test/build/commit bash as productive (resets explore streak)
 //  5. warn every turn after exploreWarnEvery consecutive explore turns
+//  6. after a successful edit/write, allow one re-read of that path
 const (
 	exploreWarnEvery  = 6
 	rereadLimit       = 1 // second access to same path stubs
@@ -236,6 +237,21 @@ func (s *thrashState) notePathAccess(path string) (string, bool) {
 			"Use the earlier result, then act (edit/write) or finish.)",
 		key,
 	), true
+}
+
+// forgetPath clears the re-read stub so the next read/cat of this path is
+// allowed. Call after a successful edit/write — the on-disk contents changed.
+func (s *thrashState) forgetPath(path string) {
+	if s == nil {
+		return
+	}
+	key := s.pathKey(path)
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.reads, key)
+	s.mu.Unlock()
 }
 
 func (s *thrashState) pathKey(p string) string {

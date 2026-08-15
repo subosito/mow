@@ -729,6 +729,10 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 	if err != nil && !errors.Is(err, ErrDone) {
 		return toolSlot{hard: err}
 	}
+	// Successful edit/write changed the file — allow one re-read of that path.
+	if err == nil && (name == "edit" || name == "write") {
+		opt.thrash.forgetPath(toolArgString(args, "path"))
+	}
 	out = TruncateToolResult(out, toolResultLimit(opt))
 	out = frameUntrustedResult(tool, name, out, opt.UntrustedNonce)
 	out = opt.thrash.annotateRepeat(name, args, out)
