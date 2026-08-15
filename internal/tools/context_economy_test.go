@@ -68,7 +68,7 @@ func TestCappedBufferSingleByteWrites(t *testing.T) {
 func TestIsListingOrSearchBash(t *testing.T) {
 	t.Parallel()
 	yes := []string{
-		"rg context_search",
+		"rg recall",
 		`cd . && rg -n leftover`,
 		"grep -R foo .",
 		"find . -name '*.go'",

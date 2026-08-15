@@ -240,7 +240,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	archiveAvailable := false
 	if e.sess != nil {
 		for _, tool := range tools {
-			if tool.Name() == "recall" || tool.Name() == "context_search" {
+			if tool.Name() == "recall" {
 				archiveAvailable = true
 				break
 			}

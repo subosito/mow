@@ -86,7 +86,7 @@ func loadConfig(eng *mow.Engine) config {
 // recovery result would start a store→stub→recover loop).
 func contextSinkHook(ctx context.Context, ev ext.PostToolEvent) (ext.PostToolDecision, error) {
 	eng := mow.EngineFromContext(ctx)
-	if eng == nil || ev.Denied || ev.ExecErr != nil || ev.Name == "recall" || ev.Name == "context_search" {
+	if eng == nil || ev.Denied || ev.ExecErr != nil || ev.Name == "recall" {
 		return ext.PostToolDecision{}, nil
 	}
 	cfg := loadConfig(eng)

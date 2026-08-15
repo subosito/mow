@@ -197,7 +197,7 @@ func TestReadAndBashSharePathDedupe(t *testing.T) {
 }
 
 func TestInventoryKey_rgAndPythonListing(t *testing.T) {
-	if got := inventoryKey(`rg context_search`); got != "rg" {
+	if got := inventoryKey(`rg recall`); got != "rg" {
 		t.Fatalf("rg: %q", got)
 	}
 	if got := inventoryKey(`cd "$(pwd)" && rg -n foo`); got != "rg" {
