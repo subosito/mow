@@ -105,7 +105,7 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	if cpt <= 0 {
 		cpt = 4 // same default as agent.defaultCharsPerToken
 	}
-	targetRaw := agent.CompactTarget(maxChars, cpt)
+	targetRaw := agent.CompactTarget(agent.CompactResumeBudget(maxChars), cpt)
 	cur := agent.EstChars(prior)
 	if auto && cur > 1 {
 		// /compact must free real headroom even when history is still under the

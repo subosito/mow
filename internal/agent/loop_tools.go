@@ -265,7 +265,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 			summary = d.Summary
 		}
 	}
-	result := CompactTiered(messages, CompactTarget(budget, ratio), summary, toolLim)
+	result := CompactTiered(messages, CompactTarget(CompactResumeBudget(budget), ratio), summary, toolLim)
 	if result.CharsSaved > 0 || result.OverBudget {
 		for _, h := range opt.Hooks.AfterCompact {
 			if h != nil {

@@ -119,6 +119,22 @@ func TestBudgetCharsAndCompactTarget(t *testing.T) {
 	}
 }
 
+func TestCompactResumeBudgetLeavesHeadroom(t *testing.T) {
+	if got := CompactResumeBudget(1_000_000); got != 700_000 {
+		t.Fatalf("resume=%d want 700000", got)
+	}
+	if got := CompactResumeBudget(1); got != 1 {
+		t.Fatalf("tiny resume=%d", got)
+	}
+	if got := CompactResumeBudget(0); got != 0 {
+		t.Fatalf("zero resume=%d", got)
+	}
+	// Auto-compact should trim to the resume floor, not sit on the trigger.
+	if CompactTarget(CompactResumeBudget(1_000), defaultCharsPerToken) >= 1_000 {
+		t.Fatal("resume target must sit below the trigger budget")
+	}
+}
+
 // A calibrated code-heavy ratio must trigger compaction on a history that the
 // fixed 4 chars/token heuristic would have let through untouched.
 func TestApplyCompactUsesCalibratedRatio(t *testing.T) {

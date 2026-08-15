@@ -20,11 +20,11 @@ const DefaultMaxToolResultChars = 24_000
 const DefaultMaxContextChars = 100_000
 
 // DefaultCompactRatio is the fraction of gateway context_window used as the
-// soft history budget when auto-scaling (1M window → ~500k tokens of history
-// at ~4 chars/token before compaction). 0.5, not higher: coding sessions
-// burn through context with tool output, and a 1M-token window should still
-// compact well before half the window — see MaxContextCharsHardCap.
-const DefaultCompactRatio = 0.5
+// soft history budget when auto-scaling (1M window → ~750k tokens of history
+// at ~4 chars/token before the hard cap). 0.75: first compact around three
+// quarters of the window, then resume toward 70% of that budget. Still
+// below grok-build’s ~85% trip. See MaxContextCharsHardCap.
+const DefaultCompactRatio = 0.75
 
 // MaxContextCharsHardCap is the absolute ceiling on the soft history budget
 // (in chars, ~400k tokens at ~4 chars/token), enforced in applyCompact
@@ -138,6 +138,27 @@ func budgetChars(chars int, ratio float64) int {
 		ratio = defaultCharsPerToken
 	}
 	return int(float64(chars) * defaultCharsPerToken / clampRatio(ratio))
+}
+
+// CompactResumeRatio is how far below the trigger we try to land. The soft
+// budget is when to fire; this is the floor we aim for so the next tool
+// batch has headroom instead of immediately re-tripping.
+const CompactResumeRatio = 0.7
+
+// CompactResumeBudget is the char target after a compact that just tripped
+// `budget`. Always strictly below budget when budget > 1.
+func CompactResumeBudget(budget int) int {
+	if budget <= 0 {
+		return budget
+	}
+	t := int(float64(budget) * CompactResumeRatio)
+	if t < 1 {
+		t = 1
+	}
+	if budget > 1 && t >= budget {
+		return budget - 1
+	}
+	return t
 }
 
 // CompactTarget converts the configured char budget into the raw char budget
@@ -746,3 +767,4 @@ func EstChars(msgs []llm.Message) int {
 // callers outside the loop (Engine.Compact) can convert chars to tokens with
 // the same baseline density the calibrator starts from.
 const DefaultCharsPerToken = defaultCharsPerToken
+

@@ -188,10 +188,10 @@ func TestContextCharsBudgetScalesWithWindow(t *testing.T) {
 	if got := ContextCharsBudget(0, 0); got != 0 {
 		t.Fatalf("unknown window → %d", got)
 	}
-	// Default 0.5 ratio: 1M × 4 × 0.5 = 2M chars, hard-capped at 1.6M (~400k tok-eq).
+	// Default 0.75 ratio: 1M × 4 × 0.75 = 3M chars, hard-capped at 1.6M (~400k tok-eq).
 	got := ContextCharsBudget(1_000_000, 0)
 	if got != 1_600_000 {
-		t.Fatalf("1M @0.5 default: got %d want 1600000", got)
+		t.Fatalf("1M @0.75 default: got %d want 1600000", got)
 	}
 	// Explicit lower ratio under the cap passes through.
 	if got := ContextCharsBudget(1_000_000, 0.3); got != 1_200_000 {
