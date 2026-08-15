@@ -198,6 +198,15 @@ func estimateCtxTokens(charsAfter int, charsPerToken float64) int {
 	if cpt <= 0 {
 		cpt = 4 // same default as agent.defaultCharsPerToken
 	}
+	// Unclamped density (1 char/token after a bad seed) reports history
+	// *chars* as tokens — mowi then paints 1.4m/500k (271%). Keep the same
+	// band the agent calibrator uses.
+	if cpt < 2 {
+		cpt = 2
+	}
+	if cpt > 8 {
+		cpt = 8
+	}
 	tok := int(float64(charsAfter)/cpt + 0.5)
 	if tok < 1 {
 		tok = 1

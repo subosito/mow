@@ -272,6 +272,15 @@ func (s *Server) handleEffortSet(req request) {
 func (s *Server) handleContext(req request) {
 	used := s.Engine.ContextTokens()
 	lim := s.Engine.Limits()
+	// Compact estimates can leak a raw char count into lastCtxTokens when
+	// chars/token calibration is 1.0. The header chip is tokens / window;
+	// a char count against a 500k tok-eq cap reads as 271%.
+	if lim.ContextWindow > 0 && used > lim.ContextWindow {
+		used = (used + 2) / 4
+		if used > lim.ContextWindow {
+			used = lim.ContextWindow
+		}
+	}
 	out := map[string]any{"tokens": used}
 	if lim.ContextWindow > 0 {
 		out["context_window"] = lim.ContextWindow
