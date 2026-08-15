@@ -1,6 +1,6 @@
 # contextsink
 
-Per-session side channel for oversized tool results: store the body beside the session, replace live history with a short stub, recover later with `context_search`.
+Per-session side channel for oversized tool results: store the body beside the session, replace live history with a short stub, recover later with `recall`.
 
 ## Link
 
@@ -14,12 +14,12 @@ Stock `cmd/mow` blank-imports this package. Library embeds that omit the import 
 
 | Surface | Name |
 |---|---|
-| Tool | `context_search` |
+| Tool | `recall` |
 | Hook | `PostTool` (store + stub) |
 
-No CLI command and no slash commands. `context_search` is read-only and `Enabled` only when `extensions.contextsink.enabled` is true.
+No CLI command and no slash commands. `recall` is read-only and `Enabled` only when `extensions.contextsink.enabled` is true.
 
-Recovery args: `pattern` (string or list), optional `max_results`, `context_lines`; or get-by-id: `id`, optional `offset`, `window`. Search is pinned to the engine’s own `SessionDir`+`SessionID`. Stored files live under `<sid>.tools/`.
+Recovery args: `pattern` (string or list), optional `max_results`, `context_lines`; or recall a stored stub: `id`, optional `offset`, `window`. Search is pinned to the engine’s own `SessionDir`+`SessionID`. Stored files live under `<sid>.tools/`. Recall is for sunk tool output, not workspace files.
 
 Storage is bounded (64 files / 32 MiB total, 8 MiB per file) and pruned. Observability events (metadata only): `harness.contextsink.store`, `harness.contextsink.recover`.
 
@@ -37,5 +37,5 @@ extensions:
 ## Docs
 
 - [docs/extensions.md](../../docs/extensions.md) — Context sink pack
-- [docs/harness.md](../../docs/harness.md) — context archive and `context_search`
+- [docs/harness.md](../../docs/harness.md) — context archive and `recall`
 - [docs/architecture.md](../../docs/architecture.md)

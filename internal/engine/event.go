@@ -75,7 +75,7 @@ const (
 	// feature is opt-in.
 	EventCompactSummary EventType = "harness.compact.summary"
 	// EventContextSinkRecover reports bytes returned to live context by
-	// context_search, either by stored-result ID or archive pattern search.
+	// recall, either by stored-result ID or archive pattern search.
 	EventContextSinkRecover EventType = "harness.contextsink.recover"
 	EventDelegateChunk      EventType = "harness.delegate.chunk"    // peer ACP answer text delta
 	EventDelegateProgress   EventType = "harness.delegate.progress" // peer tool/thought status (not final answer)

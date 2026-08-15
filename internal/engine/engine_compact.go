@@ -60,7 +60,7 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	// Calibrate chars/token from the last observed request so manual compact
 	// matches the loop's density (code-heavy history tokenizes denser).
 	//
-	// lastCtxTokens is the provider's InputTokens: history *plus* the system
+	// lastProviderTokens is the provider's InputTokens: history *plus* the system
 	// prompt, tool schemas, and the last user message. Dividing history chars
 	// by that total inflates chars/token, which then under-estimates the
 	// post-compact size — the header drops to near-zero and appears to
@@ -68,19 +68,19 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	// explicitly instead, and add it back after converting history.
 	charsPerToken := 0.0
 	overheadTokens := 0
-	if e.lastCtxTokens > 0 {
+	if e.lastProviderTokens > 0 {
 		if raw := agent.EstChars(prior); raw > 0 {
 			// Assume the default density for the non-history part, so the
 			// remainder is attributable to history.
 			histTokens := int(float64(raw)/agent.DefaultCharsPerToken + 0.5)
-			if over := e.lastCtxTokens - histTokens; over > 0 {
+			if over := e.lastProviderTokens - histTokens; over > 0 {
 				overheadTokens = over
 			}
 			// Density from history alone, never from the padded total.
 			if histTokens > 0 && overheadTokens > 0 {
-				charsPerToken = float64(raw) / float64(e.lastCtxTokens-overheadTokens)
+				charsPerToken = float64(raw) / float64(e.lastProviderTokens-overheadTokens)
 			} else {
-				charsPerToken = float64(raw) / float64(e.lastCtxTokens)
+				charsPerToken = float64(raw) / float64(e.lastProviderTokens)
 			}
 		}
 	}
@@ -145,7 +145,7 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	if res.Messages == nil {
 		return CompactReport{}, fmt.Errorf("engine: compact failed (nil result)")
 	}
-	// Best-effort archive of pre-compact history for context_search.
+	// Best-effort archive of pre-compact history for recall.
 	e.mu.Lock()
 	sess := e.sess
 	e.mu.Unlock()
@@ -172,7 +172,7 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	// Add back the fixed per-request overhead (system prompt, tool schemas):
 	// compaction cannot remove it, so omitting it reports a context far
 	// emptier than the next real request will measure.
-	e.lastCtxTokens = estimateCtxTokens(res.CharsAfter, charsPerToken) + overheadTokens
+	e.lastCtxEstimate = estimateCtxTokens(res.CharsAfter, charsPerToken) + overheadTokens
 	e.mu.Unlock()
 
 	rep := CompactReport{
@@ -234,6 +234,7 @@ func (e *Engine) Rewind() (lastUser string, ok bool) {
 		}
 		e.transcript = e.transcript[:j]
 	}
-	e.lastCtxTokens = 0
+	e.lastProviderTokens = 0
+	e.lastCtxEstimate = 0
 	return lastUser, true
 }

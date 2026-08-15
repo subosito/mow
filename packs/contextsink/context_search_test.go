@@ -43,7 +43,7 @@ func TestContextSearchEmpty(t *testing.T) {
 }
 
 // TestContextSearchGetByIDRoundTrip stores a tool result the way the context
-// sink does (<sid>.tools/<NNNN>-<tool>-<hex>.txt) and fetches it by id.
+// sink does (<sid>.tools/<NNNN>-<tool>-<hex>.txt) and recalls it.
 func TestContextSearchGetByIDRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	tdir := filepath.Join(root, "sess1.tools")
@@ -214,7 +214,7 @@ func TestContextSearchResolvesSessionFromEngineCtx(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out, "needle-ctx-77") {
-		t.Fatalf("get-by-id miss via engine ctx: %q", out)
+		t.Fatalf("recall miss via engine ctx: %q", out)
 	}
 
 	out, err = tool.Exec(ctx, json.RawMessage(`{"pattern":"needle-ctx-77"}`))
@@ -231,12 +231,12 @@ func TestContextSearchResolvesSessionFromEngineCtx(t *testing.T) {
 func TestContextSearchReadOnly(t *testing.T) {
 	tool := newContextSearchTool(t.TempDir(), "sess1")
 	if !tool.ReadOnly() {
-		t.Fatal("context_search must be read-only")
+		t.Fatal("recall must be read-only")
 	}
 }
 
 // TestContextSearchSessionIsolation: the session dir is shared by all
-// sessions of a project; search, get-by-id, and the retrieval budget must all
+// sessions of a project; search, recall, and the retrieval budget must all
 // be pinned to the tool's own session — never a sibling's.
 func TestContextSearchSessionIsolation(t *testing.T) {
 	resetBudgetRegistryForTest()
@@ -268,7 +268,7 @@ func TestContextSearchSessionIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out, "marker-sess1") || strings.Contains(out, "marker-sess2") {
-		t.Fatalf("get-by-id crossed sessions: %q", out)
+		t.Fatalf("recall crossed sessions: %q", out)
 	}
 
 	out, err = tool.Exec(ctx, json.RawMessage(`{"pattern":"marker-sess2"}`))
@@ -299,7 +299,7 @@ func TestContextSearchSessionIsolation(t *testing.T) {
 }
 
 // TestContextSearchGetByIDLargeStoredBody: stored bodies above the archive
-// scan cap (1 MiB) must still be retrievable via windowed get-by-id reads —
+// scan cap (1 MiB) must still be retrievable via windowed recall reads —
 // a stub must never point at an unretrievable body.
 func TestContextSearchGetByIDLargeStoredBody(t *testing.T) {
 	root := t.TempDir()
@@ -342,7 +342,7 @@ func TestContextSearchEmitsRecoveryEventMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Type != mow.EventContextSinkRecover || got.Tool != "context_search" || got.StoredID != id {
+	if got.Type != mow.EventContextSinkRecover || got.Tool != "recall" || got.StoredID != id {
 		t.Fatalf("event identity = %#v", got)
 	}
 	if got.RecoveryMode != "id" || got.RecoveredBytes != len(out) {

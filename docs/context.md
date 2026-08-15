@@ -2,11 +2,11 @@
 
 **Status:** implemented — oversized tool results are stored per session at
 produce time (optional pack `packs/contextsink`, linked by stock binaries;
-disabled by default; 8 KiB inline cap when enabled) and recovered by the model via `context_search id=…`
-(get-by-id, bounded window) or pattern search over stored files ("stored "
+disabled by default; 8 KiB inline cap when enabled) and recovered by the model via `recall id=…`
+(recall, bounded window) or pattern search over stored files ("stored "
 snippet headers).
 **Audience:** maintainers extending the agent loop or the session store.
-**Related:** [harness.md](harness.md) (loop, compaction, context archive, `context_search`), [embedding.md](embedding.md) (PostTool rewrite surface), [extensions.md](extensions.md) (packs/hooks).
+**Related:** [harness.md](harness.md) (loop, compaction, context archive, `recall`), [embedding.md](embedding.md) (PostTool rewrite surface), [extensions.md](extensions.md) (packs/hooks).
 
 ---
 
@@ -36,10 +36,10 @@ mow already ships a session-scoped archive + search:
 - **Session archive** — on compaction, pre-compact history is persisted as
   plain text under `<session-id>.archive/*.md` in the session dir, bounded
   (file cap, message cap, keep-count with pruning).
-- **`context_search`** — read-only tool, fixed-string scan over the newest
+- **`recall`** — read-only tool, fixed-string scan over the newest
   archive files, snippet output with stable `file:line` references, hard
   per-call and cumulative retrieval budgets, model never supplies a path.
-- **Compact stubs** — the compaction stub advertises `context_search` when an
+- **Compact stubs** — the compaction stub advertises `recall` when an
   archive exists, and stays silent when it cannot (sessionless runs).
 
 The spine exists for history dropped by compaction. What is missing: the full
@@ -72,8 +72,8 @@ search, and no second process is needed.
    mechanism: plain-text files, file/grep-based search, bounded and pruned.
    No new global store, no SQLite for the first cut.
 
-3. **Retrieval (extend `context_search`).** Search already exists. Add
-   bounded ranged retrieval by id/path. No new tool names, no MCP surface —
+3. **Retrieval (extend `recall`).** Search already exists. Add
+   bounded ranged retrieval by id. No new tool names, no MCP surface —
    the tool stays next to `read`/`bash` without prefix noise.
 
 4. **Stub.** Terse and machine-readable: tool name, stable id/path, byte
@@ -81,7 +81,7 @@ search, and no second process is needed.
    ceiling stays as a hard cap for anything that bypasses the sink.
 
 5. **Config.** Knobs under `extensions.contextsink` (the optional pack that
-   provides the write side of `context_search`):
+   provides the write side of `recall`):
 
    ```yaml
    extensions:
@@ -117,13 +117,13 @@ strictly worse here.
 ## 4. Decisions
 
 **A. Pack, not core — with a core extension point.** The whole side channel
-(write side + `context_search` recovery) ships as the optional
+(write side + `recall` recovery) ships as the optional
 `packs/contextsink` pack: library embeds that never import it keep raw bodies
 in history (no stubbing, no search tool, no new surface), while stock
 binaries link it for the lossless default. What stays core is the *machinery*:
 the session tool store, the session archive, the engine's generic ext hook and
 tool registries (no context-specific slot), and the
-`context_search` availability flag (`mow.SetContextSearchAvailable`) that lets
+archive-availability flag (`agent.SetArchiveAvailable`) that lets
 the compaction stub advertise recovery only when the tool actually exists.
 The pack registers the search tool via `ext.RegisterTool`; it resolves the
 session dir from the engine at call time (`EngineFromContext`), so no engine
@@ -153,7 +153,7 @@ line-split chunks with fixed byte ceilings (optional overlap) only for huge
 blobs, to improve hit locality. Keep stable blob/chunk ids so FTS5/BM25 can
 be added later without changing the tool contract.
 
-**F. Ranged retrieval.** get-by-id returns a bounded window (offset/range),
+**F. Ranged retrieval.** Recall returns a bounded window (offset/range),
 never the whole blob by default.
 
 ## 5. Security
@@ -163,9 +163,9 @@ never the whole blob by default.
   `0700`/`0600` permissions like the rest of `$MOW_HOME`.
 - Tool output can carry secrets or hostile text. Per-session scope plus
   bounded retention limit the exfiltration surface. **Stub previews** redact
-  common secret shapes; **`context_search` recovery is verbatim** (explicit
+  common secret shapes; **`recall` recovery is verbatim** (explicit
   product choice — recovery is opt-in and bounded, and the model needs
-  faithful text when fetching by id or pattern). Session tool I/O uses
+  faithful text when recalling by id or pattern). Session tool I/O uses
   `O_NOFOLLOW` on Unix; other platforms rely on Lstat containment plus
   post-open regular-file checks (residual TOCTOU on hostile hosts — see
   `internal/session/safefile*`).
@@ -183,14 +183,14 @@ never the whole blob by default.
    a separate per-session quota for stored tool bodies?
 3. Do stubs get their own budget class in compaction accounting (they are
    much smaller than the blobs they replace)?
-4. Does the `context_search` cumulative retrieval budget extend to get-by-id,
+4. Does the `recall` cumulative retrieval budget extend to id-window reads,
    or is a separate budget needed?
 5. Chunking ceiling: whole-blob files vs line-split — decide once the first cut shows
    real blob sizes.
 
 ---
 
-This builds on mow's own session archive and `context_search`
+This builds on mow's own session archive and `recall`
 ([harness.md](harness.md)), the PostTool rewrite surface
 ([embedding.md](embedding.md)), and the pack/extension rules
 ([extensions.md](extensions.md)) — no external product is part of the design.

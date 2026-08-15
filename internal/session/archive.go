@@ -13,7 +13,7 @@ import (
 
 // Context archive: when the agent loop compacts history, the engine persists
 // the pre-compact messages as plain-text files here so the agent can later
-// query what was dropped (context_search tool). Deliberately file/grep-based
+// query what was dropped (recall tool). Deliberately file/grep-based
 // — no embeddings, no vector store.
 
 const (

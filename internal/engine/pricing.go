@@ -107,8 +107,8 @@ func (e *Engine) EstimatePromptCost() PromptCostEstimate {
 	defer e.mu.Unlock()
 	lim := e.limitsLocked()
 	out := PromptCostEstimate{ContextWindow: lim.ContextWindow}
-	if e.lastCtxTokens > 0 {
-		out.InputTokens = e.lastCtxTokens
+	if e.lastProviderTokens > 0 {
+		out.InputTokens = e.lastProviderTokens
 		out.FromProvider = true
 	} else if n := agent.EstChars(e.prior); n > 0 {
 		out.InputTokens = estimateCtxTokens(n, agent.DefaultCharsPerToken)
@@ -185,7 +185,10 @@ func (e *Engine) ContextTokens() int {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.lastCtxTokens
+	if e.lastCtxEstimate > 0 {
+		return e.lastCtxEstimate
+	}
+	return e.lastProviderTokens
 }
 
 // estimateCtxTokens converts a raw history char count into an approximate token

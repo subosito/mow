@@ -487,8 +487,8 @@ func formatTaskAnchor(pins []string) string {
 var archiveAvailable atomic.Bool
 
 // SetArchiveAvailable records whether dropped turns are archived and searchable
-// via context_search. Hosts embedding the Engine do not call this directly —
-// the engine derives it per run from the actual context_search tool set plus
+// via recall. Hosts embedding the Engine do not call this directly —
+// the engine derives it per run from the actual recall tool set plus
 // session presence.
 func SetArchiveAvailable(v bool) { archiveAvailable.Store(v) }
 
@@ -498,7 +498,7 @@ func ArchiveAvailable() bool { return archiveAvailable.Load() }
 // defaultCompactStub builds a short note when no PreCompact summary is supplied.
 // It records what was dropped and which tools ran so work is not silently erased.
 // archived reports whether those turns went to a searchable session archive; the
-// stub only advertises context_search when they did, so a sessionless run never
+// stub only advertises recall when they did, so a sessionless run never
 // points the model at a tool it does not have.
 func defaultCompactStub(dropped, kept []llm.Message, pins []string, archived bool) string {
 	var nUser, nAsst, nTool int
@@ -526,7 +526,7 @@ func defaultCompactStub(dropped, kept []llm.Message, pins []string, archived boo
 	b.WriteString("Continue the same task using the task anchors above (if any) and the live turns below.\n")
 	b.WriteString("Do not ask the user to restate the task unless anchors and live context are empty or contradictory.\n")
 	if archived {
-		b.WriteString("The dropped turns are archived, not lost: use context_search (fixed-string match, newest first) to recover details you need.\n")
+		b.WriteString("The dropped turns are archived, not lost: use recall (fixed-string match, newest first) to recover details you need.\n")
 	}
 	if len(pins) == 0 {
 		// Fallback: snag something from dropped users (may include trivial).

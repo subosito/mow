@@ -140,7 +140,7 @@ func TestAdapterContextSinkMetrics(t *testing.T) {
 		OriginalBytes: 10_000, InlineBytes: 400,
 	})
 	ad.OnEvent(mow.Event{
-		Type: mow.EventContextSinkRecover, RunID: "r-context", Tool: "context_search",
+		Type: mow.EventContextSinkRecover, RunID: "r-context", Tool: "recall",
 		RecoveredBytes: 1_500, RecoveryMode: "id",
 	})
 

@@ -120,7 +120,7 @@ func New(opts Options) (*Adapter, error) {
 			a.contextSinkSavedBytes = c
 		}
 		if c, err := opts.Meter.Int64Counter("mow.contextsink.recovered_bytes",
-			metric.WithDescription("Bytes returned to live context by context_search"),
+			metric.WithDescription("Bytes returned to live context by recall"),
 			metric.WithUnit("By")); err == nil {
 			a.contextSinkRecoveredBytes = c
 		}

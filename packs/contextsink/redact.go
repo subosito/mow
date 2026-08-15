@@ -3,7 +3,7 @@ package contextsink
 import "regexp"
 
 // secretPatterns redact common credential shapes from *stub previews only*.
-// Pattern-search hits and get-by-id windows intentionally return stored text
+// Pattern-search hits and recall windows intentionally return stored text
 // as written (recovery is the product purpose); do not claim full redaction.
 var secretPatterns = []struct {
 	re   *regexp.Regexp

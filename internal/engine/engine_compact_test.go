@@ -88,7 +88,7 @@ func TestEngineCompactRefreshesContextTokens(t *testing.T) {
 	eng, err := mow.New(mow.Options{
 		NoSession: true,
 		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
-			// Report input tokens proportional to message bulk so lastCtxTokens is set.
+			// Report input tokens proportional to message bulk so lastProviderTokens is set.
 			inTok := 0
 			for _, m := range messages {
 				inTok += len(m.Content)/4 + 1

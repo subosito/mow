@@ -87,9 +87,9 @@ func TestEstimatePromptCost_fromLastTokens(t *testing.T) {
 	}
 	defer eng.Close()
 
-	// Seed lastCtxTokens as if a prior provider report landed.
+	// Seed lastProviderTokens as if a prior provider report landed.
 	eng.mu.Lock()
-	eng.lastCtxTokens = 50_000
+	eng.lastProviderTokens = 50_000
 	if eng.cfg != nil {
 		eng.cfg.LLM.InputPrice = 3 // $3 / 1M
 		eng.cfg.LLM.ContextWindow = 200_000
@@ -121,9 +121,9 @@ func TestEstimatePromptCost_fromPriorChars(t *testing.T) {
 	}
 	defer eng.Close()
 
-	// No lastCtxTokens — estimate from prior history bulk.
+	// No lastProviderTokens — estimate from prior history bulk.
 	eng.mu.Lock()
-	eng.lastCtxTokens = 0
+	eng.lastProviderTokens = 0
 	// ~40k chars → ~10k tokens at 4 chars/token
 	eng.prior = []llm.Message{{Role: "user", Content: strings.Repeat("x", 40_000)}}
 	eng.mu.Unlock()

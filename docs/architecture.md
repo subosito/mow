@@ -98,7 +98,7 @@ One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.m
 - `packs/lsp`: opt-in language-server tools and post-edit diagnostics
 - `packs/job`: interval/cron jobs (depends on goal); ops depends on job
 - `packs/contextsink`: per-session store + stub for oversized tool results
-  (recovery via the core `context_search` tool)
+  (recovery via the core `recall` tool)
 
 ### Heavy nested modules
 

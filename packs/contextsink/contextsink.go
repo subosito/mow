@@ -1,7 +1,7 @@
 // Package contextsink is the optional tool-result side channel: oversized
 // tool results are stored beside the session and replaced in live history
 // with a short stub, keeping the context window lean. Recovery is via the
-// pack's own read side, the context_search tool (get-by-id, or pattern search
+// pack's own read side, the recall tool (recall a stored stub, or pattern search
 // over stored files).
 //
 // Blank-import this pack to enable (stock binaries do): the write side
@@ -47,7 +47,7 @@ const (
 func init() {
 	// Stock CLI and any host that blank-imports this package get the
 	// tool-result side channel for free: the write side (store + stub) and the
-	// read side (context_search) both register through the generic ext
+	// read side (recall) both register through the generic ext
 	// hook/tool surface every pack uses — no engine wiring or special slot.
 	// All stored data is session-scoped (see mow.Engine.SaveToolResult); only
 	// the registrations are global.
@@ -82,11 +82,11 @@ func loadConfig(eng *mow.Engine) config {
 // It runs in ext registration order — the engine's event emitter runs before
 // all hooks, so hosts still receive the full body on EventToolEnd even though
 // history carries the stub. No-op when disabled, sessionless, denied,
-// exec-error, under the cap, or for context_search itself (stubbing a
+// exec-error, under the cap, or for recall itself (stubbing a
 // recovery result would start a store→stub→recover loop).
 func contextSinkHook(ctx context.Context, ev ext.PostToolEvent) (ext.PostToolDecision, error) {
 	eng := mow.EngineFromContext(ctx)
-	if eng == nil || ev.Denied || ev.ExecErr != nil || ev.Name == "context_search" {
+	if eng == nil || ev.Denied || ev.ExecErr != nil || ev.Name == "recall" || ev.Name == "context_search" {
 		return ext.PostToolDecision{}, nil
 	}
 	cfg := loadConfig(eng)
@@ -124,7 +124,7 @@ func contextSinkHook(ctx context.Context, ev ext.PostToolEvent) (ext.PostToolDec
 
 // formatStub is the model-visible replacement for a stored tool body. Kept
 // well under the history tool-result cap (~600 chars). Preview text is lightly
-// redacted; full recovery via context_search is intentionally unredacted.
+// redacted; full recovery via recall is intentionally unredacted.
 func formatStub(id, toolName, body string) string {
 	name := strings.TrimSpace(toolName)
 	if name == "" {
@@ -132,7 +132,7 @@ func formatStub(id, toolName, body string) string {
 	}
 	preview := clampRunes(redactSecrets(body), stubPreviewRunes)
 	return fmt.Sprintf(
-		"[stored id=%s tool=%s bytes=%d]\n%s\nuse context_search id=%s (or pattern= any literal above) to recover more",
+		"[stored id=%s tool=%s bytes=%d]\n%s\nuse recall id=%s (or pattern= any literal above) to recover more",
 		id, name, len(body), preview, id,
 	)
 }

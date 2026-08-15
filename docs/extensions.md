@@ -329,14 +329,14 @@ The full tool-result side channel, write side and read side together:
 
 - **Write side** — results above `max_inline_bytes` are stored beside the
   session (`<sid>.tools/`) and replaced in live history with a short stub.
-- **Read side** — `context_search` (registered via `ext.RegisterTool`, so it
+- **Read side** — `recall` (registered via `ext.RegisterTool`, so it
   needs no engine wiring): pattern search over the session's compaction
   archives and stored results (stored files carry a `stored ` snippet header),
-  or get-by-id fetch of a stored body (`id=…`, bounded window). It resolves
+  or recall of a stored stub (`id=…`, bounded window). It resolves
   the session dir from the engine at call time and is read-only, so it works
   in read-only prompts. Symlinks and non-regular files under the session
   archive/tools dirs are ignored. Stub previews redact common secret shapes;
-  recovery via `context_search` returns verbatim stored/archive text (product
+  recovery via `recall` returns verbatim stored/archive text (product
   choice — the model needs faithful detail when explicitly recovering).
   Session tool I/O uses `O_NOFOLLOW` on Unix; other platforms use Lstat
   containment plus post-open regular-file checks (residual TOCTOU on hostile
@@ -345,7 +345,7 @@ The full tool-result side channel, write side and read side together:
   Per-session retrieval budgets use deterministic LRU eviction (128 sessions);
   unrelated sessions search in parallel.
 
-Storage is strictly session-scoped (search, get-by-id, and the retrieval
+Storage is strictly session-scoped (search, recall, and the retrieval
 budget are all pinned to the engine's own `SessionDir`+`SessionID` — never a
 sibling session's), bounded (64 files / 32 MiB total, 8 MiB per file), and
 pruned.
@@ -445,3 +445,4 @@ Media stays a side lane to the chat loop:
 | `understand_video` | chat with video parts |
 
 Media tools are enabled/configured independently of extension packs.
+acks.

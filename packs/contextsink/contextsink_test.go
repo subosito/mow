@@ -139,7 +139,7 @@ func TestStoresAndStubs(t *testing.T) {
 	if strings.Contains(got, body) {
 		t.Fatal("full body must not appear in stub")
 	}
-	if !strings.Contains(got, "use context_search id=") {
+	if !strings.Contains(got, "use recall id=") {
 		t.Fatalf("stub missing search hint: %q", got)
 	}
 	id := storedIDFromStub(got)
@@ -273,17 +273,17 @@ func TestStoreRejectsOversizedBody(t *testing.T) {
 }
 
 func TestContextSearchExemptFromSink(t *testing.T) {
-	// Stubbing context_search's own output would start a recover→store→stub
+	// Stubbing recall's own output would start a recover→store→stub
 	// loop; recovery results must always pass through untouched.
 	eng, _ := runToolPrompt(t, strings.Repeat("a", 100), nil, nil)
 	dec, err := contextSinkHook(mow.ContextWithEngine(context.Background(), eng), ext.PostToolEvent{
-		Name: "context_search", Result: strings.Repeat("y", 20000),
+		Name: "recall", Result: strings.Repeat("y", 20000),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if dec.Rewrite {
-		t.Fatal("context_search results must never be stored+stubbed")
+		t.Fatal("recall results must never be stored+stubbed")
 	}
 }
 

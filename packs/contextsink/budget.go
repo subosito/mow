@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// recoveryBudget tracks cumulative bytes returned by context_search for one
+// recoveryBudget tracks cumulative bytes returned by recall for one
 // session. Each session has its own mutex so unrelated sessions search in
 // parallel; only the same session serializes budget updates.
 type recoveryBudget struct {
@@ -57,7 +57,7 @@ func acquireRecoveryBudget(key string) (b *recoveryBudget, release func()) {
 		budgetRegistryMu.Unlock()
 
 		// Block rather than spin: a search holds b.mu across archive I/O, and
-		// a parallel context_search of the same session must wait, not peg a CPU.
+		// a parallel recall of the same session must wait, not peg a CPU.
 		b.mu.Lock()
 		budgetRegistryMu.Lock()
 		if budgetByKey[key] == b {

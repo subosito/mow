@@ -169,7 +169,7 @@ session:
 # extensions:
 #   # Tool-result side channel (optional pack packs/contextsink; stock
 #   # binaries link it): store oversized tool results per session and show the
-#   # model a short stub (full body recoverable via context_search id=…).
+#   # model a short stub (full body recoverable via recall id=…).
 #   # Off by default even when the pack is linked; opt in explicitly.
 #   contextsink:
 #     enabled: true

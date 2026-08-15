@@ -20,7 +20,7 @@ import (
 
 // contextSearchTool is the recovery side of the tool-result side channel: it
 // searches the *current session's* compaction archives and stored tool
-// results, and fetches stored results by id (the id the sink stub prints).
+// results, and recalls stored results by id (the id the sink stub prints).
 // The search root is resolved from the engine at call time and pinned to the
 // engine's own session (SessionDir + SessionID) — the model supplies only
 // patterns and ids, never a path, so the tool stays safe under the default
@@ -45,7 +45,7 @@ func newContextSearchTool(dir, sid string) *contextSearchTool {
 // used by session.Store.SaveToolResult (<NNNN>-<tool>-<8hex>.txt).
 var contextSearchToolIDPattern = regexp.MustCompile(`^\d{4}-[a-z0-9_-]+-[0-9a-f]{8}\.txt$`)
 
-func (t *contextSearchTool) Name() string { return "context_search" }
+func (t *contextSearchTool) Name() string { return "recall" }
 
 // Enabled keeps the recovery tool out of the engine tool list unless the
 // contextsink feature is explicitly enabled for that engine.
@@ -58,22 +58,23 @@ func (t *contextSearchTool) Description() string {
 		"Args: pattern (string or list of strings; a line matching any of them hits), " +
 		"optional max_results, optional context_lines. Pattern lists are limited to 8 entries and each pattern to 256 characters. " +
 		"Search also covers stored tool results (their snippet headers carry a 'stored ' prefix). " +
-		"Or fetch one stored result by id: Args: id (stored tool result id, e.g. 0003-bash-ab12cd34.txt) with " +
-		"offset (rune offset into the body, default 0) and window (chars to return, default 4000, clamped); " +
-		"get-by-id returns only a bounded window, never the whole blob."
+		"Or recall one stored stub: Args: id (stored tool result id from a sink stub, e.g. 0003-bash-ab12cd34.txt) with " +
+		"offset (rune offset into the body, default 0) and window (chars to return, default 4000, clamped). " +
+		"Recall is for sunk tool output that is not a workspace file — use read/edit for paths. " +
+		"It returns only a bounded window, never the whole blob, and counts against the same session budget as search."
 }
 func (t *contextSearchTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` +
 		`"pattern":{"description":"fixed string, or list of fixed strings (match any)","oneOf":[{"type":"string"},{"type":"array","items":{"type":"string"}}]},` +
 		`"max_results":{"type":"integer","description":"max snippets to return (default 12, capped)"},` +
 		`"context_lines":{"type":"integer","description":"lines of context around each hit (default 2, capped)"},` +
-		`"id":{"type":"string","description":"stored tool result id (e.g. 0003-bash-ab12cd34.txt); when set, fetch a bounded window of that stored result instead of searching"},` +
-		`"offset":{"type":"integer","description":"rune offset into the stored body for get-by-id (default 0)"},` +
-		`"window":{"type":"integer","description":"chars to return for get-by-id (default 4000, clamped)"}` +
+		`"id":{"type":"string","description":"recall a stored tool stub by id (e.g. 0003-bash-ab12cd34.txt); not for workspace files — use read/edit"},` +
+		`"offset":{"type":"integer","description":"rune offset into the stored stub for recall (default 0)"},` +
+		`"window":{"type":"integer","description":"chars to return for recall (default 4000, clamped)"}` +
 		`}}`)
 }
 
-// ReadOnly marks context_search side-effect free so read-only prompts may use it.
+// ReadOnly marks recall side-effect free so read-only prompts may use it.
 func (t *contextSearchTool) ReadOnly() bool { return true }
 
 const (
@@ -88,7 +89,9 @@ const (
 	// contextSearchMaxRetrieved is the cumulative result budget for one
 	// session. The per-call cap prevents one broad query; this cap prevents a
 	// model from bypassing it with many broad queries in the same session.
-	contextSearchMaxRetrieved = 32_000
+	// 64k is enough for a handful of honest recalls after compact without
+	// letting the archive be paged back into the prompt.
+	contextSearchMaxRetrieved = 64_000
 	// Bound disk work as well as returned context. A miss should not rescan
 	// dozens of megabytes on every repeated query.
 	contextSearchMaxScanBytes = 8 << 20
@@ -107,7 +110,7 @@ const (
 	// contextSearchMaxSnippet clamps one whole rendered snippet.
 	contextSearchMaxSnippet = 900
 
-	// Get-by-id window: default slice length and hard ceiling. A huge requested
+	// Recall window: default slice length and hard ceiling. A huge requested
 	// window is clamped to contextSearchMaxWindow, then further bounded by the
 	// per-call and cumulative retrieval budgets.
 	contextSearchDefaultWindow = 4_000
@@ -115,7 +118,7 @@ const (
 
 	// contextSearchMaxStoredRead mirrors the session store's per-file cap
 	// (internal/session toolResultMaxReadBytes): stored bodies never exceed
-	// it, so a windowed get-by-id read of the whole stored file is always
+	// it, so a windowed recall of the whole stored file is always
 	// possible. Files above it (legacy) are treated as missing.
 	contextSearchMaxStoredRead = 8 << 20
 	// contextSearchMaxBudgetSessions bounds the per-session retrieval budget
@@ -134,18 +137,18 @@ type contextSearchArgs struct {
 
 func (a contextSearchArgs) patterns() ([]string, error) {
 	if len(a.Pattern) == 0 {
-		return nil, fmt.Errorf("context_search: pattern required")
+		return nil, fmt.Errorf("recall: pattern required")
 	}
 	validate := func(p string) error {
 		if utf8.RuneCountInString(p) > contextSearchMaxPatternRunes {
-			return fmt.Errorf("context_search: pattern exceeds %d characters", contextSearchMaxPatternRunes)
+			return fmt.Errorf("recall: pattern exceeds %d characters", contextSearchMaxPatternRunes)
 		}
 		return nil
 	}
 	var one string
 	if err := json.Unmarshal(a.Pattern, &one); err == nil {
 		if strings.TrimSpace(one) == "" {
-			return nil, fmt.Errorf("context_search: pattern required")
+			return nil, fmt.Errorf("recall: pattern required")
 		}
 		if err := validate(one); err != nil {
 			return nil, err
@@ -154,7 +157,7 @@ func (a contextSearchArgs) patterns() ([]string, error) {
 	}
 	var many []string
 	if err := json.Unmarshal(a.Pattern, &many); err != nil {
-		return nil, fmt.Errorf("context_search: pattern must be a string or list of strings")
+		return nil, fmt.Errorf("recall: pattern must be a string or list of strings")
 	}
 	seen := map[string]bool{}
 	var out []string
@@ -164,7 +167,7 @@ func (a contextSearchArgs) patterns() ([]string, error) {
 			continue
 		}
 		if len(out) >= contextSearchMaxPatterns {
-			return nil, fmt.Errorf("context_search: at most %d patterns", contextSearchMaxPatterns)
+			return nil, fmt.Errorf("recall: at most %d patterns", contextSearchMaxPatterns)
 		}
 		if err := validate(p); err != nil {
 			return nil, err
@@ -173,7 +176,7 @@ func (a contextSearchArgs) patterns() ([]string, error) {
 		out = append(out, p)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("context_search: pattern required")
+		return nil, fmt.Errorf("recall: pattern required")
 	}
 	return out, nil
 }
@@ -253,7 +256,7 @@ func (t *contextSearchTool) Exec(ctx context.Context, args json.RawMessage) (out
 		}
 		eng.Emit(mow.Event{
 			Type:           mow.EventContextSinkRecover,
-			Tool:           "context_search",
+			Tool:           "recall",
 			StoredID:       strings.TrimSpace(a.ID),
 			RecoveredBytes: len(out),
 			RecoveryMode:   mode,
@@ -262,10 +265,10 @@ func (t *contextSearchTool) Exec(ctx context.Context, args json.RawMessage) (out
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	// Get-by-id path: fetch one stored tool result (the id the context sink
-	// stub printed) instead of pattern-searching the archive.
+	// Recall path: open one stored tool stub (the id the context sink
+	// printed) instead of pattern-searching the archive.
 	if a.ID != "" {
-		return t.getByID(ctx, a.ID, a.Offset, a.Window)
+		return t.recallStored(ctx, a.ID, a.Offset, a.Window)
 	}
 	patterns, err := a.patterns()
 	if err != nil {
@@ -294,11 +297,11 @@ func (t *contextSearchTool) Exec(ctx context.Context, args json.RawMessage) (out
 
 	remaining := contextSearchMaxRetrieved - budget.used
 	if remaining <= 0 {
-		return "(context_search retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
+		return "(recall retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
 	}
 	callCap := min(contextSearchMaxOutput, max(0, remaining-contextSearchTruncationReserve))
 	if callCap < 1 {
-		return "(context_search retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
+		return "(recall retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
 	}
 
 	b := &searchBudget{maxResults: maxResults, maxOutput: callCap, maxScan: contextSearchMaxScanBytes, seen: map[uint64]bool{}}
@@ -332,14 +335,14 @@ func (t *contextSearchTool) Exec(ctx context.Context, args json.RawMessage) (out
 	return out, nil
 }
 
-// getByID fetches one stored tool result by its stable id (the id the context
-// sink stub printed). The body is returned as a bounded rune window, never the
-// whole blob, and the window counts against the same cumulative retrieval
-// budget as pattern searches.
-func (t *contextSearchTool) getByID(ctx context.Context, id string, offset, window *int) (string, error) {
+// recallStored opens one stored tool stub by its stable id (the id the
+// context sink printed). The body is a bounded rune window, never the whole
+// blob, and the window counts against the same cumulative retrieval budget
+// as pattern searches. Use this for sunk stdout, not for workspace files.
+func (t *contextSearchTool) recallStored(ctx context.Context, id string, offset, window *int) (string, error) {
 	id = strings.TrimSpace(id)
 	if !contextSearchToolIDPattern.MatchString(id) {
-		return "", fmt.Errorf("context_search: invalid stored result id %q", id)
+		return "", fmt.Errorf("recall: invalid stored result id %q", id)
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -357,11 +360,11 @@ func (t *contextSearchTool) getByID(ctx context.Context, id string, offset, wind
 
 	remaining := contextSearchMaxRetrieved - budget.used
 	if remaining <= 0 {
-		return "(context_search retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
+		return "(recall retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
 	}
 	callCap := min(contextSearchMaxOutput, max(0, remaining-contextSearchTruncationReserve))
 	if callCap < 1 {
-		return "(context_search retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
+		return "(recall retrieval budget exhausted for this session; refine the task or continue in a new session)", nil
 	}
 
 	// Prefer the engine store window API (no full-body load). Tests pin t.dir
@@ -372,18 +375,18 @@ func (t *contextSearchTool) getByID(ctx context.Context, id string, offset, wind
 		var err error
 		body, start, total, err = eng.StoredToolResultWindow(id, off, win)
 		if err != nil {
-			return "", fmt.Errorf("context_search: stored result %s expired or missing", id)
+			return "", fmt.Errorf("recall: stored result %s expired or missing", id)
 		}
 	} else {
 		toolsDir := filepath.Join(base, sid+".tools")
 		path := filepath.Join(toolsDir, id)
 		if err := rejectSymlinkComponents(base, path); err != nil {
-			return "", fmt.Errorf("context_search: stored result %s expired or missing", id)
+			return "", fmt.Errorf("recall: stored result %s expired or missing", id)
 		}
 		var ok bool
 		body, start, total, ok = readStoredResultWindow(ctx, base, path, off, win)
 		if !ok {
-			return "", fmt.Errorf("context_search: stored result %s expired or missing", id)
+			return "", fmt.Errorf("recall: stored result %s expired or missing", id)
 		}
 	}
 	out := fmt.Sprintf("[stored id=%s offset=%d chars=%d/%d]\n%s", id, start, utf8.RuneCountInString(body), total, body)
@@ -403,12 +406,12 @@ func (t *contextSearchTool) searchRoot(ctx context.Context) (base, sid, key stri
 	}
 	eng := mow.EngineFromContext(ctx)
 	if eng == nil {
-		return "", "", "", fmt.Errorf("context_search: no engine in context")
+		return "", "", "", fmt.Errorf("recall: no engine in context")
 	}
 	dir := eng.SessionDir()
 	sid = eng.SessionID()
 	if dir == "" || sid == "" {
-		return "", "", "", fmt.Errorf("context_search: no session — nothing to search")
+		return "", "", "", fmt.Errorf("recall: no session — nothing to search")
 	}
 	return dir, sid, dir + "/" + sid, nil
 }

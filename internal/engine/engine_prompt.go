@@ -234,13 +234,13 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	}()
 
 	// Per-run searchable-archive advertisement: the compaction stub mentions
-	// context_search only when the pack is linked AND this run has a session.
+	// recall only when the pack is linked AND this run has a session.
 	// Sessionless runs compact nothing searchable, so advertising the tool
 	// would send the model on a doomed turn.
 	archiveAvailable := false
 	if e.sess != nil {
 		for _, tool := range tools {
-			if tool.Name() == "context_search" {
+			if tool.Name() == "recall" || tool.Name() == "context_search" {
 				archiveAvailable = true
 				break
 			}
@@ -396,10 +396,10 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 		// (header ctx%) do not wait for the next LLM usage report.
 		e.mu.Lock()
 		cpt := 0.0
-		if e.lastCtxTokens > 0 && ev.CharsBefore > 0 {
-			cpt = float64(ev.CharsBefore) / float64(e.lastCtxTokens)
+		if e.lastProviderTokens > 0 && ev.CharsBefore > 0 {
+			cpt = float64(ev.CharsBefore) / float64(e.lastProviderTokens)
 		}
-		e.lastCtxTokens = estimateCtxTokens(ev.CharsAfter, cpt)
+		e.lastCtxEstimate = estimateCtxTokens(ev.CharsAfter, cpt)
 		e.mu.Unlock()
 		e.Emit(Event{
 			Type: EventCompact, RunID: runID, SessionID: sid, Layer: CompactLayer(ev.Layer),
@@ -415,7 +415,7 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 	}}, after...)
 	h.PreTool = pre
 	h.PostTool = post
-	// Archive pre-compact history so context_search can recover dropped turns.
+	// Archive pre-compact history so recall can recover dropped turns.
 	preC := append([]agent.PreCompactFunc(nil), h.PreCompact...)
 	preC = append(preC, func(ctx context.Context, ev agent.PreCompactEvent) (agent.PreCompactDecision, error) {
 		if e.sess != nil && len(ev.Messages) > 0 {
