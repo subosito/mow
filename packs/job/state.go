@@ -34,14 +34,14 @@ type TickState struct {
 
 var stateMu sync.Mutex
 
-// DefaultStateDir is $MOW_HOME/job/state.
-func DefaultStateDir() string {
+// defaultStateDir is $MOW_HOME/job/state.
+func defaultStateDir() string {
 	return filepath.Join(mow.Home(), "job", "state")
 }
 
-// StatePath is the JSON file for one job id.
-func StatePath(id string) string {
-	return filepath.Join(DefaultStateDir(), sanitizeStateID(id)+".json")
+// statePath is the JSON file for one job id.
+func statePath(id string) string {
+	return filepath.Join(defaultStateDir(), sanitizeStateID(id)+".json")
 }
 
 func sanitizeStateID(id string) string {
@@ -83,7 +83,7 @@ func LoadTick(id string) (TickState, error) {
 }
 
 func loadTickLocked(id string) (TickState, error) {
-	path := StatePath(id)
+	path := statePath(id)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -104,7 +104,7 @@ func loadTickLocked(id string) (TickState, error) {
 	return st, nil
 }
 
-// SaveTick writes st atomically under DefaultStateDir.
+// SaveTick writes st atomically under defaultStateDir.
 func SaveTick(st TickState) error {
 	st.ID = strings.TrimSpace(st.ID)
 	if st.ID == "" {
@@ -119,7 +119,7 @@ func SaveTick(st TickState) error {
 }
 
 func saveTickLocked(st TickState) error {
-	dir := DefaultStateDir()
+	dir := defaultStateDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -127,7 +127,7 @@ func saveTickLocked(st TickState) error {
 	if err != nil {
 		return err
 	}
-	path := StatePath(st.ID)
+	path := statePath(st.ID)
 	tmp, err := os.CreateTemp(dir, ".tick-*.json")
 	if err != nil {
 		return err
