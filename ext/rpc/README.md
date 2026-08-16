@@ -38,8 +38,9 @@ Methods (requests may omit `"jsonrpc":"2.0"`):
 | `context` | `{tokens, context_window?, remaining?, percent?}` |
 | `compact` | `params {max_chars?}` → compaction report |
 | `rewind` | `{ok, last_user}` — drop last exchange, refill input |
-| `skill.list` | `{skills:[name]}` |
+| `skill.list` | `{skills:[folder], items?:[{id,name,folder,description?}]}` |
 | `skill.activate` | `params {names[]}` → `{activated, unknown}` |
+| `plugin.list` | `{plugins:[id], items?:[{id,name,version,description?,skills?}]}` |
 | `effort.list` | `{efforts:[{id,current}], current, default}` |
 | `effort.set` | `params {id}` → `{ok, effort}` |
 | `perm.decide` | `params {id, decision}` where decision is `allow`, `deny` or `always` |

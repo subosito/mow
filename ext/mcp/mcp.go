@@ -1,11 +1,13 @@
 // Package mcp connects trusted MCP stdio servers and registers their tools.
 //
 // Config (first match wins):
-//  1. extensions.mcp in -config / $MOW_HOME/config.yaml
-//  2. $MOW_HOME/mcp.json, then $MOW_HOME/mcp.yaml
+//  1. extensions.mcp in -config / $MOW_HOME/config.yaml / trusted .mow/config.yaml
+//  2. $MOW_HOME/mcp.json, then $MOW_HOME/mcp.yaml (user home; not project .mow)
+//  3. trusted workspace-root mcp.json (the ecosystem file next to the repo)
 //
 // Both the standard mcpServers map and a servers list are accepted.
 // On tools/call failure, the client restarts the server once and retries.
+// Project .mow/mcp.json is not read — keep MCP in extensions.mcp or root mcp.json.
 package mcp
 
 import (
@@ -28,6 +30,7 @@ import (
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/extcfg"
+	"github.com/subosito/mow/internal/contextload"
 )
 
 // ServerConfig is one MCP server (stdio or streamable HTTP).
@@ -104,7 +107,51 @@ func registerAll(configPaths ...string) error {
 			}
 		}
 	}
+	if len(c.Servers) == 0 && len(c.MCPServers) == 0 {
+		if err := loadWorkspaceMCPJSON(configPaths, &c); err != nil {
+			return err
+		}
+	}
 	return RegisterServers(c.resolved())
+}
+
+// loadWorkspaceMCPJSON reads <workspace>/mcp.json when the project is trusted.
+// It does not read .mow/mcp.json — that would duplicate extensions.mcp.
+func loadWorkspaceMCPJSON(configPaths []string, c *Config) error {
+	ws := workspaceRootFromConfigPaths(configPaths)
+	if ws == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			ws = cwd
+		}
+	}
+	if ws == "" || !contextload.ProjectTrusted(ws) {
+		return nil
+	}
+	path := filepath.Join(ws, "mcp.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	if err := yaml.Unmarshal(raw, c); err != nil {
+		return fmt.Errorf("mcp: %s: %w", path, err)
+	}
+	return nil
+}
+
+// workspaceRootFromConfigPaths returns the workspace that owns a
+// <ws>/.mow/config.yaml entry in the host path list.
+func workspaceRootFromConfigPaths(configPaths []string) string {
+	for _, p := range configPaths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		p = filepath.Clean(p)
+		if strings.EqualFold(filepath.Base(p), "config.yaml") && filepath.Base(filepath.Dir(p)) == ".mow" {
+			return filepath.Dir(filepath.Dir(p))
+		}
+	}
+	return ""
 }
 
 // RegisterServers starts each server and registers tools.

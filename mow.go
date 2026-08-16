@@ -32,6 +32,8 @@ type ModelLimits = engine.ModelLimits
 type PromptCostEstimate = engine.PromptCostEstimate
 type CompactReport = engine.CompactReport
 type SessionInfo = engine.SessionInfo
+type SkillInfo = engine.SkillInfo
+type PluginInfo = engine.PluginInfo
 
 type EventType = engine.EventType
 type CompactLayer = engine.CompactLayer
@@ -153,12 +155,19 @@ func BuiltinReadInspectTools() []string { return engine.BuiltinReadInspectTools(
 // project .mow/skills are also searched. See AvailableSkillNames.
 func SkillsDir() string { return engine.SkillsDir() }
 
+func PluginsDir() string { return engine.PluginsDir() }
+
 // AvailableSkillNames returns the sorted, deduplicated skill folder names
 // that contain a SKILL.md entry point across the given directories. It lists
 // what is discoverable without reading skill bodies into the prompt — hosts
 // (e.g. /skill in the TUI) use it to show names so users know what to pass to
 // --skill / skills.explicit. Missing dirs are silently skipped.
 func AvailableSkillNames(dirs []string) []string { return engine.AvailableSkillNames(dirs) }
+
+// AvailableSkillInfos is AvailableSkillNames plus Agent Skills frontmatter.
+func AvailableSkillInfos(dirs []string) []SkillInfo {
+	return engine.AvailableSkillInfos(dirs)
+}
 
 func ExtractThinking(s string) (visible, thinking string, unclosed bool) {
 	return engine.ExtractThinking(s)

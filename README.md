@@ -93,7 +93,7 @@ Three Go modules (`go.work` wires them for local dev). Full public/internal map:
 |---|---|
 | `mow.go` + `internal/` | Public API re-export and implementation |
 | `ext/` + `cliutil/` + `extcfg/` | Core extensions, CLI helpers, extension config decode |
-| `packs/` | Optional packs: goal, review, ops, lsp, job |
+| `packs/` | Optional packs: goal, review, ops, job |
 | `packs/otel/` | Nested OTLP module |
 | `cmd/mow/` | Sole full pack host (links ext + optional packs and OTEL) |
 
@@ -103,7 +103,6 @@ Three Go modules (`go.work` wires them for local dev). Full public/internal map:
 import (
     "github.com/subosito/mow"
     _ "github.com/subosito/mow/ext/mcp"       // core protocol extension
-    _ "github.com/subosito/mow/packs/lsp"     // optional code integration
     _ "github.com/subosito/mow/packs/ops"     // optional domain pack
 )
 ```

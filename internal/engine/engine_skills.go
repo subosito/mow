@@ -170,3 +170,21 @@ func (e *Engine) AvailableSkills() []string {
 	}
 	return contextload.AvailableSkillNames(e.skillDirs)
 }
+
+// AvailableSkillInfos is AvailableSkills plus Agent Skills frontmatter
+// (name, description). Bodies are omitted.
+func (e *Engine) AvailableSkillInfos() []SkillInfo {
+	if e == nil {
+		return nil
+	}
+	return contextload.AvailableSkillInfos(e.skillDirs)
+}
+
+// AvailablePlugins lists Agent Plugins from the engine's plugin roots
+// ($MOW_HOME/plugins and, when trusted, workspace/.mow/plugins).
+func (e *Engine) AvailablePlugins() []PluginInfo {
+	if e == nil {
+		return nil
+	}
+	return contextload.ListPlugins(e.pluginRoots)
+}

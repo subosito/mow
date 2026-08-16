@@ -17,10 +17,31 @@ func SkillsDir() string {
 	return config.SkillsDir()
 }
 
+// PluginsDir returns the global plugin directory ($MOW_HOME/plugins).
+func PluginsDir() string {
+	return config.PluginsDir()
+}
+
+// PluginInfo is one Agent Plugin (plugin.json + optional skills/).
+type PluginInfo = contextload.PluginInfo
+
+// ListPlugins lists discovered plugins across the given roots.
+func ListPlugins(roots []string) []PluginInfo {
+	return contextload.ListPlugins(roots)
+}
+
 // AvailableSkillNames returns the sorted, deduplicated skill folder names
 // that contain a SKILL.md entry point across the given directories. It lists
 // what is discoverable without reading skill bodies. Hosts (e.g. the TUI
 // /skill command) use it so users know what names to pass to --skill.
 func AvailableSkillNames(dirs []string) []string {
 	return contextload.AvailableSkillNames(dirs)
+}
+
+// SkillInfo is one Agent Skills entry (folder + optional SKILL.md frontmatter).
+type SkillInfo = contextload.SkillInfo
+
+// AvailableSkillInfos is AvailableSkillNames plus Agent Skills frontmatter.
+func AvailableSkillInfos(dirs []string) []SkillInfo {
+	return contextload.AvailableSkillInfos(dirs)
 }

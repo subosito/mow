@@ -210,6 +210,7 @@ var methodNames = []string{
 	"effort.list", "effort.set",
 	"context", "compact", "rewind",
 	"skill.list", "skill.activate",
+	"plugin.list",
 	"ping", "version", "capabilities", "extension.config",
 }
 
@@ -260,6 +261,7 @@ func isControlMethod(method string) bool {
 		"perm.set", "perm.decide", "model.list", "model.set",
 		"effort.list", "effort.set",
 		"context", "rewind", "skill.list", "skill.activate",
+		"plugin.list",
 		"capabilities", "extension.config":
 		return true
 	default:
@@ -456,6 +458,8 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 		s.handleSkillList(req)
 	case "skill.activate":
 		s.handleSkillActivate(req)
+	case "plugin.list":
+		s.handlePluginList(req)
 	case "session", "session_id":
 		out := map[string]any{
 			"session_id": s.Engine.SessionID(),

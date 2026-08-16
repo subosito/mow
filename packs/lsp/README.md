@@ -8,8 +8,8 @@ Opt-in language-server tools (`lsp_hover`, `lsp_definition`) and post-edit `text
 import _ "github.com/subosito/mow/packs/lsp"
 ```
 
-Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
-displays its RPC-driven results.
+Not linked in stock `cmd/mow` (YAGNI). Blank-import to restore tools and
+post-edit diagnostics. The Rust `mowi` sibling no longer displays LSP results.
 
 ## Commands and tools
 

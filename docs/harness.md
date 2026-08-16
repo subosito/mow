@@ -93,7 +93,6 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `ext/proc` / `ext/cmdhook` / `ext/eval` | Background proc tools, command hooks, eval CLI |
 | `packs/goal` | Outer multi-step goals + `mow goal` |
 | `packs/job` | Interval / cron jobs + `mow job` |
-| `packs/lsp` | `lsp_hover` / `lsp_definition` via gopls etc. (config opt-in) |
 | `packs/review` | `mow review` / `mow sec` advisory review |
 | `packs/ops` | Ops profiles, health, runbooks |
 | `packs/otel` | Optional OTLP export (nested module) |
@@ -240,7 +239,9 @@ Compaction is **character-estimate**, not a real tokenizer. It keeps the system 
 4. Project `AGENTS.md` / `CLAUDE.md` (walk) + optional `$MOW_HOME/AGENTS.md`
 5. Skills + per-call `SystemAppend` (goal protocol, packs)
 
-**Skills** are markdown injected into the system prompt from `<dir>/<name>/SKILL.md` (folder layout). Skill dir precedence (search order): global `$MOW_HOME/skills` → `skills.dirs` (host/user config) → trusted `workspace/.mow/skills`. Dedup is by lowercased skill name with first-directory precedence (not by resolved path), so a name present in both global and user dirs loads once — the first dir's copy wins.
+**Skills** follow the Agent Skills layout (`<dir>/<name>/SKILL.md`, https://agentskills.io/specification). Optional YAML frontmatter (`name`, `description`, `disable-model-invocation`, …) is parsed; only the markdown body is injected. Spec `name` labels the system section when valid; otherwise the folder name. `disable-model-invocation: true` skips first-prompt selection (`--skill` / `/skills <name>` still load it). Skill dir precedence (search order): global `$MOW_HOME/skills` → `skills.dirs` (host/user config) → trusted `workspace/.mow/skills`. Dedup is by lowercased **folder** name with first-directory precedence (not by resolved path), so a name present in both global and user dirs loads once — the first dir's copy wins.
+
+Agent Plugins (`plugin.json` + bundled `skills/` + optional MCP, https://agent-plugins.org/specification) install as folders under `$MOW_HOME/plugins/<id>/` (trusted project: `.mow/plugins/`). Discovery reads `plugin.json`; `skills/` is searched after user/project skill dirs so those names win. `default-skills` / `always` merge into explicit skills. MCP on a plugin is not auto-registered — use `ext/mcp`. `/plugins` lists installs; `/skills` still activates. There is no `plugin install` yet — drop or clone a plugin folder in.
 
 Selection: `skills.selector` (default on) loads only skills whose folder name appears (case-insensitive substring) in the first user prompt. `skills.selector: false` loads all. `skills.explicit` / `--skill <name>` (repeatable) loads named skills unconditionally regardless of the selector — they load at startup, before the first prompt. CLI `--skill` and config `skills.explicit` are merged; unknown names are silently ignored. Name precedence: CLI wins over config (both deduped, first-seen order). `skills.explicit` is host/user-only — a project config may not force-load skills from global/user dirs it does not own.
 

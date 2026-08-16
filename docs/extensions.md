@@ -29,7 +29,6 @@ import (
     _ "github.com/subosito/mow/ext/mcp"
     _ "github.com/subosito/mow/packs/contextsink"
     _ "github.com/subosito/mow/packs/goal"
-    _ "github.com/subosito/mow/packs/lsp"
     _ "github.com/subosito/mow/packs/otel"
 )
 ```

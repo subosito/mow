@@ -49,6 +49,7 @@ type Engine struct {
 	sys            string
 	agents         string
 	skillDirs      []string
+	pluginRoots    []string
 	skillSelect    bool
 	skillsLoaded   bool
 	skillsText     string // cumulative loaded skill markdown (explicit + prompt-matched + activated)
@@ -355,6 +356,7 @@ func New(opt Options) (*Engine, error) {
 		}
 	}
 	skillDirs := append([]string(nil), cfg.Skills.Dirs...)
+	var pluginRoots []string
 	// Profile-local skills are the most specific operator-authored skills, so
 	// search them before global/config/project sources.
 	if activeProfile != nil && activeProfile.HasSkills() {
@@ -375,6 +377,11 @@ func New(opt Options) (*Engine, error) {
 		}
 		// Global $MOW_HOME/skills — host only.
 		skillDirs = append([]string{config.SkillsDir()}, skillDirs...)
+		pluginRoots = []string{config.PluginsDir()}
+		if contextload.ProjectTrusted(cfg.Workspace) {
+			pluginRoots = append(pluginRoots, filepath.Join(cfg.Workspace, ".mow", "plugins"))
+		}
+		skillDirs = append(skillDirs, contextload.PluginSkillDirs(pluginRoots)...)
 	}
 	// Programmatic dirs (tests/hosts) are searched last, after global/config
 	// dirs, so config and the global $MOW_HOME/skills still take precedence
@@ -389,6 +396,7 @@ func New(opt Options) (*Engine, error) {
 		cfg.Skills.Explicit,
 		opt.ExplicitSkills,
 	)
+	explicitSkills = mergeSkillNames(explicitSkills, contextload.PluginDefaultSkillNames(pluginRoots))
 	skills := ""
 	if !selectSkills {
 		skills = contextload.LoadSkills(skillDirs)
@@ -416,6 +424,7 @@ func New(opt Options) (*Engine, error) {
 		sys:            sys,
 		agents:         agents,
 		skillDirs:      append([]string(nil), skillDirs...),
+		pluginRoots:    append([]string(nil), pluginRoots...),
 		skillSelect:    selectSkills,
 		skillsLoaded:   !selectSkills,
 		skillsText:     skills,

@@ -24,7 +24,12 @@ No slash commands. Client instances register with `min_turns` and can be toggled
 
 ## Config (`extensions.mcp`)
 
-Accepts the ecosystem `mcpServers` map and a `servers` list. First match: `extensions.mcp` in `-config` / `$MOW_HOME/config.yaml`; if the host loaded user config, `$MOW_HOME/mcp.json` then `$MOW_HOME/mcp.yaml`.
+Accepts the ecosystem `mcpServers` map and a `servers` list. First match:
+`extensions.mcp` in `-config` / `$MOW_HOME/config.yaml` / trusted
+`.mow/config.yaml`. If that section is empty: `$MOW_HOME/mcp.json`, then
+`$MOW_HOME/mcp.yaml`. If those are empty too and the workspace is trusted:
+`<workspace>/mcp.json` (repo-root standard file). `.mow/mcp.json` is not
+read — keep project MCP in `extensions.mcp` or the root file.
 
 ```yaml
 extensions:

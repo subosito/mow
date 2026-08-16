@@ -686,6 +686,20 @@ func TestConfigResolvedAndFallbackFiles(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRootFromConfigPaths(t *testing.T) {
+	ws := "/tmp/repo"
+	got := workspaceRootFromConfigPaths([]string{
+		filepath.Join(ws, ".mow", "config.yaml"),
+		filepath.Join("/home/me/.mow", "config.yaml"),
+	})
+	if got != filepath.Clean(ws) {
+		t.Fatalf("got %q want %q", got, filepath.Clean(ws))
+	}
+	if workspaceRootFromConfigPaths([]string{filepath.Join(ws, ".mow", "mcp.json")}) != "" {
+		t.Fatal(".mow/mcp.json must not imply a workspace MCP file")
+	}
+}
+
 func TestRegisterServersHTTPAndToolCalling(t *testing.T) {
 	t.Parallel()
 

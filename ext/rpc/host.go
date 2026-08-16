@@ -328,8 +328,28 @@ func (s *Server) handleRewind(req request) {
 }
 
 func (s *Server) handleSkillList(req request) {
-	names := s.Engine.AvailableSkills()
-	s.replyTo(req, map[string]any{"skills": append([]string{}, names...)})
+	infos := s.Engine.AvailableSkillInfos()
+	names := make([]string, 0, len(infos))
+	detail := make([]map[string]any, 0, len(infos))
+	for _, info := range infos {
+		names = append(names, info.Folder)
+		row := map[string]any{
+			"id":     info.Folder,
+			"name":   info.Name,
+			"folder": info.Folder,
+		}
+		if info.Description != "" {
+			row["description"] = info.Description
+		}
+		if info.DisableModelInvocation {
+			row["disable_model_invocation"] = true
+		}
+		detail = append(detail, row)
+	}
+	s.replyTo(req, map[string]any{
+		"skills": names, // frozen string list for older hosts
+		"items":  detail,
+	})
 }
 
 func (s *Server) handleSkillActivate(req request) {
@@ -350,5 +370,33 @@ func (s *Server) handleSkillActivate(req request) {
 	s.replyTo(req, map[string]any{
 		"activated": append([]string{}, activated...),
 		"unknown":   append([]string{}, unknown...),
+	})
+}
+
+func (s *Server) handlePluginList(req request) {
+	plugins := s.Engine.AvailablePlugins()
+	items := make([]map[string]any, 0, len(plugins))
+	names := make([]string, 0, len(plugins))
+	for _, p := range plugins {
+		names = append(names, p.ID)
+		row := map[string]any{
+			"id":      p.ID,
+			"name":    p.Name,
+			"version": p.Version,
+		}
+		if p.Description != "" {
+			row["description"] = p.Description
+		}
+		if len(p.SkillFolders) > 0 {
+			row["skills"] = append([]string{}, p.SkillFolders...)
+		}
+		if p.Always {
+			row["always"] = true
+		}
+		items = append(items, row)
+	}
+	s.replyTo(req, map[string]any{
+		"plugins": names,
+		"items":   items,
 	})
 }

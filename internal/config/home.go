@@ -52,6 +52,11 @@ func SkillsDir() string {
 	return filepath.Join(Home(), "skills")
 }
 
+// PluginsDir is Home()/plugins — Agent Plugin installs (plugin.json + skills/).
+func PluginsDir() string {
+	return filepath.Join(Home(), "plugins")
+}
+
 // AgentsPath is Home()/AGENTS.md — optional global instructions file.
 func AgentsPath() string {
 	return filepath.Join(Home(), "AGENTS.md")
