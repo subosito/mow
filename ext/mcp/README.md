@@ -20,7 +20,7 @@ client process.
 | Server tool | `mow_prompt` — prompt (required), optional `read_only` bool |
 | Client tools | `mcp_<server>_<tool>` — one per tool listed by each configured server |
 
-No slash commands. Client instances register with `min_turns` and can be toggled with `mow ext on\|off <name>`.
+No slash commands. Client instances register with `min_turns` (dormant until that turn). There is no `mow ext on|off` — change config to enable or disable a server.
 
 ## Config (`extensions.mcp`)
 

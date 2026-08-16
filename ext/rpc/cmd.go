@@ -16,6 +16,7 @@ func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "rpc",
 		Summary: "JSON-lines RPC on stdin/stdout",
+		Layer:   "ext",
 		Run:     runCmd,
 	})
 }

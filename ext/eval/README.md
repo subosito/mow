@@ -8,8 +8,9 @@ CLI for running JSON fixture suites through the `github.com/subosito/mow/eval` h
 import _ "github.com/subosito/mow/ext/eval"
 ```
 
-Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
-displays its RPC-driven results.
+Stock `cmd/mow` does **not** blank-import this package. Link it yourself for
+`mow eval`, or call `github.com/subosito/mow/eval` from tests. No tools, no
+slash, no mowi surface.
 
 ## Commands and tools
 

@@ -138,6 +138,8 @@ extensions:
   are capped (~64KiB); diagnostics redact common secrets. Default is **fail-open**
   on timeout/non-2 exit (warn only); set `fail_closed: true` to block like exit 2.
 - `ext/eval`: eval/replay fixtures and command (fixture size/case count capped).
+  Optional — not blank-imported by stock `cmd/mow`. Import `github.com/subosito/mow/eval`
+  from tests, or blank-import `ext/eval` for `mow eval run`.
 
 ```yaml
 extensions:
@@ -152,15 +154,12 @@ extensions:
         min_turns: 0
 ```
 
-### Extension lifecycle & turn control (`mow ext` / `/ext`)
+### Extension lifecycle (`min_turns`)
 
-Extensions (such as MCP servers and command hook plugins) support optional `min_turns` thresholds and manual runtime activation control:
-
-- **`min_turns: N`**: specifies turn activation threshold (default `0`, active from start). When `turn < N`, hooks/tools remain dormant.
-- **`mow ext` / `/ext`**: inspect or toggle extensions at runtime:
-  - `mow ext list` or `/ext list`: list registered extension instances and status.
-  - `mow ext on <name>` or `/ext on <name>`: manually enable extension `<name>`, overriding `min_turns`.
-  - `mow ext off <name>` or `/ext off <name>`: manually disable extension `<name>`.
+MCP servers and command-hook plugins support optional `min_turns` (default `0`,
+active from start). When `turn < N`, those hooks/tools stay dormant. There is
+no `mow ext` / `/ext` command — enable or disable by config (or omit the
+server / plugin).
 
 ```yaml
 extensions:
@@ -262,6 +261,16 @@ Rules worth knowing:
   a CI contract keep a `ext.RegisterCommand` subcommand as well; `packs/review`
   registers both and shares the middle.
 
+Stock slash set is **`/goal`**, **`/review`**, **`/sec`**. Those drive the
+*live session Engine*. Do **not** register slash for:
+
+- **job** — in-process clock (`mow job`). A `/job` that fires ticks is a
+  footgun; list/check stay CLI.
+- **ops** — catalog + tools + `mow ops run`. The model uses `ops_*` tools
+  inside a tick; `/ops` would start or steer a daemon from chat.
+- **contextsink**, **lsp**, **otel** — tools or config, not user-typed
+  session commands.
+
 ### Ops (`packs/ops`)
 
 Configured service profiles under `$MOW_HOME/ops/<name>/`: services, logs,
@@ -270,6 +279,12 @@ runbooks, and peer-assisted remediation. No profile means no ops tools.
 
 - `mow ops run NAME` uses `job.Daemon` with a fresh Engine per tick (the job
   pack owns and Closes it). Sub-second `every` is raised to 1s by job.
+  That daemon is a separate process (job id `ops-<name>`); it is not a
+  row in `mow job list`. Last tick is `$MOW_HOME/job/state/ops-<name>.json`.
+  Two consecutive overlap skips open/update an incident
+  `job-overlap:ops-<name>`.
+- No `/ops` slash. Agent surface is the `ops_*` tools. Operator surface is
+  `mow ops`.
 - Log reads refuse symlinks/non-regular files and redact common secret shapes.
 - Incidents are atomic JSON (fsync + rename), id-jailed, size-capped.
 - Health probes are http/https only, ignore `HTTP_PROXY`, cap timeout at 30s,
@@ -312,6 +327,7 @@ Interval/cron prompt or goal jobs. Job depends on goal; ops uses job for daemon
 runs.
 
 - Same id never overlaps an active tick (later ticks are skipped, not queued).
+  Skips are counted in `$MOW_HOME/job/state/<id>.json`; `mow job list` shows LAST.
 - Each tick builds a fresh `Engine` and closes it when the tick ends.
 - A `every` shorter than 1s is raised to 1s. Cron is 5-field local time;
   `29 2` searches up to 8 years so leap days are not dropped.
@@ -321,6 +337,8 @@ runs.
   max 1 MiB / 64 entries. An explicit `--schedules` path that is missing is
   an error; only the default path falls back to `extensions.job`.
 - Duplicate ids fail `mow job check` / `run`. Disabled entries are valid.
+- Schedules load once at daemon start. `mow ops run` is not listed here.
+- No `/job` slash and no job tools. Operator surface is `mow job` only.
 
 ### Context sink (`packs/contextsink`)
 

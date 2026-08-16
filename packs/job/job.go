@@ -335,14 +335,23 @@ func (d *Daemon) fire(ctx context.Context, j Job) {
 	muAny, _ := d.fireMu.LoadOrStore(j.ID, &sync.Mutex{})
 	mu := muAny.(*sync.Mutex)
 	if !mu.TryLock() {
-		d.log(fmt.Sprintf("job %s skip: previous tick still running", j.ID))
+		st := recordTickSkip(j.ID, "previous tick still running")
+		d.log(fmt.Sprintf("job %s skip: previous tick still running (consecutive=%d total=%d)", j.ID, st.SkipCount, st.SkipTotal))
 		return
 	}
 	defer mu.Unlock()
 
+	recordTickStart(j.ID)
+	status := "error"
+	var tickErr string
+	defer func() {
+		recordTickEnd(j.ID, status, tickErr)
+	}()
+
 	d.log(fmt.Sprintf("job %s tick", j.ID))
 	eng, err := d.NewEngine()
 	if err != nil {
+		tickErr = err.Error()
 		d.log(fmt.Sprintf("job %s engine: %v", j.ID, err))
 		return
 	}
@@ -363,19 +372,23 @@ func (d *Daemon) fire(ctx context.Context, j Job) {
 				}
 				d.log(fmt.Sprintf("job %s goal %s reset for re-run", j.ID, g))
 			case goal.StatusBlocked:
+				status = "blocked"
 				d.log(fmt.Sprintf("job %s skip: goal %s is blocked (resume with --answer)", j.ID, g))
 				return
 			}
 		} else if !os.IsNotExist(err) {
+			tickErr = err.Error()
 			d.log(fmt.Sprintf("job %s goal %s: %v", j.ID, g, err))
 			return
 		}
 		r := &goal.Runner{Engine: eng, Store: store}
 		st, err := r.Run(ctx, g)
 		if err != nil {
+			tickErr = err.Error()
 			d.log(fmt.Sprintf("job %s goal %s: %v status=%s", j.ID, g, err, st.Status))
 			return
 		}
+		status = "ok"
 		sum := strings.TrimSpace(st.Summary)
 		if sum == "" {
 			sum = strings.TrimSpace(st.LastReply)
@@ -388,9 +401,11 @@ func (d *Daemon) fire(ctx context.Context, j Job) {
 	}
 	res, err := eng.Prompt(ctx, j.Prompt)
 	if err != nil {
+		tickErr = err.Error()
 		d.log(fmt.Sprintf("job %s prompt: %v", j.ID, err))
 		return
 	}
+	status = "ok"
 	d.log(fmt.Sprintf("job %s prompt ok session=%s", j.ID, res.SessionID))
 	if t := strings.TrimSpace(res.Text); t != "" {
 		d.log(fmt.Sprintf("job %s result:\n%s", j.ID, truncateLog(t, jobResultLogMax)))

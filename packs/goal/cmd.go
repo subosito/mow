@@ -18,6 +18,7 @@ func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "goal",
 		Summary: "Multi-step goals — list | new | run | status | …",
+		Layer:   "pack",
 		Run:     runCmd,
 	})
 }

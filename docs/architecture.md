@@ -86,7 +86,7 @@ Embedder / cmd/mow / packs
 - `ext/proc`: detached process tools/command
 - `ext/rpc`: JSON-lines control plane
 - `ext/cmdhook`: configured command hooks
-- `ext/eval`: eval/replay command
+- `ext/eval`: eval/replay command (optional; not linked in stock `cmd/mow`)
 
 ### Optional packs (`packs/` module)
 

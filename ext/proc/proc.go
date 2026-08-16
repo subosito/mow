@@ -30,6 +30,7 @@ func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "proc",
 		Summary: "Background processes — list | stop | logs",
+		Layer:   "ext",
 		Run:     procCmd,
 	})
 }

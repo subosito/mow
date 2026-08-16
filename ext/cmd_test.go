@@ -2,6 +2,8 @@ package ext_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/subosito/mow/ext"
@@ -38,6 +40,31 @@ func TestDefaultInteractive(t *testing.T) {
 	if !ok || c.Name != "b" {
 		t.Fatalf("%+v", c)
 	}
+}
+
+func TestCommandLayer(t *testing.T) {
+	ext.Reset()
+	t.Cleanup(ext.Reset)
+
+	ext.RegisterCommand(ext.Command{Name: "rpc", Layer: "ext", Run: func([]string) int { return 0 }})
+	ext.RegisterCommand(ext.Command{Name: "goal", Layer: "pack", Run: func([]string) int { return 0 }})
+	var layers []string
+	for _, c := range ext.Commands() {
+		layers = append(layers, c.Name+":"+c.Layer)
+	}
+	got := fmt.Sprintf("%v", layers)
+	if !containsAll(got, "rpc:ext", "goal:pack") {
+		t.Fatalf("layers=%s", got)
+	}
+}
+
+func containsAll(s string, parts ...string) bool {
+	for _, p := range parts {
+		if !strings.Contains(s, p) {
+			return false
+		}
+	}
+	return true
 }
 
 func TestBeforeNew(t *testing.T) {

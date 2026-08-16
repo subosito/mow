@@ -90,7 +90,8 @@ Run flags:
   --cron "…"      cron instead of --every
   --once          single scan then exit (for systemd oneshot / host cron)
   --prompt TEXT   override scan prompt (default: profile prompt or built-in)
-  --allow-shell   required for ops_action (default: on for ops run)
+  --allow-shell   required for ops_action; mow ops run always enables it
+                  for the whole Engine tick (not only ops_action)
   --allow-write   optional
   [engine flags]  --model --base-url --workspace --config …
 
@@ -103,8 +104,13 @@ Examples:
   mow ops run fleet --once
   MOW_OPS=fleet mow ops run fleet   # same; name still required on run
 
-Tools (agent): ops_services, ops_logs, ops_action, ops_incident;
-  plus acp_delegate when the profile declares acp.agents / service.acp.
+Tools (agent): ops_services, ops_logs, ops_action, ops_incident,
+  ops_health, ops_log_pattern, ops_runbook; plus acp_delegate when the
+  profile declares acp.agents / service.acp.
+
+Job vs ops: mow job list is schedules.yaml only. mow ops run NAME is a
+separate daemon (job id ops-<name>) — last tick lives in $MOW_HOME/job/state.
+
 `)
 }
 
@@ -228,6 +234,14 @@ func cmdShow(opsFlag string, args []string) int {
 		for _, a := range p.ACP.Agents {
 			fmt.Printf("  - %s  cmd=%v\n", a.Name, a.Command)
 		}
+		if strings.TrimSpace(p.Workspace) == "" {
+			fmt.Fprintln(os.Stderr, "warn: acp.agents set but workspace is empty (peers are not path-jailed)")
+		}
+	}
+	if st, err := job.LoadTick("ops-" + name); err == nil && job.FormatTick(st) != "-" {
+		fmt.Printf("last tick: %s  (job id ops-%s; not in mow job list)\n", job.FormatTick(st), name)
+	} else {
+		fmt.Printf("daemon:   not this command — start with: mow ops run %s\n", name)
 	}
 	fmt.Fprintf(os.Stderr, "run:  mow ops run %s\n", name)
 	return 0
@@ -275,6 +289,10 @@ func cmdCheck(opsFlag string, args []string) int {
 				bad++
 			}
 		}
+	}
+	if len(p.ACP.Agents) > 0 && strings.TrimSpace(p.Workspace) == "" {
+		fmt.Fprintln(os.Stderr, "warn: acp.agents set but workspace is empty (peers are not path-jailed)")
+		bad++
 	}
 	if bad > 0 {
 		fmt.Fprintf(os.Stderr, "mow ops check %s: %d issue(s)\n", name, bad)
@@ -356,6 +374,9 @@ func cmdStatus(opsFlag string, args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mow ops status: %v\n", err)
 		return 1
+	}
+	if st, err := job.LoadTick("ops-" + name); err == nil {
+		fmt.Printf("last tick: %s  (job id ops-%s; not in mow job list)\n", job.FormatTick(st), name)
 	}
 	runStatus := func(svcName string) int {
 		argv, err := p.actionArgv(svcName, "status")
@@ -471,6 +492,10 @@ func cmdRun(opsFlag string, args []string) int {
 			applyProfileLLMEnv(p)
 			return ef.NewEngineCLI()
 		},
+		OnLog: func(msg string) {
+			fmt.Fprintln(os.Stderr, "job:", msg)
+			noteOverlapIncident(p, name, msg)
+		},
 	}
 	when := everyStr
 	if c := strings.TrimSpace(*cronExpr); c != "" {
@@ -529,6 +554,26 @@ func firstNonEmpty(ss ...string) string {
 		}
 	}
 	return ""
+}
+
+const overlapIncidentThreshold = 2
+
+// noteOverlapIncident opens/updates a durable incident when the ops-run
+// daemon skipped a tick because the previous one was still running.
+func noteOverlapIncident(p Profile, name, msg string) {
+	if !strings.Contains(msg, "skip: previous tick still running") {
+		return
+	}
+	st, err := job.LoadTick("ops-" + name)
+	if err != nil || st.SkipCount < overlapIncidentThreshold {
+		return
+	}
+	sig := "job-overlap:ops-" + name
+	summary := fmt.Sprintf("ops run %s skipped %d consecutive ticks (previous still running)", name, st.SkipCount)
+	note := fmt.Sprintf("skip_total=%d last=%s", st.SkipTotal, job.FormatTick(st))
+	if _, err := openIncident(p.incidentsDir(), "", sig, summary, note); err != nil {
+		fmt.Fprintf(os.Stderr, "ops: overlap incident: %v\n", err)
+	}
 }
 
 // truncateLog clamps s to n bytes, cutting on a rune boundary. Callers pass

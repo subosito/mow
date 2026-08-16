@@ -167,6 +167,10 @@ type Command struct {
 	// DefaultInteractive: if true, used when mow is invoked with no args on a TTY.
 	// Only one pack should set this; last registration wins.
 	DefaultInteractive bool
+	// Layer is "ext" (core extension under ext/) or "pack" (optional packs/).
+	// Empty is treated as "ext" so older registrations stay in the Extensions
+	// help group.
+	Layer string
 }
 
 // toolEntry tracks a registered tool and whether it came from a BeforeNew

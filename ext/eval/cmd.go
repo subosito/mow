@@ -19,6 +19,7 @@ func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "eval",
 		Summary: "Run eval/replay fixtures (scripted turns or live model)",
+		Layer:   "ext",
 		Run:     run,
 	})
 }

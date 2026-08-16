@@ -20,6 +20,7 @@ func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "job",
 		Summary: "Interval jobs — run | list | check",
+		Layer:   "pack",
 		Run:     runCmd,
 	})
 }
@@ -82,8 +83,10 @@ File / extensions.job:
       every: 1h
       goal: fix-ci
 
-Overlapping ticks for the same id are skipped. Ctrl+C stops.
-For fleet ops prefer: mow ops run NAME
+Overlapping ticks for the same id are skipped (logged + counted in $MOW_HOME/job/state).
+Schedules are loaded once at start — edit the file and restart the daemon.
+Ctrl+C stops. For fleet ops prefer: mow ops run NAME
+(mow ops run is its own process; it does not appear in mow job list).
 
 `)
 }
@@ -137,7 +140,7 @@ func cmdList(args []string) int {
 	}
 	now := time.Now()
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tWHEN\tTARGET\tNEXT\tOK")
+	fmt.Fprintln(tw, "ID\tWHEN\tTARGET\tNEXT\tLAST\tOK")
 	for _, j := range jobs {
 		when := strings.TrimSpace(j.Every)
 		if c := strings.TrimSpace(j.Cron); c != "" {
@@ -153,10 +156,15 @@ func cmdList(args []string) int {
 		if err := ValidateJob(j); err != nil {
 			ok = err.Error()
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", j.ID, when, target, NextFire(j, now), ok)
+		last := "-"
+		if st, err := LoadTick(j.ID); err == nil {
+			last = FormatTick(st)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", j.ID, when, target, NextFire(j, now), last, ok)
 	}
 	_ = tw.Flush()
 	fmt.Fprintf(os.Stderr, "source: %s (%d)\n", src, len(jobs))
+	fmt.Fprintln(os.Stderr, "note: last is from $MOW_HOME/job/state; mow ops run NAME is a separate process (id ops-<name>), not a row here")
 	return 0
 }
 

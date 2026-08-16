@@ -49,6 +49,7 @@ func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "ops",
 		Summary: "Fleet ops — monitor, fix via peers | list | run | …",
+		Layer:   "pack",
 		Run:     opsCmd,
 	})
 	// BeforeNew: when MOW_OPS is set, apply profile LLM env + merge ACP peers

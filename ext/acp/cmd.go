@@ -21,6 +21,7 @@ func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "acp",
 		Summary: "ACP agent on stdin/stdout (editors)",
+		Layer:   "ext",
 		Run:     runCmd,
 	})
 }

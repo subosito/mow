@@ -13,7 +13,7 @@ displays its RPC-driven results.
 
 ## Commands and tools
 
-No pack CLI, no tools, no slash commands. Hooks re-register on every `BeforeNew` (prior cmdhook hooks are cleared so profiles do not leak). Instances can be listed or toggled with `mow ext list` / `mow ext on|off <name>`.
+No pack CLI, no tools, no slash commands. Hooks re-register on every `BeforeNew` (prior cmdhook hooks are cleared so profiles do not leak). There is no `mow ext` toggle — use config / `min_turns`.
 
 Supported hook events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`, `PreCompact`. Tool names are translated to Claude conventions for matchers (`read` → `Read`, `mcp_srv_x` → `mcp__srv_x`). A PreToolUse `permissionDecision` of `"ask"` is treated as deny.
 

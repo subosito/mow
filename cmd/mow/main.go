@@ -24,7 +24,6 @@ import (
 	// Remove an import to drop that pack (and its subcommand) from this binary.
 	_ "github.com/subosito/mow/ext/acp"
 	_ "github.com/subosito/mow/ext/cmdhook"
-	_ "github.com/subosito/mow/ext/eval"
 	_ "github.com/subosito/mow/ext/mcp"
 	_ "github.com/subosito/mow/ext/proc"
 	_ "github.com/subosito/mow/ext/rpc"
@@ -551,6 +550,22 @@ Start an interactive session explicitly with mow tty.
 `)
 }
 
+func printCmdGroup(title string, cmds []ext.Command) {
+	if len(cmds) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stderr, title)
+	for _, c := range cmds {
+		extra := ""
+		if c.DefaultInteractive {
+			extra = "  [default on TTY]"
+		}
+		fmt.Fprintf(os.Stderr, "  mow %-10s %s%s\n", c.Name, c.Summary, extra)
+	}
+	fmt.Fprintln(os.Stderr, "  (each: mow <name> help)")
+	fmt.Fprintln(os.Stderr)
+}
+
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `mow — agent harness (library + CLI)
 
@@ -564,16 +579,16 @@ Core:
 
 `)
 	if cmds := ext.Commands(); len(cmds) > 0 {
-		fmt.Fprintln(os.Stderr, "Packs (this binary):")
+		var extensions, packs []ext.Command
 		for _, c := range cmds {
-			extra := ""
-			if c.DefaultInteractive {
-				extra = "  [default on TTY]"
+			if strings.EqualFold(c.Layer, "pack") {
+				packs = append(packs, c)
+			} else {
+				extensions = append(extensions, c)
 			}
-			fmt.Fprintf(os.Stderr, "  mow %-10s %s%s\n", c.Name, c.Summary, extra)
 		}
-		fmt.Fprintln(os.Stderr, "  (each pack: mow <pack> help)")
-		fmt.Fprintln(os.Stderr)
+		printCmdGroup("Extensions (this binary):", extensions)
+		printCmdGroup("Packs (this binary):", packs)
 	}
 	fmt.Fprintf(os.Stderr, `Common flags:
 

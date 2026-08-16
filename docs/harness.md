@@ -90,7 +90,8 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `ext/rpc` | JSON-lines embed protocol + `mow rpc` |
 | `ext/acp` | ACP agent + client + `acp_delegate` + `mow acp` |
 | `ext/mcp` | MCP servers → tools (config opt-in) |
-| `ext/proc` / `ext/cmdhook` / `ext/eval` | Background proc tools, command hooks, eval CLI |
+| `ext/proc` / `ext/cmdhook` | Background proc tools, command hooks |
+| `ext/eval` | Optional eval CLI (`mow eval`); not in stock `cmd/mow`. Library: `github.com/subosito/mow/eval` |
 | `packs/goal` | Outer multi-step goals + `mow goal` |
 | `packs/job` | Interval / cron jobs + `mow job` |
 | `packs/review` | `mow review` / `mow sec` advisory review |

@@ -8,8 +8,10 @@ Named service profiles under `$MOW_HOME/ops/<name>/`: logs, health, allowlisted 
 import _ "github.com/subosito/mow/packs/ops"
 ```
 
-Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
-displays its RPC-driven results. Ops uses job for daemon ticks.
+Stock `cmd/mow` blank-imports this package. Ops uses job for daemon ticks.
+**No slash commands** (`/ops` is never registered). In a chat / mowi session
+the model sees the `ops_*` **tools** when this pack is linked; the clock is
+still `mow ops run NAME`, not a typed `/ops`.
 
 ## Commands and tools
 
@@ -30,7 +32,9 @@ mow ops run prod --every 5m
 mow ops run prod --once
 ```
 
-`ops_action` requires `--allow-shell` (forced on for `mow ops run`). Actions are operator argv lists (no shell), 60s timeout. When `MOW_OPS` is set, the profile’s `acp.agents` are merged into `acp_delegate`.
+`ops_action` requires `--allow-shell`. `mow ops run` **always** enables `--allow-shell` for the whole Engine tick (not only `ops_action`). Actions are operator argv lists (no shell), 60s timeout. When `MOW_OPS` is set, the profile’s `acp.agents` are merged into `acp_delegate`. `mow ops check` fails if `acp.agents` is set and `workspace` is empty (peers would not be path-jailed).
+
+`mow ops run NAME` is its own daemon (job id `ops-<name>`), not a row in `mow job list`. Last tick is `$MOW_HOME/job/state/ops-<name>.json`, shown by `mow ops show` / `mow ops status`. Two consecutive overlap skips open/update an incident with signature `job-overlap:ops-<name>`.
 
 ## Config (`extensions.ops`)
 
