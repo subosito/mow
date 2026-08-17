@@ -39,4 +39,9 @@ jobs:
         run: cd packs/otel && go test -race ./...
 
       - name: Build mow
-        run: go build -o bin/mow ./cmd/mow
+        run: |
+          ver="$(tr -d ' \n' < VERSION)"
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
+            -o bin/mow ./cmd/mow
+          ./bin/mow version | grep -F "$ver"

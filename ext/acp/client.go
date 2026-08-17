@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/internal/llm"
 )
@@ -76,7 +77,7 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 	_, err = c.call(ctx, "initialize", map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"clientInfo": map[string]any{
-			"name": "mow", "version": "1.0.0-rc.1",
+			"name": "mow", "version": mow.Version,
 		},
 		"clientCapabilities": map[string]any{
 			"fs": map[string]any{"readTextFile": false, "writeTextFile": false},

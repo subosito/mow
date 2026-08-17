@@ -105,13 +105,15 @@ const (
 // Misc consts.
 const (
 	MaxLSPDiagnostics = engine.MaxLSPDiagnostics
-	Version           = engine.Version
 	StopCompleted     = engine.StopCompleted
 	StopCancelled     = engine.StopCancelled
 	StopMaxTurns      = engine.StopMaxTurns
 	StopStuck         = engine.StopStuck
 	StopBudget        = engine.StopBudget
 )
+
+// Version is the fallback release string (overridden by ldflags / git tags).
+var Version = engine.Version
 
 // ErrBudget ends a run that hit its spend ceiling (policy.max_run_tokens /
 // max_run_usd). Partial history is preserved; this is NOT task completion.

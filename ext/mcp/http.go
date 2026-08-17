@@ -14,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/subosito/mow"
 )
 
 // checkURLScheme requires https for non-loopback MCP endpoints so bearer and
@@ -78,7 +80,7 @@ func (h *httpTransport) initialize(ctx context.Context) error {
 	_, err := h.call(ctx, "initialize", map[string]any{
 		"protocolVersion": "2025-03-26",
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "mow", "version": "1.0.0-rc.1"},
+		"clientInfo":      map[string]any{"name": "mow", "version": mow.Version},
 	})
 	if err != nil {
 		return err

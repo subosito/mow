@@ -9,7 +9,7 @@ in
 
   packages = [ pkgs.just pkgs.openssl ];
 
-  # just build → bin/mow; put it first so `mow` resolves after a local build.
+  # just build → bin/mow stamped from VERSION; put it first so `mow` resolves.
   enterShell = ''
     export PATH="$DEVENV_ROOT/bin:$PATH"
   '';

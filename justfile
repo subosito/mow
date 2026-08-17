@@ -27,8 +27,14 @@ vet:
 build: build-mow
 
 build-mow:
+    #!/usr/bin/env bash
+    set -euo pipefail
     mkdir -p bin
-    go build -o bin/mow ./cmd/mow
+    ver="$(tr -d ' \n' < VERSION)"
+    go build -trimpath \
+      -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
+      -o bin/mow ./cmd/mow
+
 
 # Closest local approximation of a CI run: no developer credentials and an
 # empty MOW_HOME. CI has no API key, so tests that build an Engine fail there
@@ -59,5 +65,5 @@ verify-ci:
         -u MOW_MODEL -u OPENAI_MODEL -u ANTHROPIC_MODEL \
         MOW_HOME="$tmp/.mow" HOME="$tmp" \
         bash -c 'cd packs/otel && go vet ./... && go test -race -count=1 ./...'
-    go build -o bin/mow ./cmd/mow
+    just build-mow
     echo "→ verify-ci ok"

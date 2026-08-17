@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        run: |
+          set -euo pipefail
+          file="$(tr -d ' \n' < VERSION)"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$file" != "$tag" ]; then
+            echo "VERSION file is $file but tag is $GITHUB_REF_NAME (want v$file)"
+            exit 1
+          fi
+          echo "version=$file" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check-version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: |
+          go vet ./...
+          go test -race ./...
+          (cd packs && go vet ./... && go test -race ./...)
+          (cd packs/otel && go vet ./... && go test -race ./...)
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          ver="${{ needs.check-version.outputs.version }}"
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
+            -o "dist/mow-${{ matrix.goos }}-${{ matrix.goarch }}" \
+            ./cmd/mow
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mow-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/mow-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  publish:
+    needs: [check-version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum mow-* | tee SHA256SUMS
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prerelease=()
+          case "${{ needs.check-version.outputs.version }}" in
+            *-rc.*|*-alpha.*|*-beta.*) prerelease=(--prerelease) ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" \
+            --title "mow ${{ needs.check-version.outputs.version }}" \
+            --generate-notes \
+            "${prerelease[@]}" \
+            dist/mow-* dist/SHA256SUMS

@@ -14,7 +14,10 @@ extensions detach by removing a blank import; secure defaults (read-only tools,
 workspace path jail, out-of-band project trust). OpenTelemetry remains optional
 and never enters a library-only embed.
 
-> Pre-1.0: the `mow`, `ext`, and packs APIs may change between minor versions.
+> Version is the single line in [`VERSION`](VERSION). Tag `v$(cat VERSION)`
+> after bumping that file. Nix and GitHub Releases read the same file.
+> RPC epoch is still `"1"` (unrelated to the tag). The `mow` / `ext` / packs
+> APIs may still change until 1.0.0.
 
 ## Library
 
@@ -51,7 +54,11 @@ Full walkthrough with code: **[docs/embedding.md](docs/embedding.md)**.
 
 ```bash
 devenv shell -- just verify
-devenv shell -- just build    # → bin/mow
+devenv shell -- just build    # → bin/mow (embeds VERSION)
+
+# Nix (after first vendorHash fill):
+# nix build          # → ./result/bin/mow
+# nix run . -- version
 
 # Or with plain Go:
 go build -o bin/mow ./cmd/mow

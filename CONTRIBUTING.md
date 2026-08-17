@@ -28,7 +28,9 @@ after those two.
 ## Build, test, verify
 
 Requires **Go 1.26.4+** (pinned in `go.mod`). `devenv shell` sets
-`GOTOOLCHAIN=local`.
+`GOTOOLCHAIN=local`. Public version is the one line in [`VERSION`](VERSION);
+`just build` and the release workflow stamp it via ldflags. Handshake
+strings use `mow.Version` — do not hardcode the number.
 
 ```bash
 devenv shell -- just verify   # go test ./... + go vet — the gate before every commit
