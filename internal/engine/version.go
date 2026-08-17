@@ -6,7 +6,7 @@ import (
 )
 
 // Version is the fallback release string when build info is unavailable.
-const Version = "0.1.0"
+const Version = "1.0.0-rc.1"
 
 // VersionString returns a human-readable version for CLI/RPC
 // (prefers module version from the binary's build info).

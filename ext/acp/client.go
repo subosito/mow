@@ -76,7 +76,7 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 	_, err = c.call(ctx, "initialize", map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"clientInfo": map[string]any{
-			"name": "mow", "version": "0.1.0",
+			"name": "mow", "version": "1.0.0-rc.1",
 		},
 		"clientCapabilities": map[string]any{
 			"fs": map[string]any{"readTextFile": false, "writeTextFile": false},

@@ -20,7 +20,7 @@ type AgentOptions struct {
 	Engine *mow.Engine
 	In     io.Reader
 	Out    io.Writer
-	// Name/version advertised in initialize (defaults: mow / 0.1.0).
+	// Name/version advertised in initialize (defaults: mow / 1.0.0-rc.1).
 	Name    string
 	Version string
 }

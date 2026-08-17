@@ -78,7 +78,7 @@ func (h *httpTransport) initialize(ctx context.Context) error {
 	_, err := h.call(ctx, "initialize", map[string]any{
 		"protocolVersion": "2025-03-26",
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "mow", "version": "0.1.0"},
+		"clientInfo":      map[string]any{"name": "mow", "version": "1.0.0-rc.1"},
 	})
 	if err != nil {
 		return err

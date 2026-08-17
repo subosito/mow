@@ -374,7 +374,7 @@ func startServer(s ServerConfig) (*client, error) {
 	_, err = c.call(context.Background(), "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "mow", "version": "0.1.0"},
+		"clientInfo":      map[string]any{"name": "mow", "version": "1.0.0-rc.1"},
 	})
 	if err != nil {
 		tail := c.stderr.tail()
