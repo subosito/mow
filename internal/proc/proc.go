@@ -7,6 +7,8 @@ package proc
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +46,25 @@ func SanitizeID(id string) string {
 		s = s[:40]
 	}
 	return s
+}
+
+// StoreDir is $MOW_HOME/proc/<workspace-hash> — per-project, so processes from
+// different repos do not collide. Shared by ext/proc tools, `mow proc`, and
+// RPC status so the TUI lists the same store the agent started.
+func StoreDir(home, workspace string) string {
+	ws := strings.TrimSpace(workspace)
+	if ws == "" {
+		ws, _ = os.Getwd()
+	}
+	if abs, err := filepath.Abs(ws); err == nil {
+		ws = abs
+	}
+	sum := sha256.Sum256([]byte(ws))
+	home = strings.TrimSpace(home)
+	if home == "" {
+		home = "."
+	}
+	return filepath.Join(home, "proc", hex.EncodeToString(sum[:6]))
 }
 
 // Start launches command via `bash -lc` detached under dir, logging to

@@ -66,6 +66,7 @@ func TestPublicFuncsResolve(t *testing.T) {
 	_ = mow.TrustedWorkspaces
 	_ = mow.SetOTELAuto
 	_ = mow.ProcSanitizeID
+	_ = mow.ProcStoreDir
 	_ = mow.ProcStart
 	_ = mow.ProcStatus
 	_ = mow.ProcList

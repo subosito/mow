@@ -48,7 +48,7 @@ func TestLoadHierarchy(t *testing.T) {
 }
 
 func TestLoadEmptyOrMissingWorkspace(t *testing.T) {
-	t.Parallel()
+	t.Setenv("MOW_HOME", t.TempDir())
 
 	tmpDir := t.TempDir()
 

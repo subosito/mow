@@ -58,6 +58,10 @@ the configured counts `extra_roots_rw` and `extra_roots_ro`. The primary
 workspace is not counted. These are security metadata only; no Git or repository
 presentation data is included.
 
+`status` also includes `procs`: `{id, pid, alive, log}` rows from the workspace
+`$MOW_HOME/proc/<hash>` store (same as `proc_start` / `mow proc`). The list is
+empty when none are recorded.
+
 `capabilities.optional.features` is present only when linked optional packages
 register host-facing facilities. Each entry is
 `{id, linked:true, events?:string[]}`. The list is dynamic and does not assume

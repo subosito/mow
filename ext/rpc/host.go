@@ -43,7 +43,26 @@ func (s *Server) statusResult() map[string]any {
 	}
 	out["pending_perm"] = s.pendingCount()
 	addExtraRootMetadata(out, s.Engine)
+	addProcMetadata(out, s.Engine)
 	return out
+}
+
+func addProcMetadata(out map[string]any, eng *mow.Engine) {
+	rows := make([]map[string]any, 0)
+	if eng != nil {
+		list, err := mow.ProcList(mow.ProcStoreDir(mow.Home(), eng.Workspace()))
+		if err == nil {
+			for _, p := range list {
+				rows = append(rows, map[string]any{
+					"id":    p.ID,
+					"pid":   p.PID,
+					"alive": p.Alive,
+					"log":   p.Log,
+				})
+			}
+		}
+	}
+	out["procs"] = rows
 }
 
 func extraRootResult(eng *mow.Engine) []map[string]any {

@@ -193,6 +193,9 @@ func SplitExtraRootSpec(raw string) (path string, readOnly bool) {
 }
 func SetOTELAuto(fn OTELAutoFunc)     { engine.SetOTELAuto(fn) }
 func ProcSanitizeID(id string) string { return engine.ProcSanitizeID(id) }
+func ProcStoreDir(home, workspace string) string {
+	return engine.ProcStoreDir(home, workspace)
+}
 func ProcStart(dir, id, command, logName, workdir string) (ProcInfo, error) {
 	return engine.ProcStart(dir, id, command, logName, workdir)
 }

@@ -18,6 +18,9 @@ type ProcInfo = proc.Info
 // ProcSanitizeID keeps a filesystem-safe short id.
 func ProcSanitizeID(id string) string { return proc.SanitizeID(id) }
 
+// ProcStoreDir is $MOW_HOME/proc/<workspace-hash> for this workspace.
+func ProcStoreDir(home, workspace string) string { return proc.StoreDir(home, workspace) }
+
 // ProcStart launches a detached process under dir. See internal/proc.Start.
 func ProcStart(dir, id, command, logName, workdir string) (ProcInfo, error) {
 	return proc.Start(dir, id, command, logName, workdir)

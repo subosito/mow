@@ -38,6 +38,7 @@ func TestIsReadOnlyTool(t *testing.T) {
 func TestIsPowerTool(t *testing.T) {
 	for name, want := range map[string]bool{
 		"write": true, "edit": true, "bash": true, "BASH": true,
+		"proc_start": true, "proc_stop": true, "proc_status": false,
 		"read": false, "grep": false, "mcp_x_y": false,
 	} {
 		if got := IsPowerTool(name); got != want {

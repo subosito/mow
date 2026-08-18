@@ -29,6 +29,7 @@ Workspace and path jail
 Tools
 - Prefer read, grep, glob, edit, write for file work and discovery.
 - Use bash for git, tests, builds, and one-off commands — not as the main way to read source (avoid cat/sed/head/tail/wc/ls/rg loops over the tree). Bash output is the usual context bloat: git diff bodies and listings re-enter history.
+- Use proc_start / proc_status / proc_stop for long-lived processes (dev servers, watchers, mocks). Requires --allow-shell. Do NOT use bash & or leave a server in the foreground: the bash tool kills its process group when it returns.
 - Do not paste raw rg/ls/find dumps into the reply; cite paths and edit.
 - Do not re-read or re-cat the same paths without an intervening edit or a new user question.
 - Do not nest another agent loop, outer goal runner, or recursive peer delegate unless the user asks.

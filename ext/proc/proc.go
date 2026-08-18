@@ -8,13 +8,10 @@ package proc
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -39,15 +36,7 @@ func init() {
 // different repos don't collide. The `mow proc` CLI resolves the same dir from
 // the current directory.
 func storeDir(workspace string) string {
-	ws := strings.TrimSpace(workspace)
-	if ws == "" {
-		ws, _ = os.Getwd()
-	}
-	if abs, err := filepath.Abs(ws); err == nil {
-		ws = abs
-	}
-	sum := sha256.Sum256([]byte(ws))
-	return filepath.Join(mow.Home(), "proc", hex.EncodeToString(sum[:6]))
+	return iproc.StoreDir(mow.Home(), workspace)
 }
 
 // requireShell resolves the engine and enforces --allow-shell (background
