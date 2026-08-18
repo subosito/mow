@@ -160,18 +160,23 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 			}
 		}
 	}
+	var bashNotice string
 	if name == "bash" {
-		if stub, ok := opt.thrash.maybeDedupeBash(args); ok {
+		guard := opt.thrash.guardBash(args)
+		if guard.blocked() {
 			return toolSlot{
 				ok: true,
 				msg: llm.Message{
 					Role:       "tool",
 					ToolCallID: tc.ID,
 					Name:       name,
-					Content:    stub,
+					Content:    guard.Block,
 				},
 			}
 		}
+		// Repetition alone does not refuse the call: run it, then cap the
+		// body and prepend the nudge below.
+		bashNotice = guard.Notice
 	}
 	out, err := runTool(ctx, tool, name, tc.ID, args, opt.Hooks)
 	if err != nil && !errors.Is(err, ErrDone) {
@@ -183,6 +188,7 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 	}
 	out = TruncateToolResult(out, toolResultLimit(opt))
 	out = frameUntrustedResult(tool, name, out, opt.UntrustedNonce)
+	out = degradeToolResult(bashNotice, out)
 	out = opt.thrash.annotateRepeat(name, args, out)
 	return toolSlot{
 		ok:   true,

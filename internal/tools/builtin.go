@@ -59,6 +59,24 @@ func pathJailHint(p *policy.Policy) string {
 	return "under the workspace path jail"
 }
 
+// emptyResultHint explains a zero-result lookup when extra roots are
+// configured. A bare "(no matches)" is correct but useless in a multi-repo
+// setup: a relative pattern only ever searches the workspace, so the model
+// retries blind. Naming the roots turns two wasted turns into one.
+func emptyResultHint(p *policy.Policy, pattern string) string {
+	if p == nil || len(p.ExtraRoots) == 0 {
+		return ""
+	}
+	// Absolute patterns already targeted a root; the miss is real.
+	if filepath.IsAbs(pattern) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"\n(searched %s only. Extra roots are configured: %s — "+
+			"relative patterns do not reach them; retry with an absolute path under a root.)",
+		p.Workspace, strings.Join(p.ExtraRoots, ", "))
+}
+
 type readTool struct{ p *policy.Policy }
 
 func (t *readTool) Name() string { return "read" }
@@ -66,9 +84,11 @@ func (t *readTool) Description() string {
 	jail := pathJailHint(t.p)
 	paging := " Args: path, optional offset (1-based first line) and limit (max lines) to page through a large file."
 	if t.p != nil && t.p.Hashline {
-		return "Read a UTF-8 text file " + jail + ". Lines are numbered with short hashes (N:hash|text) for hashline edit." + paging
+		return "Read a UTF-8 text file " + jail + ". Lines are numbered with short hashes (N:hash|text) for hashline edit." + paging +
+			" Prefer this over bash cat/head/tail/sed for reading source."
 	}
-	return "Read a UTF-8 text file " + jail + " (relative → workspace; absolute → must be in jail)." + paging
+	return "Read a UTF-8 text file " + jail + " (relative → workspace; absolute → must be in jail)." + paging +
+		" Prefer this over bash cat/head/tail/sed for reading source."
 }
 func (t *readTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"1-based first line to return (default 1)"},"limit":{"type":"integer","description":"max lines to return; omit for the whole file"}},"required":["path"]}`)
@@ -185,7 +205,7 @@ const globMaxMatches = 500
 
 func (t *globTool) Name() string { return "glob" }
 func (t *globTool) Description() string {
-	return "List files matching a glob " + pathJailHint(t.p) + ". Supports ** (recursive, matches zero or more directories). Args: pattern (e.g. **/*.go; absolute under jail OK)."
+	return "List files matching a glob " + pathJailHint(t.p) + ". Supports ** (recursive, matches zero or more directories). Args: pattern (e.g. **/*.go; absolute under jail OK). Prefer this over bash find/ls: results are bounded and jail-checked."
 }
 func (t *globTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}`)
@@ -247,7 +267,7 @@ func (t *globTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		}
 	}
 	if len(lines) == 0 {
-		return "(no matches)", nil
+		return "(no matches)" + emptyResultHint(t.p, a.Pattern), nil
 	}
 	return strings.Join(lines, "\n"), nil
 }
@@ -342,7 +362,8 @@ func (t *grepTool) Name() string { return "grep" }
 func (t *grepTool) Description() string {
 	return "Search for a fixed string in files " + pathJailHint(t.p) +
 		". Args: pattern, path (optional dir/file, default .; absolute under jail OK). " +
-		"Results are grouped by file and capped; do not reprint the dump — cite paths and edit."
+		"Results are grouped by file and capped; do not reprint the dump — cite paths and edit. " +
+		"Prefer this over bash grep/rg: hits are bounded, grouped, and jail-checked."
 }
 func (t *grepTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"]}`)
@@ -412,6 +433,9 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	})
 	if err != nil && err != filepath.SkipAll {
 		return "", err
+	}
+	if len(hits) == 0 {
+		return formatGrepHits(hits, truncated) + emptyResultHint(t.p, a.Path), nil
 	}
 	return formatGrepHits(hits, truncated), nil
 }
@@ -781,6 +805,7 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	started := time.Now()
 
 	// Own process group so timeout can kill the whole tree (bash + children).
 	// Do not use CommandContext's auto-kill alone — Wait after kill must not block forever.
@@ -818,18 +843,37 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if isListingOrSearchBash(a.Command) {
 		out = clampListingOutput(out)
 	}
+	elapsed := time.Since(started)
 	if err != nil {
 		if cctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
+			// Output captured before the kill is kept: a timeout that returns
+			// nothing is a dead end and the model just retries it bigger.
+			head := "\n"
+			if strings.TrimSpace(out) == "" {
+				head = "\n(no output was captured before the timeout)\n"
+			} else {
+				head = "\n(output above is partial — captured before the timeout)\n"
+			}
 			msg := fmt.Sprintf(
-				"\nerror: bash timed out after %s (retry with a larger timeout_sec for a slow "+
-					"build/test, or raise policy.bash_timeout_sec; do not nest `mow run` or leave "+
-					"servers in the foreground — use `cmd &` + curl + exit)",
-				timeout)
+				"%serror: bash timed out after %s.\n"+
+					"Next step, pick one:\n"+
+					"  - long-lived process (server, watcher, mock)? use proc_start "+
+					"(then proc_status / proc_stop). Do NOT use `cmd &` — the bash tool "+
+					"kills its process group when it returns.\n"+
+					"  - genuinely slow build/test? retry with a larger timeout_sec, or raise "+
+					"policy.bash_timeout_sec.\n"+
+					"  - do not nest `mow run/goal` inside bash; it blocks until timeout.",
+				head, timeout)
 			return out + msg, nil
 		}
 		return out + "\nerror: " + err.Error(), nil
 	}
-	if out == "" {
+	// Report elapsed for slow commands so the next call can budget a
+	// timeout_sec instead of discovering the ceiling by hitting it.
+	if elapsed >= 10*time.Second {
+		out += fmt.Sprintf("\n(took %s)", elapsed.Round(time.Second))
+	}
+	if strings.TrimSpace(out) == "" {
 		return "(exit 0, no output)", nil
 	}
 	return out, nil

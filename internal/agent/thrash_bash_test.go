@@ -93,44 +93,84 @@ func TestBashReadPaths(t *testing.T) {
 	}
 }
 
-func TestMaybeDedupeBash(t *testing.T) {
+func TestGuardBash(t *testing.T) {
 	s := newThrashState("")
 	args1, _ := json.Marshal(map[string]string{"command": "cat foo.go"})
-	if stub, ok := s.maybeDedupeBash(args1); ok {
-		t.Fatalf("first cat should run: stub=%q", stub)
+	if g := s.guardBash(args1); g.blocked() || g.Notice != "" {
+		t.Fatalf("first cat should run clean: %+v", g)
 	}
 	args2, _ := json.Marshal(map[string]string{"command": "sed -n '1,20p' foo.go"})
-	stub, ok := s.maybeDedupeBash(args2)
-	if !ok || !strings.Contains(stub, "already viewed") {
-		t.Fatalf("second view should stub: ok=%v stub=%q", ok, stub)
+	g := s.guardBash(args2)
+	if g.blocked() {
+		t.Fatalf("second view must still run, not block: %q", g.Block)
+	}
+	if !strings.Contains(g.Notice, "already viewed") {
+		t.Fatalf("second view should degrade: %q", g.Notice)
 	}
 	args3, _ := json.Marshal(map[string]string{"command": "go test ./..."})
-	if _, ok := s.maybeDedupeBash(args3); ok {
-		t.Fatal("go test should not path-stub")
+	if g := s.guardBash(args3); g.blocked() || g.Notice != "" {
+		t.Fatalf("go test should not path-degrade: %+v", g)
 	}
 }
 
-func TestMaybeDedupeBash_inventory(t *testing.T) {
+func TestGuardBash_inventory(t *testing.T) {
 	s := newThrashState("")
 	for i := 0; i < inventoryLimit; i++ {
 		args, _ := json.Marshal(map[string]string{"command": "git status --short"})
-		if stub, ok := s.maybeDedupeBash(args); ok {
-			t.Fatalf("status %d should run: %q", i+1, stub)
+		if g := s.guardBash(args); g.blocked() || g.Notice != "" {
+			t.Fatalf("status %d should run clean: %+v", i+1, g)
 		}
 	}
 	args, _ := json.Marshal(map[string]string{"command": `cd "$(pwd)" && git status`})
-	stub, ok := s.maybeDedupeBash(args)
-	if !ok || !strings.Contains(stub, "inventory") {
-		t.Fatalf("third status should inventory-stub: ok=%v %q", ok, stub)
+	g := s.guardBash(args)
+	if g.blocked() {
+		t.Fatalf("third status must degrade, not refuse: %q", g.Block)
+	}
+	if !strings.Contains(g.Notice, "inventory") {
+		t.Fatalf("third status should carry an inventory notice: %q", g.Notice)
 	}
 }
 
-func TestMaybeDedupeBash_destructive(t *testing.T) {
+// Past hardInventoryLimit the model has been warned repeatedly and kept
+// listing; only then does the guard refuse outright.
+func TestGuardBash_inventoryHardLimitBlocks(t *testing.T) {
+	s := newThrashState("")
+	args, _ := json.Marshal(map[string]string{"command": "git status --short"})
+	for i := 0; i < hardInventoryLimit; i++ {
+		if g := s.guardBash(args); g.blocked() {
+			t.Fatalf("call %d should not block yet: %q", i+1, g.Block)
+		}
+	}
+	g := s.guardBash(args)
+	if !g.blocked() || !strings.Contains(g.Block, "refusing") {
+		t.Fatalf("want hard block past limit: %+v", g)
+	}
+}
+
+func TestGuardBash_destructive(t *testing.T) {
 	s := newThrashState("")
 	args, _ := json.Marshal(map[string]string{"command": "git checkout -- foo.go && rm -rf internal/analytics"})
-	stub, ok := s.maybeDedupeBash(args)
-	if !ok || !strings.Contains(stub, "blocked") {
-		t.Fatalf("want blocked: ok=%v %q", ok, stub)
+	g := s.guardBash(args)
+	if !g.blocked() || !strings.Contains(g.Block, "blocked") {
+		t.Fatalf("want blocked: %+v", g)
+	}
+}
+
+// degradeToolResult must keep the real output, capped, behind the notice.
+func TestDegradeToolResult(t *testing.T) {
+	if got := degradeToolResult("", "body"); got != "body" {
+		t.Fatalf("no notice should pass through: %q", got)
+	}
+	got := degradeToolResult("(note: capped)", "real output")
+	if !strings.HasPrefix(got, "(note: capped)") {
+		t.Fatalf("notice should lead: %q", got)
+	}
+	if !strings.Contains(got, "real output") {
+		t.Fatalf("degraded result must keep the body: %q", got)
+	}
+	big := strings.Repeat("x", degradedResultLimit*3)
+	if n := len(degradeToolResult("(note)", big)); n > degradedResultLimit*2 {
+		t.Fatalf("degraded body not capped: %d", n)
 	}
 }
 
@@ -142,15 +182,15 @@ func TestPathKeyUnifiesAbsRel(t *testing.T) {
 	if k1, k2 := s.pathKey(rel), s.pathKey(abs); k1 != k2 {
 		t.Fatalf("path keys differ: rel=%q abs=%q", k1, k2)
 	}
-	// Access via abs then relative bash should stub.
+	// Access via abs then relative bash should degrade.
 	args1, _ := json.Marshal(map[string]string{"command": "cat " + abs})
-	if _, ok := s.maybeDedupeBash(args1); ok {
-		t.Fatal("first should run")
+	if g := s.guardBash(args1); g.blocked() || g.Notice != "" {
+		t.Fatal("first should run clean")
 	}
 	args2, _ := json.Marshal(map[string]string{"command": "cat " + rel})
-	stub, ok := s.maybeDedupeBash(args2)
-	if !ok || !strings.Contains(stub, "already viewed") {
-		t.Fatalf("want stub: ok=%v %q", ok, stub)
+	g := s.guardBash(args2)
+	if !strings.Contains(g.Notice, "already viewed") {
+		t.Fatalf("want notice: %+v", g)
 	}
 }
 
@@ -190,9 +230,9 @@ func TestReadAndBashSharePathDedupe(t *testing.T) {
 		t.Fatal("first read should run")
 	}
 	bashArgs, _ := json.Marshal(map[string]string{"command": "cat pkg/x.go"})
-	stub, ok := s.maybeDedupeBash(bashArgs)
-	if !ok || !strings.Contains(stub, "already viewed") {
-		t.Fatalf("bash cat after read should stub: ok=%v %q", ok, stub)
+	g := s.guardBash(bashArgs)
+	if !strings.Contains(g.Notice, "already viewed") {
+		t.Fatalf("bash cat after read should degrade: %+v", g)
 	}
 }
 
@@ -217,18 +257,21 @@ func TestInventoryKey_rgAndPythonListing(t *testing.T) {
 	}
 }
 
-func TestMaybeDedupeBash_rgInventory(t *testing.T) {
+func TestGuardBash_rgInventory(t *testing.T) {
 	s := newThrashState("")
 	for i := 0; i < inventoryLimit; i++ {
 		args, _ := json.Marshal(map[string]string{"command": "rg leftover"})
-		if stub, ok := s.maybeDedupeBash(args); ok {
-			t.Fatalf("rg %d should run: %q", i+1, stub)
+		if g := s.guardBash(args); g.blocked() || g.Notice != "" {
+			t.Fatalf("rg %d should run clean: %+v", i+1, g)
 		}
 	}
 	args, _ := json.Marshal(map[string]string{"command": `rg -n leftover src`})
-	stub, ok := s.maybeDedupeBash(args)
-	if !ok || !strings.Contains(stub, "inventory") {
-		t.Fatalf("third rg should inventory-stub: ok=%v %q", ok, stub)
+	g := s.guardBash(args)
+	if g.blocked() {
+		t.Fatalf("third rg must degrade, not refuse: %q", g.Block)
+	}
+	if !strings.Contains(g.Notice, "inventory") {
+		t.Fatalf("third rg should carry an inventory notice: %q", g.Notice)
 	}
 }
 

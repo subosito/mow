@@ -20,10 +20,16 @@ import (
 //  5. warn every turn after exploreWarnEvery consecutive explore turns
 //  6. after a successful edit/write, allow one re-read of that path
 const (
-	exploreWarnEvery  = 6
-	rereadLimit       = 1 // second access to same path stubs
-	inventoryLimit    = 2 // third identical inventory class stubs
-	sameToolWarnAfter = 3
+	exploreWarnEvery = 6
+	rereadLimit      = 1 // second access to same path degrades (runs, capped)
+	inventoryLimit   = 2 // third identical inventory class degrades
+	// hardInventoryLimit is where degrading stops and refusal starts: the
+	// model has already been told twice and repeated the same listing anyway.
+	hardInventoryLimit = 4
+	sameToolWarnAfter  = 3
+	// degradedResultLimit caps a body that only earned a Notice. Big enough
+	// to answer a real question, small enough that a repeat is not free.
+	degradedResultLimit = 2000
 )
 
 // thrashState tracks per-Prompt exploration for soft hints only.
@@ -159,36 +165,63 @@ func (s *thrashState) maybeDedupeRead(args json.RawMessage) (string, bool) {
 	return s.notePathAccess(path)
 }
 
-// maybeDedupeBash short-circuits destructive, repeated inventory, and re-views.
-func (s *thrashState) maybeDedupeBash(args json.RawMessage) (string, bool) {
+// bashGuard is the verdict for one bash call, decided before it runs.
+//
+// The three states are deliberate. A hard refusal costs a full round trip and
+// teaches the model nothing, so repetition alone only earns a Notice: the
+// command still runs, but the body is capped and carries a nudge. Refusal is
+// reserved for calls that must not happen (destructive) or that have already
+// been warned about and repeated anyway (hardInventoryLimit).
+type bashGuard struct {
+	// Block, when non-empty, replaces the tool result entirely.
+	Block string
+	// Notice, when non-empty, is prepended to a capped tool result.
+	Notice string
+}
+
+// blocked reports whether the call must not run.
+func (g bashGuard) blocked() bool { return g.Block != "" }
+
+// guardBash classifies a bash call: destructive → block, repeated inventory or
+// re-view → degrade (run, cap, nudge), repeated past the hard limit → block.
+func (s *thrashState) guardBash(args json.RawMessage) bashGuard {
 	if s == nil {
-		return "", false
+		return bashGuard{}
 	}
 	cmd := toolArgString(args, "command")
 	if cmd == "" {
-		return "", false
+		return bashGuard{}
 	}
 	if isDestructiveBash(cmd) {
-		return "(blocked by harness: discarding uncommitted work is not allowed " +
+		return bashGuard{Block: "(blocked by harness: discarding uncommitted work is not allowed " +
 			"(git checkout/restore/reset --hard, git clean, rm -rf of project trees). " +
-			"Fix compile/test errors in place with edit/write; do not wipe WIP for green.)", true
+			"Fix compile/test errors in place with edit/write; do not wipe WIP for green.)"}
 	}
 	if key := inventoryKey(cmd); key != "" {
 		s.mu.Lock()
 		n := s.inv[key]
 		s.inv[key] = n + 1
 		s.mu.Unlock()
-		if n >= inventoryLimit {
-			return fmt.Sprintf(
-				"(inventory %q already ran %d times this prompt — stop re-listing the tree. "+
-					"Next tools should be edit/write, or finish with a concrete blocker.)",
+		switch {
+		case n >= hardInventoryLimit:
+			return bashGuard{Block: fmt.Sprintf(
+				"(inventory %q already ran %d times this prompt and was already warned — "+
+					"refusing to re-list the tree. Act with edit/write, or finish with a "+
+					"concrete blocker.)",
 				key, n+1,
-			), true
+			)}
+		case n >= inventoryLimit:
+			return bashGuard{Notice: fmt.Sprintf(
+				"(note: inventory %q already ran %d times this prompt — output capped. "+
+					"Prefer grep/glob/read for targeted lookups, and act with edit/write "+
+					"once the touch points are clear.)",
+				key, n+1,
+			)}
 		}
 	}
 	paths := bashReadPaths(cmd)
 	if len(paths) == 0 {
-		return "", false
+		return bashGuard{}
 	}
 	allSeen := true
 	var keys []string
@@ -207,17 +240,31 @@ func (s *thrashState) maybeDedupeBash(args json.RawMessage) (string, bool) {
 		}
 	}
 	if len(keys) == 0 || !allSeen {
-		return "", false
+		return bashGuard{}
 	}
 	shown := keys
 	if len(shown) > 3 {
 		shown = shown[:3]
 	}
-	return fmt.Sprintf(
-		"(already viewed %s this prompt — content unchanged; do not re-cat/sed/grep the same files "+
-			"or reprint that output. Act with edit/write, or finish.)",
+	return bashGuard{Notice: fmt.Sprintf(
+		"(note: already viewed %s this prompt — output capped; content is likely unchanged. "+
+			"Do not reprint it. Act with edit/write, or finish.)",
 		strings.Join(shown, ", "),
-	), true
+	)}
+}
+
+// degradeToolResult caps a body that only earned a Notice, then prefixes the
+// nudge. Capping is what makes "run it anyway" affordable: the model still
+// gets the head of the real answer without paying full context for a repeat.
+func degradeToolResult(notice, out string) string {
+	if notice == "" {
+		return out
+	}
+	out = TruncateToolResult(out, degradedResultLimit)
+	if strings.TrimSpace(out) == "" {
+		return notice
+	}
+	return notice + "\n\n" + out
 }
 
 func (s *thrashState) notePathAccess(path string) (string, bool) {
