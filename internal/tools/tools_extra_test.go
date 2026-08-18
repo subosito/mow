@@ -364,7 +364,7 @@ func TestGrepToolExtra(t *testing.T) {
 		if err != nil {
 			t.Fatalf("grep failed: %v", err)
 		}
-		if !strings.Contains(res, "code.go:1:func targetFunc() {}") {
+		if !strings.Contains(res, "code.go (1)") || !strings.Contains(res, "  1:func targetFunc() {}") {
 			t.Errorf("unexpected grep result: %q", res)
 		}
 		if strings.Contains(res, "binary.bin") {

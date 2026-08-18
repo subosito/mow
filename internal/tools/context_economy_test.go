@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -209,4 +210,54 @@ func TestRenderReadPaging(t *testing.T) {
 			t.Error("must not name an offset when the byte cap hid the tail")
 		}
 	})
+}
+
+func TestFormatGrepHitsGroupsByFile(t *testing.T) {
+	t.Parallel()
+	got := formatGrepHits([]grepHit{
+		{Path: "a.go", Line: 3, Text: "foo one"},
+		{Path: "a.go", Line: 9, Text: "foo two"},
+	}, false)
+	if !strings.Contains(got, "a.go (2)") {
+		t.Fatalf("want file header, got %q", got)
+	}
+	if !strings.Contains(got, "  3:foo one") || !strings.Contains(got, "  9:foo two") {
+		t.Fatalf("want indented hits, got %q", got)
+	}
+	if strings.Contains(got, "files shown") {
+		t.Fatalf("small result should not add a footer: %q", got)
+	}
+
+	var one []grepHit
+	for i := 1; i <= grepMaxPerFile+5; i++ {
+		one = append(one, grepHit{Path: "hot.go", Line: i, Text: "hit"})
+	}
+	got = formatGrepHits(one, false)
+	if !strings.Contains(got, fmt.Sprintf("hot.go (%d)", grepMaxPerFile+5)) {
+		t.Fatalf("want count in header, got %q", got)
+	}
+	if !strings.Contains(got, fmt.Sprintf("…(+%d more in this file)", 5)) {
+		t.Fatalf("want per-file remainder, got %q", got)
+	}
+	if n := strings.Count(got, ":hit"); n != grepMaxPerFile {
+		t.Fatalf("printed %d hit lines, want %d:\n%s", n, grepMaxPerFile, got)
+	}
+
+	var many []grepHit
+	for i := 0; i < grepMaxFiles+10; i++ {
+		many = append(many, grepHit{Path: fmt.Sprintf("f%02d.go", i), Line: 1, Text: "x"})
+	}
+	got = formatGrepHits(many, true)
+	if n := strings.Count(got, ".go ("); n != grepMaxFiles {
+		t.Fatalf("shown files %d, want %d:\n%s", n, grepMaxFiles, got)
+	}
+	if !strings.Contains(got, "files shown") || !strings.Contains(got, "walk stopped") {
+		t.Fatalf("want summary footer, got %q", got)
+	}
+	if strings.Contains(got, "f00.go:1:") {
+		t.Fatalf("old path:line dump leaked:\n%s", got)
+	}
+	if formatGrepHits(nil, false) != "(no matches)" {
+		t.Fatal("empty hits")
+	}
 }

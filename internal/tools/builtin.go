@@ -255,14 +255,75 @@ func (t *globTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 type grepTool struct{ p *policy.Policy }
 
 const (
-	// grepMaxMatches bounds total hits in one grep result.
+	// grepMaxMatches bounds how many hits we collect while walking.
 	grepMaxMatches = 100
+	// grepMaxFiles bounds how many files appear in one result.
+	grepMaxFiles = 20
+	// grepMaxPerFile bounds hits printed under one file.
+	grepMaxPerFile = 8
 	// grepMaxLineChars bounds ONE hit. Without it a single match inside a
 	// minified bundle, a base64 blob, or a one-line JSON fixture can consume
 	// most of the tool-result budget by itself — the match is what matters,
 	// not the 40 KB of noise around it.
 	grepMaxLineChars = 500
 )
+
+type grepHit struct {
+	Path string
+	Line int
+	Text string
+}
+
+// formatGrepHits groups matches by file so a broad pattern is a file index,
+// not a 100-line dump. Per-file and per-result caps keep the wall of text down.
+func formatGrepHits(hits []grepHit, truncatedWalk bool) string {
+	if len(hits) == 0 {
+		return "(no matches)"
+	}
+	type fileHits struct {
+		path string
+		hits []grepHit
+	}
+	files := make([]fileHits, 0)
+	idx := make(map[string]int, 16)
+	for _, h := range hits {
+		if i, ok := idx[h.Path]; ok {
+			files[i].hits = append(files[i].hits, h)
+			continue
+		}
+		idx[h.Path] = len(files)
+		files = append(files, fileHits{path: h.Path, hits: []grepHit{h}})
+	}
+	var b strings.Builder
+	shownFiles := 0
+	for _, f := range files {
+		if shownFiles >= grepMaxFiles {
+			break
+		}
+		shownFiles++
+		fmt.Fprintf(&b, "%s (%d)\n", f.path, len(f.hits))
+		show := len(f.hits)
+		if show > grepMaxPerFile {
+			show = grepMaxPerFile
+		}
+		for i := 0; i < show; i++ {
+			fmt.Fprintf(&b, "  %d:%s\n", f.hits[i].Line, clampGrepLine(f.hits[i].Text))
+		}
+		if extra := len(f.hits) - show; extra > 0 {
+			fmt.Fprintf(&b, "  …(+%d more in this file)\n", extra)
+		}
+	}
+	hiddenFiles := len(files) - shownFiles
+	if hiddenFiles > 0 || truncatedWalk || len(hits) >= grepMaxMatches {
+		note := "narrow the pattern or pass a path"
+		if truncatedWalk {
+			note = "walk stopped at match cap; " + note
+		}
+		fmt.Fprintf(&b, "…(%d files shown, %d files with hits, %d matches; %s)\n",
+			shownFiles, len(files), len(hits), note)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
 
 // clampGrepLine keeps a matched line readable without letting it dominate the
 // result. Cuts on a rune boundary so the output stays valid UTF-8.
@@ -279,7 +340,9 @@ func clampGrepLine(s string) string {
 
 func (t *grepTool) Name() string { return "grep" }
 func (t *grepTool) Description() string {
-	return "Search for a fixed string in files " + pathJailHint(t.p) + ". Args: pattern, path (optional dir/file, default .; absolute under jail OK)."
+	return "Search for a fixed string in files " + pathJailHint(t.p) +
+		". Args: pattern, path (optional dir/file, default .; absolute under jail OK). " +
+		"Results are grouped by file and capped; do not reprint the dump — cite paths and edit."
 }
 func (t *grepTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"]}`)
@@ -303,8 +366,8 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if err != nil {
 		return "", err
 	}
-	var out strings.Builder
-	n := 0
+	var hits []grepHit
+	truncated := false
 	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return err
@@ -338,10 +401,9 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		relp, _ := filepath.Rel(t.p.Workspace, path)
 		for i, line := range lines {
 			if strings.Contains(line, a.Pattern) {
-				fmt.Fprintf(&out, "%s:%d:%s\n", relp, i+1, clampGrepLine(line))
-				n++
-				if n >= grepMaxMatches {
-					fmt.Fprintf(&out, "…(%d-match limit reached; narrow the pattern or pass a path to see the rest)\n", grepMaxMatches)
+				hits = append(hits, grepHit{Path: relp, Line: i + 1, Text: line})
+				if len(hits) >= grepMaxMatches {
+					truncated = true
 					return filepath.SkipAll
 				}
 			}
@@ -351,10 +413,7 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if err != nil && err != filepath.SkipAll {
 		return "", err
 	}
-	if out.Len() == 0 {
-		return "(no matches)", nil
-	}
-	return out.String(), nil
+	return formatGrepHits(hits, truncated), nil
 }
 
 type writeTool struct{ p *policy.Policy }
@@ -682,7 +741,7 @@ func (t *bashTool) Description() string {
 		"(bounded hits). bash rg/find/ls/awk listings are capped — do not reprint them; cite " +
 		"paths and edit. Do NOT start long-lived servers in the foreground, and do NOT nest " +
 		"another full `mow run/goal` inside bash (it will block the tool until timeout). " +
-		"For a smoke server: start with `&`, redirect logs, sleep briefly, curl once, exit."
+		"For a smoke server: use proc_start (not bash &); then proc_status / curl / proc_stop."
 }
 func (t *bashTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"timeout_sec":{"type":"integer","description":"override the default timeout for one slow command (e.g. a full test suite)"}},"required":["command"]}`)
