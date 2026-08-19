@@ -98,6 +98,7 @@ func TestRetryableNetErr(t *testing.T) {
 		{"hostname mismatch", x509.HostnameError{Certificate: &x509.Certificate{}, Host: "x"}, false},
 		{"tls verification", &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}, false},
 		{"connection refused", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}, true},
+		{"url wrapped refused", &url.Error{Op: "Post", URL: "http://127.0.0.1:9420/v1/responses", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}}, true},
 		{"generic transient", errors.New("unexpected EOF"), true},
 	}
 	for _, tc := range cases {
@@ -261,6 +262,18 @@ func TestServerRestartingAndRefusedDelay(t *testing.T) {
 	if !serverRestarting(ref) {
 		t.Fatal("ECONNREFUSED must classify as server restarting")
 	}
+	wrapped := &url.Error{Op: "Post", URL: "http://127.0.0.1:9420/v1/responses", Err: ref}
+	if !serverRestarting(wrapped) {
+		t.Fatal("url.Error-wrapped ECONNREFUSED must classify as restarting")
+	}
+	textOnly := fmt.Errorf(`Post "http://127.0.0.1:9420/v1/responses": dial tcp 127.0.0.1:9420: connect: connection refused`)
+	if !serverRestarting(textOnly) {
+		t.Fatal("string-wrapped connection refused must classify as restarting")
+	}
+	reset := &url.Error{Op: "Post", URL: "http://127.0.0.1:9420/v1/responses", Err: syscall.ECONNRESET}
+	if !serverRestarting(reset) {
+		t.Fatal("ECONNRESET must classify as restarting")
+	}
 	if serverRestarting(io.EOF) || serverRestarting(nil) {
 		t.Fatal("non-refused errors must not classify as restarting")
 	}
@@ -271,3 +284,36 @@ func TestServerRestartingAndRefusedDelay(t *testing.T) {
 		t.Fatal("refused delay must grow then cap")
 	}
 }
+
+func TestDoWithRetrySurvivesWrappedRefusedThenOK(t *testing.T) {
+	shrinkRefusedBudget(t)
+	var n atomic.Int32
+	hc := &http.Client{Transport: RoundTripFunc(func(*http.Request) (*http.Response, error) {
+		if n.Add(1) < 3 {
+			return nil, &url.Error{
+				Op:  "Post",
+				URL: "http://127.0.0.1:9420/v1/responses",
+				Err: &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED},
+			}
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(http.NoBody),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:9420/v1/responses", nil)
+	res, err := doWithRetry(hc, req, maxHTTPAttempts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if n.Load() != 3 {
+		t.Fatalf("attempts=%d want 3", n.Load())
+	}
+}
+
+type RoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f RoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+

@@ -32,14 +32,30 @@ var maxConnRefusedAttempts = 12
 // (doubles twice then caps); tests shrink it.
 var connRefusedBaseDelay = time.Second
 
-// serverRestarting reports whether err is a connection refusal — the peer
-// accepted the TCP handshake or nothing is listening (server down/restarting).
-// These deserve a much longer retry window than generic transients.
+// serverRestarting reports whether err is the local gateway bouncing:
+// nothing listening (ECONNREFUSED), peer reset during drain, or a
+// connect-time EOF. These deserve a much longer retry window than generic
+// transients. http.Client wraps the net error in *url.Error, so we match
+// both errors.Is and the usual dial strings.
 func serverRestarting(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, syscall.ECONNREFUSED)
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	if strings.Contains(s, "connection refused") {
+		return true
+	}
+	if strings.Contains(s, "connection reset by peer") {
+		return true
+	}
+	// Connect-time close while systemd is restarting the listener.
+	if strings.Contains(s, "connect:") && strings.Contains(s, "connection reset") {
+		return true
+	}
+	return false
 }
 
 // retryDelayRefused grows the backoff for connection-refused retries:
