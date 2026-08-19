@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/subosito/mow"
+	"github.com/subosito/mow/internal/permstore"
 )
 
 // askTools are the power tools worth a confirmation prompt. Read-only tools
@@ -15,7 +16,7 @@ import (
 // without buying any safety the path jail does not already give.
 func isAskTool(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "write", "edit", "bash":
+	case "write", "edit", "bash", "proc_start", "proc_stop":
 		return true
 	default:
 		return false
@@ -49,6 +50,22 @@ func (s *Server) preTool(ctx context.Context, e mow.PreToolEvent) (mow.PreToolDe
 		s.permMu.Unlock()
 		return mow.PreToolDecision{}, nil
 	}
+	s.permMu.Unlock()
+
+	args := e.Args
+	if len(args) == 0 {
+		args = json.RawMessage("null")
+	}
+	if s.Engine != nil {
+		if d, ok, err := permstore.Lookup(s.Engine.Workspace(), e.Name, string(args)); err == nil && ok {
+			if d == permstore.Deny {
+				return mow.PreToolDecision{Deny: true, Message: "denied by remembered rule"}, nil
+			}
+			return mow.PreToolDecision{}, nil
+		}
+	}
+
+	s.permMu.Lock()
 	id := fmt.Sprintf("perm-%d", atomic.AddInt64(&s.permSeq, 1))
 	ch := make(chan string, 1)
 	if s.pending == nil {
@@ -63,10 +80,6 @@ func (s *Server) preTool(ctx context.Context, e mow.PreToolEvent) (mow.PreToolDe
 		s.permMu.Unlock()
 	}()
 
-	args := e.Args
-	if len(args) == 0 {
-		args = json.RawMessage("null")
-	}
 	s.notify("perm.ask", map[string]any{
 		"id":           id,
 		"name":         e.Name,

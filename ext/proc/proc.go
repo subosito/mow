@@ -76,7 +76,7 @@ func (startTool) Exec(ctx context.Context, args json.RawMessage) (string, error)
 	dir := storeDir(eng.Workspace())
 	info, err := iproc.Start(dir, a.ID, a.Command, a.Log, eng.Workspace())
 	if errors.Is(err, iproc.ErrAlreadyRunning) {
-		return fmt.Sprintf("already running id=%s pid=%d", info.ID, info.PID), nil
+		return fmt.Sprintf("already running id=%s pid=%d — pick a new id or proc_stop first; do not reuse a dead id's port", info.ID, info.PID), nil
 	}
 	if err != nil {
 		return "error: " + err.Error(), nil
@@ -117,6 +117,9 @@ func (statusTool) Exec(ctx context.Context, args json.RawMessage) (string, error
 			return "error: " + err.Error(), nil
 		}
 		out := fmt.Sprintf("id=%s pid=%d status=%s", info.ID, info.PID, procState(info.Alive))
+		if !info.Alive {
+			out += " — dead; do not open its old port or treat the pid as live"
+		}
 		if tail, _ := iproc.Tail(dir, id, 20); tail != "" {
 			out += "\n--- log (tail) ---\n" + tail
 		}

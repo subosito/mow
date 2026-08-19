@@ -56,6 +56,10 @@ func run(args []string) int {
 		return ttyCmd(args[1:])
 	case "trust":
 		return cliutil.TrustCommand("mow", args[1:])
+	case "doctor":
+		return doctorCmd(args[1:])
+	case "approvals":
+		return approvalsCmd(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println(mow.VersionString())
 		return 0
@@ -114,7 +118,7 @@ func helpCmd(args []string) int {
 }
 
 func suggestCommand(name string) string {
-	cands := []string{"run", "tty", "trust", "version", "help"}
+	cands := []string{"run", "tty", "trust", "doctor", "approvals", "version", "help"}
 	for _, c := range ext.Commands() {
 		cands = append(cands, c.Name)
 	}
@@ -575,6 +579,8 @@ Core:
   mow tty  [flags]            interactive line session (/model /btw /quit)
   mow trust [path]            trust workspace for project .mow config
   mow trust --list | --revoke
+  mow doctor [--bundle]       inspect host/workspace (does not start MCP)
+  mow approvals               list | remember allow|deny <tool> | revoke <id>
   mow version | help
 
 `)
