@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/subosito/mow"
+	iproc "github.com/subosito/mow/internal/proc"
 	"github.com/subosito/mow/slash"
 )
 
@@ -245,7 +246,10 @@ func (s *Server) handleModelSet(req request) {
 		s.replyErrTo(req, codeInternalError, err.Error())
 		return
 	}
-	s.replyTo(req, map[string]any{"ok": true, "model": s.Engine.Model()})
+	// Echo the effort the engine landed on after SetModel aligned it to the
+	// new model's catalog default_effort (unpinning any leftover tier from a
+	// previous model). Hosts like mowi show `model (effort)` from this.
+	s.replyTo(req, map[string]any{"ok": true, "model": s.Engine.Model(), "effort": s.Engine.Effort()})
 }
 
 func (s *Server) handleEffortList(req request) {
@@ -418,4 +422,23 @@ func (s *Server) handlePluginList(req request) {
 		"plugins": names,
 		"items":   items,
 	})
+}
+
+func (s *Server) handleProcList(req request) {
+	dir := iproc.StoreDir(mow.Home(), s.Engine.Workspace())
+	list, err := iproc.List(dir)
+	if err != nil {
+		s.replyErrTo(req, codeInternalError, err.Error())
+		return
+	}
+	items := make([]map[string]any, 0, len(list))
+	for _, p := range list {
+		items = append(items, map[string]any{
+			"id":    p.ID,
+			"pid":   p.PID,
+			"log":   p.Log,
+			"alive": p.Alive,
+		})
+	}
+	s.replyTo(req, map[string]any{"items": items})
 }

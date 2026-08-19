@@ -67,6 +67,10 @@ func (e *Engine) SetModel(id string) error {
 	if strings.TrimSpace(e.client.Effort) == "" && eff != "" {
 		e.client.Effort = eff
 		e.client.EffortPinned = true
+	} else if eff == "" {
+		// A catalog pick (kimi-k3, not kimi-k3-high) should take that
+		// model's default_effort, not keep grok's leftover "high" as pinned.
+		e.client.EffortPinned = false
 	}
 	// Align effort with catalog efforts for this model (default_effort when needed).
 	e.client.SyncEffortToModel(id)
