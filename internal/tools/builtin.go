@@ -276,16 +276,16 @@ type grepTool struct{ p *policy.Policy }
 
 const (
 	// grepMaxMatches bounds how many hits we collect while walking.
-	grepMaxMatches = 100
+	grepMaxMatches = 48
 	// grepMaxFiles bounds how many files appear in one result.
-	grepMaxFiles = 20
+	grepMaxFiles = 8
 	// grepMaxPerFile bounds hits printed under one file.
-	grepMaxPerFile = 8
+	grepMaxPerFile = 3
 	// grepMaxLineChars bounds ONE hit. Without it a single match inside a
 	// minified bundle, a base64 blob, or a one-line JSON fixture can consume
 	// most of the tool-result budget by itself — the match is what matters,
 	// not the 40 KB of noise around it.
-	grepMaxLineChars = 500
+	grepMaxLineChars = 240
 )
 
 type grepHit struct {

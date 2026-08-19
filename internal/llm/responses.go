@@ -471,9 +471,8 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 			return nil
 		}
 		if ev.Delta != "" {
-			content.WriteString(ev.Delta)
-			if hooks.OnContent != nil {
-				hooks.OnContent(ev.Delta)
+			if out := appendSnapshotDelta(content, ev.Delta); out != "" && hooks.OnContent != nil {
+				hooks.OnContent(out)
 			}
 		}
 

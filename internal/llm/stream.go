@@ -339,9 +339,8 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		}
 		d := chunk.Choices[0].Delta
 		if d.Content != "" {
-			content.WriteString(d.Content)
-			if hooks.OnContent != nil {
-				hooks.OnContent(d.Content)
+			if out := appendSnapshotDelta(&content, d.Content); out != "" && hooks.OnContent != nil {
+				hooks.OnContent(out)
 			}
 		}
 		// Reasoning is UI-only — never part of Message.Content / tool loop history.
@@ -417,4 +416,27 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		})
 	}
 	return msg, nil
+}
+
+// appendSnapshotDelta writes a content token into buf.
+//
+// Some providers re-send the growing snapshot as each "delta". Treat a
+// prefix-extension as a replacement so the same sentence cannot glue
+// itself into the saved message. Returns the incremental slice to
+// forward to OnContent (empty when this token is a duplicate snapshot).
+func appendSnapshotDelta(buf *strings.Builder, delta string) string {
+	if delta == "" {
+		return ""
+	}
+	cur := buf.String()
+	if delta == cur {
+		return ""
+	}
+	if cur == "" || strings.HasPrefix(delta, cur) {
+		buf.Reset()
+		buf.WriteString(delta)
+		return delta[len(cur):]
+	}
+	buf.WriteString(delta)
+	return delta
 }

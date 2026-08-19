@@ -372,3 +372,31 @@ func (*neverReader) Read(p []byte) (int, error) {
 	time.Sleep(time.Hour)
 	return 0, io.EOF
 }
+
+func TestAppendSnapshotDeltaReplacesGrowingPrefix(t *testing.T) {
+	var buf strings.Builder
+	var forwarded strings.Builder
+	// Growing snapshots must not glue: "Hi" then "Hi there" is one sentence.
+	for _, d := range []string{"Hi", "Hi there", "Hi there."} {
+		if out := appendSnapshotDelta(&buf, d); out != "" {
+			forwarded.WriteString(out)
+		}
+	}
+	if got := buf.String(); got != "Hi there." {
+		t.Fatalf("buf = %q, want %q", got, "Hi there.")
+	}
+	if got := forwarded.String(); got != "Hi there." {
+		t.Fatalf("forwarded = %q, want %q", got, "Hi there.")
+	}
+	// Duplicate snapshot is a no-op.
+	if out := appendSnapshotDelta(&buf, "Hi there."); out != "" {
+		t.Fatalf("duplicate snapshot forwarded %q", out)
+	}
+	// Real incremental tokens still append.
+	if out := appendSnapshotDelta(&buf, " Next"); out != " Next" {
+		t.Fatalf("incremental out = %q", out)
+	}
+	if got := buf.String(); got != "Hi there. Next" {
+		t.Fatalf("after incremental buf = %q", got)
+	}
+}
