@@ -461,5 +461,7 @@ Media stays a side lane to the chat loop:
 | `understand_voice` | transcription endpoint |
 | `understand_video` | chat with video parts |
 
-Media tools are enabled/configured independently of extension packs.
+Media ships as the linked pack `ext/media` (blank-import, like `acp`/`mcp`/
+`proc`). Each tool registers only when its model id is configured under
+`llm.generate.*` / `llm.understand.*`; `tools.enable` still gates visibility.
 acks.

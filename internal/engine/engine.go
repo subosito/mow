@@ -587,19 +587,6 @@ func New(opt Options) (*Engine, error) {
 		}
 	}
 
-	if mediaClient != nil {
-		toolList = append(toolList, tools.MediaTools(pol, tools.MediaOptions{
-			Client:             mediaClient,
-			GenerateImage:      cfg.LLM.Generate.Image,
-			GenerateSpeech:     cfg.LLM.Generate.Speech,
-			DefaultSpeechVoice: cfg.LLM.Generate.SpeechVoice,
-			GenerateVideo:      cfg.LLM.Generate.Video,
-			UnderstandImage:    cfg.LLM.Understand.Image,
-			UnderstandVoice:    cfg.LLM.Understand.Voice,
-			UnderstandVideo:    cfg.LLM.Understand.Video,
-		})...)
-	}
-
 	enableSet := map[string]bool{}
 	for _, name := range enabled {
 		enableSet[strings.ToLower(name)] = true
@@ -616,24 +603,6 @@ func New(opt Options) (*Engine, error) {
 			continue
 		}
 		final = append(final, t)
-	}
-	for _, name := range []string{
-		"generate_image", "generate_speech", "generate_video",
-		"understand_image", "understand_voice", "understand_video",
-	} {
-		if !enableSet[name] {
-			continue
-		}
-		if !toolPresent(final, name) {
-			// tools.enable listing a media verb is a wish, not a hard
-			// requirement. A host config that enables generate_image before
-			// llm.generate.image is set must still start (mow rpc handshake,
-			// mowi). The tool simply is not registered until the model is.
-			if e.logger != nil {
-				e.logger.Warn("skipping media tool: model or API key not set", "tool", name)
-			}
-			continue
-		}
 	}
 	e.tools = final
 	// Per-engine nonce for untrusted-output framing (bash/MCP/delegate).
@@ -1031,9 +1000,6 @@ func (e *Engine) ensureLLM() error {
 		client.SyncEffortToModel(client.Model)
 		cfg.LLM.Effort = client.Effort
 		e.applyPreferredWireFromCatalog()
-	}
-	if media := llm.FromClient(client); media != nil && e.pol != nil {
-		e.tools = append(e.tools, tools.MediaTools(e.pol, tools.MediaOptions{})...)
 	}
 	e.chat = func(ctx context.Context, messages []llm.Message, specs []llm.ToolSpec) (llm.Message, error) {
 		e.onTokenMu.Lock()

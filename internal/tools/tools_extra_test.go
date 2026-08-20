@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/subosito/mow/internal/llm"
 	"github.com/subosito/mow/internal/policy"
 )
 
@@ -39,16 +38,7 @@ func TestToolMetadataAndRegistry(t *testing.T) {
 
 	allTools := Registry(p, []string{"read", "write", "edit", "glob", "grep", "bash"})
 	// recall moved to packs/contextsink (covered by its own tests).
-	mediaOpts := MediaOptions{
-		Client:          &llm.MediaClient{},
-		GenerateImage:   "img-model",
-		GenerateSpeech:  "speech-model",
-		GenerateVideo:   "video-model",
-		UnderstandImage: "vision-model",
-		UnderstandVoice: "audio-model",
-		UnderstandVideo: "vid-model",
-	}
-	allTools = append(allTools, MediaTools(p, mediaOpts)...)
+	// media tools moved to ext/media (covered by ext/media tests).
 
 	for _, tool := range allTools {
 		if tool.Name() == "" {

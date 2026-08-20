@@ -1,4 +1,4 @@
-package tools
+package media
 
 import (
 	"context"
@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/subosito/mow/internal/agent"
+	"github.com/subosito/mow"
+	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/internal/llm"
 	"github.com/subosito/mow/internal/policy"
+	toolspkg "github.com/subosito/mow/internal/tools"
 )
 
 // Default media layout under the workspace (path-jailed):
@@ -50,11 +52,11 @@ const DefaultSpeechVoiceID = "alloy"
 
 // MediaTools returns generate/understand tools for configured models.
 // Caller still filters by tools.enable.
-func MediaTools(p *policy.Policy, opt MediaOptions) []agent.Tool {
+func MediaTools(p *policy.Policy, opt MediaOptions) []ext.Tool {
 	if opt.Client == nil {
 		return nil
 	}
-	var out []agent.Tool
+	var out []ext.Tool
 	if strings.TrimSpace(opt.GenerateImage) != "" {
 		out = append(out, &imageGenTool{p: p, c: opt.Client, model: opt.GenerateImage})
 	}
@@ -99,15 +101,44 @@ const (
 	ToolUnderstandVideo = "understand_video"
 )
 
-func writeWorkspaceFile(p *policy.Policy, rel string, data []byte) (string, error) {
-	if _, err := writeFileJailed(p, rel, data, 0o644); err != nil {
+// jail resolves the path jail for a media tool call. Tools registered by
+// init() carry a nil policy: the workspace is only known once an Engine exists,
+// so it is read from the engine in ctx (same shape as ext/acp). A policy passed
+// explicitly to MediaTools (tests, embedders) always wins.
+func jail(ctx context.Context, p *policy.Policy) (*policy.Policy, error) {
+	if p != nil {
+		return p, nil
+	}
+	eng := mow.EngineFromContext(ctx)
+	if eng == nil {
+		return nil, fmt.Errorf("media tools need the engine context")
+	}
+	ws := strings.TrimSpace(eng.Workspace())
+	if ws == "" {
+		return nil, fmt.Errorf("workspace not set")
+	}
+	// Generated media is the documented opt-in write: media/ files land
+	// without --allow-write, but still inside the path jail.
+	return &policy.Policy{Workspace: ws, MaxReadBytes: 0}, nil
+}
+
+func writeWorkspaceFile(ctx context.Context, p *policy.Policy, rel string, data []byte) (string, error) {
+	pol, err := jail(ctx, p)
+	if err != nil {
+		return "", err
+	}
+	if _, err := toolspkg.WriteFileJailed(pol, rel, data, 0o644); err != nil {
 		return "", err
 	}
 	return rel, nil
 }
 
-func readWorkspaceFile(p *policy.Policy, rel string, max int) (abs string, data []byte, err error) {
-	abs, data, err = readFileJailed(p, rel)
+func readWorkspaceFile(ctx context.Context, p *policy.Policy, rel string, max int) (abs string, data []byte, err error) {
+	pol, err := jail(ctx, p)
+	if err != nil {
+		return "", nil, err
+	}
+	abs, data, err = toolspkg.ReadFileJailed(pol, rel)
 	if err != nil {
 		return "", nil, err
 	}
@@ -165,7 +196,7 @@ func (t *imageGenTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	default:
 		return "", fmt.Errorf("generate_image: no image bytes or url")
 	}
-	rel, err := writeWorkspaceFile(t.p, outPath, data)
+	rel, err := writeWorkspaceFile(ctx, t.p, outPath, data)
 	if err != nil {
 		return "", err
 	}
@@ -219,7 +250,7 @@ func (t *speechGenTool) Exec(ctx context.Context, args json.RawMessage) (string,
 	if outPath == "" {
 		outPath = filepath.Join(mediaDir, "speech-"+mediaStamp()+"."+format)
 	}
-	rel, err := writeWorkspaceFile(t.p, outPath, data)
+	rel, err := writeWorkspaceFile(ctx, t.p, outPath, data)
 	if err != nil {
 		return "", err
 	}
@@ -263,7 +294,7 @@ func (t *videoGenTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 		if outPath == "" {
 			outPath = filepath.Join(mediaDir, "video-"+mediaStamp()+".mp4")
 		}
-		rel, err := writeWorkspaceFile(t.p, outPath, res.Bytes)
+		rel, err := writeWorkspaceFile(ctx, t.p, outPath, res.Bytes)
 		if err != nil {
 			return "", err
 		}
@@ -280,7 +311,7 @@ func (t *videoGenTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	if outPath == "" {
 		outPath = filepath.Join(mediaDir, "video-job-"+mediaStamp()+".json")
 	}
-	rel, err := writeWorkspaceFile(t.p, outPath, res.Job)
+	rel, err := writeWorkspaceFile(ctx, t.p, outPath, res.Job)
 	if err != nil {
 		return "", err
 	}
@@ -311,7 +342,7 @@ func (t *understandImageTool) Exec(ctx context.Context, args json.RawMessage) (s
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	abs, data, err := readWorkspaceFile(t.p, a.Path, 8<<20)
+	abs, data, err := readWorkspaceFile(ctx, t.p, a.Path, 8<<20)
 	if err != nil {
 		return "", fmt.Errorf("understand_image: %w", err)
 	}
@@ -342,7 +373,7 @@ func (t *understandVoiceTool) Exec(ctx context.Context, args json.RawMessage) (s
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	abs, data, err := readWorkspaceFile(t.p, a.Path, 25<<20)
+	abs, data, err := readWorkspaceFile(ctx, t.p, a.Path, 25<<20)
 	if err != nil {
 		return "", fmt.Errorf("understand_voice: %w", err)
 	}
@@ -374,7 +405,7 @@ func (t *understandVideoTool) Exec(ctx context.Context, args json.RawMessage) (s
 		return "", err
 	}
 	// Keep payload modest; long videos belong on a provider that accepts URLs/jobs.
-	abs, data, err := readWorkspaceFile(t.p, a.Path, 16<<20)
+	abs, data, err := readWorkspaceFile(ctx, t.p, a.Path, 16<<20)
 	if err != nil {
 		return "", fmt.Errorf("understand_video: %w", err)
 	}

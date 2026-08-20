@@ -106,12 +106,13 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `internal/engine` | Engine construction, prompt/control, public re-export surface |
 | `internal/agent` | Loop: messages, tool calls, max turns, abort, compaction |
 | `internal/llm` | OpenAI + Anthropic chat; media HTTP (generate/understand) |
-| `internal/tools` | Built-in FS/shell + media tools |
+| `internal/tools` | Built-in FS/shell tools |
 | `internal/config` | yaml + env; `extensions` blobs |
 | `internal/policy` | Workspace jail, power-tool gates |
 | `internal/session` | JSONL persistence, resume |
 | `internal/contextload` | AGENTS.md / CLAUDE.md, skills, project trust |
 | `internal/proc` | Detached process implementation (shared by `ext/proc` and goal tools) |
+| `ext/media` | Media tool pack: `generate_*` / `understand_*` (linked, config-gated) |
 
 Do **not** import `internal/*` from outside the module’s own packages. Full
 module map: [architecture.md](architecture.md).
@@ -300,10 +301,19 @@ tools:
 
 ### Media tools (`generate_*` / `understand_*`) — end to end
 
+Media lives in the linked pack `ext/media`, the same category as `ext/acp`,
+`ext/mcp` and `ext/proc` — not a core builtin. The stock `mow` binary
+blank-imports it (`_ "github.com/subosito/mow/ext/media"` in `cmd/mow/main.go`),
+so nothing changes for CLI users. A custom binary that omits the import simply
+has no media tools.
+
 A media tool appears only when **both** hold: its model id is set under
 `llm.generate.*` / `llm.understand.*`, **and** its name is in `tools.enable`.
-Media calls reuse the chat `base_url` + key, so `base_url` typically points at a
-gateway that routes each model by id (or use one provider's own ids).
+The pack registers each tool from config at `BeforeNew` time, so enabling
+`generate_image` before `llm.generate.image` is set is a no-op — never a
+startup error. Media calls reuse the chat `base_url` + key, so `base_url`
+typically points at a gateway that routes each model by id (or use one
+provider's own ids).
 
 | Tool | Args | Endpoint | Output |
 |------|------|----------|--------|

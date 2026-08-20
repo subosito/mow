@@ -1,4 +1,4 @@
-package tools_test
+package media_test
 
 import (
 	"context"
@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/subosito/mow/ext/media"
 	"github.com/subosito/mow/internal/llm"
 	"github.com/subosito/mow/internal/policy"
-	"github.com/subosito/mow/internal/tools"
 )
 
 func TestUnderstandImageTool(t *testing.T) {
@@ -36,7 +36,7 @@ func TestUnderstandImageTool(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: ws, MaxReadBytes: 1 << 20}
 	mc := &llm.MediaClient{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list := tools.MediaTools(p, tools.MediaOptions{Client: mc, UnderstandImage: "vl-m"})
+	list := media.MediaTools(p, media.MediaOptions{Client: mc, UnderstandImage: "vl-m"})
 	if len(list) != 1 || list[0].Name() != "understand_image" {
 		t.Fatalf("%v", list)
 	}
@@ -62,7 +62,7 @@ func TestImageGenToolWritesMediaDir(t *testing.T) {
 	ws := t.TempDir()
 	p := &policy.Policy{Workspace: ws}
 	mc := &llm.MediaClient{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list := tools.MediaTools(p, tools.MediaOptions{Client: mc, GenerateImage: "img-m"})
+	list := media.MediaTools(p, media.MediaOptions{Client: mc, GenerateImage: "img-m"})
 	out, err := list[0].Exec(context.Background(), json.RawMessage(`{"prompt":"cat"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestUnderstandVoiceTool(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: ws}
 	mc := &llm.MediaClient{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list := tools.MediaTools(p, tools.MediaOptions{Client: mc, UnderstandVoice: "whisper"})
+	list := media.MediaTools(p, media.MediaOptions{Client: mc, UnderstandVoice: "whisper"})
 	if list[0].Name() != "understand_voice" {
 		t.Fatal(list[0].Name())
 	}
@@ -123,7 +123,7 @@ func TestSpeechGenToolWritesMediaDir(t *testing.T) {
 			Format string `json:"response_format"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.Voice != tools.DefaultSpeechVoiceID {
+		if body.Voice != media.DefaultSpeechVoiceID {
 			t.Errorf("voice=%q want default DefaultSpeechVoiceID", body.Voice)
 		}
 		if body.Format != "mp3" {
@@ -137,7 +137,7 @@ func TestSpeechGenToolWritesMediaDir(t *testing.T) {
 	ws := t.TempDir()
 	p := &policy.Policy{Workspace: ws}
 	mc := &llm.MediaClient{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list := tools.MediaTools(p, tools.MediaOptions{Client: mc, GenerateSpeech: "tts-m"})
+	list := media.MediaTools(p, media.MediaOptions{Client: mc, GenerateSpeech: "tts-m"})
 	if len(list) != 1 || list[0].Name() != "generate_speech" {
 		t.Fatalf("%v", list)
 	}
@@ -168,7 +168,7 @@ func TestSpeechGenToolUsesConfiguredDefaultVoice(t *testing.T) {
 	ws := t.TempDir()
 	p := &policy.Policy{Workspace: ws}
 	mc := &llm.MediaClient{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list := tools.MediaTools(p, tools.MediaOptions{
+	list := media.MediaTools(p, media.MediaOptions{
 		Client: mc, GenerateSpeech: "tts-m", DefaultSpeechVoice: "VoiceX",
 	})
 	if _, err := list[0].Exec(context.Background(), json.RawMessage(`{"text":"hi"}`)); err != nil {
@@ -197,7 +197,7 @@ func TestVideoGenToolBytesPath(t *testing.T) {
 	ws := t.TempDir()
 	p := &policy.Policy{Workspace: ws}
 	mc := &llm.MediaClient{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list := tools.MediaTools(p, tools.MediaOptions{Client: mc, GenerateVideo: "vid-m"})
+	list := media.MediaTools(p, media.MediaOptions{Client: mc, GenerateVideo: "vid-m"})
 	out, err := list[0].Exec(context.Background(), json.RawMessage(`{"prompt":"cat playing"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +221,7 @@ func TestVideoGenToolJobJSONFallback(t *testing.T) {
 	ws := t.TempDir()
 	p := &policy.Policy{Workspace: ws}
 	mc := &llm.MediaClient{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list := tools.MediaTools(p, tools.MediaOptions{Client: mc, GenerateVideo: "vid-m"})
+	list := media.MediaTools(p, media.MediaOptions{Client: mc, GenerateVideo: "vid-m"})
 	out, err := list[0].Exec(context.Background(), json.RawMessage(`{"prompt":"cat"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -254,7 +254,7 @@ func TestUnderstandVideoTool(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: ws, MaxReadBytes: 1 << 20}
 	mc := &llm.MediaClient{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list := tools.MediaTools(p, tools.MediaOptions{Client: mc, UnderstandVideo: "v-m"})
+	list := media.MediaTools(p, media.MediaOptions{Client: mc, UnderstandVideo: "v-m"})
 	if list[0].Name() != "understand_video" {
 		t.Fatal(list[0].Name())
 	}
@@ -268,7 +268,7 @@ func TestUnderstandVideoTool(t *testing.T) {
 }
 
 func TestMediaToolsAllConfigured(t *testing.T) {
-	list := tools.MediaTools(&policy.Policy{Workspace: t.TempDir()}, tools.MediaOptions{
+	list := media.MediaTools(&policy.Policy{Workspace: t.TempDir()}, media.MediaOptions{
 		Client:          &llm.MediaClient{BaseURL: "http://x", APIKey: "k"},
 		GenerateImage:   "a",
 		GenerateSpeech:  "b",
@@ -283,7 +283,7 @@ func TestMediaToolsAllConfigured(t *testing.T) {
 }
 
 func TestMediaToolsSkipsUnconfigured(t *testing.T) {
-	list := tools.MediaTools(&policy.Policy{Workspace: t.TempDir()}, tools.MediaOptions{
+	list := media.MediaTools(&policy.Policy{Workspace: t.TempDir()}, media.MediaOptions{
 		Client: &llm.MediaClient{BaseURL: "http://x", APIKey: "k"},
 	})
 	if len(list) != 0 {

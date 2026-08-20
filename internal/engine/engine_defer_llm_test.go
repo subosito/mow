@@ -48,4 +48,9 @@ func TestNewSkipsUnconfiguredMediaTools(t *testing.T) {
 		t.Fatalf("New with generate_image enabled but no media model: %v", err)
 	}
 	defer eng.Close()
+	for _, tl := range eng.tools {
+		if tl.Name() == "generate_image" {
+			t.Fatal("generate_image registered without llm.generate.image")
+		}
+	}
 }
