@@ -173,7 +173,7 @@ type ModelInfo struct {
 	ID            string
 	Wire          string
 	Wires         []string
-	Efforts       []string // catalog-advertised; empty = use static none|low|medium|high
+	Efforts       []string // catalog-advertised; empty = model has no effort parameter
 	DefaultEffort string
 	// Facet is a gateway capability token ("chat", "image", "embed", …) for
 	// models that need a different wire or endpoint. Non-chat facets are
@@ -472,7 +472,8 @@ func (e *Engine) requestEffort() string {
 }
 
 // Efforts returns catalog-advertised effort levels for the active model, or nil
-// when the gateway did not advertise them (caller may fall back to static list).
+// when the gateway did not advertise them (no selectable effort — hosts must
+// not fall back to a static none|low|medium|high list).
 func (e *Engine) Efforts() []string {
 	if e == nil {
 		return nil

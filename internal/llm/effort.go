@@ -370,17 +370,32 @@ func (c *Client) DefaultEffortForModel(model string) string {
 // carrying "max" from the previous pick would silently run the new model at an
 // intensity the operator never chose. An effort the operator pinned explicitly
 // (SetEffort / llm.effort) survives the switch when the new model allows it.
-// No-op when the model has no efforts metadata.
+//
+// When the catalog lists no efforts (and no default_effort), the model does
+// not take an effort parameter — clear the session value so hosts do not
+// keep showing a leftover "high" from the previous pick.
 func (c *Client) SyncEffortToModel(model string) {
 	if c == nil {
 		return
 	}
 	allowed := c.EffortsForModel(model)
+	def := strings.ToLower(strings.TrimSpace(c.DefaultEffortForModel(model)))
 	if len(allowed) == 0 {
+		// Distinguish "this model is in the catalog and has no effort
+		// parameter" from "we have no catalog yet". Only the former
+		// should wipe a leftover session effort (e.g. grok high →
+		// claude-opus). A failed / empty GET /models must not blank
+		// a real configured effort.
+		if _, ok := c.CatalogEntry(model); ok {
+			if def != "" {
+				c.Effort = def
+				return
+			}
+			c.Effort = ""
+		}
 		return
 	}
 	cur := strings.ToLower(strings.TrimSpace(c.Effort))
-	def := strings.ToLower(strings.TrimSpace(c.DefaultEffortForModel(model)))
 	allows := func(v string) bool {
 		if v == "" {
 			return false

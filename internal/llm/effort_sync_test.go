@@ -37,10 +37,35 @@ func TestSyncEffortToModelDropsPinnedEffortWhenUnsupported(t *testing.T) {
 	}
 }
 
-func TestSyncEffortToModelNoCatalogEffortsIsNoop(t *testing.T) {
+func TestSyncEffortToModelNoCatalogEffortsClearsLeftover(t *testing.T) {
 	c := &Client{Model: "model-a", Effort: "high"}
+	c.SetCatalogModels([]ModelInfo{
+		{ID: "model-b"}, // no efforts, no default_effort
+	})
 	c.SyncEffortToModel("model-b")
+	if c.Effort != "" {
+		t.Fatalf("effort = %q, want empty when catalog has no efforts", c.Effort)
+	}
+}
+
+func TestSyncEffortToModelUnknownModelKeepsConfiguredEffort(t *testing.T) {
+	c := &Client{Model: "model-a", Effort: "high"}
+	c.SetCatalogModels([]ModelInfo{
+		{ID: "model-a", Efforts: []string{"low", "high"}, DefaultEffort: "high"},
+	})
+	c.SyncEffortToModel("unknown-model")
 	if c.Effort != "high" {
-		t.Fatalf("effort = %q, want unchanged without catalog metadata", c.Effort)
+		t.Fatalf("effort = %q, want unchanged when model is not in the catalog", c.Effort)
+	}
+}
+
+func TestSyncEffortToModelAdoptsLoneDefaultWithoutEfforts(t *testing.T) {
+	c := &Client{Model: "model-a", Effort: "high"}
+	c.SetCatalogModels([]ModelInfo{
+		{ID: "model-b", DefaultEffort: "medium"},
+	})
+	c.SyncEffortToModel("model-b")
+	if c.Effort != "medium" {
+		t.Fatalf("effort = %q, want advertised default_effort", c.Effort)
 	}
 }
