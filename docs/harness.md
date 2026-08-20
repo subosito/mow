@@ -594,9 +594,13 @@ tool with `Untrusted() bool` so the agent loop frames results in
 
 ## OpenTelemetry export
 
-Optional. **Default off**. A non-empty `otel.endpoint` enables export (set
-`enabled: false` to keep it off despite an endpoint). When set in `$MOW_HOME/config.yaml`
-or `MOW_OTEL_ENDPOINT`, the stock CLI exports spans/metrics via OTLP/HTTP to that
-collector. `Engine.Close` shuts down the OTLP providers and flushes pending spans.
+Optional. **Default off**, and **not linked into the stock binary**: `packs/otel`
+is a nested module, so a plain `go install`/`just build-mow` pulls no OTLP
+dependencies at all. To get config-driven export, blank-import the pack in your
+own `main` (`_ "github.com/subosito/mow/packs/otel"`) and build. With the pack
+linked, a non-empty `otel.endpoint` in `$MOW_HOME/config.yaml` or
+`MOW_OTEL_ENDPOINT` enables export (set `enabled: false` to keep it off despite
+an endpoint); spans/metrics go via OTLP/HTTP to that collector. `Engine.Close`
+shuts down the OTLP providers and flushes pending spans.
 See [embedding.md](embedding.md) § OpenTelemetry.
 

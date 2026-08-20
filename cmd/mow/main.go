@@ -31,7 +31,6 @@ import (
 	_ "github.com/subosito/mow/packs/goal"
 	_ "github.com/subosito/mow/packs/job"
 	_ "github.com/subosito/mow/packs/ops"
-	_ "github.com/subosito/mow/packs/otel" // config-driven OTLP when otel.endpoint set
 	_ "github.com/subosito/mow/packs/review"
 )
 

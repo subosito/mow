@@ -121,7 +121,9 @@ import (
 
 Import only `github.com/subosito/mow` for the Engine library. Add individual
 `ext/*` or `packs/*` imports as needed. Import
-`github.com/subosito/mow/packs/otel` only when OTLP auto-wiring is wanted.
+`github.com/subosito/mow/packs/otel` only when OTLP auto-wiring is wanted — it
+is a nested module and is **not** linked into the stock `mow` binary, which is
+why the root module has no OpenTelemetry dependencies.
 
 Config: `extensions.<pack>` (see `internal/config/mow.yaml.example`).
 Docs: [docs/extensions.md](docs/extensions.md).
