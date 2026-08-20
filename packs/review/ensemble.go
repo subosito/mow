@@ -102,13 +102,12 @@ func (e *EnsembleReviewer) askCandidates(ctx context.Context, system, prompt str
 				return
 			}
 			defer func() { <-sem }()
-			reply, err := member.Reviewer.Ask(ctx, system, prompt)
+			env, _, err := askAndParseCandidates(ctx, member.Reviewer, system, prompt)
 			if err != nil {
 				responses <- response{member: member, err: err}
 				return
 			}
-			env, err := parseCandidates(reply)
-			responses <- response{member: member, env: env, err: err}
+			responses <- response{member: member, env: env}
 		}(member)
 	}
 	go func() { wg.Wait(); close(responses) }()

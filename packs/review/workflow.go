@@ -117,11 +117,7 @@ func Run(ctx context.Context, rev Reviewer, sc *Scope, req Request) (*Result, er
 	}
 
 	// --- Pass 1: candidate discovery ---
-	reply, err := rev.Ask(ctx, systemPrompt(prof), candidatePrompt(prof, sc))
-	if err != nil {
-		return nil, fmt.Errorf("review: candidate pass: %w", err)
-	}
-	cand, err := parseCandidates(reply)
+	cand, _, err := askAndParseCandidates(ctx, rev, systemPrompt(prof), candidatePrompt(prof, sc))
 	if err != nil {
 		return nil, err
 	}
@@ -228,11 +224,7 @@ func appendReportNote(rep *Report, note string) {
 
 // verifyPass runs the second model call and applies its verdicts.
 func verifyPass(ctx context.Context, rev Reviewer, prof *Profile, sc *Scope, cands []Finding, req Request) ([]Finding, []string, error) {
-	reply, err := rev.Ask(ctx, systemPrompt(prof), verifyPrompt(prof, sc, cands))
-	if err != nil {
-		return nil, nil, fmt.Errorf("review: verification pass: %w", err)
-	}
-	env, err := parseVerdicts(reply)
+	env, _, err := askAndParseVerdicts(ctx, rev, systemPrompt(prof), verifyPrompt(prof, sc, cands))
 	if err != nil {
 		return nil, nil, err
 	}
