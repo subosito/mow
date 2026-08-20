@@ -232,7 +232,7 @@ Compaction is **character-estimate**, not a real tokenizer. It keeps the system 
 | `llm.base_url` | Provider or gateway `/v1` |
 | `llm.api_key` / `api_key_env` | Provider key **or** gateway key |
 | `llm.model` | Model id |
-| `llm.effort` | Reasoning intensity: `none` \| `low` \| `medium` \| `high` (optional body fields; never part of model id) |
+| `llm.effort` | Reasoning intensity: `none` \| `low` \| `medium` \| `high` (optional body fields; never part of model id). An effort set here (or via `MOW_EFFORT`, `-effort`, `/effort`) is **pinned**: it survives model switches where the catalog allows it, and is always sent as-is. When effort instead comes from the catalog `default_effort` and that tier is `high`/`max`/`xhigh`, mow sends short mechanical prompts (≤120 runes, no complexity keyword like `debug`/`refactor`/`why does`) at `medium` — wire-only, so `Effort()`, the status line, and the session record still report the selected tier |
 | `llm.wire` | `openai-chat-completions` (default) \| `openai-responses` \| `anthropic-messages`. If unset, Engine aligns to the **catalog preferred wire** for `llm.model` after `GET /v1/models` (e.g. `claude-sonnet-4` → `anthropic-messages`). Explicit `llm.wire` / `MOW_WIRE` is never overridden |
 | `llm.headers` | Optional extra headers |
 | `llm.stream` | SSE content deltas (both wires) |

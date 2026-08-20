@@ -423,6 +423,15 @@ func (e *Engine) applyAutoEffort(text string) (restore func()) {
 		return noop
 	}
 	e.mu.Lock()
+	// An explicit operator choice is never second-guessed. EffortPinned is
+	// set by SetEffort (/effort, config llm.effort, MOW_EFFORT) and cleared
+	// when a catalog model pick supplies the tier via default_effort. So the
+	// downshift only ever applies to a tier mow chose on the user's behalf,
+	// not to one the user asked for.
+	if e.client != nil && e.client.EffortPinned {
+		e.mu.Unlock()
+		return noop
+	}
 	cur := ""
 	var allowed []string
 	if e.client != nil {
