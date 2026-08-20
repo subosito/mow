@@ -625,7 +625,14 @@ func New(opt Options) (*Engine, error) {
 			continue
 		}
 		if !toolPresent(final, name) {
-			return nil, fmt.Errorf("tool %q enabled but llm.generate/understand model not set (or no API key for media)", name)
+			// tools.enable listing a media verb is a wish, not a hard
+			// requirement. A host config that enables generate_image before
+			// llm.generate.image is set must still start (mow rpc handshake,
+			// mowi). The tool simply is not registered until the model is.
+			if e.logger != nil {
+				e.logger.Warn("skipping media tool: model or API key not set", "tool", name)
+			}
+			continue
 		}
 	}
 	e.tools = final
