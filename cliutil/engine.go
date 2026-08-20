@@ -10,6 +10,7 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
+	"github.com/subosito/mow/internal/sandbox"
 )
 
 // EngineFlags are common flags for any command that constructs a mow.Engine.
@@ -26,6 +27,9 @@ type EngineFlags struct {
 	DisallowShell bool
 	DisallowWrite bool
 	ReadOnly      bool
+	// Sandbox is --sandbox: none (default) | bwrap. Only meaningful with
+	// --allow-shell; an invalid value always errors.
+	Sandbox string
 	// MaxTurns is the parsed --max-turns value. Only applied when MaxTurnsSet
 	// (omit flag → config default; --max-turns 0 → unlimited).
 	MaxTurns    int
@@ -49,7 +53,8 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.Effort, "effort", "", "reasoning effort (catalog efforts when listed; else none|low|medium|high)")
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
 	fs.Var((*stringList)(&f.SystemPrefix), "system-prefix", "system prompt prefix (repeatable)")
-	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash/proc (unsandboxed — not path-jailed)")
+	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash/proc (unsandboxed — not path-jailed; see --sandbox)")
+	fs.StringVar(&f.Sandbox, "sandbox", "", "none|bwrap: opt-in bubblewrap jail for bash/proc (Linux; not a VM; network on)")
 	fs.BoolVar(&f.AllowWrite, "allow-write", false, "enable write/edit")
 	fs.BoolVar(&f.DisallowShell, "disallow-shell", false, "disable bash even when enabled in config")
 	fs.BoolVar(&f.DisallowWrite, "disallow-write", false, "disable write/edit even when enabled in config")
@@ -152,6 +157,7 @@ func (f *EngineFlags) Options() mow.Options {
 		ExplicitSkills:     append([]string(nil), f.Skills...),
 		AllowWrite:         f.AllowWrite,
 		AllowShell:         f.AllowShell,
+		Sandbox:            strings.TrimSpace(f.Sandbox),
 		DisableWrite:       disableWrite,
 		DisableShell:       disableShell,
 		NoSession:          f.NoSession,
@@ -190,6 +196,12 @@ func (f *EngineFlags) Validate() error {
 	// everywhere, defeating the point, so it still conflicts).
 	if f.AllowWrite && (f.DisallowWrite || f.ReadOnly) {
 		return fmt.Errorf("--allow-write conflicts with --disallow-write/--read-only")
+	}
+	// --sandbox is validated even without --allow-shell so a typo never passes
+	// silently; the jail itself is a no-op until a shell exists (nothing to
+	// jail), so the combination is allowed rather than rejected.
+	if _, err := sandbox.ParseMode(f.Sandbox); err != nil {
+		return fmt.Errorf("--sandbox: %w", err)
 	}
 	return nil
 }

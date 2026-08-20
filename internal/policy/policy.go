@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+
+	"github.com/subosito/mow/internal/sandbox"
 )
 
 // JailRoot is one absolute directory tree permitted by the path jail.
@@ -37,9 +40,23 @@ type Policy struct {
 	// AllowWrite=false (which removes the write/edit tools entirely), ReadOnly
 	// keeps the tools available so writes can still land under a WritableRoots
 	// entry. Set by --read-only when at least one --extra-root PATH:rw is given.
-	ReadOnly     bool
-	AllowWrite   bool
-	AllowShell   bool
+	ReadOnly   bool
+	AllowWrite bool
+	AllowShell bool
+	// Sandbox is the opt-in OS jail for shell execution (bash + proc_start).
+	// Empty / "none" = today's behavior: --allow-shell runs an unsandboxed
+	// `bash -lc` as the user. "bwrap" wraps both shell entry points in
+	// bubblewrap (Linux only). Ignored entirely when AllowShell is false —
+	// there is no shell to jail. Carried on the policy so tools never re-read
+	// flags or config.
+	Sandbox sandbox.Mode
+	// sandboxOnce/backend memoize the resolved backend: building it does a
+	// LookPath and (for bwrap) validates the platform, and every bash call
+	// would otherwise repeat that.
+	sandboxOnce sync.Once
+	sandboxBE   sandbox.Backend
+	sandboxErr  error
+
 	MaxReadBytes int
 	// BashTimeoutSec caps each bash tool Exec (default 300). Soft-returns on timeout.
 	BashTimeoutSec int
@@ -51,7 +68,7 @@ type Policy struct {
 
 // Power tools that are denied unless explicitly allowed.
 var powerTools = map[string]string{
-	"write": "write",
+	"write":      "write",
 	"edit":       "write",
 	"bash":       "shell",
 	"proc_start": "shell",

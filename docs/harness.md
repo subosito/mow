@@ -285,7 +285,7 @@ Optional HTTP attribution labels: `X-Mow-Actor`, `X-Mow-Session`, `X-Mow-Compone
 |------|----------|--------|
 | `read`, `glob`, `grep` | **Yes** | Secure defaults |
 | `write`, `edit` | **No** | `--allow-write` or config |
-| `bash` | **No** | `--allow-shell` or config |
+| `bash` | **No** | `--allow-shell` or config. Unsandboxed unless `--sandbox=bwrap` |
 | `generate_*` / `understand_*` | **No** | Model ids + explicit names in `tools.enable`; generate writes under `media/` without `--allow-write` (enable list is the opt-in) |
 
 ```yaml
@@ -431,17 +431,30 @@ there is no API to add one mid-session. Grant the root at launch, or start a new
 session.
 
 > **Scope of the guarantee.** The path jail applies to the **FS tools**
-> (`read`, `write`, `edit`, `glob`, `grep`). It is **not** applied to `bash`,
-> which runs real commands with the workspace as cwd and can reach anything the
-> user can — a coding agent needs `git`, compilers, and toolchains outside the
-> tree. Treat the jail as a guardrail against accidental scope creep and
-> confused-deputy edits, **not** as containment against a hostile model or
-> prompt injection. `bash` / `proc_start` are off by default. `--allow-shell`
-> is the real trust cliff: those tools are **not path-jailed**. The process
-> runs as you (`cd /; curl | sh` is allowed). File tools stay in the workspace
-> jail; this flag does not. Treat it like root-adjacent, not a sibling of
-> `--allow-write`. For containment, run mow in a container or sandbox with
-> the filesystem restricted at the OS level.
+> (`read`, `write`, `edit`, `glob`, `grep`). It is **not** applied to `bash`
+> by default. `bash` / `proc_start` run real commands with the workspace as
+> cwd and can reach anything the user can — a coding agent needs `git`,
+> compilers, and toolchains outside the tree. Treat the FS jail as a
+> guardrail against accidental scope creep and confused-deputy edits, **not**
+> as containment against a hostile model or prompt injection.
+>
+> `bash` / `proc_start` are off by default. `--allow-shell` is the real trust
+> cliff: those tools are **not path-jailed**. The process runs as you
+> (`cd /; curl | sh` is allowed). File tools stay in the workspace jail; this
+> flag does not. Treat it like root-adjacent, not a sibling of
+> `--allow-write`.
+>
+> **Opt-in OS jail (`--sandbox=bwrap`).** When you also pass `--sandbox=bwrap`
+> (config: `policy.sandbox: bwrap`), both `bash` and `proc_start` are wrapped
+> in [bubblewrap](https://github.com/containers/bubblewrap) on Linux. The
+> workspace and extra roots are bound the same way as the FS jail (`:ro` →
+> `--ro-bind`); `$HOME` is **not** bound unless it is one of those roots. A
+> missing `bwrap` binary is a hard error — mow never silently falls back to a
+> raw shell. This is a **filesystem/home jail, not a VM and not malware
+> containment**: network stays on (no `--unshare-net`), so `curl | sh` still
+> works. macOS has no backend; `--sandbox=bwrap` errors there. Default remains
+> unsandboxed (`none`). For stronger containment, run all of mow in a
+> container with the filesystem restricted at the OS level.
 
 An extra root grants the **same** permissions as the workspace: if `--allow-write`
 is on, files under an extra root are writable too. There is currently no

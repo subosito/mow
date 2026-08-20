@@ -153,6 +153,14 @@ policy:
   #   - /path/to/sibling-repo     # user/host config only (not project .mow/config)
   # CLI: --extra-root PATH (repeatable)
 
+# Opt-in OS jail for bash + proc_start (Linux bubblewrap). Default none =
+# unsandboxed --allow-shell (today's behavior). "bwrap" binds the workspace
+# and extra_roots the same way as the FS jail; $HOME is not bound unless it
+# is one of those. Network stays on. Missing bwrap = hard error, no fallback.
+# CLI: --sandbox=bwrap  (ignored unless --allow-shell / tools.enable includes bash)
+# policy:
+#   sandbox: bwrap                # none | bwrap
+
 skills:
   # dirs: [~/skills]           # skill dirs; each skill is <name>/SKILL.md (folder layout)
   #                            # host/user config only; project .mow/skills is added when trusted

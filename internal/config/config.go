@@ -167,7 +167,15 @@ type PolicyConfig struct {
 	// MaxBashTimeoutSec bounds what one bash call may request via timeout_sec
 	// (default 900). Keeps a model from parking on a hung command forever.
 	MaxBashTimeoutSec int `yaml:"max_bash_timeout_sec"`
-	MaxReadBytes      int `yaml:"max_read_bytes"`
+	// Sandbox opts shell execution (the bash tool and proc_start) into an OS
+	// jail. "" / "none" (default) keeps today's behavior: --allow-shell runs
+	// an unsandboxed `bash -lc` as you. "bwrap" wraps both entry points in
+	// bubblewrap (Linux only, requires the `bwrap` binary).
+	//
+	// It is a filesystem/home jail, not malware containment: network stays on,
+	// so `curl | sh` still works. CLI --sandbox overrides this.
+	Sandbox      string `yaml:"sandbox"`
+	MaxReadBytes int    `yaml:"max_read_bytes"`
 	// MaxContextChars soft-limits history before each LLM call (char estimate, not tokens).
 	// Default ~100k floor; Engine auto-scales from gateway context_window × CompactRatio
 	// when still on the built-in default. Set to -1 to disable compaction. An explicit
@@ -466,6 +474,10 @@ func mergeProjectFile(dst *File, path string) error {
 	// Extra FS roots expand the jail — host/CLI only (not project-controlled).
 	overlay.Policy.ExtraRoots = nil
 	overlay.Policy.ExtraRootsReadOnly = nil
+	// Sandbox is a host/user trust decision: a cloned workspace must not be
+	// able to turn the jail off (policy.sandbox: none) — or on, which would
+	// silently break builds the operator never opted into.
+	overlay.Policy.Sandbox = ""
 
 	// tools.enable: project may only *add* safe tools; never replace the
 	// host list (which would drop user-granted power tools or sneak in
@@ -612,6 +624,9 @@ func mergeOverlay(dst *File, overlay *File) {
 	}
 	if overlay.Policy.MaxReadBytes > 0 {
 		dst.Policy.MaxReadBytes = overlay.Policy.MaxReadBytes
+	}
+	if strings.TrimSpace(overlay.Policy.Sandbox) != "" {
+		dst.Policy.Sandbox = strings.TrimSpace(overlay.Policy.Sandbox)
 	}
 	if strings.TrimSpace(overlay.Session.Dir) != "" {
 		dst.Session.Dir = overlay.Session.Dir

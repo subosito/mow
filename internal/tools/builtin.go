@@ -21,6 +21,7 @@ import (
 
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/policy"
+	"github.com/subosito/mow/internal/sandbox"
 )
 
 // Registry builds the enabled tool set for a policy + enable list.
@@ -760,9 +761,14 @@ type bashTool struct{ p *policy.Policy }
 func (t *bashTool) Name() string    { return "bash" }
 func (t *bashTool) Untrusted() bool { return true }
 func (t *bashTool) Description() string {
+	jail := "Not path-jailed: the process runs as you and can leave the workspace. "
+	if t.p.SandboxEnabled() {
+		jail = "Sandboxed (bubblewrap): only the workspace and configured extra " +
+			"roots are visible/writable — $HOME and the rest of the filesystem " +
+			"are not. Network is still ON. "
+	}
 	return "Run a shell command with cwd=workspace (default timeout 300s). " +
-		"Requires --allow-shell. Not path-jailed: the process runs as you and " +
-		"can leave the workspace. Args: command, optional timeout_sec for slow " +
+		"Requires --allow-shell. " + jail + "Args: command, optional timeout_sec for slow " +
 		"builds/test suites. For repo search prefer the grep tool (bounded hits). " +
 		"bash rg/find/ls/awk listings are capped — do not reprint them; cite " +
 		"paths and edit. Do NOT start long-lived servers in the foreground, and " +
@@ -815,6 +821,18 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	cmd := exec.Command("bash", "-lc", a.Command)
 	cmd.Dir = t.p.Workspace
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Opt-in OS jail (policy.sandbox / --sandbox=bwrap). Identity by default;
+	// when enabled it rewrites argv to `bwrap ... -- bash -lc <command>` and
+	// keeps the process group above intact so the timeout kill still works.
+	// A configured-but-unavailable sandbox is a hard error: never fall back to
+	// an unsandboxed shell.
+	if be, err := t.p.SandboxBackend(); err != nil {
+		return "", err
+	} else if wrapped, err := sandbox.WithNewSession(be, true).Wrap(cmd); err != nil {
+		return "", err
+	} else {
+		cmd = wrapped
+	}
 	var buf cappedBuffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf

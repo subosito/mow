@@ -19,6 +19,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/subosito/mow/internal/sandbox"
 )
 
 // ErrAlreadyRunning is returned by Start when id is already alive.
@@ -70,7 +72,13 @@ func StoreDir(home, workspace string) string {
 // Start launches command via `bash -lc` detached under dir, logging to
 // <dir>/<logName> (default <id>.log), and records <dir>/<id>.pid. Returns
 // ErrAlreadyRunning (with the live Info) when id is already running.
-func Start(dir, id, command, logName, workdir string) (Info, error) {
+//
+// The optional box wraps the command in an OS sandbox (--sandbox=bwrap).
+// proc_start must honor the same jail as the bash tool: a sandboxed bash next
+// to an unsandboxed proc_start is just a slower escape hatch. Setsid stays in
+// the parent so the recorded pid is still the session leader we later signal —
+// the backend is asked not to add its own --new-session.
+func Start(dir, id, command, logName, workdir string, box ...sandbox.Backend) (Info, error) {
 	id = SanitizeID(id)
 	command = strings.TrimSpace(command)
 	if id == "" || command == "" {
@@ -98,6 +106,17 @@ func Start(dir, id, command, logName, workdir string) (Info, error) {
 	c.Stderr = logF
 	c.Stdin = nil
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detached session, no tty
+	if len(box) > 0 && box[0] != nil {
+		wrapped, werr := sandbox.WithNewSession(box[0], false).Wrap(c)
+		if werr != nil {
+			logF.Close()
+			return Info{}, werr
+		}
+		wrapped.Stdout = logF
+		wrapped.Stderr = logF
+		wrapped.Stdin = nil
+		c = wrapped
+	}
 	if err := c.Start(); err != nil {
 		logF.Close()
 		return Info{}, err

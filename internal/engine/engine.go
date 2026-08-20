@@ -18,6 +18,7 @@ import (
 	"github.com/subosito/mow/internal/contextload"
 	"github.com/subosito/mow/internal/llm"
 	"github.com/subosito/mow/internal/policy"
+	"github.com/subosito/mow/internal/sandbox"
 	"github.com/subosito/mow/internal/session"
 	"github.com/subosito/mow/internal/tools"
 )
@@ -276,14 +277,25 @@ func New(opt Options) (*Engine, error) {
 		cfg.Policy.MaxTurns = 0
 	}
 
+	// Sandbox: CLI --sandbox wins over policy.sandbox in config. Parsed here so
+	// an invalid value fails at New rather than at the first bash call.
+	sbSrc := cfg.Policy.Sandbox
+	if s := strings.TrimSpace(opt.Sandbox); s != "" {
+		sbSrc = s
+	}
+	sbMode, err := sandbox.ParseMode(sbSrc)
+	if err != nil {
+		return nil, fmt.Errorf("policy.sandbox: %w", err)
+	}
+
 	pol := &policy.Policy{
-		Workspace:          cfg.Workspace,
-		ExtraRoots:         append([]string(nil), cfg.Policy.ExtraRoots...),
+		Workspace: cfg.Workspace, ExtraRoots: append([]string(nil), cfg.Policy.ExtraRoots...),
 		ExtraRootsReadOnly: append([]string(nil), cfg.Policy.ExtraRootsReadOnly...),
 		WritableRoots:      append([]string(nil), opt.WritableRoots...),
 		ReadOnly:           opt.ReadOnly,
 		AllowWrite:         cfg.ToolEnabled("write") || cfg.ToolEnabled("edit"),
 		AllowShell:         cfg.ToolEnabled("bash"),
+		Sandbox:            sbMode,
 		MaxReadBytes:       cfg.Policy.MaxReadBytes,
 		BashTimeoutSec:     cfg.Policy.BashTimeoutSec,
 		MaxBashTimeoutSec:  cfg.Policy.MaxBashTimeoutSec,
@@ -935,6 +947,26 @@ func (e *Engine) AllowWrite() bool {
 // AllowShell reports whether bash is enabled.
 func (e *Engine) AllowShell() bool {
 	return e != nil && e.pol != nil && e.pol.AllowShell
+}
+
+// ShellSandbox returns the sandbox backend that shell tools must wrap their
+// commands in (identity when --sandbox is unset). Every shell entry point —
+// the bash tool and proc_start — has to use it, or the unwrapped one becomes
+// the escape hatch. An unavailable backend is an error, never a silent
+// fallback to a raw shell.
+func (e *Engine) ShellSandbox() (sandbox.Backend, error) {
+	if e == nil || e.pol == nil {
+		return sandbox.None{}, nil
+	}
+	return e.pol.SandboxBackend()
+}
+
+// SandboxMode reports the configured shell sandbox ("none" or "bwrap").
+func (e *Engine) SandboxMode() string {
+	if e == nil || e.pol == nil || !e.pol.SandboxEnabled() {
+		return string(sandbox.ModeNone)
+	}
+	return string(e.pol.Sandbox)
 }
 
 // ensureLLM attaches the built-in LLM client when New ran with DeferLLM.

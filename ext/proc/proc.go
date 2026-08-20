@@ -56,7 +56,7 @@ type startTool struct{}
 
 func (startTool) Name() string { return "proc_start" }
 func (startTool) Description() string {
-	return "Start a long-lived process in the background (dev server, watcher, mock) and keep working while it runs — this returns a pid immediately; the process is detached. Args: id (short name), command (shell), log (optional filename), keep (bool: survive session exit; default false = auto-killed on exit). Manage with proc_status / proc_stop. Requires --allow-shell. Do NOT use bare `bash &` for servers: the bash tool kills its process group when it returns."
+	return "Start a long-lived process in the background (dev server, watcher, mock) and keep working while it runs — this returns a pid immediately; the process is detached. Args: id (short name), command (shell), log (optional filename), keep (bool: survive session exit; default false = auto-killed on exit). Manage with proc_status / proc_stop. Requires --allow-shell. Same jail as bash when --sandbox=bwrap is on (bubblewrap; network still ON). Do NOT use bare `bash &` for servers: the bash tool kills its process group when it returns."
 }
 func (startTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"command":{"type":"string"},"log":{"type":"string"},"keep":{"type":"boolean"}},"required":["id","command"]}`)
@@ -74,7 +74,13 @@ func (startTool) Exec(ctx context.Context, args json.RawMessage) (string, error)
 		return "", err
 	}
 	dir := storeDir(eng.Workspace())
-	info, err := iproc.Start(dir, a.ID, a.Command, a.Log, eng.Workspace())
+	// Same jail as the bash tool when --sandbox is on. proc_start is the other
+	// shell entry point; leaving it unwrapped would make the sandbox theater.
+	box, err := eng.ShellSandbox()
+	if err != nil {
+		return "error: " + err.Error(), nil
+	}
+	info, err := iproc.Start(dir, a.ID, a.Command, a.Log, eng.Workspace(), box)
 	if errors.Is(err, iproc.ErrAlreadyRunning) {
 		return fmt.Sprintf("already running id=%s pid=%d — pick a new id or proc_stop first; do not reuse a dead id's port", info.ID, info.PID), nil
 	}

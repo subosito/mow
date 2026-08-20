@@ -89,7 +89,10 @@ subcommand disappear from that binary and help.
 Secure default tools: **read**, **glob**, **grep**. Power tools need
 `--allow-write` / `--allow-shell`. `--allow-shell` is the trust cliff:
 `bash` / `proc_start` are **not** path-jailed (they run as you). File
-tools stay in the workspace jail. Project `.mow` config/skills load only after
+tools stay in the workspace jail. Opt-in `--sandbox=bwrap` (config
+`policy.sandbox: bwrap`) wraps both shell entry points in bubblewrap on
+Linux — a filesystem/home jail, not a VM; network stays on; a missing
+`bwrap` is a hard error. Project `.mow` config/skills load only after
 `mow trust` (stored out-of-band under `$MOW_HOME`, so a cloned repo cannot trust
 itself), and never set credentials, endpoints, or power tools.
 

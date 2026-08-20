@@ -120,6 +120,13 @@ type Options struct {
 	AllowShell   bool
 	DisableWrite bool
 	DisableShell bool
+	// Sandbox opts shell execution (bash + proc_start) into an OS jail.
+	// "" / "none" = today's behavior (unsandboxed shell as the user);
+	// "bwrap" = bubblewrap on Linux. Overrides config policy.sandbox when set.
+	// An unknown value is an error at New; a missing `bwrap` binary is an
+	// error too — mow never silently downgrades to an unsandboxed shell.
+	// Ignored when no shell is enabled. CLI: --sandbox=bwrap.
+	Sandbox string
 	// NoSession skips JSONL persistence.
 	NoSession bool
 	// SessionID forces a session id (resume that file).
