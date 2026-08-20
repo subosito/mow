@@ -249,11 +249,11 @@ func (s *Server) handleModelSet(req request) {
 	// Echo the effort the engine landed on after SetModel aligned it to the
 	// new model's catalog default_effort (unpinning any leftover tier from a
 	// previous model). Hosts like mowi show `model (effort)` from this.
-	s.replyTo(req, map[string]any{"ok": true, "model": s.Engine.Model(), "effort": s.Engine.Effort()})
+	s.replyTo(req, map[string]any{"ok": true, "model": s.Engine.Model(), "effort": s.Engine.DisplayEffort()})
 }
 
 func (s *Server) handleEffortList(req request) {
-	cur := s.Engine.Effort()
+	cur := s.Engine.DisplayEffort()
 	efforts := s.Engine.Efforts()
 	list := make([]map[string]any, 0, len(efforts))
 	for _, e := range efforts {
@@ -287,7 +287,7 @@ func (s *Server) handleEffortSet(req request) {
 		s.replyErrTo(req, codeInvalidRequest, err.Error())
 		return
 	}
-	s.replyTo(req, map[string]any{"ok": true, "effort": s.Engine.Effort()})
+	s.replyTo(req, map[string]any{"ok": true, "effort": s.Engine.DisplayEffort()})
 }
 
 // handleContext reports context-window usage so a UI can paint a gauge

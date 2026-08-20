@@ -498,3 +498,31 @@ func (e *Engine) DefaultEffort() string {
 	}
 	return e.client.DefaultEffortForModel(e.client.Model)
 }
+
+// DisplayEffort is what hosts should paint next to the model name: the
+// session effort if set, otherwise catalog default_effort when this model
+// advertises a selectable list. Empty means hide the chip (no effort
+// parameter).
+func (e *Engine) DisplayEffort() string {
+	if e == nil {
+		return ""
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	cur := ""
+	if e.client != nil {
+		cur = strings.TrimSpace(e.client.Effort)
+	} else if e.cfg != nil {
+		cur = strings.TrimSpace(e.cfg.LLM.Effort)
+	}
+	if cur != "" {
+		return cur
+	}
+	if e.client == nil {
+		return ""
+	}
+	if len(e.client.EffortsForModel(e.client.Model)) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(e.client.DefaultEffortForModel(e.client.Model))
+}
