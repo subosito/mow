@@ -3,6 +3,7 @@ package cliutil
 import (
 	"flag"
 	"io"
+	"runtime"
 	"testing"
 )
 
@@ -64,5 +65,14 @@ func TestSandboxWithoutAllowShellIsAllowed(t *testing.T) {
 func TestSandboxNoneIsExplicitlyValid(t *testing.T) {
 	if _, err := parseSandbox(t, "--allow-shell", "--sandbox", "none"); err != nil {
 		t.Errorf("--sandbox none should be valid: %v", err)
+	}
+}
+
+func TestSandboxBwrapRejectedOffLinux(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("linux advertises bwrap")
+	}
+	if _, err := parseSandbox(t, "--allow-shell", "--sandbox", "bwrap"); err == nil {
+		t.Fatal("--sandbox=bwrap must error off linux")
 	}
 }

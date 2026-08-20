@@ -547,9 +547,8 @@ Flags:
   -e, --ephemeral      run against resumed context without saving this turn
   --config --workspace --model --base-url
   --allow-shell --allow-write --max-turns --effort --extra-root
-  --sandbox none|bwrap  opt-in bubblewrap jail for bash/proc (Linux;
-                        not a VM, network stays on; only matters with
-                        --allow-shell)
+  --sandbox none|bwrap  Linux only: opt-in bubblewrap jail for bash/proc
+                        (not a VM, network stays on; omit on Darwin)
   --stream --verbose --session --continue --no-session
 
 Examples:

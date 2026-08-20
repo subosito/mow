@@ -5,6 +5,7 @@ package cliutil
 import (
 	"flag"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -54,7 +55,7 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
 	fs.Var((*stringList)(&f.SystemPrefix), "system-prefix", "system prompt prefix (repeatable)")
 	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash/proc (unsandboxed — not path-jailed; see --sandbox)")
-	fs.StringVar(&f.Sandbox, "sandbox", "", "none|bwrap: opt-in bubblewrap jail for bash/proc (Linux; not a VM; network on)")
+	fs.StringVar(&f.Sandbox, "sandbox", "", sandboxFlagHelp())
 	fs.BoolVar(&f.AllowWrite, "allow-write", false, "enable write/edit")
 	fs.BoolVar(&f.DisallowShell, "disallow-shell", false, "disable bash even when enabled in config")
 	fs.BoolVar(&f.DisallowWrite, "disallow-write", false, "disable write/edit even when enabled in config")
@@ -68,6 +69,13 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.Var((*stringList)(&f.EnableExt), "enable-ext", "force enable extension instance by name (repeatable)")
 	fs.Var((*stringList)(&f.DisableExt), "disable-ext", "force disable extension instance by name (repeatable)")
 	fs.Var((*stringList)(&f.Skills), "skill", "load a named skill unconditionally regardless of selector (repeatable; use `/skill` in the TUI to list or activate)")
+}
+
+func sandboxFlagHelp() string {
+	if runtime.GOOS == "linux" {
+		return "none|bwrap: opt-in bubblewrap jail for bash/proc (not a VM; network on)"
+	}
+	return "none: OS jail is Linux-only (bwrap); omit or none on " + runtime.GOOS
 }
 
 // stringList is a repeatable flag.String-like value (append on each Set).
@@ -200,8 +208,12 @@ func (f *EngineFlags) Validate() error {
 	// --sandbox is validated even without --allow-shell so a typo never passes
 	// silently; the jail itself is a no-op until a shell exists (nothing to
 	// jail), so the combination is allowed rather than rejected.
-	if _, err := sandbox.ParseMode(f.Sandbox); err != nil {
+	mode, err := sandbox.ParseMode(f.Sandbox)
+	if err != nil {
 		return fmt.Errorf("--sandbox: %w", err)
+	}
+	if mode == sandbox.ModeBwrap && runtime.GOOS != "linux" {
+		return fmt.Errorf("--sandbox=bwrap is Linux-only (this is %s); omit the flag or use none", runtime.GOOS)
 	}
 	return nil
 }

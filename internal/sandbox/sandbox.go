@@ -140,7 +140,10 @@ var systemROBinds = []string{
 	"/etc/localtime",
 	"/etc/passwd",
 	"/etc/group",
-	"/nix/store", // NixOS: /bin and /usr are mostly symlinks into here
+	"/nix/store",              // NixOS: /bin and /usr are mostly symlinks into here
+	"/nix/var",                // profiles, gc roots
+	"/run/current-system",     // NixOS system-path (bash, git, coreutils)
+	"/run/wrappers",           // NixOS setuid wrappers (rarely needed; skip if missing)
 }
 
 // envAllowlist is passed through after --clearenv when set in the parent.
@@ -182,12 +185,22 @@ func (b *Bwrap) Args() []string {
 		"--dev", "/dev",
 		"--proc", "/proc",
 		"--tmpfs", "/tmp",
+		// Parent dirs so --ro-bind-try /run/current-system and /nix/store
+		// have somewhere to attach. Harmless on Debian (empty dirs).
+		"--dir", "/run",
+		"--dir", "/nix",
 	)
+	// --ro-bind-try: skip missing paths. Debian has /lib; NixOS often does
+	// not. NixOS needs /nix/store and /run/current-system; Debian does not.
+	// One list, no host-specific branches.
 	for _, p := range systemROBinds {
-		if exists(p) {
-			args = append(args, "--ro-bind", p, p)
-		}
+		args = append(args, "--ro-bind-try", p, p)
 	}
+	// Do not also --ro-bind-try dirname(bash). On NixOS the login bash is
+	// /run/current-system/sw/bin/bash; binding that directory *and*
+	// /run/current-system makes bwrap `Can't mkdir /run/current-system/sw/bin`.
+	// /nix/store, /run/current-system, /usr, and /bin already cover FHS and Nix.
+	// Absolute argv[0] (absArgv) is enough once those parents are mounted.
 	// Workspace read-write, then the extra roots. $HOME is NOT bound unless it
 	// happens to be one of these — that is the whole point of the jail.
 	args = append(args, "--bind", b.Workspace, b.Workspace)
@@ -226,7 +239,7 @@ func (b *Bwrap) Wrap(cmd *exec.Cmd) (*exec.Cmd, error) {
 	if b == nil || strings.TrimSpace(b.Bin) == "" {
 		return nil, fmt.Errorf("sandbox: bwrap backend not initialized")
 	}
-	argv := append(b.Args(), cmd.Args...)
+	argv := append(b.Args(), absArgv(cmd.Args)...)
 	out := exec.Command(b.Bin, argv...)
 	out.Dir = b.Workspace
 	out.Stdin = cmd.Stdin
@@ -257,6 +270,24 @@ func WithNewSession(b Backend, on bool) Backend {
 }
 
 func exists(p string) bool {
-	_, err := os.Lstat(p)
+	_, err := os.Stat(p)
 	return err == nil
+}
+
+// absArgv rewrites argv[0] to an absolute path when LookPath can find it.
+// Inside the jail PATH may still be the host PATH, but the first lookup of
+// `bash` happens before /nix/store and /run/current-system are necessarily
+// useful as relative names — an absolute store path is always under a bind.
+func absArgv(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	out := append([]string(nil), args...)
+	if filepath.IsAbs(out[0]) {
+		return out
+	}
+	if p, err := exec.LookPath(out[0]); err == nil {
+		out[0] = p
+	}
+	return out
 }

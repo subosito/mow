@@ -121,8 +121,17 @@ func TestWrapBindsWorkspaceAndRoots(t *testing.T) {
 		t.Fatalf("no -- separator: %v", args)
 	}
 	got := strings.Join(args[sep+1:], " ")
-	if got != "bash -lc echo hi" {
-		t.Errorf("inner argv = %q", got)
+	if !strings.HasSuffix(got, "bash -lc echo hi") && got != "bash -lc echo hi" {
+		t.Errorf("inner argv = %q, want bash -lc echo hi (absolute path ok)", got)
+	}
+	if contains(args, "/run/current-system/sw/bin") {
+		t.Errorf("must not bind dirname(bash) under /run/current-system (nested mkdir): %v", args)
+	}
+	if !contains(args, "--ro-bind-try") {
+		t.Errorf("system binds should use --ro-bind-try so missing /lib does not abort: %v", args)
+	}
+	if !contains(args, "--dir") {
+		t.Errorf("want --dir /run so NixOS current-system can mount: %v", args)
 	}
 
 	for _, want := range []string{"--die-with-parent", "--unshare-pid", "--new-session", "--clearenv", "--chdir"} {
