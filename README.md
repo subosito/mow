@@ -87,7 +87,9 @@ import (for example `_ "github.com/subosito/mow/ext/acp"`) and its tools and
 subcommand disappear from that binary and help.
 
 Secure default tools: **read**, **glob**, **grep**. Power tools need
-`--allow-write` / `--allow-shell`. Project `.mow` config/skills load only after
+`--allow-write` / `--allow-shell`. `--allow-shell` is the trust cliff:
+`bash` / `proc_start` are **not** path-jailed (they run as you). File
+tools stay in the workspace jail. Project `.mow` config/skills load only after
 `mow trust` (stored out-of-band under `$MOW_HOME`, so a cloned repo cannot trust
 itself), and never set credentials, endpoints, or power tools.
 

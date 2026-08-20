@@ -19,8 +19,8 @@ func TestRPCDoesNotInstallStderrProgress(t *testing.T) {
 		t.Error("rpc must not use NewEngineCLI: it prints tool progress to stderr, " +
 			"which a TUI host inherits and paints over its own frame")
 	}
-	if !strings.Contains(src, "ef.Options()") {
-		t.Error("rpc should build its Engine from ef.Options() (no stderr progress)")
+	if !strings.Contains(src, "ef.OptionsDeferLLM()") {
+		t.Error("rpc should build its Engine from ef.OptionsDeferLLM() (no stderr progress, ping without a key)")
 	}
 	// Fail loudly if the CLI helper stops being the thing that adds progress,
 	// so this test cannot quietly become vacuous.

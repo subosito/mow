@@ -23,6 +23,9 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	if e == nil {
 		return RunResult{}, fmt.Errorf("mow: nil engine")
 	}
+	if err := e.ensureLLM(); err != nil {
+		return RunResult{}, err
+	}
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return RunResult{}, fmt.Errorf("mow: empty prompt")

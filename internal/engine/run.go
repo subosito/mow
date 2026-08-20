@@ -53,6 +53,11 @@ type Options struct {
 	// after turn, stop). Options.Hooks still run. Combine with
 	// SkipExtensionSetup for strict read-only workflows.
 	DisableExtensionHooks bool
+	// DeferLLM, when true, skips the API-key / model / provider handshake in
+	// New. Control-plane hosts (mow rpc ping/version) can start without
+	// credentials. The first Prompt / ListModels / chat call still requires a
+	// key unless Options.Chat or Options.Provider was injected.
+	DeferLLM bool
 	// HTTPClient is used for all LLM/media HTTP (proxies, custom timeouts,
 	// transport middleware). Nil uses a default client (120s chat, 180s media).
 	HTTPClient *http.Client

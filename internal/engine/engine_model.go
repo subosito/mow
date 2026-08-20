@@ -234,6 +234,13 @@ func (e *Engine) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	if e == nil {
 		return nil, fmt.Errorf("mow: nil engine")
 	}
+	if err := e.ensureLLM(); err != nil && e.client == nil && e.provider == nil {
+		// DeferLLM host without a key: return the configured model only.
+		if e.cfg != nil && strings.TrimSpace(e.cfg.LLM.Model) != "" {
+			return []ModelInfo{{ID: e.cfg.LLM.Model}}, nil
+		}
+		return nil, err
+	}
 	e.mu.Lock()
 	client := e.client
 	current := ""

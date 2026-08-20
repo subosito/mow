@@ -220,9 +220,9 @@ func TestRPCCommandHelpAndArgs(t *testing.T) {
 		t.Errorf("runCmd(invalid flag) = %d; want 2", code)
 	}
 
-	// Calling runCmd without required API key should return exit code 1 from NewEngineCLI.
-	if code := runCmd([]string{"--no-session"}); code != 1 {
-		t.Errorf("runCmd(--no-session) = %d; want 1", code)
+	// DeferLLM: ping/version must start without an API key.
+	if code := runCmd([]string{"--no-session"}); code != 0 {
+		t.Errorf("runCmd(--no-session) = %d; want 0 (DeferLLM)", code)
 	}
 }
 

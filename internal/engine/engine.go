@@ -501,6 +501,9 @@ func New(opt Options) (*Engine, error) {
 			}
 		}
 	default:
+		if opt.DeferLLM {
+			break
+		}
 		key := cfg.ResolveAPIKey()
 		if key == "" {
 			return nil, fmt.Errorf("api key required (OPENAI_API_KEY / MOW_API_KEY / ANTHROPIC_API_KEY, or llm.api_key in the config file under MOW_HOME)")
@@ -932,6 +935,84 @@ func (e *Engine) AllowWrite() bool {
 // AllowShell reports whether bash is enabled.
 func (e *Engine) AllowShell() bool {
 	return e != nil && e.pol != nil && e.pol.AllowShell
+}
+
+// ensureLLM attaches the built-in LLM client when New ran with DeferLLM.
+// Injected Chat/Provider engines are already ready. Safe to call more than once.
+func (e *Engine) ensureLLM() error {
+	if e == nil {
+		return fmt.Errorf("mow: nil engine")
+	}
+	if e.chat != nil {
+		return nil
+	}
+	if e.opt.Provider != nil || e.opt.Chat != nil {
+		return fmt.Errorf("mow: chat backend missing")
+	}
+	cfg := e.cfg
+	if cfg == nil {
+		return fmt.Errorf("mow: engine has no config")
+	}
+	key := cfg.ResolveAPIKey()
+	if key == "" {
+		return fmt.Errorf("api key required (OPENAI_API_KEY / MOW_API_KEY / ANTHROPIC_API_KEY, or llm.api_key in the config file under MOW_HOME)")
+	}
+	if strings.TrimSpace(cfg.LLM.Model) == "" && !e.opt.Continue && strings.TrimSpace(e.opt.SessionID) == "" {
+		return fmt.Errorf("model required (OPENAI_MODEL / MOW_MODEL / ANTHROPIC_MODEL or llm.model)")
+	}
+	headers := withActorHeaders(cfg.LLM.Headers, "mow")
+	client := &llm.Client{
+		Wire:               cfg.LLM.Wire,
+		BaseURL:            cfg.LLM.BaseURL,
+		APIKey:             key,
+		Model:              cfg.LLM.Model,
+		Effort:             cfg.LLM.Effort,
+		EffortPinned:       strings.TrimSpace(cfg.LLM.Effort) != "",
+		HTTP:               e.opt.HTTPClient,
+		ExtraHeaders:       headers,
+		Stream:             cfg.LLM.Stream || e.opt.Stream,
+		PromptCache:        cfg.LLM.PromptCache == nil || cfg.LLM.PromptCache.Enabled(),
+		CacheTTL:           cacheTTL(cfg.LLM.PromptCache),
+		MaxTokens:          cfg.LLM.MaxTokens,
+		NativeTools:        cfg.LLM.NativeTools,
+		SystemPrefix:       append([]string(nil), cfg.LLM.SystemPrefix...),
+		SystemPrefixModels: append([]string(nil), cfg.LLM.SystemPrefixModels...),
+		FirstByteTimeout:   time.Duration(cfg.LLM.FirstByteTimeoutSec) * time.Second,
+		CallTimeout:        time.Duration(cfg.LLM.CallTimeoutSec) * time.Second,
+	}
+	e.client = client
+	e.wireExplicit = cfg.LLM.WireExplicit
+	if client.ExtraHeaders[llm.HeaderComponent] == "" {
+		client.ExtraHeaders[llm.HeaderComponent] = "turn.chat"
+	}
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, _ = client.ListModels(ctx)
+		cancel()
+		client.SyncEffortToModel(client.Model)
+		cfg.LLM.Effort = client.Effort
+		e.applyPreferredWireFromCatalog()
+	}
+	if media := llm.FromClient(client); media != nil && e.pol != nil {
+		e.tools = append(e.tools, tools.MediaTools(e.pol, tools.MediaOptions{})...)
+	}
+	e.chat = func(ctx context.Context, messages []llm.Message, specs []llm.ToolSpec) (llm.Message, error) {
+		e.onTokenMu.Lock()
+		hooks := llm.StreamHooks{OnContent: e.onToken, OnReasoning: e.onReasoning}
+		e.onTokenMu.Unlock()
+		e.mu.Lock()
+		c := cloneRequestClient(e.client, e.runEffort)
+		e.mu.Unlock()
+		msg, err := c.ChatWithStream(ctx, messages, specs, hooks)
+		if err == nil && msg.Usage.InputTokens > 0 {
+			e.mu.Lock()
+			e.lastProviderTokens = msg.Usage.InputTokens
+			e.lastCtxEstimate = 0
+			e.mu.Unlock()
+		}
+		return msg, err
+	}
+	return nil
 }
 
 // cacheTTL maps the configured prompt-cache mode to a wire ttl. Unset means

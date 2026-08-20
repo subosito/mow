@@ -142,6 +142,15 @@ func TestCLIHelp(t *testing.T) {
 				"run `mow help` to list available commands",
 			},
 		},
+		{
+			name:     "reserved leftover is not a prompt",
+			args:     []string{"repl"},
+			wantCode: 2,
+			want: []string{
+				`mow: unknown command "repl"`,
+				"mow run -p",
+			},
+		},
 	}
 
 	for _, tt := range tests {

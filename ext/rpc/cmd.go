@@ -38,7 +38,7 @@ func runCmd(args []string) int {
 	// ("→ bash …"), which a TUI host inherits and which lands on the terminal
 	// outside its frame, corrupting the display. Tool activity reaches the
 	// client as event notifications on stdout instead.
-	eng, err := mow.New(ef.Options())
+	eng, err := mow.New(ef.OptionsDeferLLM())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mow rpc: %v\n", err)
 		return 1

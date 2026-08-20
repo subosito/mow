@@ -436,9 +436,12 @@ session.
 > user can — a coding agent needs `git`, compilers, and toolchains outside the
 > tree. Treat the jail as a guardrail against accidental scope creep and
 > confused-deputy edits, **not** as containment against a hostile model or
-> prompt injection. `bash` is off by default and enabling it (`--allow-shell`)
-> is the real trust decision; for containment, run mow in a container or
-> sandbox with the filesystem restricted at the OS level.
+> prompt injection. `bash` / `proc_start` are off by default. `--allow-shell`
+> is the real trust cliff: those tools are **not path-jailed**. The process
+> runs as you (`cd /; curl | sh` is allowed). File tools stay in the workspace
+> jail; this flag does not. Treat it like root-adjacent, not a sibling of
+> `--allow-write`. For containment, run mow in a container or sandbox with
+> the filesystem restricted at the OS level.
 
 An extra root grants the **same** permissions as the workspace: if `--allow-write`
 is on, files under an extra root are writable too. There is currently no

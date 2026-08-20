@@ -49,7 +49,7 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.Effort, "effort", "", "reasoning effort (catalog efforts when listed; else none|low|medium|high)")
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
 	fs.Var((*stringList)(&f.SystemPrefix), "system-prefix", "system prompt prefix (repeatable)")
-	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash")
+	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash/proc (unsandboxed — not path-jailed)")
 	fs.BoolVar(&f.AllowWrite, "allow-write", false, "enable write/edit")
 	fs.BoolVar(&f.DisallowShell, "disallow-shell", false, "disable bash even when enabled in config")
 	fs.BoolVar(&f.DisallowWrite, "disallow-write", false, "disable write/edit even when enabled in config")
@@ -167,6 +167,14 @@ func (f *EngineFlags) Options() mow.Options {
 			opt.MaxTurns = f.MaxTurns
 		}
 	}
+	return opt
+}
+
+// OptionsDeferLLM is Options with DeferLLM set so New can start without an
+// API key (mow rpc ping/version). The first Prompt still requires credentials.
+func (f *EngineFlags) OptionsDeferLLM() mow.Options {
+	opt := f.Options()
+	opt.DeferLLM = true
 	return opt
 }
 

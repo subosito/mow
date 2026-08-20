@@ -760,12 +760,15 @@ type bashTool struct{ p *policy.Policy }
 func (t *bashTool) Name() string    { return "bash" }
 func (t *bashTool) Untrusted() bool { return true }
 func (t *bashTool) Description() string {
-	return "Run a shell command with cwd=workspace (default timeout 300s). Args: command, " +
-		"optional timeout_sec for slow builds/test suites. For repo search prefer the grep tool " +
-		"(bounded hits). bash rg/find/ls/awk listings are capped — do not reprint them; cite " +
-		"paths and edit. Do NOT start long-lived servers in the foreground, and do NOT nest " +
-		"another full `mow run/goal` inside bash (it will block the tool until timeout). " +
-		"For a smoke server: use proc_start (not bash &); then proc_status / curl / proc_stop."
+	return "Run a shell command with cwd=workspace (default timeout 300s). " +
+		"Requires --allow-shell. Not path-jailed: the process runs as you and " +
+		"can leave the workspace. Args: command, optional timeout_sec for slow " +
+		"builds/test suites. For repo search prefer the grep tool (bounded hits). " +
+		"bash rg/find/ls/awk listings are capped — do not reprint them; cite " +
+		"paths and edit. Do NOT start long-lived servers in the foreground, and " +
+		"do NOT nest another full `mow run/goal` inside bash (it will block the " +
+		"tool until timeout). For a smoke server: use proc_start (not bash &); " +
+		"then proc_status / curl / proc_stop."
 }
 func (t *bashTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"timeout_sec":{"type":"integer","description":"override the default timeout for one slow command (e.g. a full test suite)"}},"required":["command"]}`)

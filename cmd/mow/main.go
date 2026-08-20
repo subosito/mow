@@ -72,8 +72,17 @@ func run(args []string) int {
 		if c, ok := ext.LookupCommand(args[0]); ok {
 			return c.Run(args[1:])
 		}
-		// Free-form args: treat as a prompt, but catch likely subcommand typos first.
+		// Free-form args: treat as a prompt, but catch likely subcommand
+		// typos and reserved/command-shaped leftovers first.
 		if !strings.HasPrefix(args[0], "-") {
+			if reservedCLIToken(args[0]) {
+				fmt.Fprintf(os.Stderr, "mow: unknown command %q\n", args[0])
+				if sug := suggestCommand(args[0]); sug != "" {
+					fmt.Fprintf(os.Stderr, "  did you mean %q?\n", sug)
+				}
+				fmt.Fprintf(os.Stderr, "  for a free-form prompt use: mow run -p %q\n", args[0])
+				return 2
+			}
 			if sug := suggestCommand(args[0]); sug != "" && len(args) == 1 {
 				fmt.Fprintf(os.Stderr, "mow: unknown command %q (did you mean %q?)\n", args[0], sug)
 				fmt.Fprintf(os.Stderr, "  for a free-form prompt use: mow run -p %q\n", args[0])
@@ -123,6 +132,24 @@ func suggestCommand(name string) string {
 		cands = append(cands, c.Name)
 	}
 	return cliutil.SuggestCommand(name, cands)
+}
+
+// reservedCLIToken is a leftover that should never become a free-form prompt:
+// known command family, or a close typo of one (rpc/ops/help/run/…).
+func reservedCLIToken(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return false
+	}
+	switch n {
+	case "run", "tty", "trust", "doctor", "approvals", "version", "help",
+		"rpc", "ops", "repl", "acp", "goal", "review", "sec", "job", "proc":
+		return true
+	}
+	if _, ok := ext.LookupCommand(n); ok {
+		return true
+	}
+	return false
 }
 
 func isTTY() bool {
