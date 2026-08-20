@@ -173,6 +173,28 @@ func TestCLIHelp(t *testing.T) {
 	}
 }
 
+// Engine flags bound in cliutil must also be discoverable from the hand-written
+// help text; --sandbox and --extra-root were bound but undocumented.
+func TestHelpTextListsEngineFlags(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"run help", []string{"run", "-h"}, []string{"--sandbox", "--extra-root", "--allow-shell"}},
+		{"top-level help", []string{"help"}, []string{"--sandbox", "--extra-root", "--allow-shell"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			output, _ := runMow(t, tt.args...)
+			for _, want := range tt.want {
+				if !strings.Contains(output, want) {
+					t.Errorf("help missing %q:\n%s", want, output)
+				}
+			}
+		})
+	}
+}
+
 func runMow(t *testing.T, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(mowBinary, args...)

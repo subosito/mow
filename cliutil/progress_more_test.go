@@ -281,6 +281,7 @@ func TestNewFlagSetUsageAndErrors(t *testing.T) {
 		for _, want := range []string{
 			"--config", "--workspace", "--extra-root", "--model", "--effort",
 			"--base-url", "--system-prefix", "--allow-shell", "--allow-write",
+			"--sandbox",
 			"--max-turns", "--no-session", "--session", "--continue",
 			"--stream", "--verbose",
 		} {

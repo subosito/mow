@@ -547,12 +547,16 @@ Flags:
   -e, --ephemeral      run against resumed context without saving this turn
   --config --workspace --model --base-url
   --allow-shell --allow-write --max-turns --effort --extra-root
+  --sandbox none|bwrap  opt-in bubblewrap jail for bash/proc (Linux;
+                        not a VM, network stays on; only matters with
+                        --allow-shell)
   --stream --verbose --session --continue --no-session
 
 Examples:
 
   mow run -p "summarize this repo"
   mow run -p "fix the tests" --allow-write --allow-shell
+  mow run -p "run the suite" --allow-shell --sandbox bwrap
   mow run --continue -p "try again"
   mow run --continue -e -p "thanks"
 
@@ -625,8 +629,8 @@ Core:
 	}
 	fmt.Fprintf(os.Stderr, `Common flags:
 
-  --config --workspace --model --effort --base-url
-  --allow-shell --allow-write --max-turns --stream --verbose
+  --config --workspace --model --effort --base-url --extra-root
+  --allow-shell --allow-write --sandbox --max-turns --stream --verbose
   --session --continue --no-session
 
 Env:
