@@ -177,6 +177,13 @@ Note that repeating the *same tool calls* is a separate, softer signal: the
 loop injects a nudge message after several identical batches but never stops
 for it. Only the evidence signal hard-stops.
 
+The guards described above (`max_turns`, the evidence/`ErrStuck` backstop,
+context cancel, and the identical-batch nudge) are engine mechanism and live in
+core. The *workflow* heuristics — re-read stubs, inventory caps, the
+destructive-git block, and the explore-only nag — are not: they ship as the
+linked pack `ext/thrash` and can be tuned under `extensions.thrash` or dropped
+entirely by removing its blank import. See docs/extensions.md.
+
 **Hosts:** surface `StopStuck` distinctly from `StopMaxTurns`. They mean
 opposite things — out of an explicitly configured budget vs. out of ideas —
 and a user who sees "stuck"

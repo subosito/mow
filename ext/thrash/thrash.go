@@ -1,4 +1,4 @@
-package agent
+package thrash
 
 import (
 	"encoding/json"
@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-
-	"github.com/subosito/mow/internal/llm"
 )
 
 // Soft exploration helpers — no hard kill on explore streak. Long runs stop on
@@ -19,22 +17,54 @@ import (
 //  4. treat test/build/commit bash as productive (resets explore streak)
 //  5. warn every turn after exploreWarnEvery consecutive explore turns
 //  6. after a successful edit/write, allow one re-read of that path
+//
+// Defaults preserve the pre-move core behavior exactly. Each is overridable
+// via extensions.thrash in config.
 const (
-	exploreWarnEvery = 6
-	rereadLimit      = 1 // second access to same path degrades (runs, capped)
-	inventoryLimit   = 2 // third identical inventory class degrades
-	// hardInventoryLimit is where degrading stops and refusal starts: the
-	// model has already been told twice and repeated the same listing anyway.
-	hardInventoryLimit = 4
-	sameToolWarnAfter  = 3
-	// degradedResultLimit caps a body that only earned a Notice. Big enough
-	// to answer a real question, small enough that a repeat is not free.
-	degradedResultLimit = 2000
+	defaultExploreWarnEvery = 6
+	defaultRereadLimit      = 1 // second access to same path degrades (runs, capped)
+	defaultInventoryLimit   = 2 // third identical inventory class degrades
+	// defaultHardInventoryLimit is where degrading stops and refusal starts:
+	// the model has already been told twice and repeated the listing anyway.
+	defaultHardInventoryLimit = 4
+	// defaultDegradedResultLimit caps a body that only earned a Notice. Big
+	// enough to answer a real question, small enough that a repeat is not free.
+	defaultDegradedResultLimit = 2000
 )
+
+// Config is extensions.thrash. Zero values fall back to the defaults above,
+// so an absent or partial section keeps stock behavior.
+type Config struct {
+	ExploreWarnEvery    int `yaml:"explore_warn_every"`
+	RereadLimit         int `yaml:"reread_limit"`
+	InventoryLimit      int `yaml:"inventory_limit"`
+	HardInventoryLimit  int `yaml:"hard_inventory_limit"`
+	DegradedResultLimit int `yaml:"degraded_result_limit"`
+}
+
+func (c Config) withDefaults() Config {
+	if c.ExploreWarnEvery <= 0 {
+		c.ExploreWarnEvery = defaultExploreWarnEvery
+	}
+	if c.RereadLimit <= 0 {
+		c.RereadLimit = defaultRereadLimit
+	}
+	if c.InventoryLimit <= 0 {
+		c.InventoryLimit = defaultInventoryLimit
+	}
+	if c.HardInventoryLimit <= 0 {
+		c.HardInventoryLimit = defaultHardInventoryLimit
+	}
+	if c.DegradedResultLimit <= 0 {
+		c.DegradedResultLimit = defaultDegradedResultLimit
+	}
+	return c
+}
 
 // thrashState tracks per-Prompt exploration for soft hints only.
 type thrashState struct {
 	mu        sync.Mutex
+	cfg       Config
 	workspace string // absolute; used to unify abs vs relative paths
 	// path → times accessed this Prompt (read tool + bash file views)
 	reads map[string]int
@@ -44,28 +74,35 @@ type thrashState struct {
 	calls map[string]int
 	// consecutive turns whose tools were all explore-only
 	exploreStreak int
+	// per-turn accumulation, folded by closeTurn
+	turnSawAny        bool
+	turnSawProductive bool
+	// tool call id → degrade notice parked between PreTool and PostTool
+	notices map[string]string
 }
 
-func newThrashState(workspace string) *thrashState {
+func newThrashState(workspace string, cfg Config) *thrashState {
 	ws, _ := filepath.Abs(strings.TrimSpace(workspace))
 	return &thrashState{
 		workspace: ws,
+		cfg:       cfg.withDefaults(),
 		reads:     make(map[string]int),
 		inv:       make(map[string]int),
 		calls:     make(map[string]int),
 	}
 }
 
-func isExploreToolCall(tc llm.ToolCall) bool {
-	name := strings.ToLower(strings.TrimSpace(tc.Function.Name))
-	switch name {
+// isExploreToolName classifies one tool call as exploration (surveying) or
+// productive action. Same rules as the pre-move isExploreToolCall, expressed
+// over the PreTool event shape (name + raw args) instead of llm.ToolCall.
+func isExploreToolName(name string, args json.RawMessage) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "read", "glob", "grep":
 		return true
 	case "write", "edit":
 		return false
 	case "bash":
-		cmd := toolArgString(json.RawMessage(tc.Function.Arguments), "command")
-		return isExploreBash(cmd)
+		return isExploreBash(toolArgString(args, "command"))
 	default:
 		// Custom tools (media, acp_delegate, …) count as productive action.
 		return false
@@ -129,31 +166,6 @@ func isDestructiveBash(cmd string) bool {
 
 var reDestructiveRM = regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-rf|-fr)\b`)
 
-func batchExploreOnly(calls []llm.ToolCall) bool {
-	if len(calls) == 0 {
-		return false
-	}
-	for _, tc := range calls {
-		if !isExploreToolCall(tc) {
-			return false
-		}
-	}
-	return true
-}
-
-// noteTurn updates explore streak. After exploreWarnEvery, warns every turn.
-func (s *thrashState) noteTurn(calls []llm.ToolCall) (warn bool) {
-	if s == nil {
-		return false
-	}
-	if !batchExploreOnly(calls) {
-		s.exploreStreak = 0
-		return false
-	}
-	s.exploreStreak++
-	return s.exploreStreak >= exploreWarnEvery
-}
-
 func (s *thrashState) maybeDedupeRead(args json.RawMessage) (string, bool) {
 	if s == nil {
 		return "", false
@@ -203,14 +215,14 @@ func (s *thrashState) guardBash(args json.RawMessage) bashGuard {
 		s.inv[key] = n + 1
 		s.mu.Unlock()
 		switch {
-		case n >= hardInventoryLimit:
+		case n >= s.cfg.HardInventoryLimit:
 			return bashGuard{Block: fmt.Sprintf(
 				"(inventory %q already ran %d times this prompt and was already warned — "+
 					"refusing to re-list the tree. Act with edit/write, or finish with a "+
 					"concrete blocker.)",
 				key, n+1,
 			)}
-		case n >= inventoryLimit:
+		case n >= s.cfg.InventoryLimit:
 			return bashGuard{Notice: fmt.Sprintf(
 				"(note: inventory %q already ran %d times this prompt — output capped. "+
 					"Prefer grep/glob/read for targeted lookups, and act with edit/write "+
@@ -235,7 +247,7 @@ func (s *thrashState) guardBash(args json.RawMessage) bashGuard {
 		n := s.reads[key]
 		s.reads[key] = n + 1
 		s.mu.Unlock()
-		if n < rereadLimit {
+		if n < s.cfg.RereadLimit {
 			allSeen = false
 		}
 	}
@@ -256,11 +268,11 @@ func (s *thrashState) guardBash(args json.RawMessage) bashGuard {
 // degradeToolResult caps a body that only earned a Notice, then prefixes the
 // nudge. Capping is what makes "run it anyway" affordable: the model still
 // gets the head of the real answer without paying full context for a repeat.
-func degradeToolResult(notice, out string) string {
+func (s *thrashState) degradeToolResult(notice, out string) string {
 	if notice == "" {
 		return out
 	}
-	out = TruncateToolResult(out, degradedResultLimit)
+	out = truncate(out, s.cfg.DegradedResultLimit)
 	if strings.TrimSpace(out) == "" {
 		return notice
 	}
@@ -276,7 +288,7 @@ func (s *thrashState) notePathAccess(path string) (string, bool) {
 	n := s.reads[key]
 	s.reads[key] = n + 1
 	s.mu.Unlock()
-	if n < rereadLimit {
+	if n < s.cfg.RereadLimit {
 		return "", false
 	}
 	return fmt.Sprintf(
@@ -666,13 +678,5 @@ func exploreWarnMessage(streak int) string {
 			"Stop surveying — next tools MUST be edit or write (or finish with a concrete blocker). "+
 			"Re-listing and re-catting the same tree will be stubbed. Soft signal; run continues but act now.",
 		streak,
-	)
-}
-
-func sameToolWarnMessage(n int) string {
-	return fmt.Sprintf(
-		"You repeated the same tool call(s) %d times. Change args, act (edit/write), or finish — "+
-			"the run is not stopped; avoid tight loops.",
-		n,
 	)
 }

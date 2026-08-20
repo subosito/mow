@@ -28,6 +28,7 @@ import (
 	_ "github.com/subosito/mow/ext/media"
 	_ "github.com/subosito/mow/ext/proc"
 	_ "github.com/subosito/mow/ext/rpc"
+	_ "github.com/subosito/mow/ext/thrash"
 	_ "github.com/subosito/mow/packs/contextsink"
 	_ "github.com/subosito/mow/packs/goal"
 	_ "github.com/subosito/mow/packs/job"

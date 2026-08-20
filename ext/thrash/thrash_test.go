@@ -1,4 +1,4 @@
-package agent_test
+package thrash_test
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/llm"
+
+	"github.com/subosito/mow/ext/thrash"
 )
 
 type readOnceTool struct {
@@ -49,11 +51,13 @@ func TestRereadShortCircuit(t *testing.T) {
 			}},
 		}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	opt := agent.Options{
 		MaxTurns:         10,
 		MaxParallelTools: 1,
 		Tools:            []agent.Tool{rt},
-	})
+	}
+	thrash.InstallForTest(&opt, thrash.Config{})
+	res, err := agent.Run(context.Background(), chat, "hi", opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,17 +119,19 @@ func TestRereadAllowedAfterEdit(t *testing.T) {
 		return llm.Message{
 			Role: "assistant",
 			ToolCalls: []llm.ToolCall{{
-				ID:   fmt.Sprintf("c%d", n),
-				Type: "function",
+				ID:       fmt.Sprintf("c%d", n),
+				Type:     "function",
 				Function: llm.FunctionCall{Name: c.name, Arguments: c.args},
 			}},
 		}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	opt := agent.Options{
 		MaxTurns:         10,
 		MaxParallelTools: 1,
 		Tools:            []agent.Tool{rt, et},
-	})
+	}
+	thrash.InstallForTest(&opt, thrash.Config{})
+	res, err := agent.Run(context.Background(), chat, "hi", opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,34 +168,3 @@ func TestRereadAllowedAfterEdit(t *testing.T) {
 }
 
 // Unlimited MaxTurns must not hit a silent safety cap — loop until the model finishes.
-func TestUnlimitedRunsUntilDone(t *testing.T) {
-	n := 0
-	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
-		n++
-		if n > 60 {
-			return llm.Message{Role: "assistant", Content: "done"}, nil
-		}
-		return llm.Message{
-			Role: "assistant",
-			ToolCalls: []llm.ToolCall{{
-				ID:   fmt.Sprintf("c%d", n),
-				Type: "function",
-				Function: llm.FunctionCall{
-					Name:      "echo",
-					Arguments: fmt.Sprintf(`{"text":"%d"}`, n),
-				},
-			}},
-		}, nil
-	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
-		MaxTurns:         0, // unlimited
-		MaxParallelTools: 1,
-		Tools:            []agent.Tool{echoTool{}},
-	})
-	if err != nil {
-		t.Fatalf("unlimited should not error: %v", err)
-	}
-	if res.Text != "done" || n != 61 {
-		t.Fatalf("text=%q n=%d", res.Text, n)
-	}
-}

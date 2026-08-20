@@ -145,6 +145,23 @@ type AfterTurnEvent struct {
 // AfterTurnFunc runs after each LLM turn (tools may still follow).
 type AfterTurnFunc func(ctx context.Context, e AfterTurnEvent)
 
+// AfterTurnDecision lets a deciding after-turn hook inject guidance for the
+// next LLM call. A struct (not a bare string) so the seam stays extensible.
+//
+// Inject, when non-empty, is appended to history as a synthetic user message
+// before the next LLM call. The loop owns the framing: a hook supplies text
+// only, never a Message. Forging assistant/tool roles would break tool_call
+// pairing (providers 400 on orphans) and Rewind's synthetic-skip invariant.
+type AfterTurnDecision struct {
+	Inject string
+}
+
+// AfterTurnDecisionFunc is the deciding form of AfterTurnFunc: same event, but
+// it may return text to inject before the next turn. It is a sibling hook
+// rather than a signature change to AfterTurnFunc, which is re-exported
+// publicly and must not break external observers.
+type AfterTurnDecisionFunc func(ctx context.Context, e AfterTurnEvent) (AfterTurnDecision, error)
+
 // StopEvent is emitted when Prompt returns (success or error).
 type StopEvent struct {
 	Text      string
@@ -205,6 +222,7 @@ var (
 	preCompact       []hookEntry[PreCompactFunc]
 	preModel         []hookEntry[PreModelFunc]
 	afterTurn        []hookEntry[AfterTurnFunc]
+	afterTurnDecide  []hookEntry[AfterTurnDecisionFunc]
 	stop             []hookEntry[StopFunc]
 
 	extInstances map[string]*ExtensionState
@@ -568,6 +586,20 @@ func RegisterAfterTurnSource(source string, fn AfterTurnFunc) {
 	afterTurn = append(afterTurn, hookEntry[AfterTurnFunc]{fn: fn, gen: currentRegGen(), source: source})
 }
 
+// RegisterAfterTurnDecision appends a global deciding after-turn hook.
+func RegisterAfterTurnDecision(fn AfterTurnDecisionFunc) { RegisterAfterTurnDecisionSource("", fn) }
+
+// RegisterAfterTurnDecisionSource is RegisterAfterTurnDecision with a pack
+// source id.
+func RegisterAfterTurnDecisionSource(source string, fn AfterTurnDecisionFunc) {
+	if fn == nil {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	afterTurnDecide = append(afterTurnDecide, hookEntry[AfterTurnDecisionFunc]{fn: fn, gen: currentRegGen(), source: source})
+}
+
 // RegisterStop appends a global stop hook (after Prompt finishes).
 func RegisterStop(fn StopFunc) { RegisterStopSource("", fn) }
 
@@ -703,6 +735,21 @@ func AfterTurnHooksForEngine(loadUserConfig bool) []AfterTurnFunc {
 	mu.Lock()
 	defer mu.Unlock()
 	return collectHooks(afterTurn, loadUserConfig, true)
+}
+
+// AfterTurnDecisionHooks returns every registered deciding after-turn hook.
+func AfterTurnDecisionHooks() []AfterTurnDecisionFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(afterTurnDecide, true, false)
+}
+
+// AfterTurnDecisionHooksForEngine is the Engine-scoped filter for deciding
+// after-turn hooks.
+func AfterTurnDecisionHooksForEngine(loadUserConfig bool) []AfterTurnDecisionFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(afterTurnDecide, loadUserConfig, true)
 }
 
 // StopHooks returns every registered stop hook.

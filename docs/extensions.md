@@ -465,3 +465,52 @@ Media ships as the linked pack `ext/media` (blank-import, like `acp`/`mcp`/
 `proc`). Each tool registers only when its model id is configured under
 `llm.generate.*` / `llm.understand.*`; `tools.enable` still gates visibility.
 acks.
+
+## Explore guards (`ext/thrash`)
+
+The soft anti-thrash heuristics are a linked pack, not core loop behavior.
+Blank-importing `ext/thrash` (the stock `mow` binary does) installs:
+
+1. re-read stubs — the same unchanged path via `read`, or `bash cat/sed/head/tail`
+2. inventory caps — repeated `git status`/`ls`/`find`/`rg` degrade, then refuse
+3. a soft block on destructive `git`/`rm` that would discard uncommitted work
+4. productive bash (`go test`, `go build`, `git commit`, …) resets the streak
+5. a nag after N consecutive explore-only turns
+
+Remove the import and every one of them disappears with no residue in the
+loop. The engine's own guards — `MaxTurns`, context cancel, `ErrStuck`, and the
+identical-tool-call nudge in `internal/agent/repeat.go` — stay in core: those
+are mechanism, not workflow opinion.
+
+Tunable under `extensions.thrash` (defaults reproduce the pre-move behavior):
+
+```yaml
+extensions:
+  thrash:
+    explore_warn_every: 6      # nag after N explore-only turns
+    reread_limit: 1            # re-reads of an unchanged path before stubbing
+    inventory_limit: 2         # inventory calls before results degrade
+    hard_inventory_limit: 4    # inventory calls before refusal
+    degraded_result_limit: 2000 # cap (chars) on a degraded result body
+```
+
+A malformed section falls back to defaults rather than failing Engine
+construction — the guards are an advisory lane, not a gate.
+
+### Hooks it rides on
+
+The pack uses `PreTool` (deny + stub message), `PostTool` (rewrite the result
+body), and `AfterTurnDecide`. The last is the deciding form of the after-turn
+hook:
+
+```go
+type AfterTurnDecisionFunc func(ctx context.Context, e AfterTurnEvent) (AfterTurnDecision, error)
+```
+
+`AfterTurnDecision.Inject`, when non-empty, is appended to history as a
+synthetic user message before the next LLM call. It is a *sibling* of the
+observer `AfterTurnFunc`, which keeps its signature — existing observers are
+unaffected. A hook supplies text only, never a `Message`: the loop owns the
+framing so an extension cannot forge assistant/tool roles and break tool_call
+pairing. Multiple hooks compose by ordered concatenation.
+

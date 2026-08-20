@@ -145,51 +145,13 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	// Re-read short-circuit: do not re-dump the same file into context
-	// (read tool and bash cat/sed/head/tail of already-seen paths).
-	if name == "read" {
-		if stub, ok := opt.thrash.maybeDedupeRead(args); ok {
-			return toolSlot{
-				ok: true,
-				msg: llm.Message{
-					Role:       "tool",
-					ToolCallID: tc.ID,
-					Name:       name,
-					Content:    stub,
-				},
-			}
-		}
-	}
-	var bashNotice string
-	if name == "bash" {
-		guard := opt.thrash.guardBash(args)
-		if guard.blocked() {
-			return toolSlot{
-				ok: true,
-				msg: llm.Message{
-					Role:       "tool",
-					ToolCallID: tc.ID,
-					Name:       name,
-					Content:    guard.Block,
-				},
-			}
-		}
-		// Repetition alone does not refuse the call: run it, then cap the
-		// body and prepend the nudge below.
-		bashNotice = guard.Notice
-	}
-	out, err := runTool(ctx, tool, name, tc.ID, args, opt.Hooks)
+	out, err := runTool(ctx, tool, name, tc.ID, args, opt.Hooks, func(s string) string {
+		s = TruncateToolResult(s, toolResultLimit(opt))
+		return frameUntrustedResult(tool, name, s, opt.UntrustedNonce)
+	})
 	if err != nil && !errors.Is(err, ErrDone) {
 		return toolSlot{hard: err}
 	}
-	// Successful edit/write changed the file — allow one re-read of that path.
-	if err == nil && (name == "edit" || name == "write") {
-		opt.thrash.forgetPath(toolArgString(args, "path"))
-	}
-	out = TruncateToolResult(out, toolResultLimit(opt))
-	out = frameUntrustedResult(tool, name, out, opt.UntrustedNonce)
-	out = degradeToolResult(bashNotice, out)
-	out = opt.thrash.annotateRepeat(name, args, out)
 	return toolSlot{
 		ok:   true,
 		done: errors.Is(err, ErrDone),
@@ -289,7 +251,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 // runTool applies PreTool → Exec (or deny) → PostTool and returns the model-visible result.
 // A non-nil error aborts the whole agent Run (hook hard-fail or parent ctx done).
 // Tool timeouts that leave parent ctx alive stay soft (model-visible error string).
-func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawMessage, hooks Hooks) (string, error) {
+func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawMessage, hooks Hooks, finalize func(string) string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -348,6 +310,14 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 
 	if extra != "" {
 		out = extra + "\n" + out
+	}
+
+	// Finalize (truncate + untrusted framing) BEFORE post-tool hooks so a
+	// hook that annotates or caps a body operates on exactly what the model
+	// will see — and its note lands outside the untrusted wrapper, not inside
+	// it. Denied calls skip this: the deny text is ours, not tool output.
+	if !denied && finalize != nil {
+		out = finalize(out)
 	}
 
 	dur := time.Since(start)

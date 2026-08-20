@@ -96,6 +96,28 @@ type AfterTurnEvent struct {
 // AfterTurnFunc runs after each LLM turn (tools may still follow).
 type AfterTurnFunc func(ctx context.Context, e AfterTurnEvent)
 
+// AfterTurnDecision lets an after-turn hook inject guidance for the model.
+//
+// A struct (not a bare string) so the seam stays extensible without breaking
+// implementors again.
+type AfterTurnDecision struct {
+	// Inject, when non-empty, is appended to history as a synthetic user
+	// message before the next LLM call. The loop owns the framing: a hook
+	// supplies text only, never a Message. Forging assistant/tool roles would
+	// break tool_call pairing (providers 400 on orphans) and Rewind's
+	// synthetic-skip invariant.
+	Inject string
+}
+
+// AfterTurnDecisionFunc is the deciding form of AfterTurnFunc: same event, but
+// it may return text to inject. It is a sibling hook rather than a change to
+// AfterTurnFunc because that type is re-exported publicly (mow.AfterTurnFunc)
+// and external observers must not break. Mirrors PreModelFunc / PreCompactFunc,
+// which already return decisions.
+//
+// Returning an error aborts the whole Run.
+type AfterTurnDecisionFunc func(ctx context.Context, e AfterTurnEvent) (AfterTurnDecision, error)
+
 // PreModelEvent is emitted immediately before each LLM call.
 //
 // This is the loop's only gate on the model call itself. Tools have had
@@ -150,4 +172,6 @@ type Hooks struct {
 	PreCompact   []PreCompactFunc
 	AfterCompact []AfterCompactFunc
 	AfterTurn    []AfterTurnFunc
+	// AfterTurnDecide runs after AfterTurn observers and may inject text.
+	AfterTurnDecide []AfterTurnDecisionFunc
 }

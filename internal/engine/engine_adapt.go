@@ -109,6 +109,19 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 				fn(ctx, ext.AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
 			})
 		}
+		// Deciding form: may return text the loop injects before the next
+		// call. Kept separate from the observers above so an observer can
+		// never influence history.
+		for _, fn := range ext.AfterTurnDecisionHooksForEngine(loadUser) {
+			fn := fn
+			h.AfterTurnDecide = append(h.AfterTurnDecide, func(ctx context.Context, e agent.AfterTurnEvent) (agent.AfterTurnDecision, error) {
+				d, err := fn(ctx, ext.AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
+				if err != nil {
+					return agent.AfterTurnDecision{}, err
+				}
+				return agent.AfterTurnDecision{Inject: d.Inject}, nil
+			})
+		}
 	}
 	for _, fn := range hooks.OnAfterTurn {
 		fn := fn

@@ -95,8 +95,7 @@ type Options struct {
 	// MaxParallelTools caps concurrent Exec in one assistant tool batch.
 	// 0 → DefaultMaxParallelTools; 1 → sequential (legacy).
 	MaxParallelTools int
-	// Workspace is the project root (absolute preferred). Used by thrash
-	// guards to unify absolute vs relative path re-reads.
+	// Workspace is the project root (absolute preferred).
 	Workspace string
 	// Steer, when set, is called at each turn boundary (after a tool batch,
 	// before the next LLM call). Any returned strings are appended as user
@@ -110,9 +109,6 @@ type Options struct {
 	// UntrustedSource) in <untrusted-output nonce=…> before history. Empty
 	// still frames named external tools without the forgery guard.
 	UntrustedNonce string
-
-	// thrash is set by Run for explore-loop / re-read guards (internal).
-	thrash *thrashState
 }
 
 // Result is the final assistant text and message history.
@@ -189,7 +185,6 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	var (
 		lastToolFP string
 		sameToolFP int
-		thrash     = newThrashState(opt.Workspace)
 		calib      = newRatioCalibrator()
 		evidence   = newEvidenceSet()
 		barrenRuns int
@@ -210,8 +205,6 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	for _, ts := range toolSpecs {
 		toolChars += len(ts.Function.Name) + len(ts.Function.Description) + len(ts.Function.Parameters) + 16
 	}
-	opt.thrash = thrash
-
 	for turn := 0; maxTurns <= 0 || turn < maxTurns; turn++ {
 		ctx = context.WithValue(ctx, "mow.turn", turn+1)
 		if err := ctx.Err(); err != nil {
@@ -382,8 +375,6 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			lastToolFP = fp
 			sameToolFP = 1
 		}
-		exploreWarn := thrash.noteTurn(msg.ToolCalls)
-
 		toolMsgs, err := runToolBatch(ctx, msg.ToolCalls, byName, opt)
 		// Every advertised tool_call must have a matching tool result or the
 		// history is unreplayable (providers 400 on orphaned tool_calls).
@@ -425,16 +416,41 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		// Soft hints only — after tool results so message order stays valid.
 		// Synthetic: these are host nudges, not the user's prompt — Rewind
 		// (edit/retry/↑) must skip them.
+		//
+		// Deciding after-turn hooks run here, not next to the AfterTurn
+		// observers above: a hook that judges the turn's tool use (explore
+		// guards) must see the tool calls resolve first. Multiple hooks
+		// compose by ordered concatenation of non-empty Inject strings.
+		turnInject := ""
+		for _, h := range opt.Hooks.AfterTurnDecide {
+			if h == nil {
+				continue
+			}
+			d, err := h(ctx, AfterTurnEvent{
+				AssistantText: msg.Content,
+				HasToolCalls:  len(msg.ToolCalls) > 0,
+			})
+			if err != nil {
+				return Result{Messages: messages, Usage: usage}, err
+			}
+			if d.Inject == "" {
+				continue
+			}
+			if turnInject != "" {
+				turnInject += "\n\n"
+			}
+			turnInject += d.Inject
+		}
 		if sameToolFP >= sameToolWarnAfter {
 			messages = append(messages, llm.Message{
 				Role:      "user",
 				Content:   sameToolWarnMessage(sameToolFP),
 				Synthetic: true,
 			})
-		} else if exploreWarn {
+		} else if turnInject != "" {
 			messages = append(messages, llm.Message{
 				Role:      "user",
-				Content:   exploreWarnMessage(thrash.exploreStreak),
+				Content:   turnInject,
 				Synthetic: true,
 			})
 		}
