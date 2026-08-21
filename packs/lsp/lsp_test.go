@@ -10,9 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/subosito/mow/internal/config"
 )
+
+// envHome mirrors config.EnvHome. packs/ is the public-API tier and must not
+// import internal/… — see docs/extensions.md. One string literal is cheaper
+// than exporting a constant for a test.
+const envHome = "MOW_HOME"
 
 func TestPathToURI(t *testing.T) {
 	cases := []struct{ in, want string }{
@@ -158,7 +161,7 @@ func TestClientCallSkipsNotifications(t *testing.T) {
 
 func TestRegisterAllNoConfigIsNoop(t *testing.T) {
 	// No extensions.lsp and no $MOW_HOME/lsp.yaml → clean no-op (no server spawn).
-	t.Setenv(config.EnvHome, t.TempDir())
+	t.Setenv(envHome, t.TempDir())
 	if err := registerAll(); err != nil {
 		t.Fatalf("unconfigured registerAll should be a no-op, got %v", err)
 	}
@@ -166,7 +169,7 @@ func TestRegisterAllNoConfigIsNoop(t *testing.T) {
 
 func TestRegisterAllYAMLFallbackMissing(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv(config.EnvHome, dir)
+	t.Setenv(envHome, dir)
 	// A present-but-empty lsp.yaml (no command) is still a no-op, not an error.
 	if err := os.WriteFile(filepath.Join(dir, "lsp.yaml"), []byte("args: [x]\n"), 0o644); err != nil {
 		t.Fatal(err)

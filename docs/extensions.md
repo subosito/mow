@@ -466,6 +466,43 @@ Media ships as the linked pack `ext/media` (blank-import, like `acp`/`mcp`/
 `llm.generate.*` / `llm.understand.*`; `tools.enable` still gates visibility.
 acks.
 
+## Two tiers: `ext/` and `packs/`
+
+Both tiers register the same way (blank import + `ext.Register*`) and both
+detach the same way — delete one line from `cmd/mow/main.go` and the feature is
+gone from the binary. That *link* boundary is what keeps core lean, and it is
+the only property a pack must have.
+
+They differ in what they may depend on:
+
+| | `ext/` | `packs/` |
+|---|---|---|
+| Module | root | separate (`packs/go.mod`) |
+| May import `internal/…` | **yes** — privileged first-party | **no** — public API only |
+| Maintained | in lockstep with core | as an API consumer |
+| Detach | one blank import | one blank import |
+
+`ext/` is **privileged first-party code that happens to be optionally linked**,
+not a public plugin surface. Being in `ext/` is not a promise the pack could
+move to `packs/`. `ext/acp` and `ext/media` reach into `internal/` by design:
+media needs the path-jail policy and the media HTTP client, which are
+mid-evolution internals with no public contract.
+
+This is deliberate. A same-module `internal/` import pins first-party code that
+can be updated in the same commit. Exporting those types to make a pack "pure"
+pins them for every future consumer, forever — the worse of the two pins, and
+there is no versioning story for it (`packs/` consumes the root module at
+`v0.0.0` through a `replace`). Do not export internals to prove a boundary;
+export them when a second real consumer needs them.
+
+`packs/` is the tier with the actual API contract, and that rule should be kept
+true. It is convention, not compiler-enforced: Go's `internal/` rule is
+import-path-prefix based, and `packs/` sits under `github.com/subosito/mow/`,
+so the import compiles. Treat an `internal/` import from `packs/` as a bug.
+
+When adding a pack: default to `packs/`. Use `ext/` only when it genuinely needs
+core internals, and keep that surface narrow.
+
 ## Explore guards (`ext/thrash`)
 
 The soft anti-thrash heuristics are a linked pack, not core loop behavior.
