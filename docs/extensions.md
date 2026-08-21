@@ -503,10 +503,10 @@ so the import compiles. Treat an `internal/` import from `packs/` as a bug.
 When adding a pack: default to `packs/`. Use `ext/` only when it genuinely needs
 core internals, and keep that surface narrow.
 
-## Explore guards (`ext/thrash`)
+## Explore guards (`ext/focus`)
 
 The soft anti-thrash heuristics are a linked pack, not core loop behavior.
-Blank-importing `ext/thrash` (the stock `mow` binary does) installs:
+Blank-importing `ext/focus` (the stock `mow` binary does) installs:
 
 1. re-read stubs — the same unchanged path via `read`, or `bash cat/sed/head/tail`
 2. inventory caps — repeated `git status`/`ls`/`find`/`rg` degrade, then refuse
@@ -519,11 +519,11 @@ loop. The engine's own guards — `MaxTurns`, context cancel, `ErrStuck`, and th
 identical-tool-call nudge in `internal/agent/repeat.go` — stay in core: those
 are mechanism, not workflow opinion.
 
-Tunable under `extensions.thrash` (defaults reproduce the pre-move behavior):
+Tunable under `extensions.focus` (defaults reproduce the pre-move behavior):
 
 ```yaml
 extensions:
-  thrash:
+  focus:
     explore_warn_every: 6      # nag after N explore-only turns
     reread_limit: 1            # re-reads of an unchanged path before stubbing
     inventory_limit: 2         # inventory calls before results degrade

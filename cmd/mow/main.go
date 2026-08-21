@@ -24,11 +24,11 @@ import (
 	// Remove an import to drop that pack (and its subcommand) from this binary.
 	_ "github.com/subosito/mow/ext/acp"
 	_ "github.com/subosito/mow/ext/cmdhook"
+	_ "github.com/subosito/mow/ext/focus"
 	_ "github.com/subosito/mow/ext/mcp"
 	_ "github.com/subosito/mow/ext/media"
 	_ "github.com/subosito/mow/ext/proc"
 	_ "github.com/subosito/mow/ext/rpc"
-	_ "github.com/subosito/mow/ext/thrash"
 	_ "github.com/subosito/mow/packs/contextsink"
 	_ "github.com/subosito/mow/packs/goal"
 	_ "github.com/subosito/mow/packs/job"

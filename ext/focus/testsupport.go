@@ -1,4 +1,4 @@
-package thrash
+package focus
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 //
 // Exported (not _test.go) so the engine-level e2e can use it too.
 func InstallForTest(opt *agent.Options, cfg Config) {
-	st := newThrashState(opt.Workspace, cfg)
+	st := newFocusState(opt.Workspace, cfg)
 
 	opt.Hooks.PreTool = append(opt.Hooks.PreTool, func(ctx context.Context, e agent.PreToolEvent) (agent.PreToolDecision, error) {
 		d, err := preTool(st, ctx, e.Name, e.Args, e.ToolCallID)

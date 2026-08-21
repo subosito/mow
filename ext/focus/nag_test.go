@@ -1,4 +1,4 @@
-package thrash_test
+package focus_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/subosito/mow/ext/thrash"
+	"github.com/subosito/mow/ext/focus"
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/llm"
 )
@@ -51,7 +51,7 @@ func runExploreTurns(t *testing.T, turns int, install bool) []string {
 	}
 	opt := agent.Options{MaxTurns: turns + 2, MaxParallelTools: 1, Tools: []agent.Tool{&lsTool{}}}
 	if install {
-		thrash.InstallForTest(&opt, thrash.Config{})
+		focus.InstallForTest(&opt, focus.Config{})
 	}
 	res, err := agent.Run(context.Background(), chat, "hi", opt)
 	if err != nil {

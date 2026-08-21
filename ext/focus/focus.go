@@ -1,4 +1,4 @@
-package thrash
+package focus
 
 import (
 	"encoding/json"
@@ -19,7 +19,7 @@ import (
 //  6. after a successful edit/write, allow one re-read of that path
 //
 // Defaults preserve the pre-move core behavior exactly. Each is overridable
-// via extensions.thrash in config.
+// via extensions.focus in config.
 const (
 	defaultExploreWarnEvery = 6
 	defaultRereadLimit      = 1 // second access to same path degrades (runs, capped)
@@ -32,7 +32,7 @@ const (
 	defaultDegradedResultLimit = 2000
 )
 
-// Config is extensions.thrash. Zero values fall back to the defaults above,
+// Config is extensions.focus. Zero values fall back to the defaults above,
 // so an absent or partial section keeps stock behavior.
 type Config struct {
 	ExploreWarnEvery    int `yaml:"explore_warn_every"`
@@ -61,8 +61,8 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// thrashState tracks per-Prompt exploration for soft hints only.
-type thrashState struct {
+// focusState tracks per-Prompt exploration for soft hints only.
+type focusState struct {
 	mu        sync.Mutex
 	cfg       Config
 	workspace string // absolute; used to unify abs vs relative paths
@@ -81,9 +81,9 @@ type thrashState struct {
 	notices map[string]string
 }
 
-func newThrashState(workspace string, cfg Config) *thrashState {
+func newFocusState(workspace string, cfg Config) *focusState {
 	ws, _ := filepath.Abs(strings.TrimSpace(workspace))
-	return &thrashState{
+	return &focusState{
 		workspace: ws,
 		cfg:       cfg.withDefaults(),
 		reads:     make(map[string]int),
@@ -166,7 +166,7 @@ func isDestructiveBash(cmd string) bool {
 
 var reDestructiveRM = regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-rf|-fr)\b`)
 
-func (s *thrashState) maybeDedupeRead(args json.RawMessage) (string, bool) {
+func (s *focusState) maybeDedupeRead(args json.RawMessage) (string, bool) {
 	if s == nil {
 		return "", false
 	}
@@ -196,7 +196,7 @@ func (g bashGuard) blocked() bool { return g.Block != "" }
 
 // guardBash classifies a bash call: destructive → block, repeated inventory or
 // re-view → degrade (run, cap, nudge), repeated past the hard limit → block.
-func (s *thrashState) guardBash(args json.RawMessage) bashGuard {
+func (s *focusState) guardBash(args json.RawMessage) bashGuard {
 	if s == nil {
 		return bashGuard{}
 	}
@@ -268,7 +268,7 @@ func (s *thrashState) guardBash(args json.RawMessage) bashGuard {
 // degradeToolResult caps a body that only earned a Notice, then prefixes the
 // nudge. Capping is what makes "run it anyway" affordable: the model still
 // gets the head of the real answer without paying full context for a repeat.
-func (s *thrashState) degradeToolResult(notice, out string) string {
+func (s *focusState) degradeToolResult(notice, out string) string {
 	if notice == "" {
 		return out
 	}
@@ -279,7 +279,7 @@ func (s *thrashState) degradeToolResult(notice, out string) string {
 	return notice + "\n\n" + out
 }
 
-func (s *thrashState) notePathAccess(path string) (string, bool) {
+func (s *focusState) notePathAccess(path string) (string, bool) {
 	key := s.pathKey(path)
 	if key == "" {
 		return "", false
@@ -300,7 +300,7 @@ func (s *thrashState) notePathAccess(path string) (string, bool) {
 
 // forgetPath clears the re-read stub so the next read/cat of this path is
 // allowed. Call after a successful edit/write — the on-disk contents changed.
-func (s *thrashState) forgetPath(path string) {
+func (s *focusState) forgetPath(path string) {
 	if s == nil {
 		return
 	}
@@ -313,7 +313,7 @@ func (s *thrashState) forgetPath(path string) {
 	s.mu.Unlock()
 }
 
-func (s *thrashState) pathKey(p string) string {
+func (s *focusState) pathKey(p string) string {
 	p = strings.TrimSpace(p)
 	p = strings.Trim(p, `"'`)
 	if p == "" || p == "." || p == ".." {
@@ -619,7 +619,7 @@ func skipFlags(fields []string, i int, valueFlags map[string]bool) int {
 	return i
 }
 
-func (s *thrashState) annotateRepeat(name string, args json.RawMessage, out string) string {
+func (s *focusState) annotateRepeat(name string, args json.RawMessage, out string) string {
 	if s == nil || name == "read" {
 		return out
 	}

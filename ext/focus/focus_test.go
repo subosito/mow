@@ -1,4 +1,4 @@
-package thrash_test
+package focus_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/llm"
 
-	"github.com/subosito/mow/ext/thrash"
+	"github.com/subosito/mow/ext/focus"
 )
 
 type readOnceTool struct {
@@ -56,7 +56,7 @@ func TestRereadShortCircuit(t *testing.T) {
 		MaxParallelTools: 1,
 		Tools:            []agent.Tool{rt},
 	}
-	thrash.InstallForTest(&opt, thrash.Config{})
+	focus.InstallForTest(&opt, focus.Config{})
 	res, err := agent.Run(context.Background(), chat, "hi", opt)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestRereadAllowedAfterEdit(t *testing.T) {
 		MaxParallelTools: 1,
 		Tools:            []agent.Tool{rt, et},
 	}
-	thrash.InstallForTest(&opt, thrash.Config{})
+	focus.InstallForTest(&opt, focus.Config{})
 	res, err := agent.Run(context.Background(), chat, "hi", opt)
 	if err != nil {
 		t.Fatal(err)

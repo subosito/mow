@@ -1,4 +1,4 @@
-// Package thrash is the explore-guard pack: soft heuristics that keep a run
+// Package focus is the explore-guard pack: soft heuristics that keep a run
 // from burning turns re-reading, re-listing, and surveying instead of acting.
 //
 // These were compiled into the agent loop until they were moved here. They are
@@ -15,10 +15,10 @@
 //  5. nag every turn after N consecutive explore-only turns
 //  6. after a successful edit/write, allow one re-read of that path
 //
-// Config: extensions.thrash (explore_warn_every, reread_limit, inventory_limit,
+// Config: extensions.focus (explore_warn_every, reread_limit, inventory_limit,
 // hard_inventory_limit, degraded_result_limit). Defaults reproduce the exact
 // pre-move core behavior.
-package thrash
+package focus
 
 import (
 	"context"
@@ -34,14 +34,14 @@ import (
 
 // hookSource tags this pack's hooks so a re-registration on a later BeforeNew
 // replaces the previous generation instead of stacking duplicates.
-const hookSource = "thrash"
+const hookSource = "focus"
 
 // state is per-Engine. BeforeNew fires once per Engine construction, so a
 // fresh streak/read/inventory ledger is installed for each run rather than
 // leaking counts across engines in the same process.
 var (
 	mu  sync.Mutex
-	cur *thrashState
+	cur *focusState
 )
 
 func init() {
@@ -54,7 +54,7 @@ func setup(configPaths ...string) error {
 	var cfg Config
 	// A malformed section must not abort Engine construction: the guards are
 	// an advisory lane. Fall back to defaults and stay linked.
-	if _, err := extcfg.DecodeSection("thrash", configPaths, &cfg); err != nil {
+	if _, err := extcfg.DecodeSection("focus", configPaths, &cfg); err != nil {
 		cfg = Config{}
 	}
 
@@ -62,7 +62,7 @@ func setup(configPaths ...string) error {
 	// in the re-read ledger. The process cwd is the run's workspace; if it is
 	// unavailable the ledger simply falls back to literal path matching.
 	ws, _ := os.Getwd()
-	st := newThrashState(ws, cfg)
+	st := newFocusState(ws, cfg)
 
 	mu.Lock()
 	cur = st
@@ -74,7 +74,7 @@ func setup(configPaths ...string) error {
 }
 
 // register installs the four seams this pack rides on.
-func register(st *thrashState) {
+func register(st *focusState) {
 	// PreTool: re-read stub (read) and the bash guard (destructive / repeated
 	// inventory past the hard limit). Both surface as Deny + Message; the
 	// message IS the stub the model sees.
@@ -107,7 +107,7 @@ func register(st *thrashState) {
 // a turn counts as explore-only when it made at least one tool call and every
 // one of them was explore. Anything else (a productive bash, an edit/write, a
 // custom tool, or no tools at all) resets the streak.
-func (s *thrashState) closeTurn(hadToolCalls bool) bool {
+func (s *focusState) closeTurn(hadToolCalls bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sawAny, sawProductive := s.turnSawAny, s.turnSawProductive
@@ -123,7 +123,7 @@ func (s *thrashState) closeTurn(hadToolCalls bool) bool {
 
 // noteCall records one tool call's explore/productive classification for the
 // turn in progress.
-func (s *thrashState) noteCall(name string, args json.RawMessage) {
+func (s *focusState) noteCall(name string, args json.RawMessage) {
 	explore := isExploreToolName(name, args)
 	s.mu.Lock()
 	s.turnSawAny = true
@@ -134,7 +134,7 @@ func (s *thrashState) noteCall(name string, args json.RawMessage) {
 }
 
 // denyText recovers the original stub from core's "error: " deny rendering.
-func (s *thrashState) denyText(result string) (string, bool) {
+func (s *focusState) denyText(result string) (string, bool) {
 	const prefix = "error: "
 	if !strings.HasPrefix(result, prefix) {
 		return "", false
@@ -148,7 +148,7 @@ func (s *thrashState) denyText(result string) (string, bool) {
 }
 
 // stashNotice parks a degrade notice between PreTool and PostTool for one call.
-func (s *thrashState) stashNotice(callID, notice string) {
+func (s *focusState) stashNotice(callID, notice string) {
 	if callID == "" {
 		return
 	}
@@ -160,7 +160,7 @@ func (s *thrashState) stashNotice(callID, notice string) {
 	s.notices[callID] = notice
 }
 
-func (s *thrashState) takeNotice(callID string) string {
+func (s *focusState) takeNotice(callID string) string {
 	if callID == "" {
 		return ""
 	}
@@ -171,7 +171,7 @@ func (s *thrashState) takeNotice(callID string) string {
 	return n
 }
 
-func (s *thrashState) streak() int {
+func (s *focusState) streak() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.exploreStreak
@@ -189,7 +189,7 @@ var _ = json.RawMessage(nil)
 
 // preTool is the shared PreTool body: re-read stub + bash guard. Shared with
 // InstallForTest so the direct-agent path exercises identical logic.
-func preTool(st *thrashState, ctx context.Context, name string, args json.RawMessage, callID string) (ext.PreToolDecision, error) {
+func preTool(st *focusState, ctx context.Context, name string, args json.RawMessage, callID string) (ext.PreToolDecision, error) {
 	n := strings.ToLower(strings.TrimSpace(name))
 	// Every call feeds the explore streak, including ones denied below:
 	// a stubbed re-read is still an explore turn.
@@ -215,7 +215,7 @@ func preTool(st *thrashState, ctx context.Context, name string, args json.RawMes
 
 // postTool is the shared PostTool body. Returns the (possibly rewritten)
 // result and whether it changed.
-func postTool(st *thrashState, name string, args json.RawMessage, callID, result string, denied bool, execErr error) (string, bool) {
+func postTool(st *focusState, name string, args json.RawMessage, callID, result string, denied bool, execErr error) (string, bool) {
 	n := strings.ToLower(strings.TrimSpace(name))
 	if denied {
 		// Core renders a hook deny as "error: <msg>". Our stubs are not

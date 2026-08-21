@@ -1,4 +1,4 @@
-package thrash
+package focus
 
 import (
 	"encoding/json"
@@ -92,7 +92,7 @@ func TestBashReadPaths(t *testing.T) {
 }
 
 func TestGuardBash(t *testing.T) {
-	s := newThrashState("", Config{})
+	s := newFocusState("", Config{})
 	args1, _ := json.Marshal(map[string]string{"command": "cat foo.go"})
 	if g := s.guardBash(args1); g.blocked() || g.Notice != "" {
 		t.Fatalf("first cat should run clean: %+v", g)
@@ -112,7 +112,7 @@ func TestGuardBash(t *testing.T) {
 }
 
 func TestGuardBash_inventory(t *testing.T) {
-	s := newThrashState("", Config{})
+	s := newFocusState("", Config{})
 	for i := 0; i < defaultInventoryLimit; i++ {
 		args, _ := json.Marshal(map[string]string{"command": "git status --short"})
 		if g := s.guardBash(args); g.blocked() || g.Notice != "" {
@@ -132,7 +132,7 @@ func TestGuardBash_inventory(t *testing.T) {
 // Past defaultHardInventoryLimit the model has been warned repeatedly and kept
 // listing; only then does the guard refuse outright.
 func TestGuardBash_inventoryHardLimitBlocks(t *testing.T) {
-	s := newThrashState("", Config{})
+	s := newFocusState("", Config{})
 	args, _ := json.Marshal(map[string]string{"command": "git status --short"})
 	for i := 0; i < defaultHardInventoryLimit; i++ {
 		if g := s.guardBash(args); g.blocked() {
@@ -146,7 +146,7 @@ func TestGuardBash_inventoryHardLimitBlocks(t *testing.T) {
 }
 
 func TestGuardBash_destructive(t *testing.T) {
-	s := newThrashState("", Config{})
+	s := newFocusState("", Config{})
 	args, _ := json.Marshal(map[string]string{"command": "git checkout -- foo.go && rm -rf internal/analytics"})
 	g := s.guardBash(args)
 	if !g.blocked() || !strings.Contains(g.Block, "blocked") {
@@ -156,7 +156,7 @@ func TestGuardBash_destructive(t *testing.T) {
 
 // degradeToolResult must keep the real output, capped, behind the notice.
 func TestDegradeToolResult(t *testing.T) {
-	st := newThrashState("", Config{})
+	st := newFocusState("", Config{})
 	if got := st.degradeToolResult("", "body"); got != "body" {
 		t.Fatalf("no notice should pass through: %q", got)
 	}
@@ -175,7 +175,7 @@ func TestDegradeToolResult(t *testing.T) {
 
 func TestPathKeyUnifiesAbsRel(t *testing.T) {
 	ws := t.TempDir()
-	s := newThrashState(ws, Config{})
+	s := newFocusState(ws, Config{})
 	rel := "internal/foo.go"
 	abs := filepath.Join(ws, rel)
 	if k1, k2 := s.pathKey(rel), s.pathKey(abs); k1 != k2 {
@@ -194,7 +194,7 @@ func TestPathKeyUnifiesAbsRel(t *testing.T) {
 }
 
 func TestBatchExploreOnly_productiveBashResets(t *testing.T) {
-	s := newThrashState("", Config{})
+	s := newFocusState("", Config{})
 	// noteTurn was split when this moved out of the loop: PreTool feeds each
 	// call via noteCall, and the deciding after-turn hook evaluates the streak
 	// via closeTurn. This shim replays one bash turn through both.
@@ -224,7 +224,7 @@ func TestBatchExploreOnly_productiveBashResets(t *testing.T) {
 }
 
 func TestReadAndBashSharePathDedupe(t *testing.T) {
-	s := newThrashState("", Config{})
+	s := newFocusState("", Config{})
 	readArgs, _ := json.Marshal(map[string]string{"path": "pkg/x.go"})
 	if _, ok := s.maybeDedupeRead(readArgs); ok {
 		t.Fatal("first read should run")
@@ -258,7 +258,7 @@ func TestInventoryKey_rgAndPythonListing(t *testing.T) {
 }
 
 func TestGuardBash_rgInventory(t *testing.T) {
-	s := newThrashState("", Config{})
+	s := newFocusState("", Config{})
 	for i := 0; i < defaultInventoryLimit; i++ {
 		args, _ := json.Marshal(map[string]string{"command": "rg leftover"})
 		if g := s.guardBash(args); g.blocked() || g.Notice != "" {
