@@ -384,6 +384,17 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 		// Emitting it as Error made the CLI print "✗ goal_report: agent: done".
 		if ev.ExecErr != nil && !errors.Is(ev.ExecErr, agent.ErrDone) {
 			errStr = ev.ExecErr.Error()
+		} else if ev.Denied && errStr == "" {
+			// PreTool denials put the reason in Result as "error: <msg>"
+			// and leave ExecErr nil. Hosts (mowi) paint Denied + empty
+			// Error as a bare "denied", which hides the real reason.
+			errStr = strings.TrimPrefix(ev.Result, "error: ")
+			if errStr == ev.Result {
+				errStr = strings.TrimSpace(ev.Result)
+			}
+			if errStr == "" {
+				errStr = "denied by hook"
+			}
 		}
 		durMs := ev.Duration.Milliseconds()
 		e.Emit(Event{
