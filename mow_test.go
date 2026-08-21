@@ -38,6 +38,9 @@ func TestPublicTypesResolve(t *testing.T) {
 	var _ mow.Usage
 	var _ mow.Status
 	var _ mow.ProcInfo
+	var _ mow.MediaClient
+	var _ mow.MediaImageResult
+	var _ mow.MediaVideoResult
 	var _ mow.ChatHooks
 	var _ mow.Provider
 	var _ mow.ModelLister
@@ -72,6 +75,12 @@ func TestPublicFuncsResolve(t *testing.T) {
 	_ = mow.ProcList
 	_ = mow.ProcStop
 	_ = mow.ProcTail
+	_ = mow.NewMediaClient
+	_ = mow.MediaClientFromConfig
+	_ = mow.MediaDataURL
+	_ = mow.MediaMIMEFromPath
+	_ = mow.WriteWorkspaceFile
+	_ = mow.ReadWorkspaceFile
 	_ = mow.Home
 	_ = mow.VersionString
 	_ = mow.New

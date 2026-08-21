@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/internal/config"
 	"github.com/subosito/mow/internal/proc"
+	"github.com/subosito/mow/internal/tools"
 )
 
 // Check is one diagnostic row.
@@ -42,6 +44,7 @@ func Run(workspace string) Report {
 	r := Report{At: time.Now().UTC(), Home: home, Workspace: ws}
 	r.Checks = append(r.Checks, checkHome(home))
 	r.Checks = append(r.Checks, checkConfig(home))
+	r.Checks = append(r.Checks, checkTools())
 	r.Checks = append(r.Checks, checkAgents(home, ws))
 	r.Checks = append(r.Checks, checkTrust(ws))
 	r.Checks = append(r.Checks, checkMCP(ws)...)
@@ -79,6 +82,55 @@ func checkConfig(home string) Check {
 		return Check{Name: "config", OK: true, Detail: fmt.Sprintf("%s (%d B)", path, len(b))}
 	}
 	return Check{Name: "config", OK: true, Detail: path}
+}
+
+func checkTools() Check {
+	cfg, err := config.Load()
+	if err != nil {
+		return Check{Name: "tools", OK: false, Detail: err.Error()}
+	}
+	if cfg == nil {
+		return Check{Name: "tools", OK: true, Detail: "defaults (read, glob, grep)"}
+	}
+	have := registeredToolNames()
+	miss := tools.UnknownEnable(cfg.Tools.Enable, have)
+	if len(miss) == 0 {
+		return Check{Name: "tools", OK: true, Detail: strings.Join(cfg.Tools.Enable, ", ")}
+	}
+	return Check{Name: "tools", OK: false, Detail: tools.FormatUnregisteredEnable(miss, mediaPackLinked())}
+}
+
+func registeredToolNames() []string {
+	names := append([]string(nil), tools.RegistryNames()...)
+	for _, t := range ext.ToolsForEngine(true) {
+		if t != nil {
+			names = append(names, t.Name())
+		}
+	}
+	if mediaPackLinked() {
+		names = append(names, tools.MediaEnableNames()...)
+	}
+	return names
+}
+
+func mediaPackLinked() bool {
+	for _, f := range ext.OptionalFeatures() {
+		if f.ID == "media" {
+			return true
+		}
+	}
+	return false
+}
+
+func hostBinary() string {
+	if _, ok := ext.LookupCommand("goal"); ok {
+		if _, ok := ext.LookupCommand("ops"); ok {
+			if _, ok := ext.LookupCommand("review"); ok {
+				return "mow-full"
+			}
+		}
+	}
+	return "mow"
 }
 
 func checkAgents(home, ws string) Check {
@@ -184,6 +236,7 @@ func checkProcStore(home, ws string) Check {
 func Format(r Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "mow doctor  %s\n", r.At.Format(time.RFC3339))
+	fmt.Fprintf(&b, "binary     %s\n", hostBinary())
 	fmt.Fprintf(&b, "home       %s\n", r.Home)
 	fmt.Fprintf(&b, "workspace  %s\n", r.Workspace)
 	b.WriteByte('\n')

@@ -4,7 +4,7 @@ mow is a public library plus detachable extensions and optional hosts. The
 interactive TUI is the Rust `mowi` sibling project, which drives `mow rpc`;
 do not move TUI dependencies into the root module or `internal/engine`.
 
-mow is **standalone**: a Go workspace (root, packs, and packs/otel modules), OpenAI/Anthropic-compatible HTTP. No other
+mow is **standalone**: a Go workspace (root and packs modules), OpenAI/Anthropic-compatible HTTP. No other
 repo, gateway product, or host is required to build, test, or run. The Rust
 `mowi` sibling project is an external TUI that drives `mow rpc`.
 
@@ -16,7 +16,7 @@ Requires **Go 1.26.4+** (pinned in `go.mod`). Prefer `devenv shell` (sets
 ```bash
 devenv shell -- just verify    # vet + go test -race + build  — gate before commit
 devenv shell -- just verify-ci # same, but with no credentials and an empty MOW_HOME
-devenv shell -- just build     # → bin/mow
+devenv shell -- just build     # → bin/mow (lean) + bin/mow-full
 devenv shell -- just test      # fast inner loop (no race detector)
 ```
 
@@ -68,11 +68,12 @@ Source of truth for modules and public/internal: [docs/architecture.md](docs/arc
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
 | `extcfg/` | Decode `extensions.<name>` (shared by extensions and packs) |
 | `testutil/` | Shared test helpers (e.g. pin `$MOW_HOME` for `TestMain`) |
-| `ext/` | Registration (`ext.go`) + core extensions: acp, mcp, proc, rpc, cmdhook, eval |
-| `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): goal, review, ops, lsp, job, contextsink |
-| `packs/otel/` | OTLP export (nested submodule `github.com/subosito/mow/packs/otel`; config-driven) |
+| `ext/` | Registration (`ext.go`) + core extensions: acp, rpc |
+| `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): focus, proc, cmdhook, mcp, media, goal, review, ops, job, contextsink |
 | `internal/` | Implementation — **not** an integrator import surface |
-| `cmd/mow/` | Sole full pack host; blank-imports packs |
+| `cmd/mow/` | Lean pack host; blank-imports the lean pack set |
+| `cmd/mow-full/` | Full pack host; blank-imports all packs |
+| `cmd/internal/mowcli/` | Shared CLI frontend (run/tty/trust/doctor/…) for both binaries |
 | `docs/` | architecture, harness, extensions |
 
 Public vs internal: if integrators need something in `internal/`, re-export —
@@ -80,15 +81,16 @@ do not tell them to import `internal/`.
 
 ## Packs
 
-- Stock binary links packs via blank import in `cmd/mow/main.go`.
-- Core packs live in `ext/` (part of the root module): acp, mcp, proc, rpc,
-  cmdhook, eval.
+- `cmd/mow` (lean) blank-imports acp, rpc, focus, proc, cmdhook, mcp.
+- `cmd/mow-full` adds goal, job, ops, review, media, contextsink. Both share `cmd/internal/mowcli`.
+- Core extensions live in `ext/` (root module): acp, rpc.
 - Optional packs live in `packs/` (separate Go module
-  `github.com/subosito/mow/packs`): goal, review, ops, lsp, job.
+  `github.com/subosito/mow/packs`): focus, proc, cmdhook, mcp, media, goal,
+  review, ops, job, contextsink.
 - `go.work` wires the root module and `packs/` together for local dev.
 - Remove import → subcommand/tools gone.
 - Extension config: `extensions.<name>` via `Engine.Extension` or `extcfg.DecodeSection`.
-- MCP/LSP only activate when configured (no config → no process).
+- MCP only activates when configured (no config → no process).
 
 ## Conventions
 
@@ -191,5 +193,5 @@ Also apply **Public samples (OSS)** above when the commit includes docs or fixtu
 | [docs/architecture.md](docs/architecture.md) | Public/internal, LLM endpoint model |
 | [docs/embedding.md](docs/embedding.md) | Embedding in Go: options, events, custom tools/providers, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config, sessions |
-| [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP/LSP |
-| [docs/review.md](docs/review.md) | `mow review` / `mow sec`: two-pass workflow, `--reviewer` / `--verifier`, report schema, exit codes |
+| [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP |
+| [docs/review.md](docs/review.md) | `mow-full review` / `mow-full sec`: two-pass workflow, `--reviewer` / `--verifier`, report schema, exit codes |

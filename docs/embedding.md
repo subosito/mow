@@ -119,7 +119,7 @@ eng, _ := mow.New(mow.Options{
 Add more listeners any time with `eng.AddOnEvent(fn)`. Event types:
 `loop.run.start`, `loop.token`, `loop.reasoning`, `harness.tool.start`,
 `harness.tool.end`, `loop.turn`, `harness.delegate.chunk`, `loop.stall`,
-`harness.lsp.diagnostics`, `loop.run.end`. Types carry a layer prefix
+`loop.run.end`. Types carry a layer prefix
 (`loop.*` lifecycle, `graph.*` orchestration, `harness.*` reality-touching);
 switch on the `Event*` constants, not string literals. Correlate across a process with `ev.RunID` (one
 per `Prompt`) and `ev.SessionID`.
@@ -330,65 +330,7 @@ boundaries, so several sent during one turn arrive together, in order.
 - [harness.md](harness.md) — loop, config, sessions, policy knobs
 - [extensions.md](extensions.md) — packs, hooks table, ACP, media, cmdhook
 
-## 10. OpenTelemetry (optional)
-
-**Default: off.** No exporter runs until you set an endpoint.
-
-### Config / CLI (out of the box)
-
-Stock `mow` blank-imports `github.com/subosito/mow/packs/otel`. When user config
-(or env) sets a non-empty OTLP endpoint, `Engine.New` auto-wires the adapter and an
-OTLP/HTTP exporter; `Engine.Close` flushes and shuts down providers. Set
-`otel.enabled: false` to disable export despite an endpoint. Project `.mow/config` cannot set
-this (host/user only).
-
-```yaml
-# $MOW_HOME/config.yaml
-otel:
-  enabled: true                     # optional; endpoint alone enables when omitted
-  endpoint: http://127.0.0.1:4318   # empty = disabled
-  protocol: http                    # http default; grpc reserved
-  service_name: mow
-  # headers:
-  #   authorization: Bearer …
-```
-
-Env (wins over file): `MOW_OTEL_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`,
-`MOW_OTEL_PROTOCOL`, `MOW_OTEL_SERVICE_NAME` / `OTEL_SERVICE_NAME`.
-
-Programmatic `StartExport` requires `ExportConfig.Enabled: true` explicitly.
-
-### Embed
-
-Same auto-wire if the host imports `_ "github.com/subosito/mow/packs/otel"` (or the
-stock binary). Or attach a custom pipeline:
-
-```go
-import mowotel "github.com/subosito/mow/packs/otel"
-
-// Config-driven:
-exp, err := mowotel.StartExport(ctx, mowotel.ExportConfig{
-    Enabled:  true,
-    Endpoint: "http://127.0.0.1:4318",
-})
-eng.AddOnEvent(exp.Adapter.OnEvent)
-eng.RegisterCleanup(func() { _ = exp.Shutdown(context.Background()) })
-
-// Or bring your own Tracer/Meter (Datadog, Honeycomb, …):
-adapter, err := mowotel.New(mowotel.Options{
-    Tracer: tp.Tracer("mow"),
-    Meter:  mp.Meter("mow"),
-})
-eng.AddOnEvent(adapter.OnEvent)
-```
-
-Mapping: `loop.run.*` → `mow.run` span + token counters (low-cardinality
-`mow.stop_reason` only on metrics; run id stays on spans); `harness.tool.*` →
-`mow.tool.<name>` child spans + duration histogram; `graph.goal.*` → `mow.goal`
-span with step events. Error and goal summary text is redacted/truncated before
-export. Tool/goal spans without a matching end event are closed on `run.end`.
-
-## 11. Eval / replay fixtures
+## 10. Eval / replay fixtures
 
 For deterministic regression checks (model upgrades, system prompt tweaks)
 import `github.com/subosito/mow/eval` and drive scripted assistant turns:
@@ -403,5 +345,5 @@ sr := eval.RunFixture(ctx, fix, eval.Options{
 if !sr.OK { /* fail CI */ }
 ```
 
-See [extensions.md](extensions.md) § Eval / replay and `mow eval run`.
+See [extensions.md](extensions.md) § Eval / replay.
 

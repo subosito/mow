@@ -26,23 +26,22 @@ jobs:
       - name: Vet packs
         run: cd packs && go vet ./...
 
-      - name: Vet OTEL pack
-        run: cd packs/otel && go vet ./...
-
       - name: Test root
         run: go test -race ./...
 
       - name: Test packs
         run: cd packs && go test -race ./...
 
-      - name: Test OTEL pack
-        run: cd packs/otel && go test -race ./...
-
-      - name: Build mow
+      - name: Build binaries
         run: |
           ver="$(tr -d ' \n' < VERSION)"
           go build -trimpath \
             -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
             -o bin/mow ./cmd/mow
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
+            -o bin/mow-full ./cmd/mow-full
           ./bin/mow version
           ./bin/mow version | grep -F "mow $ver"
+          ./bin/mow-full version
+          ./bin/mow-full version | grep -F "mow $ver"

@@ -153,6 +153,73 @@ func TestHandshakeFlagMatrix(t *testing.T) {
 		}
 	}
 
+	// A session whose last effort is a catalog-only tier ("xhigh" is not in
+	// the static none|low|medium|high list). Persisted through the real
+	// client path: SetEffort records the runtime event even with no Prompt.
+	sidTier := "sess-handshake-tier"
+	{
+		opt := mow.Options{
+			LoadUserConfig: true,
+			Workspace:      ws,
+			BaseURL:        srv.URL + "/v1",
+			Model:          "grok-4.6",
+			ExplicitModel:  true,
+			DeferLLM:       true,
+			SessionID:      sidTier,
+		}
+		eng, err := mow.New(opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := eng.SetEffort("xhigh"); err != nil {
+			t.Fatal(err)
+		}
+		eng.Close()
+	}
+
+	t.Run("--continue restores catalog-only session effort", func(t *testing.T) {
+		opt := mow.Options{
+			LoadUserConfig: true,
+			Workspace:      ws,
+			BaseURL:        srv.URL + "/v1",
+			DeferLLM:       true,
+			Continue:       true,
+			SessionID:      sidTier,
+		}
+		eng, err := mow.New(opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = eng.Close() })
+		if got := eng.Model(); got != "grok-4.6" {
+			t.Fatalf("Model()=%q want grok-4.6", got)
+		}
+		if got := eng.DisplayEffort(); got != "xhigh" {
+			t.Fatalf("DisplayEffort()=%q want restored xhigh (catalog tier the static list would reject)", got)
+		}
+	})
+
+	t.Run("--continue --effort low beats session tier", func(t *testing.T) {
+		opt := mow.Options{
+			LoadUserConfig: true,
+			Workspace:      ws,
+			BaseURL:        srv.URL + "/v1",
+			DeferLLM:       true,
+			Continue:       true,
+			SessionID:      sidTier,
+			Effort:         "low",
+			ExplicitEffort: true,
+		}
+		eng, err := mow.New(opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = eng.Close() })
+		if got := eng.DisplayEffort(); got != "low" {
+			t.Fatalf("DisplayEffort()=%q want explicit low", got)
+		}
+	})
+
 	t.Run("--continue restores session model+effort", func(t *testing.T) {
 		opt := mow.Options{
 			LoadUserConfig: true,

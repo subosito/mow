@@ -1,5 +1,9 @@
 # mow review / mow sec
 
+Ships on **`mow-full`** (`cmd/mow-full`), not the lean `mow` binary. Invoke as
+`mow-full review` / `mow-full sec` (examples below keep the short `mow review`
+form for the subcommand itself).
+
 Two AI-assisted review commands over one read-only workflow. `mow review` looks
 for correctness and maintainability problems; `mow sec` reads the same code
 adversarially for security problems. They share a schema, a scope resolver, a

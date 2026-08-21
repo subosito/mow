@@ -9,9 +9,9 @@ import (
 // Identical-tool-call detection. This is a core engine guard, not workflow
 // opinion: it catches a model wedged on the exact same call and nudges it,
 // independent of any explore/focus pack. It lived in thrash.go until the
-// soft heuristics moved to ext/focus; only the loop-owned half stayed.
+// soft heuristics moved to packs/focus; only the loop-owned half stayed.
 //
-// ext/focus keeps its own copy of the normalizer for its inventory ledger —
+// packs/focus keeps its own copy of the normalizer for its inventory ledger —
 // the two are deliberately independent so unlinking the pack cannot change
 // how the loop fingerprints repeats.
 

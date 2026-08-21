@@ -767,4 +767,3 @@ func EstChars(msgs []llm.Message) int {
 // callers outside the loop (Engine.Compact) can convert chars to tokens with
 // the same baseline density the calibrator starts from.
 const DefaultCharsPerToken = defaultCharsPerToken
-

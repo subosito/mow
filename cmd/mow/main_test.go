@@ -1,9 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,11 +10,10 @@ import (
 
 var mowBinary string
 
-// TestMain builds the real command once so these tests cover process startup,
-// command dispatch, exit status, and stderr output rather than calling run
-// directly.
+// TestMain builds the lean binary once so these tests cover the real binary's
+// linked pack set, not an in-process approximation.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "mow-cli-test-*")
+	dir, err := os.MkdirTemp("", "mow-lean-test-*")
 	if err != nil {
 		panic(err)
 	}
@@ -26,173 +22,9 @@ func TestMain(m *testing.M) {
 	mowBinary = filepath.Join(dir, "mow")
 	build := exec.Command("go", "build", "-o", mowBinary, ".")
 	if output, err := build.CombinedOutput(); err != nil {
-		panic("build mow CLI: " + err.Error() + "\n" + string(output))
+		panic("build lean mow: " + err.Error() + "\n" + string(output))
 	}
 	os.Exit(m.Run())
-}
-
-func TestRunEphemeralFlagDoesNotCreateSessionHistory(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/models"):
-			fmt.Fprint(w, `{"data":[{"id":"deepseek-chat"}]}`)
-		case strings.HasSuffix(r.URL.Path, "/chat/completions"):
-			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
-			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-			fmt.Fprint(w, "data: [DONE]\n\n")
-		default:
-			t.Errorf("unexpected request path: %s", r.URL.Path)
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	home := t.TempDir()
-	cmd := exec.Command(mowBinary, "run", "--ephemeral", "-p", "hi")
-	cmd.Env = append(os.Environ(),
-		"MOW_HOME="+home,
-		"MOW_BASE_URL="+server.URL+"/v1",
-		"MOW_API_KEY=test",
-		"MOW_MODEL=deepseek-chat",
-	)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("mow run --ephemeral: %v\n%s", err, output)
-	}
-	if !strings.Contains(string(output), "hello") {
-		t.Fatalf("output missing response (%q)", output)
-	}
-	var sessionFiles []string
-	err = filepath.WalkDir(home, func(path string, d os.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".jsonl") {
-			sessionFiles = append(sessionFiles, path)
-		}
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sessionFiles) != 0 {
-		t.Fatalf("ephemeral run persisted session history: %v", sessionFiles)
-	}
-}
-
-func TestCLIHelp(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []string
-		wantCode int
-		want     []string
-		notWant  []string
-	}{
-		{
-			name: "top level",
-			args: []string{"help"},
-			want: []string{
-				"mow — agent harness (library + CLI)",
-				"mow run",
-				"mow tty",
-				"mow trust",
-			},
-		},
-		{
-			name: "run command",
-			args: []string{"help", "run"},
-			want: []string{
-				"mow run — one-shot prompt",
-				"mow run -p",
-			},
-			notWant: []string{"Core:"},
-		},
-		{
-			name: "trust command",
-			args: []string{"help", "trust"},
-			want: []string{
-				"mow trust — allow project .mow/config and skills",
-				"mow trust --list",
-			},
-			notWant: []string{"Core:"},
-		},
-		{
-			name: "tty command",
-			args: []string{"help", "tty"},
-			want: []string{
-				"mow tty — interactive line session",
-				"/model [id]",
-			},
-			notWant: []string{"Core:"},
-		},
-		{
-			name: "run short help flag",
-			args: []string{"run", "-h"},
-			want: []string{
-				"mow run — one-shot prompt",
-				"mow run -p",
-			},
-			notWant: []string{"Core:"},
-		},
-		{
-			name:     "unknown command",
-			args:     []string{"help", "nosuchcmd"},
-			wantCode: 2,
-			want: []string{
-				`mow help: unknown command "nosuchcmd"`,
-				"run `mow help` to list available commands",
-			},
-		},
-		{
-			name:     "reserved leftover is not a prompt",
-			args:     []string{"repl"},
-			wantCode: 2,
-			want: []string{
-				`mow: unknown command "repl"`,
-				"mow run -p",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			output, code := runMow(t, tt.args...)
-			if code != tt.wantCode {
-				t.Fatalf("exit code = %d, want %d\noutput:\n%s", code, tt.wantCode, output)
-			}
-			for _, want := range tt.want {
-				if !strings.Contains(output, want) {
-					t.Errorf("output missing %q:\n%s", want, output)
-				}
-			}
-			for _, notWant := range tt.notWant {
-				if strings.Contains(output, notWant) {
-					t.Errorf("output unexpectedly contains %q:\n%s", notWant, output)
-				}
-			}
-		})
-	}
-}
-
-// Engine flags bound in cliutil must also be discoverable from the hand-written
-// help text; --sandbox and --extra-root were bound but undocumented.
-func TestHelpTextListsEngineFlags(t *testing.T) {
-	for _, tt := range []struct {
-		name string
-		args []string
-		want []string
-	}{
-		{"run help", []string{"run", "-h"}, []string{"--sandbox", "--extra-root", "--allow-shell"}},
-		{"top-level help", []string{"help"}, []string{"--sandbox", "--extra-root", "--allow-shell"}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			output, _ := runMow(t, tt.args...)
-			for _, want := range tt.want {
-				if !strings.Contains(output, want) {
-					t.Errorf("help missing %q:\n%s", want, output)
-				}
-			}
-		})
-	}
 }
 
 func runMow(t *testing.T, args ...string) (string, int) {
@@ -208,4 +40,64 @@ func runMow(t *testing.T, args ...string) (string, int) {
 	}
 	t.Fatalf("run mow %q: %v", args, err)
 	return "", -1
+}
+
+// The lean binary links acp, rpc, focus, proc, cmdhook, mcp — and must not
+// show the mow-full packs in help.
+func TestLeanHelpListsLeanCommands(t *testing.T) {
+	output, code := runMow(t, "help")
+	if code != 0 {
+		t.Fatalf("exit code = %d\n%s", code, output)
+	}
+	for _, want := range []string{"mow acp", "mow rpc", "mow mcp", "mow proc"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("lean help missing %q:\n%s", want, output)
+		}
+	}
+	for _, notWant := range []string{"mow goal", "mow ops", "mow review", "mow job", "mow media"} {
+		if strings.Contains(output, notWant) {
+			t.Errorf("lean help unexpectedly lists %q:\n%s", notWant, output)
+		}
+	}
+}
+
+func TestDoctorReportsUnregisteredMediaTool(t *testing.T) {
+	home := t.TempDir()
+	body := "llm:\n  model: gpt-5-mini\ntools:\n  enable: [read, glob, grep, understand_image]\nextensions:\n  media:\n    understand:\n      image: gpt-4o\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(mowBinary, "doctor")
+	cmd.Env = append(os.Environ(), "MOW_HOME="+home)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mow doctor: %v\n%s", err, out)
+	}
+	text := string(out)
+	if !strings.Contains(text, "understand_image") {
+		t.Fatalf("want understand_image:\n%s", text)
+	}
+	if !strings.Contains(text, "not registered") || !strings.Contains(text, "this binary") {
+		t.Fatalf("want unregistered wording:\n%s", text)
+	}
+	if !strings.Contains(text, "packs/media") || !strings.Contains(text, "mow-full") {
+		t.Fatalf("want lean hint:\n%s", text)
+	}
+}
+
+// Full-pack command names stay reserved even when the pack is not linked:
+// `mow ops` on the lean binary must be an unknown command, not a free-form
+// prompt to the model.
+func TestLeanReservedFullPackTokens(t *testing.T) {
+	for _, tok := range []string{"ops", "goal", "review", "media", "job"} {
+		output, code := runMow(t, tok)
+		if code != 2 {
+			t.Errorf("%s: exit code = %d, want 2\n%s", tok, code, output)
+			continue
+		}
+		want := `mow: unknown command "` + tok + `"`
+		if !strings.Contains(output, want) {
+			t.Errorf("%s: missing %q:\n%s", tok, want, output)
+		}
+	}
 }

@@ -8,7 +8,7 @@ Named service profiles under `$MOW_HOME/ops/<name>/`: logs, health, allowlisted 
 import _ "github.com/subosito/mow/packs/ops"
 ```
 
-Stock `cmd/mow` blank-imports this package. Ops uses job for daemon ticks.
+`cmd/mow-full` blank-imports this package; lean `cmd/mow` does not. Ops uses job for daemon ticks.
 **No slash commands** (`/ops` is never registered). In a chat / mowi session
 the model sees the `ops_*` **tools** when this pack is linked; the clock is
 still `mow ops run NAME`, not a typed `/ops`.

@@ -18,18 +18,17 @@ Customization modes:
 |---|---|---|
 | Public Engine | `github.com/subosito/mow` | `Engine`, `Run`, hooks, events, providers |
 | Registration | `github.com/subosito/mow/ext` | `RegisterTool`, `RegisterCommand`, lifecycle hooks |
-| Core extensions | `github.com/subosito/mow/ext/<name>` | acp, focus, media, rpc — privileged tier (may import internal/); one-pager in each `ext/<name>/README.md` |
-| Optional packs | `github.com/subosito/mow/packs/<name>` | goal, review, ops, lsp, job, contextsink — `packs/<name>/README.md` |
-| Heavy optional | `github.com/subosito/mow/packs/otel` | OTLP — `packs/otel/README.md` |
+| Core extensions | `github.com/subosito/mow/ext/<name>` | acp, rpc — privileged tier (may import internal/); one-pager in each `ext/<name>/README.md` |
+| Optional packs | `github.com/subosito/mow/packs/<name>` | focus, media, goal, review, ops, job, contextsink — `packs/<name>/README.md` |
 
 ```go
 import (
     "github.com/subosito/mow"
     _ "github.com/subosito/mow/ext/acp"
+    _ "github.com/subosito/mow/packs/focus"
     _ "github.com/subosito/mow/packs/mcp"
     _ "github.com/subosito/mow/packs/contextsink"
     _ "github.com/subosito/mow/packs/goal"
-    _ "github.com/subosito/mow/packs/otel"
 )
 ```
 
@@ -37,10 +36,13 @@ Remove an import and the associated tools/subcommand/auto-wire disappear.
 
 ## Linked binaries
 
-- `cmd/mow` is the sole full pack host: it links core extensions,
-  goal/review/ops/lsp/job, and OTEL.
+- `cmd/mow` is the lean pack host: core extensions acp/rpc plus focus, proc,
+  cmdhook, mcp. `cmd/mow-full` links those plus goal, job, ops, review, media,
+  contextsink. Both share `cmd/internal/mowcli`.
 - The Rust `mowi` sibling project launches `mow rpc`, owns terminal
   presentation, and receives the registered command/tool events over RPC.
+  Spawn binary: `--mow-bin` / `$MOW_BIN` / host `$MOW_HOME/config.yaml`
+  `extensions.mowi.mow_bin` (not project `.mow/`) / `mow`.
 - `mow_agents` start the currently running executable (`os.Executable()`), so
   native ACP peers remain self-contained.
 
@@ -137,10 +139,6 @@ extensions:
   Hermetic engines only see the current generation of hooks. Hook stdout/stderr
   are capped (~64KiB); diagnostics redact common secrets. Default is **fail-open**
   on timeout/non-2 exit (warn only); set `fail_closed: true` to block like exit 2.
-- `packs/eval`: eval/replay fixtures and command (fixture size/case count capped).
-  Optional — not blank-imported by stock `cmd/mow`. Import `github.com/subosito/mow/eval`
-  from tests, or blank-import `packs/eval` for `mow eval run`.
-
 ```yaml
 extensions:
   cmdhook:
@@ -268,8 +266,7 @@ Stock slash set is **`/goal`**, **`/review`**, **`/sec`**. Those drive the
   footgun; list/check stay CLI.
 - **ops** — catalog + tools + `mow ops run`. The model uses `ops_*` tools
   inside a tick; `/ops` would start or steer a daemon from chat.
-- **contextsink**, **lsp**, **otel** — tools or config, not user-typed
-  session commands.
+- **contextsink** — tools or config, not user-typed session commands.
 
 ### Ops (`packs/ops`)
 
@@ -292,34 +289,6 @@ runbooks, and peer-assisted remediation. No profile means no ops tools.
   `allowed_hosts` still trusts DNS for those names.
 - Actions are operator argv lists (no shell). Any declared key may run, with a
   60s timeout. `ops_action` still requires `--allow-shell`.
-
-### LSP (`packs/lsp`)
-
-Opt-in language-server tools (`lsp_hover`, `lsp_definition`) and post-edit
-`textDocument/diagnostic`. Requires an operator-installed/configured language
-server. No config means no process. Tools declare `ReadOnly()` so they stay
-available in read-only prompts.
-
-Paths resolve through the engine path jail when available (same boundary as
-`read`/`write`); hosts without an engine in context fall back to containment
-under the configured `root`. RPC framing is bounded (1 MiB frames, capped
-header lines and skipped frames); `didOpen` rejects symlinks/non-regular files
-and caps file bodies at 4 MiB. `$MOW_HOME/lsp.yaml` is capped at 1 MiB.
-A cancelled or expired RPC kills a wedged server and returns without retrying
-on the dead context; the next call starts a fresh process.
-
-Diagnostics are sorted by severity, capped at `mow.MaxLSPDiagnostics`, attached
-to successful write/edit results, and emitted as `harness.lsp.diagnostics`.
-Post-edit pulls use their own deadline (`diagTimeout`, default 10s) and never
-fail a successful edit when the server is slow or down.
-
-```yaml
-extensions:
-  lsp:
-    command: gopls
-    args: [serve]
-    root: .
-```
 
 ### Job (`packs/job`)
 
@@ -386,8 +355,8 @@ model context, and compare that with `recovered_bytes` to see how much was
 brought back on demand. When the OTEL pack is configured, it exports these as
 `mow.contextsink.stored_results`, `mow.contextsink.saved_bytes`, and
 `mow.contextsink.recovered_bytes` counters. Without the pack,
-results simply stay inline and no search tool exists. The stock `mow` binary
-links it; library embeds opt in by blank-importing it. Config key
+results simply stay inline and no search tool exists. `mow-full` links it;
+lean `mow` does not. Library embeds opt in by blank-importing it. Config key
 `extensions.contextsink`.
 
 ```yaml
@@ -397,30 +366,14 @@ extensions:
     max_inline_bytes: 8000  # above this → store + stub (default; capped at 8 MiB)
 ```
 
-## OpenTelemetry (`packs/otel`)
-
-Nested module so OTEL/grpc/protobuf dependencies do not enter a library-only
-embed. Blank import registers an Engine-construction hook:
-
-```go
-import _ "github.com/subosito/mow/packs/otel"
-```
-
-When `otel.endpoint` is set (or `MOW_OTEL_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`),
-the hook attaches OTLP/HTTP tracing and metrics. Empty endpoint means no exporter.
-A non-empty endpoint is on; set `enabled: false` in the `otel:` config section
-to force off despite the endpoint. Protocol is `http` (default);
-`grpc` is reserved. `Shutdown` is idempotent, ends leftover spans, and flushes
-queued telemetry (auto-wire cleanup uses a 5s timeout). Span error/status text
-is redacted and length-capped. URL userinfo becomes an `Authorization` header
-when none is set.
-
 ## TUI host
 
 The Rust `mowi` sibling project/repository is the interactive terminal host.
 It launches `mow rpc` and renders sessions, streaming, model/effort pickers,
-tool approval, peer streams, and pack command results. See that project for
-installation and release instructions.
+tool approval, peer streams, and pack command results. `extensions.mowi.mow_bin`
+in host `$MOW_HOME/config.yaml` selects `mow` vs `mow-full` (CLI `--mow-bin`
+and `$MOW_BIN` win; project `.mow/` is never read for this). See that project
+for installation and release instructions.
 
 ## Configuration
 
@@ -461,14 +414,18 @@ Media stays a side lane to the chat loop:
 | `understand_voice` | transcription endpoint |
 | `understand_video` | chat with video parts |
 
-Media ships as the linked pack `ext/media` (blank-import, like `acp`/`rpc`/
-`focus`). Each tool registers only when its model id is configured under
-`extensions.media.generate.*` / `extensions.media.understand.*`; `tools.enable` still gates visibility.
+Media ships as `packs/media`. `mow-full` blank-imports it; lean `mow` does not.
+Each tool registers only when its model id is configured under
+`extensions.media.generate.*` / `extensions.media.understand.*`; `tools.enable`
+still gates visibility. Listing a media name in `tools.enable` on lean `mow`
+is a no-op (`mow doctor` reports it). Unused `extensions.media` keys stay as
+yaml blobs.
 
 ## Two tiers: `ext/` and `packs/`
 
 Both tiers register the same way (blank import + `ext.Register*`) and both
-detach the same way — delete one line from `cmd/mow/main.go` and the feature is
+detach the same way — delete one line from `cmd/mow/main.go` or
+`cmd/mow-full/main.go` and the feature is
 gone from the binary. That *link* boundary is what keeps core lean, and it is
 the only property a pack must have.
 
@@ -483,9 +440,10 @@ They differ in what they may depend on:
 
 `ext/` is **privileged first-party code that happens to be optionally linked**,
 not a public plugin surface. Being in `ext/` is not a promise the pack could
-move to `packs/`. `ext/acp` and `ext/media` reach into `internal/` by design:
-media needs the path-jail policy and the media HTTP client, which are
-mid-evolution internals with no public contract.
+move to `packs/`. `ext/acp` reaches into `internal/` by design (ACP session
+and peer plumbing). `packs/media` moved once a narrow public facade existed
+(`mow.MediaClient`, `mow.WriteWorkspaceFile`) — that is the "second real
+consumer" case below, not a dump of `internal/llm`.
 
 This is deliberate. A same-module `internal/` import pins first-party code that
 can be updated in the same commit. Exporting those types to make a pack "pure"
@@ -502,10 +460,10 @@ so the import compiles. Treat an `internal/` import from `packs/` as a bug.
 When adding a pack: default to `packs/`. Use `ext/` only when it genuinely needs
 core internals, and keep that surface narrow.
 
-## Explore guards (`ext/focus`)
+## Explore guards (`packs/focus`)
 
 The soft anti-thrash heuristics are a linked pack, not core loop behavior.
-Blank-importing `ext/focus` (the stock `mow` binary does) installs:
+Blank-importing `packs/focus` (the stock `mow` binary does) installs:
 
 1. view caps — the same `read` window (path+offset+limit), or `bash cat/sed/head/tail`; the call still runs
 2. inventory caps — repeated `git status`/`ls`/`find` degrade, then refuse; `git log`/`show`/`diff` and `rg`/`grep` key on args
@@ -550,6 +508,21 @@ unaffected. A hook supplies text only, never a `Message`: the loop owns the
 framing so an extension cannot forge assistant/tool roles and break tool_call
 pairing. Multiple hooks compose by ordered concatenation.
 
-tant/tool roles and break tool_call
+s `PreTool` (deny + stub message), `PostTool` (rewrite the result
+body), and `AfterTurnDecide`. The last is the deciding form of the after-turn
+hook:
+
+```go
+type AfterTurnDecisionFunc func(ctx context.Context, e AfterTurnEvent) (AfterTurnDecision, error)
+```
+
+`AfterTurnDecision.Inject`, when non-empty, is appended to history as a
+synthetic user message before the next LLM call. It is a *sibling* of the
+observer `AfterTurnFunc`, which keeps its signature — existing observers are
+unaffected. A hook supplies text only, never a `Message`: the loop owns the
+framing so an extension cannot forge assistant/tool roles and break tool_call
+pairing. Multiple hooks compose by ordered concatenation.
+
+s and break tool_call
 pairing. Multiple hooks compose by ordered concatenation.
 

@@ -605,6 +605,17 @@ func New(opt Options) (*Engine, error) {
 		final = append(final, t)
 	}
 	e.tools = final
+	// Enable names that never landed in the registry (wrong binary, or a
+	// pack that did not RegisterTool) stay a no-op — warn so the operator
+	// is not stuck with a silent missing tool.
+	if miss := unknownRegisteredEnable(enabled, toolList); len(miss) > 0 {
+		msg := "mow: " + tools.FormatUnregisteredEnable(miss, mediaPackLinked())
+		if opt.Logger != nil {
+			opt.Logger.Warn(msg)
+		} else {
+			fmt.Fprintln(os.Stderr, msg)
+		}
+	}
 	// Per-engine nonce for untrusted-output framing (bash/MCP/delegate).
 	nb := make([]byte, 8)
 	if _, err := rand.Read(nb); err == nil {
@@ -677,11 +688,28 @@ func New(opt Options) (*Engine, error) {
 				// catalog efforts may not include the session's stored tier,
 				// and SetModel already synced effort for that model.
 				e.mu.Lock()
-				var allowed []string
+				norm := ""
 				if e.client != nil {
-					allowed = e.client.EffortsForModel(e.client.Model)
+					// Catalog is loaded: accept only tiers the restored
+					// model advertises.
+					if n, nerr := llm.NormalizeEffortFor(runtime.Effort, e.client.EffortsForModel(e.client.Model)); nerr == nil {
+						norm = n
+					}
+				} else {
+					// DeferLLM (mow rpc): no catalog yet, and the static
+					// none|low|medium|high list would reject catalog-only
+					// tiers (max, xhigh) — exactly what a session persists.
+					// Take the recorded tier as-is; ensureLLM runs
+					// SyncEffortToModel once the catalog loads, keeping it
+					// when the model allows it and landing on default_effort
+					// otherwise.
+					switch n := strings.ToLower(strings.TrimSpace(runtime.Effort)); n {
+					case "", "default", "auto":
+					default:
+						norm = n
+					}
 				}
-				if norm, nerr := llm.NormalizeEffortFor(runtime.Effort, allowed); nerr == nil {
+				if norm != "" {
 					if e.client != nil {
 						e.client.Effort = norm
 					}

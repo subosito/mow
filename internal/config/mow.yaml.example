@@ -11,10 +11,10 @@
 workspace: .
 
 # Optional OpenTelemetry (OTLP). Empty endpoint = disabled (default).
+# There is no otel.enabled — a set endpoint turns the exporter on.
 # Host/user config only — not honored from project .mow/config.
 # Env: MOW_OTEL_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT
 # otel:
-#   enabled: true
 #   endpoint: http://127.0.0.1:4318   # OTLP/HTTP collector
 #   protocol: http                    # http (default); grpc reserved
 #   service_name: mow
@@ -96,19 +96,6 @@ llm:
   # provider documents such a preamble, put it here as its own first segment;
   # folding it into another segment does not satisfy the check.
 
-  # Side-lane model ids (same base_url/key as chat). Chat stays on `model` above.
-  # Use whatever ids your provider/gateway exposes. Chat stays on `model` above.
-  # generate.* / understand.* → tools generate_* / understand_*
-  # generate:
-  #   image: gpt-image-1                  # or your gateway's image model id
-  #   speech: tts-1
-  #   speech_voice: alloy                 # provider voice id (optional; default alloy)
-  #   video: …                            # if your endpoint supports video
-  # understand:
-  #   image: gpt-5                        # vision-capable chat model id
-  #   voice: whisper-1
-  #   video: …
-
 tools:
   # Secure default when omitted: read, glob, grep
   enable:
@@ -120,13 +107,14 @@ tools:
   #   - write
   #   - edit
   #   - bash
-  # Media (also set matching llm.generate.* / llm.understand.* model ids):
-  #   - generate_image
-  #   - generate_speech
-  #   - generate_video
+  # Media names are opt-in and only exist when this process is mow-full
+  # (packs/media). Lean mow ignores them in the tool list; `mow doctor` warns.
   #   - understand_image
   #   - understand_voice
   #   - understand_video
+  #   - generate_image
+  #   - generate_speech
+  #   - generate_video
 
 policy:
   # max_turns: 200                # cap LLM round-trips per Prompt. Default: unlimited —
@@ -173,12 +161,21 @@ skills:
 session:
   # dir: # default $MOW_HOME/sessions
 
-# Optional packs — packages under ext/<name>; config key extensions.<name>
+# Optional packs — config key extensions.<name>. Unused keys stay as yaml
+# blobs; lean mow ignores media/ops/job/review/goal/contextsink.
 # extensions:
-#   # Tool-result side channel (optional pack packs/contextsink; stock
-#   # binaries link it): store oversized tool results per session and show the
-#   # model a short stub (full body recoverable via recall id=…).
-#   # Off by default even when the pack is linked; opt in explicitly.
+#   mowi:                             # host $MOW_HOME only (not project .mow/)
+#     mow_bin: mow                    # lean default; TUI spawn
+#     # mow_bin: mow-full             # --mow-bin > $MOW_BIN > this > mow
+#     theme: catppuccin-mocha
+#   media:                            # mow-full (packs/media); ignored by lean mow
+#     understand:
+#       image: gpt-4o
+#     # generate:
+#     #   image: gpt-image-1
+#   # Tool-result side channel (packs/contextsink; mow-full links it): store
+#   # oversized tool results per session and show the model a short stub
+#   # (full body recoverable via recall id=…). Off by default even when linked.
 #   contextsink:
 #     enabled: true
 #     max_inline_bytes: 8000    # above this → store + stub (default)
@@ -215,7 +212,7 @@ session:
 #       - id: hourly
 #         every: 1h
 #         goal: fix-ci
-#   ops:                              # pack settings only (ext/ops)
+#   ops:                              # pack settings only (packs/ops)
 #     # root:                            # default $MOW_HOME/ops
 #     # log_max_lines: 200
 #     # log_max_bytes: 262144
@@ -241,10 +238,6 @@ session:
 #     # Then: mow ops run api-stack --once
 
 
-# Claude Code plugin hooks bridge (ext/cmdhook). Runs a plugin hooks.json
-# against mow's hook system — e.g. context-mode. Same trust bar as shell.
-# extensions:
-#   cmdhook:
-#     root: /path/to/plugin
-#     hooks_file: hooks/hooks.json
-#     timeout_sec: 10
+# Claude Code plugin hooks: extensions.cmdhook above (packs/cmdhook). Same
+# trust bar as shell. The single-plugin shape (root + hooks_file) still works
+# when you only have one plugin.

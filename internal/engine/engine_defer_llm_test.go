@@ -50,7 +50,7 @@ func TestNewSkipsUnconfiguredMediaTools(t *testing.T) {
 	defer eng.Close()
 	for _, tl := range eng.tools {
 		if tl.Name() == "generate_image" {
-			t.Fatal("generate_image registered without llm.generate.image")
+			t.Fatal("generate_image registered without extensions.media.generate.image")
 		}
 	}
 }

@@ -75,7 +75,7 @@ func TestIsListingOrSearchBash(t *testing.T) {
 		"find . -name '*.go'",
 		"ls -la internal",
 		"awk '{print}' src/app.rs",
-		`python3 -c "import os; os.walk('.')"` ,
+		`python3 -c "import os; os.walk('.')"`,
 	}
 	for _, c := range yes {
 		if !isListingOrSearchBash(c) {

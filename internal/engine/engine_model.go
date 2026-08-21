@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/subosito/mow/internal/llm"
+	"github.com/subosito/mow/internal/session"
 )
 
 // Model returns the active chat model id.
@@ -343,13 +344,13 @@ func (e *Engine) SetEffort(effort string) error {
 	}
 	_ = e.ensureLLM()
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	var allowed []string
 	if e.client != nil {
 		allowed = e.client.EffortsForModel(e.client.Model)
 	}
 	norm, err := llm.NormalizeEffortFor(effort, allowed)
 	if err != nil {
+		e.mu.Unlock()
 		return err
 	}
 	if e.client != nil {
@@ -361,7 +362,19 @@ func (e *Engine) SetEffort(effort string) error {
 		e.cfg.LLM.Effort = norm
 	}
 	if e.client == nil && e.cfg == nil {
+		e.mu.Unlock()
 		return fmt.Errorf("mow: effort switch requires a live engine")
+	}
+	sess := e.sess
+	e.mu.Unlock()
+	if sess != nil {
+		// Persist the choice so --continue / --session restore it even when
+		// the operator quits before the next prompt — the turn-boundary
+		// runtime event in PromptWith is the only other writer. File I/O
+		// stays outside e.mu.
+		if aerr := sess.Append(session.Event{Type: "runtime", Model: e.Model(), Wire: e.Wire(), Effort: norm}); aerr != nil {
+			e.log().Warn("mow: session runtime append failed (resume may use previous effort)", "err", aerr)
+		}
 	}
 	return nil
 }

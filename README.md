@@ -5,7 +5,8 @@
 ```text
 Embedder / tests ──┐
 CLI (run/tty) ────┼──▶  mow.Engine  ──▶  LLM HTTP (any compatible endpoint)
-ext + packs ──────┘     (acp · mcp · goal · review · …)
+mow / mow-full ───┘     (lean: acp · rpc · focus · proc · mcp
+                         full: + goal · review · ops · media · …)
 ```
 
 **Why mow:** the core module has two runtime dependencies (pty, yaml) — no SDK,
@@ -62,6 +63,7 @@ devenv shell -- just build    # → bin/mow (embeds VERSION)
 
 # Or with plain Go:
 go build -o bin/mow ./cmd/mow
+go build -o bin/mow-full ./cmd/mow-full
 
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_API_KEY=sk-…
@@ -72,19 +74,24 @@ export OPENAI_MODEL=gpt-5-mini
 
 ./bin/mow run -p "Reply with exactly: hi"
 ./bin/mow tty
-./bin/mow goal run --goal "Make CI green"   # packs/goal — multi-step
-./bin/mow review                              # packs/review — advisory review
-./bin/mow sec --format sarif                  # advisory security review / SARIF
-./bin/mow job                                 # packs/job — interval jobs
 ./bin/mow acp                                 # ext/acp — ACP agent
 ./bin/mow rpc                                 # ext/rpc — JSON-lines
 ./bin/mow help                                # linked commands, dynamically
+
+# mow-full links the workflow packs on top of mow:
+./bin/mow-full goal run --goal "Make CI green"   # packs/goal — multi-step
+./bin/mow-full review                            # packs/review — advisory review
+./bin/mow-full sec --format sarif                # advisory security review / SARIF
+./bin/mow-full job                               # packs/job — interval jobs
+./bin/mow-full ops list                          # packs/ops — fleet ops
 
 ```
 
 **Pack-owned subcommands:** stock binaries blank-import linked packs. Remove an
 import (for example `_ "github.com/subosito/mow/ext/acp"`) and its tools and
-subcommand disappear from that binary and help.
+subcommand disappear from that binary and help. `bin/mow` is the lean stock
+binary (acp, rpc, focus, proc, cmdhook, mcp); `bin/mow-full` adds the
+workflow packs (goal, job, ops, review, media, contextsink).
 
 Secure default tools: **read**, **glob**, **grep**. Power tools need
 `--allow-write` / `--allow-shell`. `--allow-shell` is the trust cliff:
@@ -105,9 +112,9 @@ Three Go modules (`go.work` wires them for local dev). Full public/internal map:
 |---|---|
 | `mow.go` + `internal/` | Public API re-export and implementation |
 | `ext/` + `cliutil/` + `extcfg/` | Core extensions, CLI helpers, extension config decode |
-| `packs/` | Optional packs: goal, review, ops, job |
-| `packs/otel/` | Nested OTLP module |
-| `cmd/mow/` | Sole full pack host (links ext + optional packs and OTEL) |
+| `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job, contextsink |
+| `cmd/mow/` | Lean pack host (acp, rpc, focus, proc, cmdhook, mcp) |
+| `cmd/mow-full/` | Full pack host (lean set + goal, job, ops, review, media, contextsink) |
 
 ## Pick extensions when embedding
 
@@ -120,10 +127,7 @@ import (
 ```
 
 Import only `github.com/subosito/mow` for the Engine library. Add individual
-`ext/*` or `packs/*` imports as needed. Import
-`github.com/subosito/mow/packs/otel` only when OTLP auto-wiring is wanted — it
-is a nested module and is **not** linked into the stock `mow` binary, which is
-why the root module has no OpenTelemetry dependencies.
+`ext/*` or `packs/*` imports as needed.
 
 Config: `extensions.<pack>` (see `internal/config/mow.yaml.example`).
 Docs: [docs/extensions.md](docs/extensions.md).
@@ -142,5 +146,8 @@ Docs: [docs/extensions.md](docs/extensions.md).
 | [docs/extensions.md](docs/extensions.md) | Core extensions, optional packs, ACP, MCP/LSP, media |
 
 ## License
+
+MIT
+se
 
 MIT

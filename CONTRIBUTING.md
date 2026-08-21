@@ -16,7 +16,8 @@ integrate against; the CLI and every pack are thin shells over it. So:
 - Implementation detail → `internal/*`. If an integrator ends up needing it,
   re-export it deliberately rather than leaking the internal path.
 - A frontend, protocol, or heavy optional feature → a **core extension** under
-  `ext/` or an **optional pack** under `packs/` (blank-imported into `cmd/mow`),
+  `ext/` or an **optional pack** under `packs/` (blank-imported into
+  `cmd/mow` and/or `cmd/mow-full`),
   or an external host that imports mow. The Rust `mowi` sibling project is the
   interactive TUI and drives `mow rpc`.
 
@@ -34,7 +35,7 @@ strings use `mow.Version` — do not hardcode the number.
 
 ```bash
 devenv shell -- just verify   # go test ./... + go vet — the gate before every commit
-devenv shell -- just build    # → bin/mow
+devenv shell -- just build    # → bin/mow (lean) + bin/mow-full
 devenv shell -- go test -race ./...   # run when touching the loop, hooks, or sessions
 # Plain Go, no devenv/nix:
 go test ./... && go vet ./...
@@ -54,9 +55,8 @@ Layout and module boundaries: [docs/architecture.md](docs/architecture.md)
 | A built-in tool or the path jail | `internal/tools/`, `internal/policy/` |
 | Config, env, trust | `internal/config/`, `internal/contextload/` |
 | An LLM wire | `internal/llm/` |
-| A core extension (acp, mcp, proc, rpc, cmdhook, eval) | `ext/<name>/` |
-| An optional pack (goal, review, ops, lsp, job) | `packs/<name>/` |
-| OTLP export | `packs/otel/` |
+| A core extension (acp, rpc) | `ext/<name>/` |
+| An optional pack (focus, mcp, proc, goal, review, ops, job, media) | `packs/<name>/` |
 | Interactive TUI | Rust `mowi` sibling project over `mow rpc` |
 
 Engine construction is `internal/engine/engine.go` (`New`); prompt/model/control

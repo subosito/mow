@@ -11,6 +11,7 @@ import (
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/config"
 	"github.com/subosito/mow/internal/llm"
+	"github.com/subosito/mow/internal/tools"
 )
 
 type toolAdapter struct{ t ext.Tool }
@@ -353,6 +354,25 @@ func isBuiltin(name string) bool {
 	default:
 		return false
 	}
+}
+
+func unknownRegisteredEnable(enable []string, registered []agent.Tool) []string {
+	names := make([]string, 0, len(registered))
+	for _, t := range registered {
+		if t != nil {
+			names = append(names, t.Name())
+		}
+	}
+	return tools.UnknownEnable(enable, names)
+}
+
+func mediaPackLinked() bool {
+	for _, f := range ext.OptionalFeatures() {
+		if f.ID == "media" {
+			return true
+		}
+	}
+	return false
 }
 
 // isReadOnlyTool reports whether a tool may run in a read-only prompt:

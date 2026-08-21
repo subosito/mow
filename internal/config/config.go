@@ -116,7 +116,7 @@ type LLMConfig struct {
 	InputPrice    float64 `yaml:"input_price"`
 	OutputPrice   float64 `yaml:"output_price"`
 
-	// Media model ids moved to extensions.media (owned by ext/media).
+	// Media model ids moved to extensions.media (owned by packs/media).
 	// The media tools still share llm.base_url / api_key / headers — only the
 	// per-modality model ids are pack config.
 }

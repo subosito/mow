@@ -11,15 +11,15 @@ import (
 //
 // Go does not enforce this. The internal/ rule is import-path-prefix based and
 // packs/ sits under github.com/subosito/mow/, so the import compiles happily —
-// it drifted once already (packs/lsp/lsp_test.go imported internal/config for
+// it drifted once already (a pack test imported internal/config for
 // a single "MOW_HOME" string). Keep the tier honest here instead.
 //
 // ext/ is the privileged tier and is deliberately exempt: see
 // docs/extensions.md. If a pack genuinely needs core internals it belongs in
 // ext/, not in a widened exception to this test.
 //
-// This test covers every pack in packs/, linked or not — otel, lsp and eval
-// are not blank-imported by cmd/mow but must still honor the tier rule.
+// This test covers every pack in packs/, linked or not — packs are not
+// blank-imported by cmd/mow but must still honor the tier rule.
 func TestPacksDoNotImportInternal(t *testing.T) {
 	const needle = `"github.com/subosito/mow/internal/`
 

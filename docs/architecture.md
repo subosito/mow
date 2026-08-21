@@ -25,12 +25,11 @@ broker, host UI, or sibling repository is required for `mow.Engine`.
 
 | Module | Path | Role |
 |---|---|---|
-| `github.com/subosito/mow` | root | Public API, `internal/engine`, registration, core extensions, `cmd/mow` |
-| `github.com/subosito/mow/packs` | `packs/` | Optional workflow/domain packs: goal, review, ops, lsp, job |
-| `github.com/subosito/mow/packs/otel` | `packs/otel/` | Optional OTLP auto-wire/export module |
+| `github.com/subosito/mow` | root | Public API, `internal/engine`, registration, core extensions, `cmd/mow`, `cmd/mow-full` |
+| `github.com/subosito/mow/packs` | `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job, contextsink |
 
-`go.work` wires the three Go modules for local development. Import direction is
-one-way: nested modules depend on the root public API, never the reverse.
+`go.work` wires the two Go modules for local development. Import direction is
+one-way: the packs module depends on the root public API, never the reverse.
 
 ## Public vs internal
 
@@ -40,9 +39,8 @@ one-way: nested modules depend on the root public API, never the reverse.
 |---|---|
 | `github.com/subosito/mow` | Thin aliases/wrappers: `Engine`, `Run`, options, events, hooks, providers |
 | `github.com/subosito/mow/ext` | Registration API: tools, lifecycle hooks, commands, `BeforeNew` |
-| `github.com/subosito/mow/ext/<name>` | Core protocol/runtime extensions: acp, mcp, proc, rpc, cmdhook, eval |
-| `github.com/subosito/mow/packs/<name>` | Optional packs: goal, review, ops, lsp, job, contextsink |
-| `github.com/subosito/mow/packs/otel` | Optional OTLP integration |
+| `github.com/subosito/mow/ext/<name>` | Core protocol/runtime extensions: acp, rpc |
+| `github.com/subosito/mow/packs/<name>` | Optional packs: media, mcp, proc, goal, review, ops, job, contextsink |
 | `github.com/subosito/mow/cliutil` | CLI flags → Engine |
 | `github.com/subosito/mow/extcfg` | Decode `extensions.<name>` |
 
@@ -53,7 +51,7 @@ one-way: nested modules depend on the root public API, never the reverse.
 | `internal/engine` | Engine implementation + behavior tests |
 | `internal/agent` | Tool-calling loop, compact, steer, stall handling |
 | `internal/llm` | HTTP wires, model catalog/filtering, effort/native tools |
-| `internal/tools` | Built-in and media tools |
+| `internal/tools` | Built-in FS/shell tools |
 | `internal/config` | YAML/env config and workspace sets |
 | `internal/policy` | Path jail and power-tool gates |
 | `internal/session` | JSONL sessions and context archive |
@@ -62,7 +60,7 @@ one-way: nested modules depend on the root public API, never the reverse.
 
 Integrators never import `internal/*`. If an optional module needs internal
 behavior, the root public package re-exports a narrow API (for example
-`mow.Proc*`).
+`mow.Proc*`, `mow.MediaClient`).
 
 ```text
 Embedder / cmd/mow / packs
@@ -86,12 +84,12 @@ Embedder / cmd/mow / packs
 - `packs/proc`: detached process tools/command
 - `ext/rpc`: JSON-lines control plane
 - `packs/cmdhook`: configured command hooks
-- `packs/eval`: eval/replay command (optional; not linked in stock `cmd/mow`)
 
 ### Optional packs (`packs/` module)
 
 One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.md`).
 
+- `packs/media`: generate/understand tools (config-gated)
 - `packs/goal`: durable outer-loop goals
 - `packs/review`: code/security review workflows
 - `packs/ops`: ops profiles, logs, actions, incidents, runbooks
@@ -101,18 +99,19 @@ One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.m
 
 ### Heavy nested modules
 
-- `packs/otel`: OpenTelemetry dependencies stay isolated unless imported
 - Rust `mowi`: external TUI host that drives `mow rpc`
 
 ## Binaries
 
 | Binary | Source | Ships |
 |---|---|---|
-| `mow` | `cmd/mow` | Full CLI host: core extensions + optional packs + OTEL |
+| `mow` | `cmd/mow` | Lean CLI: acp, rpc, focus, proc, cmdhook, mcp |
+| `mow-full` | `cmd/mow-full` | Lean set plus goal, job, ops, review, media, contextsink |
 | Rust `mowi` | sibling project/repository | Interactive TUI over `mow rpc` |
 
-The Rust `mowi` host launches `mow rpc` and owns terminal presentation; pack
-commands and tools remain registered in the `mow` host.
+The Rust `mowi` host launches `mow rpc` (present in both binaries) and owns
+terminal presentation; pack commands and tools remain registered in the mow
+host that is on `PATH`.
 
 ## Catalog behavior
 

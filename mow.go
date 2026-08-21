@@ -68,6 +68,9 @@ type Hooks = engine.Hooks
 
 type OTELAutoFunc = engine.OTELAutoFunc
 type ProcInfo = engine.ProcInfo
+type MediaClient = engine.MediaClient
+type MediaImageResult = engine.MediaImageResult
+type MediaVideoResult = engine.MediaVideoResult
 
 // SandboxBackend is the OS jail passed to ProcStart (nil/omitted = no jail).
 type SandboxBackend = engine.SandboxBackend
@@ -206,3 +209,28 @@ func ProcStatus(dir, id string) (ProcInfo, error)    { return engine.ProcStatus(
 func ProcList(dir string) ([]ProcInfo, error)        { return engine.ProcList(dir) }
 func ProcStop(dir, id string) (ProcInfo, error)      { return engine.ProcStop(dir, id) }
 func ProcTail(dir, id string, n int) (string, error) { return engine.ProcTail(dir, id, n) }
+
+// NewMediaClient builds a generate/understand client from the chat credential.
+// Returns nil when apiKey is empty.
+func NewMediaClient(baseURL, apiKey string, extraHeaders map[string]string) *MediaClient {
+	return engine.NewMediaClient(baseURL, apiKey, extraHeaders)
+}
+
+// MediaClientFromConfig loads llm.base_url, the resolved API key, and
+// llm.headers. Returns nil when no key is resolvable (media is opt-in).
+func MediaClientFromConfig(configPaths ...string) *MediaClient {
+	return engine.MediaClientFromConfig(configPaths...)
+}
+
+func MediaDataURL(mime string, data []byte) string { return engine.MediaDataURL(mime, data) }
+func MediaMIMEFromPath(p string) string            { return engine.MediaMIMEFromPath(p) }
+
+// WriteWorkspaceFile writes data at rel under workspace through the path jail.
+func WriteWorkspaceFile(workspace, rel string, data []byte) (string, error) {
+	return engine.WriteWorkspaceFile(workspace, rel, data)
+}
+
+// ReadWorkspaceFile reads rel under workspace through the path jail.
+func ReadWorkspaceFile(workspace, rel string) (abs string, data []byte, err error) {
+	return engine.ReadWorkspaceFile(workspace, rel)
+}

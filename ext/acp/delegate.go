@@ -369,8 +369,17 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 			})
 		}
 	})
+	// Peer write/edit → host harness.tool.start/end so the parent transcript
+	// paints the same path row / diff card as a local tool. Not an Exec.
+	startedMut := map[string]bool{}
+	slot.client.SetOnFileMutation(func(m fileMutation) {
+		if eng := mow.EngineFromContext(ctx); eng != nil {
+			emitHostFileMutation(eng, agentName, m, startedMut)
+		}
+	})
 	defer slot.client.SetOnChunk(nil)
 	defer slot.client.SetOnProgress(nil)
+	defer slot.client.SetOnFileMutation(nil)
 
 	reply, stop, usage, err := slot.client.Prompt(pctx, slot.sessionID, prompt)
 	t.peersMu.Lock()

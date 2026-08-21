@@ -12,7 +12,7 @@ import (
 
 	"github.com/subosito/mow"
 
-	_ "github.com/subosito/mow/ext/focus"
+	_ "github.com/subosito/mow/packs/focus"
 )
 
 // Second read of the same path must still Exec. The focus pack degrades the

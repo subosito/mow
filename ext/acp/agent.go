@@ -452,10 +452,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 					SessionID: p.SessionID,
 					Update: sessionUpdate{
 						SessionUpdate: "agent_message_chunk",
-						Content: &struct {
-							Type string `json:"type"`
-							Text string `json:"text"`
-						}{Type: "text", Text: text},
+						Content:       &chunkContent{Type: "text", Text: text},
 					},
 				}),
 			})
@@ -471,10 +468,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 					SessionID: p.SessionID,
 					Update: sessionUpdate{
 						SessionUpdate: "agent_thought_chunk",
-						Content: &struct {
-							Type string `json:"type"`
-							Text string `json:"text"`
-						}{Type: "text", Text: text},
+						Content:       &chunkContent{Type: "text", Text: text},
 					},
 				}),
 			})

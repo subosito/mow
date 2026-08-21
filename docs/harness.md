@@ -42,7 +42,7 @@ mow run -p "Summarize this repo"
 
 ```text
 mow tty                  # line session (core)
-mow goal run --goal "…"  # multi-step outer loop (or --id NAME)
+mow-full goal run --goal "…"  # multi-step outer loop (or --id NAME)
 mow run -p "…"           # one-shot
 ```
 
@@ -91,12 +91,12 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `ext/acp` | ACP agent + client + `acp_delegate` + `mow acp` |
 | `packs/mcp` | MCP servers → tools (config opt-in) |
 | `packs/proc` / `packs/cmdhook` | Background proc tools, command hooks |
-| `packs/eval` | Optional eval CLI (`mow eval`); not in stock `cmd/mow`. Library: `github.com/subosito/mow/eval` |
+| `packs/media` | Media tool pack: `generate_*` / `understand_*` (`mow-full`, config-gated) |
+| `eval` | Eval/replay fixture library (`github.com/subosito/mow/eval`, root module) for `go test` hosts |
 | `packs/goal` | Outer multi-step goals + `mow goal` |
 | `packs/job` | Interval / cron jobs + `mow job` |
 | `packs/review` | `mow review` / `mow sec` advisory review |
 | `packs/ops` | Ops profiles, health, runbooks |
-| `packs/otel` | Optional OTLP export (nested module) |
 | `cmd/mow` | Thin shell: core commands + blank-import packs |
 
 ### Internal
@@ -112,7 +112,6 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `internal/session` | JSONL persistence, resume |
 | `internal/contextload` | AGENTS.md / CLAUDE.md, skills, project trust |
 | `internal/proc` | Detached process implementation (shared by `packs/proc` and goal tools) |
-| `ext/media` | Media tool pack: `generate_*` / `understand_*` (linked, config-gated) |
 
 Do **not** import `internal/*` from outside the module’s own packages. Full
 module map: [architecture.md](architecture.md).
@@ -181,7 +180,7 @@ The guards described above (`max_turns`, the evidence/`ErrStuck` backstop,
 context cancel, and the identical-batch nudge) are engine mechanism and live in
 core. The *workflow* heuristics — re-read caps, inventory caps, the
 destructive-git block, and the explore-only nag — are not: they ship as the
-linked pack `ext/focus` and can be tuned under `extensions.focus` or dropped
+linked pack `packs/focus` and can be tuned under `extensions.focus` or dropped
 entirely by removing its blank import. See docs/extensions.md.
 
 **Hosts:** surface `StopStuck` distinctly from `StopMaxTurns`. They mean
@@ -260,7 +259,7 @@ When `skills.selector` is on, the lazy load happens on the first `Prompt` call (
 
 When prefix matches the model (e.g. Claude family → “You are Claude Code”), the “You are mow” line is **omitted** so the model does not see two identities. Prefix sets persona; harness rules still apply.
 
-**Media model ids** live in `extensions.media` (owned by `ext/media`), not under
+**Media model ids** live in `extensions.media` (owned by `packs/media`), not under
 `llm`. The media tools still share `llm.base_url` / `llm.api_key` /
 `llm.headers` — only the per-modality model ids are pack config:
 
@@ -312,7 +311,7 @@ Optional HTTP attribution labels: `X-Mow-Actor`, `X-Mow-Session`, `X-Mow-Compone
 | `read`, `glob`, `grep` | **Yes** | Secure defaults |
 | `write`, `edit` | **No** | `--allow-write` or config |
 | `bash` | **No** | `--allow-shell` or config. Unsandboxed unless `--sandbox=bwrap` |
-| `generate_*` / `understand_*` | **No** | Model ids + explicit names in `tools.enable`; generate writes under `media/` without `--allow-write` (enable list is the opt-in) |
+| `generate_*` / `understand_*` | **No** | `mow-full` + `packs/media` only. Model ids + names in `tools.enable`; generate writes under `media/` without `--allow-write` |
 
 ```yaml
 tools:
@@ -320,17 +319,17 @@ tools:
     - read
     - glob
     - grep
-    - generate_image   # needs extensions.media.generate.image
-    - understand_image # needs extensions.media.understand.image
+    # media names need mow-full (packs/media) plus extensions.media.* model ids
+    # - generate_image
+    # - understand_image
 ```
 
 ### Media tools (`generate_*` / `understand_*`) — end to end
 
-Media lives in the linked pack `ext/media`, the same category as `ext/acp`,
-`packs/mcp` and `packs/proc` — not a core builtin. The stock `mow` binary
-blank-imports it (`_ "github.com/subosito/mow/ext/media"` in `cmd/mow/main.go`),
-so nothing changes for CLI users. A custom binary that omits the import simply
-has no media tools.
+Media lives in the linked pack `packs/media`, the same category as `packs/mcp`
+and `packs/proc` — not a core builtin. The `mow-full` binary blank-imports it
+(`_ "github.com/subosito/mow/packs/media"` in `cmd/mow-full/main.go`); lean
+`mow` does not. A custom binary that omits the import simply has no media tools.
 
 A media tool appears only when **both** hold: its model id is set under
 `extensions.media.generate.*` / `extensions.media.understand.*`, **and** its name is in `tools.enable`.
@@ -353,26 +352,34 @@ provider's own ids).
 under `media/` **without** `--allow-write` — being in the enable list is the
 write consent for that folder.
 
-Runnable config (`$MOW_HOME/config.yaml`):
+Same `$MOW_HOME/config.yaml` works for lean `mow` and `mow-full`. Unused
+`extensions.*` keys stay as yaml blobs. Media tools only appear in `mow-full`
+when the model id is set and the name is in `tools.enable`. Lean `mow` leaves
+those names off the tool list (`mow doctor` reports it).
 
 ```yaml
 llm:
+  model: gpt-5-mini
   base_url: https://api.openai.com/v1   # or a gateway that routes these models
   api_key_env: OPENAI_API_KEY           # media reuses the chat endpoint + key
-  model: gpt-5-mini
-  generate:
-    image:  gpt-image-1                 # OpenAI ids shown; swap for your gateway's
-    speech: tts-1
-    speech_voice: alloy                 # provider voice id (OpenAI-style name or vendor voice_id)
-    # video: …                          # if your endpoint supports video
-  understand:
-    image:  gpt-5                       # vision-capable chat model
-    voice:  whisper-1
-    # video: …
 tools:
-  enable: [read, glob, grep,
-           generate_image, generate_speech, generate_video,
-           understand_image, understand_voice, understand_video]
+  enable:
+    - read
+    - glob
+    - grep
+    # - understand_image               # mow-full + extensions.media.understand.image
+    # - generate_image
+extensions:
+  mowi:
+    # mow_bin: mow-full                # host yaml only; TUI spawn (not project .mow/)
+    theme: catppuccin-mocha
+  media:
+    understand:
+      image: gpt-4o
+    # generate:
+    #   image: gpt-image-1
+    #   speech: tts-1
+    #   speech_voice: alloy
 ```
 
 Then just ask — the agent calls the tool; you don't invoke it directly:
@@ -386,8 +393,9 @@ mow run -p "Transcribe recording.mp3 and summarize it"
 #   → understand_voice → transcript → summary
 ```
 
-Confirm what's active with `mow run -p "list your available tools"`. A missing
-tool means its model id isn't set or its name isn't in `tools.enable`.
+Confirm what's active with `mow doctor` or `mow run -p "list your available tools"`.
+A missing tool means this binary did not link `packs/media`, the model id isn't
+set, or the name isn't in `tools.enable`.
 
 ---
 
@@ -397,7 +405,7 @@ Load order: defaults → `$MOW_HOME/config.yaml` (default `~/.mow/config.yaml`) 
 
 `MOW_HOME` relocates the user data root (config, sessions, skills, global `AGENTS.md`). Default is `~/.mow`. Useful for tests/CI: `MOW_HOME=$(mktemp -d)`.
 
-Project trust: `mow trust` (stored out-of-band in `$MOW_HOME/trusted`) or env `MOW_TRUST_PROJECT=1` enables project config and `.mow/skills`. Trust is never read from inside the workspace — a cloned repo cannot grant itself trust. Even trusted, project config may not set `llm.base_url`, `llm.wire`, credentials, headers, media model ids (`llm.generate` / `llm.understand`), `session.dir`, `policy.extra_roots`, power tools (`write`/`edit`/`bash`), or media-write tools (`generate_*`). Project `tools.enable` only *adds* safe tools (never replaces the host list). Project `skills.dirs` entries outside the workspace are ignored.
+Project trust: `mow trust` (stored out-of-band in `$MOW_HOME/trusted`) or env `MOW_TRUST_PROJECT=1` enables project config and `.mow/skills`. Trust is never read from inside the workspace — a cloned repo cannot grant itself trust. Even trusted, project config may not set `llm.base_url`, `llm.wire`, credentials, headers, media model ids (`extensions.media`), `session.dir`, `policy.extra_roots`, power tools (`write`/`edit`/`bash`), or media-write tools (`generate_*`). Project `tools.enable` only *adds* safe tools (never replaces the host list). Project `skills.dirs` entries outside the workspace are ignored.
 
 **Supported env (slim set):**
 
@@ -525,7 +533,7 @@ Embedders build a session picker with **`Engine.Sessions()`** → `[]SessionInfo
 | Config-only | yaml, env, skills markdown |
 | Tool pack | `ext.RegisterTool` in `init` (blank-import) |
 | Hooks | `RegisterPreTool` / `PostTool` / `UserPrompt` / `SessionStart` / `PreCompact` / `AfterTurn` / `Stop` |
-| CLI pack | `ext.RegisterCommand` + blank-import in `cmd/mow` |
+| CLI pack | `ext.RegisterCommand` + blank-import in `cmd/mow-full` (and `cmd/mow` for the lean set) |
 | Pre-New setup | `ext.RegisterBeforeNew` (e.g. register config-driven tools) |
 | Custom binary | `mow.New` + choose which packs to import |
 
@@ -627,15 +635,6 @@ MCP tool results are external server text. The MCP pack marks every `mcp_*`
 tool with `Untrusted() bool` so the agent loop frames results in
 `<untrusted-output>` the same way as `bash` and `acp_delegate`.
 
-## OpenTelemetry export
-
-Optional. **Default off**, and **not linked into the stock binary**: `packs/otel`
-is a nested module, so a plain `go install`/`just build-mow` pulls no OTLP
-dependencies at all. To get config-driven export, blank-import the pack in your
-own `main` (`_ "github.com/subosito/mow/packs/otel"`) and build. With the pack
-linked, a non-empty `otel.endpoint` in `$MOW_HOME/config.yaml` or
-`MOW_OTEL_ENDPOINT` enables export (set `enabled: false` to keep it off despite
-an endpoint); spans/metrics go via OTLP/HTTP to that collector. `Engine.Close`
-shuts down the OTLP providers and flushes pending spans.
-See [embedding.md](embedding.md) § OpenTelemetry.
+the agent loop frames results in
+`<untrusted-output>` the same way as `bash` and `acp_delegate`.
 

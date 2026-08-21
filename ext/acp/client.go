@@ -46,6 +46,9 @@ type Client struct {
 	// OnProgress receives non-answer peer activity (thoughts, tool_call status).
 	// Does not append to the Prompt reply buffer. Set via SetOnProgress.
 	OnProgress func(kind, text string)
+	// OnFileMutation receives peer write/edit tool_call updates so the host
+	// can paint the same path / diff card as a local write/edit.
+	OnFileMutation func(fileMutation)
 	// PermissionMode controls agent→client session/request_permission (reject|allow).
 	// Default reject when empty.
 	PermissionMode string
@@ -282,6 +285,12 @@ func (c *Client) SetOnProgress(fn func(kind, text string)) {
 	c.textMu.Unlock()
 }
 
+func (c *Client) SetOnFileMutation(fn func(fileMutation)) {
+	c.textMu.Lock()
+	c.OnFileMutation = fn
+	c.textMu.Unlock()
+}
+
 func (c *Client) call(ctx context.Context, method string, params any, onCancel ...func()) (json.RawMessage, error) {
 	id := fmt.Sprintf("%d", c.nextID.Add(1))
 	ch := make(chan response, 1)
@@ -452,14 +461,15 @@ func (c *Client) onNotification(n notification) {
 		}
 	case "tool_call", "tool_call_update":
 		line := formatPeerToolProgress(u)
-		if line == "" {
-			return
-		}
 		c.textMu.Lock()
-		fn := c.OnProgress
+		progress := c.OnProgress
+		mutFn := c.OnFileMutation
 		c.textMu.Unlock()
-		if fn != nil {
-			fn("tool", line)
+		if line != "" && progress != nil {
+			progress("tool", line)
+		}
+		if mut, ok := peerFileMutation(u); ok && mutFn != nil {
+			mutFn(mut)
 		}
 	}
 }

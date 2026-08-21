@@ -29,15 +29,35 @@
               "-X github.com/subosito/mow/internal/engine.Version=${version}"
             ];
             meta = {
-              description = "Minimal, secure-by-default agentic harness";
+              description = "Minimal, secure-by-default agentic harness (lean)";
               homepage = "https://github.com/subosito/mow";
               license = lib.licenses.mit;
               mainProgram = "mow";
             };
           };
+          mow-full = pkgs.buildGoModule {
+            pname = "mow-full";
+            inherit version;
+            src = lib.cleanSource ./.;
+            vendorHash = "sha256-1E3PywLh8UXMO9eAiIumGzoQ6MijuImOibkoFbZw9sk=";
+            subPackages = [ "cmd/mow-full" ];
+            env.CGO_ENABLED = "0";
+            env.GOWORK = "off";
+            ldflags = [
+              "-s"
+              "-w"
+              "-X github.com/subosito/mow/internal/engine.Version=${version}"
+            ];
+            meta = {
+              description = "mow with workflow packs (goal, ops, review, media, …)";
+              homepage = "https://github.com/subosito/mow";
+              license = lib.licenses.mit;
+              mainProgram = "mow-full";
+            };
+          };
         in
         {
-          inherit mow;
+          inherit mow mow-full;
           default = mow;
         });
 

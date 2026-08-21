@@ -38,6 +38,7 @@ func formatTrace(r Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# mow trace\n\n")
 	fmt.Fprintf(&b, "- at: `%s`\n", r.At.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "- binary: `%s`\n", hostBinary())
 	fmt.Fprintf(&b, "- home: `%s`\n", r.Home)
 	fmt.Fprintf(&b, "- workspace: `%s`\n\n", r.Workspace)
 	b.WriteString("## checks\n\n")

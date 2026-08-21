@@ -27,6 +27,29 @@ func TestRunDoesNotNeedMCP(t *testing.T) {
 	}
 }
 
+func TestRunReportsUnregisteredEnable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	ws := t.TempDir()
+	body := "llm:\n  model: gpt-5-mini\ntools:\n  enable: [read, glob, grep, understand_image]\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	text := Format(Run(ws))
+	if !strings.Contains(text, "understand_image") {
+		t.Fatalf("want understand_image in doctor:\n%s", text)
+	}
+	if !strings.Contains(text, "not registered") || !strings.Contains(text, "this binary") {
+		t.Fatalf("want unregistered-enable wording:\n%s", text)
+	}
+	if !strings.Contains(text, "packs/media") || !strings.Contains(text, "mow-full") {
+		t.Fatalf("want lean/mow-full hint:\n%s", text)
+	}
+	if !strings.Contains(text, "FAIL") {
+		t.Fatalf("want tools check FAIL:\n%s", text)
+	}
+}
+
 func TestBundleIsRedacted(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("MOW_HOME", home)
