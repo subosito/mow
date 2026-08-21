@@ -463,7 +463,7 @@ Media stays a side lane to the chat loop:
 
 Media ships as the linked pack `ext/media` (blank-import, like `acp`/`rpc`/
 `focus`). Each tool registers only when its model id is configured under
-`llm.generate.*` / `llm.understand.*`; `tools.enable` still gates visibility.
+`extensions.media.generate.*` / `extensions.media.understand.*`; `tools.enable` still gates visibility.
 acks.
 
 ## Two tiers: `ext/` and `packs/`

@@ -32,7 +32,7 @@ func TestEngineOffersConfiguredMediaTool(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	cfg := filepath.Join(home, "config.yaml")
-	body := "llm:\n  model: test-model\n  generate:\n    image: img-model\n" +
+	body := "llm:\n  model: test-model\nextensions:\n  media:\n    generate:\n      image: img-model\n" +
 		"tools:\n  enable: [read, generate_image]\n"
 	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)

@@ -214,17 +214,19 @@ extensions:
 	}
 }
 
-func TestLoadGenerateUnderstandYAML(t *testing.T) {
+func TestLoadMediaExtensionYAML(t *testing.T) {
 	t.Setenv(config.EnvHome, t.TempDir())
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.yaml")
 	yaml := `
 llm:
   model: deepseek-chat
-  generate:
-    image: gpt-image-1
-  understand:
-    image: gpt-5
+extensions:
+  media:
+    generate:
+      image: gpt-image-1
+    understand:
+      image: gpt-5
 tools:
   enable:
     - read
@@ -244,12 +246,10 @@ tools:
 	if err != nil {
 		t.Fatal(err)
 	}
-	// env OPENAI_MODEL empty string might not clear - Load applies firstEnv only if non-empty
-	if f.LLM.Generate.Image != "gpt-image-1" {
-		t.Fatalf("generate.image=%q", f.LLM.Generate.Image)
-	}
-	if f.LLM.Understand.Image != "gpt-5" {
-		t.Fatalf("understand.image=%q", f.LLM.Understand.Image)
+	// Model ids are pack config now: config only has to carry the opaque
+	// extensions.media node through. ext/media owns decoding it.
+	if _, ok := f.Extensions["media"]; !ok {
+		t.Fatalf("extensions.media missing: %#v", f.Extensions)
 	}
 	if !f.ToolEnabled("generate_image") || !f.ToolEnabled("understand_image") {
 		t.Fatalf("enable=%v", f.Tools.Enable)

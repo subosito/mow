@@ -140,9 +140,10 @@ session:
 	if len(f.LLM.NativeTools) != 0 {
 		t.Fatalf("project config declared native tools: %#v", f.LLM.NativeTools)
 	}
-	if f.LLM.Generate.Image != "" || f.LLM.Understand.Image != "" {
-		t.Fatalf("project config set media models: generate=%q understand=%q",
-			f.LLM.Generate.Image, f.LLM.Understand.Image)
+	// Media model ids moved to extensions.media; a cloned workspace must not
+	// be able to point them at an attacker endpoint (they share the host key).
+	if _, ok := f.Extensions["media"]; ok {
+		t.Fatalf("project config kept extensions.media: %#v", f.Extensions["media"])
 	}
 	if f.ToolEnabled("write") || f.ToolEnabled("generate_image") {
 		t.Fatalf("project config enabled write/media tools: %v", f.Tools.Enable)

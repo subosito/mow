@@ -116,32 +116,9 @@ type LLMConfig struct {
 	InputPrice    float64 `yaml:"input_price"`
 	OutputPrice   float64 `yaml:"output_price"`
 
-	// Generate maps modality → model id for generate_* tools
-	// (image → POST /v1/images/generations, speech → /v1/audio/speech, …).
-	// Empty means that generate tool is unavailable.
-	Generate GenerateConfig `yaml:"generate"`
-
-	// Understand maps modality → model id for side-lane “sense” tools
-	// (image / voice / video). Chat model need not be multimodal.
-	Understand UnderstandConfig `yaml:"understand"`
-}
-
-// GenerateConfig holds model ids for generate_* tools.
-type GenerateConfig struct {
-	Image  string `yaml:"image"`
-	Speech string `yaml:"speech"`
-	// SpeechVoice is the default TTS voice when the tool call omits voice.
-	// For ElevenLabs this must be a voice_id (not a display name).
-	// Empty → tools package built-in default.
-	SpeechVoice string `yaml:"speech_voice"`
-	Video       string `yaml:"video"`
-}
-
-// UnderstandConfig holds model ids for understand_* tools (image / voice / video).
-type UnderstandConfig struct {
-	Image string `yaml:"image"`
-	Voice string `yaml:"voice"`
-	Video string `yaml:"video"`
+	// Media model ids moved to extensions.media (owned by ext/media).
+	// The media tools still share llm.base_url / api_key / headers — only the
+	// per-modality model ids are pack config.
 }
 
 type ToolsConfig struct {
@@ -459,8 +436,10 @@ func mergeProjectFile(dst *File, path string) error {
 	overlay.LLM.SystemPrefix = nil
 	overlay.LLM.SystemPrefixModels = nil
 	// Media side-lanes share the chat key; project must not point them.
-	overlay.LLM.Generate = GenerateConfig{}
-	overlay.LLM.Understand = UnderstandConfig{}
+	// The model ids now live in extensions.media, so drop that whole section
+	// rather than trusting the pack to re-check: a cloned workspace pointing
+	// them at an attacker endpoint would leak the host's API key.
+	delete(overlay.Extensions, "media")
 	// Native tools make the provider fetch/search on the request's behalf and
 	// bill it. That is a capability decision for the host/user, not something
 	// a cloned workspace may switch on.
@@ -773,24 +752,6 @@ func mergeLLM(dst *LLMConfig, o LLMConfig) {
 	}
 	if o.CallTimeoutSec != 0 {
 		dst.CallTimeoutSec = o.CallTimeoutSec
-	}
-	if s := strings.TrimSpace(o.Generate.Image); s != "" {
-		dst.Generate.Image = s
-	}
-	if s := strings.TrimSpace(o.Generate.Speech); s != "" {
-		dst.Generate.Speech = s
-	}
-	if s := strings.TrimSpace(o.Generate.Video); s != "" {
-		dst.Generate.Video = s
-	}
-	if s := strings.TrimSpace(o.Understand.Image); s != "" {
-		dst.Understand.Image = s
-	}
-	if s := strings.TrimSpace(o.Understand.Voice); s != "" {
-		dst.Understand.Voice = s
-	}
-	if s := strings.TrimSpace(o.Understand.Video); s != "" {
-		dst.Understand.Video = s
 	}
 }
 

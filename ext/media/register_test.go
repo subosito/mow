@@ -19,7 +19,7 @@ func TestSetupRegistersOnlyConfiguredTools(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	cfg := filepath.Join(home, "config.yaml")
-	body := "llm:\n  generate:\n    image: img-model\n  understand:\n    voice: audio-model\n"
+	body := "extensions:\n  media:\n    generate:\n      image: img-model\n    understand:\n      voice: audio-model\n"
 	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestSetupWithoutAPIKeyRegistersNothing(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	cfg := filepath.Join(home, "config.yaml")
-	if err := os.WriteFile(cfg, []byte("llm:\n  generate:\n    image: img-model\n"), 0o600); err != nil {
+	if err := os.WriteFile(cfg, []byte("extensions:\n  media:\n    generate:\n      image: img-model\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// No key means no media client can be built: a no-op, never an error.

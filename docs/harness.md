@@ -260,8 +260,26 @@ When `skills.selector` is on, the lazy load happens on the first `Prompt` call (
 
 When prefix matches the model (e.g. Claude family → “You are Claude Code”), the “You are mow” line is **omitted** so the model does not see two identities. Prefix sets persona; harness rules still apply.
 
-| `llm.generate.*` | Side-lane model ids for generate tools |
-| `llm.understand.*` | Side-lane model ids for understand tools |
+**Media model ids** live in `extensions.media` (owned by `ext/media`), not under
+`llm`. The media tools still share `llm.base_url` / `llm.api_key` /
+`llm.headers` — only the per-modality model ids are pack config:
+
+```yaml
+extensions:
+  media:
+    generate:
+      image: gpt-image-1
+      speech: tts-1
+      speech_voice: alloy   # ElevenLabs needs a voice_id, not a display name
+      video: sora-2
+    understand:
+      image: gpt-5
+      voice: whisper-1
+      video: gemini-2.5
+```
+
+Because these share the host's chat credential, an untrusted project config
+cannot set them: `extensions.media` is dropped wholesale from project overlays.
 
 **Network timeouts:** `llm.first_byte_timeout_sec` (default `300`) bounds how
 long a streaming call waits for response headers/first byte — long-reasoning
@@ -302,8 +320,8 @@ tools:
     - read
     - glob
     - grep
-    - generate_image   # needs llm.generate.image
-    - understand_image # needs llm.understand.image
+    - generate_image   # needs extensions.media.generate.image
+    - understand_image # needs extensions.media.understand.image
 ```
 
 ### Media tools (`generate_*` / `understand_*`) — end to end
@@ -315,9 +333,9 @@ so nothing changes for CLI users. A custom binary that omits the import simply
 has no media tools.
 
 A media tool appears only when **both** hold: its model id is set under
-`llm.generate.*` / `llm.understand.*`, **and** its name is in `tools.enable`.
+`extensions.media.generate.*` / `extensions.media.understand.*`, **and** its name is in `tools.enable`.
 The pack registers each tool from config at `BeforeNew` time, so enabling
-`generate_image` before `llm.generate.image` is set is a no-op — never a
+`generate_image` before `extensions.media.generate.image` is set is a no-op — never a
 startup error. Media calls reuse the chat `base_url` + key, so `base_url`
 typically points at a gateway that routes each model by id (or use one
 provider's own ids).

@@ -21,16 +21,33 @@ tools talk to `internal/llm` media clients directly.
 | Tools | `understand_image`, `understand_voice`, `understand_video` |
 
 No CLI, no slash commands. Registration is per-tool and conditional: a tool
-appears only when its model id is set (`llm.generate.image`,
-`llm.understand.voice`, …) and an API key is resolvable. No media config
+appears only when its model id is set (`extensions.media.generate.image`,
+`extensions.media.understand.voice`, …) and an API key is resolvable. No media config
 means no tools, never an Engine construction error. The Rust `mowi` sibling
 project exposes these tools through the RPC surface.
 
-## Config
+## Config (`extensions.media`)
 
-No `extensions.media` section. Model ids live under `llm.generate.*` /
-`llm.understand.*` in the usual config files; the API key is the host's
-configured key.
+Model ids are pack config. The provider connection is not: base_url, api_key
+and headers still come from `llm.*`, because these tools share the chat
+credential and endpoint.
+
+```yaml
+extensions:
+  media:
+    generate:
+      image: gpt-image-1
+      speech: tts-1
+      speech_voice: alloy   # ElevenLabs needs a voice_id, not a display name
+      video: sora-2
+    understand:
+      image: gpt-5
+      voice: whisper-1
+      video: gemini-2.5
+```
+
+Sharing the host key is also why an untrusted project config cannot set this:
+`extensions.media` is stripped from project overlays.
 
 ## Docs
 
