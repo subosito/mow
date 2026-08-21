@@ -272,6 +272,14 @@ func (e *Engine) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	e.mu.Lock()
 	if e.client == client {
 		e.client.SetCatalogModels(infos)
+		// Catalog may have arrived after New() (or the first GET /models
+		// missed). Adopt default_effort now so DisplayEffort and the wire
+		// agree — empty Client.Effort omits reasoning_effort and the
+		// gateway falls through to medium.
+		e.client.SyncEffortToModel(e.client.Model)
+		if e.cfg != nil {
+			e.cfg.LLM.Effort = e.client.Effort
+		}
 	}
 	e.mu.Unlock()
 	out := make([]ModelInfo, 0, len(infos))

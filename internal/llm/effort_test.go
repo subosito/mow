@@ -172,6 +172,31 @@ func TestFinalizeChatBodyGeminiWithCatalogEfforts(t *testing.T) {
 	}
 }
 
+func TestFinalizeChatBodyCSGeminiCatalogHigh(t *testing.T) {
+	// Prefixed request id + bare catalog id must still send reasoning_effort,
+	// not the Gemini-family thinking_budget fallback the Cursor adapter ignores.
+	c := &Client{Model: "cs/gemini-3.7-flash", Wire: WireOpenAIChat, Effort: "high"}
+	c.SetCatalogModels([]ModelInfo{{
+		ID: "gemini-3.7-flash", Efforts: []string{"low", "medium", "high"}, DefaultEffort: "high",
+	}})
+	raw, _ := json.Marshal(map[string]any{"model": "cs/gemini-3.7-flash"})
+	out, err := c.finalizeChatBody(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(out, &m)
+	if m["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort=%v want high; body=%v", m["reasoning_effort"], m)
+	}
+	if m["thinking_budget"] != nil {
+		t.Fatalf("must not send thinking_budget when catalog efforts resolve: %v", m)
+	}
+	if m["model"] != "cs/gemini-3.7-flash" {
+		t.Fatalf("model=%v", m["model"])
+	}
+}
+
 func TestNormalizeEffortForCatalog(t *testing.T) {
 	allowed := []string{"low", "medium", "high"}
 	got, err := NormalizeEffortFor("high", allowed)

@@ -102,3 +102,46 @@ func TestSetModelAdoptsCatalogDefaultEffort(t *testing.T) {
 	}
 }
 
+// A provider-prefixed model id must still pick up catalog default_effort
+// when GET /models publishes the bare id (cs/gemini-x vs gemini-x).
+func TestNewPrefixedModelAdoptsBareCatalogDefaultEffort(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" && r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{
+				"id":             "gemini-3.7-flash",
+				"facet":          "chat",
+				"efforts":        []string{"low", "medium", "high"},
+				"default_effort": "high",
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("MOW_HOME", t.TempDir())
+	t.Setenv("MOW_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	eng, err := mow.New(mow.Options{
+		NoSession:     true,
+		BaseURL:       srv.URL + "/v1",
+		Model:         "cs/gemini-3.7-flash",
+		ExplicitModel: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.Close() })
+
+	if got := eng.Effort(); got != "high" {
+		t.Fatalf("Effort()=%q want catalog default high", got)
+	}
+	if got := eng.DisplayEffort(); got != "high" {
+		t.Fatalf("DisplayEffort()=%q want high (must match adopted Client.Effort)", got)
+	}
+}
+

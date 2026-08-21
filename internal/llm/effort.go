@@ -230,18 +230,54 @@ func thinkingBudgetFor(effort string) *int {
 
 // modelEfforts returns catalog-advertised efforts for the active model, if any.
 func (c *Client) modelEfforts() []string {
-	if c == nil || len(c.CatalogModels) == 0 {
+	info, ok := c.catalogInfo(c.Model)
+	if !ok || len(info.Efforts) == 0 {
 		return nil
 	}
-	id := strings.ToLower(strings.TrimSpace(StripEffortTiers(c.Model)))
-	if info, ok := c.CatalogModels[id]; ok && len(info.Efforts) > 0 {
-		return info.Efforts
+	return info.Efforts
+}
+
+// providerBareID strips a single leading provider prefix (cs/gemini-x → gemini-x).
+func providerBareID(id string) string {
+	i := strings.IndexByte(id, '/')
+	if i <= 0 || i == len(id)-1 {
+		return id
 	}
-	// Case-sensitive fallback (ids are usually already lower).
-	if info, ok := c.CatalogModels[strings.TrimSpace(StripEffortTiers(c.Model))]; ok && len(info.Efforts) > 0 {
-		return info.Efforts
+	return id[i+1:]
+}
+
+// catalogInfo resolves a model id against CatalogModels. Exact lowercase and
+// effort-tier-stripped keys win, then a single provider prefix is tolerated
+// in either direction (cs/gemini-x ↔ gemini-x).
+func (c *Client) catalogInfo(model string) (ModelInfo, bool) {
+	if c == nil || len(c.CatalogModels) == 0 {
+		return ModelInfo{}, false
 	}
-	return nil
+	key := strings.ToLower(strings.TrimSpace(model))
+	if key == "" {
+		return ModelInfo{}, false
+	}
+	if info, ok := c.CatalogModels[key]; ok {
+		return info, true
+	}
+	base := strings.ToLower(StripEffortTiers(key))
+	if base != key {
+		if info, ok := c.CatalogModels[base]; ok {
+			return info, true
+		}
+	}
+	want := providerBareID(base)
+	if want != base {
+		if info, ok := c.CatalogModels[want]; ok {
+			return info, true
+		}
+	}
+	for id, info := range c.CatalogModels {
+		if providerBareID(id) == want {
+			return info, true
+		}
+	}
+	return ModelInfo{}, false
 }
 
 // requestModel returns the lean model id for the request body.
@@ -318,50 +354,28 @@ func (c *Client) SetCatalogModels(list []ModelInfo) {
 }
 
 // CatalogEntry returns the cached GET /models entry for id (exact, then
-// effort-tier stripped). Empty ID on miss. Filled by ListModels.
+// effort-tier stripped, then a single provider prefix in either direction).
+// Empty ID on miss. Filled by ListModels.
 func (c *Client) CatalogEntry(model string) (ModelInfo, bool) {
-	if c == nil || len(c.CatalogModels) == 0 {
-		return ModelInfo{}, false
-	}
-	key := strings.ToLower(strings.TrimSpace(model))
-	if key == "" {
-		return ModelInfo{}, false
-	}
-	if info, ok := c.CatalogModels[key]; ok {
-		return info, true
-	}
-	// Lean base after AG effort-tier collapse (gemini-x-medium → gemini-x).
-	base := strings.ToLower(StripEffortTiers(key))
-	if base != key {
-		if info, ok := c.CatalogModels[base]; ok {
-			return info, true
-		}
-	}
-	return ModelInfo{}, false
+	return c.catalogInfo(model)
 }
 
 // EffortsForModel returns catalog efforts for a model id, or nil.
 func (c *Client) EffortsForModel(model string) []string {
-	if c == nil || len(c.CatalogModels) == 0 {
+	info, ok := c.catalogInfo(model)
+	if !ok || len(info.Efforts) == 0 {
 		return nil
 	}
-	id := strings.ToLower(strings.TrimSpace(StripEffortTiers(model)))
-	if info, ok := c.CatalogModels[id]; ok {
-		return append([]string(nil), info.Efforts...)
-	}
-	return nil
+	return append([]string(nil), info.Efforts...)
 }
 
 // DefaultEffortForModel returns catalog default_effort for a model id, or "".
 func (c *Client) DefaultEffortForModel(model string) string {
-	if c == nil || len(c.CatalogModels) == 0 {
+	info, ok := c.catalogInfo(model)
+	if !ok {
 		return ""
 	}
-	id := strings.ToLower(strings.TrimSpace(StripEffortTiers(model)))
-	if info, ok := c.CatalogModels[id]; ok {
-		return strings.TrimSpace(info.DefaultEffort)
-	}
-	return ""
+	return strings.TrimSpace(info.DefaultEffort)
 }
 
 // SyncEffortToModel aligns engine effort with a model's catalog metadata.
