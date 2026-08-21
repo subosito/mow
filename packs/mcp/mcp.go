@@ -30,7 +30,6 @@ import (
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/extcfg"
-	"github.com/subosito/mow/internal/contextload"
 )
 
 // ServerConfig is one MCP server (stdio or streamable HTTP).
@@ -124,7 +123,7 @@ func loadWorkspaceMCPJSON(configPaths []string, c *Config) error {
 			ws = cwd
 		}
 	}
-	if ws == "" || !contextload.ProjectTrusted(ws) {
+	if ws == "" || !mow.WorkspaceTrusted(ws) {
 		return nil
 	}
 	path := filepath.Join(ws, "mcp.json")

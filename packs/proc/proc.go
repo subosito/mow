@@ -17,7 +17,6 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
-	iproc "github.com/subosito/mow/internal/proc"
 )
 
 func init() {
@@ -36,7 +35,7 @@ func init() {
 // different repos don't collide. The `mow proc` CLI resolves the same dir from
 // the current directory.
 func storeDir(workspace string) string {
-	return iproc.StoreDir(mow.Home(), workspace)
+	return mow.ProcStoreDir(mow.Home(), workspace)
 }
 
 // requireShell resolves the engine and enforces --allow-shell (background
@@ -80,8 +79,8 @@ func (startTool) Exec(ctx context.Context, args json.RawMessage) (string, error)
 	if err != nil {
 		return "error: " + err.Error(), nil
 	}
-	info, err := iproc.Start(dir, a.ID, a.Command, a.Log, eng.Workspace(), box)
-	if errors.Is(err, iproc.ErrAlreadyRunning) {
+	info, err := mow.ProcStart(dir, a.ID, a.Command, a.Log, eng.Workspace(), box)
+	if errors.Is(err, mow.ProcErrAlreadyRunning) {
 		return fmt.Sprintf("already running id=%s pid=%d — pick a new id or proc_stop first; do not reuse a dead id's port", info.ID, info.PID), nil
 	}
 	if err != nil {
@@ -93,7 +92,7 @@ func (startTool) Exec(ctx context.Context, args json.RawMessage) (string, error)
 	// Auto-kill on session exit unless keep=true. Cleanup runs on Engine.Close().
 	if !a.Keep {
 		id := info.ID
-		eng.RegisterCleanup(func() { _, _ = iproc.Stop(dir, id) })
+		eng.RegisterCleanup(func() { _, _ = mow.ProcStop(dir, id) })
 		return fmt.Sprintf("started id=%s pid=%d log=%s", info.ID, info.PID, info.Log), nil
 	}
 	return fmt.Sprintf("started id=%s pid=%d log=%s (kept — survives session exit)", info.ID, info.PID, info.Log), nil
@@ -117,8 +116,8 @@ func (statusTool) Exec(ctx context.Context, args json.RawMessage) (string, error
 	var a struct{ ID string }
 	_ = json.Unmarshal(args, &a)
 	dir := storeDir(eng.Workspace())
-	if id := iproc.SanitizeID(a.ID); id != "" {
-		info, err := iproc.Status(dir, id)
+	if id := mow.ProcSanitizeID(a.ID); id != "" {
+		info, err := mow.ProcStatus(dir, id)
 		if err != nil {
 			return "error: " + err.Error(), nil
 		}
@@ -126,12 +125,12 @@ func (statusTool) Exec(ctx context.Context, args json.RawMessage) (string, error
 		if !info.Alive {
 			out += " — dead; do not open its old port or treat the pid as live"
 		}
-		if tail, _ := iproc.Tail(dir, id, 20); tail != "" {
+		if tail, _ := mow.ProcTail(dir, id, 20); tail != "" {
 			out += "\n--- log (tail) ---\n" + tail
 		}
 		return out, nil
 	}
-	list, _ := iproc.List(dir)
+	list, _ := mow.ProcList(dir)
 	if len(list) == 0 {
 		return "(no background processes)", nil
 	}
@@ -160,11 +159,11 @@ func (stopTool) Exec(ctx context.Context, args json.RawMessage) (string, error) 
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	id := iproc.SanitizeID(a.ID)
+	id := mow.ProcSanitizeID(a.ID)
 	if id == "" {
 		return "error: id required", nil
 	}
-	info, err := iproc.Stop(storeDir(eng.Workspace()), id)
+	info, err := mow.ProcStop(storeDir(eng.Workspace()), id)
 	if err != nil {
 		return "error: " + err.Error(), nil
 	}
@@ -191,7 +190,7 @@ func procCmd(args []string) int {
 	}
 	switch sub {
 	case "list", "ls":
-		list, _ := iproc.List(dir)
+		list, _ := mow.ProcList(dir)
 		if len(list) == 0 {
 			fmt.Println("(no background processes)")
 			return 0
@@ -206,7 +205,7 @@ func procCmd(args []string) int {
 			fmt.Fprintln(os.Stderr, "  mow proc stop <id>")
 			return 2
 		}
-		info, err := iproc.Stop(dir, args[1])
+		info, err := mow.ProcStop(dir, args[1])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "mow proc:", err)
 			return 1
@@ -214,10 +213,10 @@ func procCmd(args []string) int {
 		fmt.Printf("stopped %s (pid %d)\n", info.ID, info.PID)
 		return 0
 	case "stop-all":
-		list, _ := iproc.List(dir)
+		list, _ := mow.ProcList(dir)
 		n := 0
 		for _, p := range list {
-			if _, err := iproc.Stop(dir, p.ID); err == nil {
+			if _, err := mow.ProcStop(dir, p.ID); err == nil {
 				n++
 			}
 		}
@@ -235,7 +234,7 @@ func procCmd(args []string) int {
 				n = v
 			}
 		}
-		out, err := iproc.Tail(dir, args[1], n)
+		out, err := mow.ProcTail(dir, args[1], n)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "mow proc:", err)
 			return 1

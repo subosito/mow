@@ -5,7 +5,7 @@ Claude Code-style lifecycle shell hooks: a `hooks.json` declares commands per ev
 ## Link
 
 ```go
-import _ "github.com/subosito/mow/ext/cmdhook"
+import _ "github.com/subosito/mow/packs/cmdhook"
 ```
 
 Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project

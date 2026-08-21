@@ -116,7 +116,7 @@ func (e *Engine) RegisterCleanup(fn func()) {
 
 // Close cancels any in-flight run and runs registered cleanups once (LIFO).
 // Idempotent. Hosts (mow run/tty, embedders) should defer Close so
-// session-scoped resources — notably ext/proc background processes — are torn
+// session-scoped resources — notably packs/proc background processes — are torn
 // down on exit. A crashed process skips cleanups; `mow proc stop-all` recovers.
 func (e *Engine) Close() error {
 	if e == nil {

@@ -82,11 +82,11 @@ Embedder / cmd/mow / packs
 ### Core extensions (`ext/`, root module)
 
 - `ext/acp`: ACP agent + peer delegation (`acp_delegate`)
-- `ext/mcp`: MCP server + configured MCP client tools
-- `ext/proc`: detached process tools/command
+- `packs/mcp`: MCP server + configured MCP client tools
+- `packs/proc`: detached process tools/command
 - `ext/rpc`: JSON-lines control plane
-- `ext/cmdhook`: configured command hooks
-- `ext/eval`: eval/replay command (optional; not linked in stock `cmd/mow`)
+- `packs/cmdhook`: configured command hooks
+- `packs/eval`: eval/replay command (optional; not linked in stock `cmd/mow`)
 
 ### Optional packs (`packs/` module)
 

@@ -18,7 +18,7 @@ Customization modes:
 |---|---|---|
 | Public Engine | `github.com/subosito/mow` | `Engine`, `Run`, hooks, events, providers |
 | Registration | `github.com/subosito/mow/ext` | `RegisterTool`, `RegisterCommand`, lifecycle hooks |
-| Core extensions | `github.com/subosito/mow/ext/<name>` | acp, mcp, proc, rpc, cmdhook, eval — one-pager in each `ext/<name>/README.md` |
+| Core extensions | `github.com/subosito/mow/ext/<name>` | acp, focus, media, rpc — privileged tier (may import internal/); one-pager in each `ext/<name>/README.md` |
 | Optional packs | `github.com/subosito/mow/packs/<name>` | goal, review, ops, lsp, job, contextsink — `packs/<name>/README.md` |
 | Heavy optional | `github.com/subosito/mow/packs/otel` | OTLP — `packs/otel/README.md` |
 
@@ -26,7 +26,7 @@ Customization modes:
 import (
     "github.com/subosito/mow"
     _ "github.com/subosito/mow/ext/acp"
-    _ "github.com/subosito/mow/ext/mcp"
+    _ "github.com/subosito/mow/packs/mcp"
     _ "github.com/subosito/mow/packs/contextsink"
     _ "github.com/subosito/mow/packs/goal"
     _ "github.com/subosito/mow/packs/otel"
@@ -89,7 +89,7 @@ extensions:
         read_only: false        # omit to inherit (!host write && !host shell)
 ```
 
-### MCP (`ext/mcp`)
+### MCP (`packs/mcp`)
 
 Both directions:
 
@@ -116,7 +116,7 @@ extensions:
 
 ### Process / RPC / command hooks / eval
 
-- `ext/proc`: `proc_start`, `proc_status`, `proc_stop` and `mow proc`. Stop
+- `packs/proc`: `proc_start`, `proc_status`, `proc_stop` and `mow proc`. Stop
   signals the process group; log tails are size-capped.
 - `ext/rpc`: JSON-lines prompt/event/cancel/status control plane. `mow rpc`
   always `Close`s the Engine on exit. Cancel/status use a dedicated channel so
@@ -131,15 +131,15 @@ extensions:
   presentation metadata. `capabilities.optional.features` dynamically lists
   optional packages that register host-facing facilities and their event
   types. Optional slash commands remain discoverable through `slash.list`.
-- `ext/cmdhook`: Claude-style lifecycle shell hooks (`root` or `plugins` map,
+- `packs/cmdhook`: Claude-style lifecycle shell hooks (`root` or `plugins` map,
   `min_turns`). Hooks re-register on every `BeforeNew` (no first-config pin);
   prior cmdhook hooks are cleared so profiles do not leak across Engines.
   Hermetic engines only see the current generation of hooks. Hook stdout/stderr
   are capped (~64KiB); diagnostics redact common secrets. Default is **fail-open**
   on timeout/non-2 exit (warn only); set `fail_closed: true` to block like exit 2.
-- `ext/eval`: eval/replay fixtures and command (fixture size/case count capped).
+- `packs/eval`: eval/replay fixtures and command (fixture size/case count capped).
   Optional — not blank-imported by stock `cmd/mow`. Import `github.com/subosito/mow/eval`
-  from tests, or blank-import `ext/eval` for `mow eval run`.
+  from tests, or blank-import `packs/eval` for `mow eval run`.
 
 ```yaml
 extensions:
@@ -461,8 +461,8 @@ Media stays a side lane to the chat loop:
 | `understand_voice` | transcription endpoint |
 | `understand_video` | chat with video parts |
 
-Media ships as the linked pack `ext/media` (blank-import, like `acp`/`mcp`/
-`proc`). Each tool registers only when its model id is configured under
+Media ships as the linked pack `ext/media` (blank-import, like `acp`/`rpc`/
+`focus`). Each tool registers only when its model id is configured under
 `llm.generate.*` / `llm.understand.*`; `tools.enable` still gates visibility.
 acks.
 

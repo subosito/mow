@@ -9,7 +9,7 @@ import (
 )
 
 // init links the media pack: the six generate_*/understand_* tools register
-// from config at BeforeNew time, the same way ext/cmdhook loads its plugins.
+// from config at BeforeNew time, the same way packs/cmdhook loads its plugins.
 //
 // Registration is per-tool and conditional. A tool appears only when its model
 // id is set (llm.generate.image, llm.understand.voice, …) AND an API key is

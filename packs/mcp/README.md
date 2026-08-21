@@ -5,7 +5,7 @@ MCP in both directions: configured client servers become tools, and `mow mcp` ex
 ## Link
 
 ```go
-import _ "github.com/subosito/mow/ext/mcp"
+import _ "github.com/subosito/mow/packs/mcp"
 ```
 
 Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project

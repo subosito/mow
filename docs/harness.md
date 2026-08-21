@@ -89,9 +89,9 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `extcfg` | Decode `extensions.<name>` — shared by extensions and packs |
 | `ext/rpc` | JSON-lines embed protocol + `mow rpc` |
 | `ext/acp` | ACP agent + client + `acp_delegate` + `mow acp` |
-| `ext/mcp` | MCP servers → tools (config opt-in) |
-| `ext/proc` / `ext/cmdhook` | Background proc tools, command hooks |
-| `ext/eval` | Optional eval CLI (`mow eval`); not in stock `cmd/mow`. Library: `github.com/subosito/mow/eval` |
+| `packs/mcp` | MCP servers → tools (config opt-in) |
+| `packs/proc` / `packs/cmdhook` | Background proc tools, command hooks |
+| `packs/eval` | Optional eval CLI (`mow eval`); not in stock `cmd/mow`. Library: `github.com/subosito/mow/eval` |
 | `packs/goal` | Outer multi-step goals + `mow goal` |
 | `packs/job` | Interval / cron jobs + `mow job` |
 | `packs/review` | `mow review` / `mow sec` advisory review |
@@ -111,7 +111,7 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `internal/policy` | Workspace jail, power-tool gates |
 | `internal/session` | JSONL persistence, resume |
 | `internal/contextload` | AGENTS.md / CLAUDE.md, skills, project trust |
-| `internal/proc` | Detached process implementation (shared by `ext/proc` and goal tools) |
+| `internal/proc` | Detached process implementation (shared by `packs/proc` and goal tools) |
 | `ext/media` | Media tool pack: `generate_*` / `understand_*` (linked, config-gated) |
 
 Do **not** import `internal/*` from outside the module’s own packages. Full
@@ -250,7 +250,7 @@ Compaction is **character-estimate**, not a real tokenizer. It keeps the system 
 
 **Skills** follow the Agent Skills layout (`<dir>/<name>/SKILL.md`, https://agentskills.io/specification). Optional YAML frontmatter (`name`, `description`, `disable-model-invocation`, …) is parsed; only the markdown body is injected. Spec `name` labels the system section when valid; otherwise the folder name. `disable-model-invocation: true` skips first-prompt selection (`--skill` / `/skills <name>` still load it). Skill dir precedence (search order): global `$MOW_HOME/skills` → `skills.dirs` (host/user config) → trusted `workspace/.mow/skills`. Dedup is by lowercased **folder** name with first-directory precedence (not by resolved path), so a name present in both global and user dirs loads once — the first dir's copy wins.
 
-Agent Plugins (`plugin.json` + bundled `skills/` + optional MCP, https://agent-plugins.org/specification) install as folders under `$MOW_HOME/plugins/<id>/` (trusted project: `.mow/plugins/`). Discovery reads `plugin.json`; `skills/` is searched after user/project skill dirs so those names win. `default-skills` / `always` merge into explicit skills. MCP on a plugin is not auto-registered — use `ext/mcp`. `/plugins` lists installs; `/skills` still activates. There is no `plugin install` yet — drop or clone a plugin folder in.
+Agent Plugins (`plugin.json` + bundled `skills/` + optional MCP, https://agent-plugins.org/specification) install as folders under `$MOW_HOME/plugins/<id>/` (trusted project: `.mow/plugins/`). Discovery reads `plugin.json`; `skills/` is searched after user/project skill dirs so those names win. `default-skills` / `always` merge into explicit skills. MCP on a plugin is not auto-registered — use `packs/mcp`. `/plugins` lists installs; `/skills` still activates. There is no `plugin install` yet — drop or clone a plugin folder in.
 
 Selection: `skills.selector` (default on) loads only skills whose folder name appears (case-insensitive substring) in the first user prompt. `skills.selector: false` loads all. `skills.explicit` / `--skill <name>` (repeatable) loads named skills unconditionally regardless of the selector — they load at startup, before the first prompt. CLI `--skill` and config `skills.explicit` are merged; unknown names are silently ignored. Name precedence: CLI wins over config (both deduped, first-seen order). `skills.explicit` is host/user-only — a project config may not force-load skills from global/user dirs it does not own.
 
@@ -309,7 +309,7 @@ tools:
 ### Media tools (`generate_*` / `understand_*`) — end to end
 
 Media lives in the linked pack `ext/media`, the same category as `ext/acp`,
-`ext/mcp` and `ext/proc` — not a core builtin. The stock `mow` binary
+`packs/mcp` and `packs/proc` — not a core builtin. The stock `mow` binary
 blank-imports it (`_ "github.com/subosito/mow/ext/media"` in `cmd/mow/main.go`),
 so nothing changes for CLI users. A custom binary that omits the import simply
 has no media tools.

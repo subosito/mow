@@ -69,6 +69,9 @@ type Hooks = engine.Hooks
 type OTELAutoFunc = engine.OTELAutoFunc
 type ProcInfo = engine.ProcInfo
 
+// SandboxBackend is the OS jail passed to ProcStart (nil/omitted = no jail).
+type SandboxBackend = engine.SandboxBackend
+
 // --- Vars / consts ---
 
 var (
@@ -196,8 +199,8 @@ func ProcSanitizeID(id string) string { return engine.ProcSanitizeID(id) }
 func ProcStoreDir(home, workspace string) string {
 	return engine.ProcStoreDir(home, workspace)
 }
-func ProcStart(dir, id, command, logName, workdir string) (ProcInfo, error) {
-	return engine.ProcStart(dir, id, command, logName, workdir)
+func ProcStart(dir, id, command, logName, workdir string, box ...SandboxBackend) (ProcInfo, error) {
+	return engine.ProcStart(dir, id, command, logName, workdir, box...)
 }
 func ProcStatus(dir, id string) (ProcInfo, error)    { return engine.ProcStatus(dir, id) }
 func ProcList(dir string) ([]ProcInfo, error)        { return engine.ProcList(dir) }

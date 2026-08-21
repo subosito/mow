@@ -5,7 +5,7 @@ CLI for running JSON fixture suites through the `github.com/subosito/mow/eval` h
 ## Link
 
 ```go
-import _ "github.com/subosito/mow/ext/eval"
+import _ "github.com/subosito/mow/packs/eval"
 ```
 
 Stock `cmd/mow` does **not** blank-import this package. Link it yourself for

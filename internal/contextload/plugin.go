@@ -10,7 +10,7 @@ import (
 
 // PluginInfo is one Agent Plugin (https://agent-plugins.org/specification):
 // a folder with plugin.json that may ship a skills/ directory of Agent Skills.
-// MCP servers declared on the plugin are not registered here — ext/mcp stays
+// MCP servers declared on the plugin are not registered here — packs/mcp stays
 // the tool surface. /plugins lists installs; /skills still activates.
 type PluginInfo struct {
 	// ID is the on-disk directory name (stable key).

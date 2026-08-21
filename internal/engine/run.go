@@ -249,7 +249,7 @@ type PromptOpts struct {
 }
 
 // Run is a one-shot helper: New + single Prompt. Close is deferred so
-// session-scoped resources (e.g. ext/proc background processes) are torn down
+// session-scoped resources (e.g. packs/proc background processes) are torn down
 // when the one-shot finishes.
 func Run(ctx context.Context, prompt string, opt Options) (RunResult, error) {
 	eng, err := New(opt)

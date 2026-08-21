@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/subosito/mow"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/subosito/mow/ext"
-	iproc "github.com/subosito/mow/internal/proc"
 )
 
 // --- storeDir -----------------------------------------------------------
@@ -356,10 +356,10 @@ func TestProcCmdListStopLogs(t *testing.T) {
 	cliEnv(t)
 	dir := storeDir("")
 	// One live process that writes log lines, one dead one.
-	if _, err := iproc.Start(dir, "cli-srv", "echo hello-cli; sleep 30", "", ""); err != nil {
+	if _, err := mow.ProcStart(dir, "cli-srv", "echo hello-cli; sleep 30", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := iproc.Start(dir, "cli-dead", "exit 0", "", ""); err != nil {
+	if _, err := mow.ProcStart(dir, "cli-dead", "exit 0", "", ""); err != nil {
 		t.Fatal(err)
 	}
 

@@ -17,6 +17,9 @@ import (
 // ext/ is the privileged tier and is deliberately exempt: see
 // docs/extensions.md. If a pack genuinely needs core internals it belongs in
 // ext/, not in a widened exception to this test.
+//
+// This test covers every pack in packs/, linked or not — otel, lsp and eval
+// are not blank-imported by cmd/mow but must still honor the tier rule.
 func TestPacksDoNotImportInternal(t *testing.T) {
 	const needle = `"github.com/subosito/mow/internal/`
 
@@ -37,7 +40,7 @@ func TestPacksDoNotImportInternal(t *testing.T) {
 			return nil
 		}
 		// This file names the import path in its own docs.
-		if filepath.Base(path) == "internal_import_test.go" {
+		if filepath.Base(path) == "pack_test.go" {
 			return nil
 		}
 		src, rerr := os.ReadFile(path)

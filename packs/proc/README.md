@@ -5,7 +5,7 @@ Background-process tools and CLI: start a long-lived process (dev server, watche
 ## Link
 
 ```go
-import _ "github.com/subosito/mow/ext/proc"
+import _ "github.com/subosito/mow/packs/proc"
 ```
 
 Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project

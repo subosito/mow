@@ -2,10 +2,18 @@
 // and cannot import internal/). Packs that need process management —
 // packs/goal's process tools — import mow.Proc* instead of internal/proc.
 //
-// ext/proc (which stays in the root module) imports internal/proc directly.
+// packs/proc (the general proc_* tools + `mow proc` CLI) uses these
+// re-exports for the same reason.
 package engine
 
-import "github.com/subosito/mow/internal/proc"
+import (
+	"github.com/subosito/mow/internal/proc"
+	"github.com/subosito/mow/internal/sandbox"
+)
+
+// SandboxBackend is the OS jail handed to ProcStart. Alias so packs/ can name
+// the type without importing internal/sandbox.
+type SandboxBackend = sandbox.Backend
 
 // ProcErrAlreadyRunning is returned by ProcStart when id is already alive.
 // (Re-exported as a value, not a sentinel, so cross-module callers can
@@ -22,8 +30,14 @@ func ProcSanitizeID(id string) string { return proc.SanitizeID(id) }
 func ProcStoreDir(home, workspace string) string { return proc.StoreDir(home, workspace) }
 
 // ProcStart launches a detached process under dir. See internal/proc.Start.
-func ProcStart(dir, id, command, logName, workdir string) (ProcInfo, error) {
-	return proc.Start(dir, id, command, logName, workdir)
+//
+// box is the OS jail for the spawned process. It is variadic to match
+// proc.Start, which makes it easy to omit by accident: a caller that drops it
+// gets an unsandboxed process with no compile error. proc_start is a shell
+// entry point, so an unwrapped launch makes --sandbox theater. Pass the
+// engine's ShellSandbox() unless you deliberately want no jail.
+func ProcStart(dir, id, command, logName, workdir string, box ...sandbox.Backend) (ProcInfo, error) {
+	return proc.Start(dir, id, command, logName, workdir, box...)
 }
 
 // ProcStatus returns the info for one id.
