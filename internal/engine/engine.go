@@ -91,8 +91,17 @@ type Engine struct {
 	onTokenMu   sync.Mutex
 	onToken     func(string)
 	onReasoning func(string)
+	// onRetryFn is the current run's retry reporter (Prompt-scoped, like
+	// onToken): the built-in client and cooperative providers feed it.
+	onRetryFn   func(RetryInfo)
 	onEvents    []eventSub // fan-out; AddOnEvent / SetOnEvent
 	nextEventID uint64
+
+	// activeMu guards modelActiveFn, the CURRENT LLM call's first-byte
+	// signal, registered by the loop per call (SetModelActive) and invoked
+	// on the first streamed delta or upstream frame.
+	activeMu      sync.Mutex
+	modelActiveFn func()
 
 	runMu     sync.Mutex
 	busy      bool
@@ -467,8 +476,9 @@ func New(opt Options) (*Engine, error) {
 			// Hooks are read per call so SetOnToken/Prompt wrappers apply to
 			// custom providers exactly like the built-in client.
 			e.onTokenMu.Lock()
-			hooks := ChatHooks{OnToken: e.onToken, OnReasoning: e.onReasoning}
+			hooks := ChatHooks{OnToken: e.onToken, OnReasoning: e.onReasoning, OnRetry: e.onRetryFn}
 			e.onTokenMu.Unlock()
+			hooks.OnActivity = e.signalModelActive
 			out, err := prov.Chat(ctx, toPublicMessages(messages), toPublicToolSpecs(tools), hooks)
 			if err != nil {
 				return llm.Message{}, err
@@ -568,7 +578,7 @@ func New(opt Options) (*Engine, error) {
 		}
 		e.chat = func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
 			e.onTokenMu.Lock()
-			hooks := llm.StreamHooks{OnContent: e.onToken, OnReasoning: e.onReasoning}
+			hooks := llm.StreamHooks{OnContent: e.onToken, OnReasoning: e.onReasoning, OnActivity: e.signalModelActive}
 			e.onTokenMu.Unlock()
 			// Snapshot all mutable request/catalog state under e.mu. ListModels
 			// publishes refreshed catalogs under the same lock, so a running call
@@ -576,6 +586,7 @@ func New(opt Options) (*Engine, error) {
 			e.mu.Lock()
 			c := cloneRequestClient(e.client, e.runEffort)
 			e.mu.Unlock()
+			c.OnRetry = e.llmRetryHook()
 			msg, err := c.ChatWithStream(ctx, messages, tools, hooks)
 			if err == nil && msg.Usage.InputTokens > 0 {
 				e.mu.Lock()
@@ -1034,11 +1045,12 @@ func (e *Engine) ensureLLM() error {
 	}
 	e.chat = func(ctx context.Context, messages []llm.Message, specs []llm.ToolSpec) (llm.Message, error) {
 		e.onTokenMu.Lock()
-		hooks := llm.StreamHooks{OnContent: e.onToken, OnReasoning: e.onReasoning}
+		hooks := llm.StreamHooks{OnContent: e.onToken, OnReasoning: e.onReasoning, OnActivity: e.signalModelActive}
 		e.onTokenMu.Unlock()
 		e.mu.Lock()
 		c := cloneRequestClient(e.client, e.runEffort)
 		e.mu.Unlock()
+		c.OnRetry = e.llmRetryHook()
 		msg, err := c.ChatWithStream(ctx, messages, specs, hooks)
 		if err == nil && msg.Usage.InputTokens > 0 {
 			e.mu.Lock()

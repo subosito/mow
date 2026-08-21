@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -144,6 +145,44 @@ type DeltaFn func(delta string)
 type StreamHooks struct {
 	OnContent   DeltaFn
 	OnReasoning DeltaFn
+	// OnActivity, when set, fires exactly once per call on the first
+	// MEANINGFUL decoded stream frame — content, reasoning, tool-call deltas,
+	// usage, even an error envelope. It never fires on blank lines, SSE
+	// comments, keepalive pings, or bare lifecycle envelopes (Responses
+	// created/in_progress): those arrive while the model is still silent, so
+	// counting them would end the host's wait on a lie. It carries no payload
+	// (never tool arguments): hosts use it to end a pre-first-byte wait when
+	// a tool-call-only reply streams nothing the content/reasoning hooks
+	// would observe.
+	OnActivity func()
+}
+
+// onceActivity wraps an OnActivity hook so the stream loops can fire it per
+// frame while the signal reaches the host exactly once per call.
+func onceActivity(fn func()) func() {
+	if fn == nil {
+		return nil
+	}
+	var once sync.Once
+	return func() { once.Do(fn) }
+}
+
+// resolveSSEType names one SSE frame: the event: line when present, else the
+// data payload's "type" field (some proxies strip event lines). "" means the
+// frame could not be classified — the loops treat it as junk, not activity.
+// The payload peek only runs when the event line is missing, so the common
+// path costs nothing extra.
+func resolveSSEType(eventName, data string) string {
+	if eventName != "" {
+		return eventName
+	}
+	var base struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(data), &base); err != nil {
+		return ""
+	}
+	return base.Type
 }
 
 // streamChunk is one OpenAI chat-completions SSE payload. Declared once (not
@@ -299,6 +338,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	var chunk streamChunk
 	decBuf := new(bytes.Reader)
 	dec := json.NewDecoder(decBuf)
+	activity := onceActivity(hooks.OnActivity)
 	for sc.Scan() {
 		// Bytes (not Text) avoids a string copy per line; the slice is only
 		// valid until the next Scan, and json.Unmarshal copies what it keeps.
@@ -319,6 +359,14 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 			// Re-sync the decoder: a malformed line must not poison later ones.
 			dec = json.NewDecoder(decBuf)
 			continue
+		}
+		// First MEANINGFUL decoded frame ends the wait: one carrying an error,
+		// usage, or a choice (a tool-call-only reply streams nothing the
+		// content/reasoning hooks observe, but its frames still decode).
+		// Comment/keepalive lines never reach here, and a frame that decodes
+		// to nothing ({}, heartbeat chunks) is not upstream work either.
+		if activity != nil && (chunk.Error != nil || chunk.Usage != nil || len(chunk.Choices) > 0) {
+			activity()
 		}
 		if chunk.Error != nil && chunk.Error.Message != "" {
 			return Message{}, fmt.Errorf("llm: %s", chunk.Error.Message)

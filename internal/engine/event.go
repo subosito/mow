@@ -56,8 +56,32 @@ const (
 	EventStall EventType = "loop.stall"
 	// EventSteer: host injected guidance into a running turn; the in-flight
 	// LLM call was interrupted and will be reissued with the steer appended.
-	EventSteer  EventType = "loop.steer"
-	EventRunEnd EventType = "loop.run.end"
+	EventSteer EventType = "loop.steer"
+	// EventModelWait fires per LLM call while the request has produced no
+	// token/reasoning delta and no response yet: at elapsed 0 (request sent)
+	// and at widening thresholds (10s, 30s, then every 30s) while the call
+	// stays silent. Delta carries host-displayable copy; Model/Effort
+	// identify the request. A gateway can hold a request for minutes with no
+	// bytes at all, so this is a HOST-SIDE observation of upstream silence —
+	// never proof the model is reasoning. Hosts must not render it as
+	// "thinking".
+	EventModelWait EventType = "loop.model.wait"
+	// EventModelActive ends EventModelWait: the first token/reasoning delta
+	// or upstream stream frame arrived (a tool-call-only reply still counts —
+	// its frames are activity even when no content streams), or the call
+	// returned successfully without streaming anything. It does NOT fire
+	// when the call fails before any upstream activity — EventRunEnd clears
+	// the wait state then, so hosts never show a false "responding".
+	EventModelActive EventType = "loop.model.active"
+	// EventModelRetry fires once per scheduled LLM retry (retryable 429/5xx,
+	// transient network error, or connection-refused restart), just before
+	// the backoff sleep. Delta carries honest host-displayable copy
+	// ("provider busy · retrying in 3s") — never URLs or secrets; Model/Effort
+	// identify the request. During the sleep it replaces EventModelWait's
+	// silence copy (the gateway is not being asked, so "silent" would be a
+	// lie); the wait monitor resumes once the new attempt is in flight.
+	EventModelRetry EventType = "loop.model.retry"
+	EventRunEnd     EventType = "loop.run.end"
 
 	// graph.* — orchestration (ext/goal pack): state transitions and node progress.
 	EventGoalStart   EventType = "graph.goal.start"

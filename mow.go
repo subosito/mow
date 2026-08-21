@@ -22,6 +22,12 @@ type ChatHooks = engine.ChatHooks
 type Provider = engine.Provider
 type ModelLister = engine.ModelLister
 type ModelSwitcher = engine.ModelSwitcher
+
+// RetryInfo / RetryKind describe one scheduled model-call retry, reported
+// via ChatHooks.OnRetry and surfaced as EventModelRetry. They never carry
+// URLs, headers, or credentials.
+type RetryInfo = engine.RetryInfo
+type RetryKind = engine.RetryKind
 type Engine = engine.Engine
 type Options = engine.Options
 type RunResult = engine.RunResult
@@ -106,6 +112,22 @@ const (
 	EventDelegateUsage      = engine.EventDelegateUsage
 	EventLSPDiagnostics     = engine.EventLSPDiagnostics
 	EventSteer              = engine.EventSteer
+	// EventModelWait / EventModelActive bracket the pre-first-byte silence of
+	// an LLM call. The wait is a host-side observation of upstream silence,
+	// never proof the model is reasoning.
+	EventModelWait   = engine.EventModelWait
+	EventModelActive = engine.EventModelActive
+	// EventModelRetry fires once per scheduled LLM retry, before the backoff
+	// sleep; Delta carries honest copy ("provider busy · retrying in 3s") that
+	// replaces the wait's silence copy while the gateway is not being asked.
+	EventModelRetry = engine.EventModelRetry
+)
+
+// Retry classifications for RetryInfo.Kind.
+const (
+	RetryBusy        = engine.RetryBusy
+	RetryUnavailable = engine.RetryUnavailable
+	RetryNetwork     = engine.RetryNetwork
 )
 
 // Misc consts.

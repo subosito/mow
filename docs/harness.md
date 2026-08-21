@@ -201,6 +201,20 @@ should be prompted to add information or change the task, not to raise a limit.
 
 Lifecycle slog (`mow run/tool start|end`) is **Debug** by default. Stock CLI prints compact progress on stderr (`→ read path`, `→ grep pattern`) via `OnEvent`; use `--verbose` for Debug logs.
 
+### Pre-first-byte wait state
+
+A gateway can hold a request for minutes with no response headers or bytes at
+all (some reasoning models stream nothing until the final tool-call JSON), so
+a host has no upstream signal to show. Each LLM call therefore emits
+`loop.model.wait` at elapsed 0 (`request sent; waiting for response`) and at
+widening thresholds while the call stays silent (10s, 30s, then every 30s:
+`waiting for first response`; the status bar’s elapsed clock carries the duration), then `loop.model.active`
+once — on the first token/reasoning delta, or when the call returns (a
+tool-call-only reply streams nothing, so the return itself ends the wait).
+
+This is a **host-side observation of upstream silence, not proof the model is
+reasoning**. Hosts must not render the wait state as "thinking".
+
 ### Token efficiency (defaults)
 
 | Knob | Default | Effect |

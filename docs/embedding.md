@@ -117,7 +117,8 @@ eng, _ := mow.New(mow.Options{
 ```
 
 Add more listeners any time with `eng.AddOnEvent(fn)`. Event types:
-`loop.run.start`, `loop.token`, `loop.reasoning`, `harness.tool.start`,
+`loop.run.start`, `loop.model.wait`, `loop.model.active`, `loop.token`,
+`loop.reasoning`, `harness.tool.start`,
 `harness.tool.end`, `loop.turn`, `harness.delegate.chunk`, `loop.stall`,
 `loop.run.end`. Types carry a layer prefix
 (`loop.*` lifecycle, `graph.*` orchestration, `harness.*` reality-touching);

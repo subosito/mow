@@ -224,6 +224,11 @@ type Client struct {
 	// CallTimeout bounds a single non-streaming call (one attempt). Zero =
 	// defaultCallTimeout (120s). Only consulted when c.HTTP is nil.
 	CallTimeout time.Duration `json:"-"`
+	// OnRetry, when set, fires exactly once per scheduled retry, just before
+	// the backoff sleep, with a classified secret-free RetryInfo (no URL,
+	// headers, or bodies). Hosts use it to replace "gateway silent" wait
+	// copy while a backoff is in flight.
+	OnRetry func(RetryInfo) `json:"-"`
 	// MaxTokens caps the response length on wires that require it
 	// (anthropic-messages, openai-responses max_output_tokens). Zero means
 	// provider default (8192 for Anthropic; omit for Responses).
@@ -312,7 +317,9 @@ func (c *Client) ChatWithDelta(ctx context.Context, messages []Message, tools []
 
 // ChatWithStream is Chat with content and reasoning SSE callbacks.
 func (c *Client) ChatWithStream(ctx context.Context, messages []Message, tools []ToolSpec, hooks StreamHooks) (Message, error) {
-	stream := c.Stream || hooks.OnContent != nil || hooks.OnReasoning != nil
+	// OnActivity is streaming-only too: a caller asking for the first-frame
+	// signal must get the stream even when it does not consume deltas.
+	stream := c.Stream || hooks.OnContent != nil || hooks.OnReasoning != nil || hooks.OnActivity != nil
 	// Leading system segments for non-Anthropic wires (Anthropic uses system blocks).
 	messages = c.messagesWithSystemPrefix(messages)
 	switch NormalizeWire(c.Wire) {

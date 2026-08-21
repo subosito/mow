@@ -81,6 +81,7 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 	sc := bufio.NewScanner(res.Body)
 	sc.Buffer(make([]byte, 0, 64*1024), 2<<20)
 	var eventName string
+	activity := onceActivity(hooks.OnActivity)
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
@@ -100,6 +101,16 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "" || data == "[DONE]" {
 			continue
+		}
+		// ping keepalives arrive while the model is still silent — counting
+		// one would end the wait state on a lie. message_start and everything
+		// after it are real upstream work.
+		if activity != nil {
+			switch resolveSSEType(eventName, data) {
+			case "", "ping":
+			default:
+				activity()
+			}
 		}
 		if err := applyAnthropicSSE(data, eventName, &msg, toolsByIdx, hooks); err != nil {
 			return Message{}, err

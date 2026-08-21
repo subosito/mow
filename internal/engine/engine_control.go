@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/subosito/mow/internal/llm"
 )
 
 // SetOnToken sets (or clears) the streaming content callback for subsequent LLM calls.
@@ -30,6 +32,46 @@ func (e *Engine) SetOnReasoning(fn func(delta string)) {
 	e.onTokenMu.Lock()
 	e.onReasoning = fn
 	e.onTokenMu.Unlock()
+}
+
+// signalModelActive ends the current LLM call's wait state when the loop
+// registered a first-byte signal for it: the first upstream frame of any
+// kind arrived (content, reasoning, or a tool-call-only frame). No-op
+// outside an in-flight call.
+func (e *Engine) signalModelActive() {
+	e.activeMu.Lock()
+	fn := e.modelActiveFn
+	e.activeMu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// llmRetryHook adapts the current run's retry reporter to the built-in
+// client's callback shape. Nil outside Prompt (no run to report on).
+func (e *Engine) llmRetryHook() func(llm.RetryInfo) {
+	e.onTokenMu.Lock()
+	fn := e.onRetryFn
+	e.onTokenMu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return func(ri llm.RetryInfo) { fn(retryInfoFromLLM(ri)) }
+}
+
+// retryInfoFromLLM maps the internal wire-level retry report onto the public
+// shape providers and hosts see.
+func retryInfoFromLLM(ri llm.RetryInfo) RetryInfo {
+	info := RetryInfo{Attempt: ri.Attempt, Delay: ri.Delay, Status: ri.Status}
+	switch ri.Kind {
+	case llm.RetryKindUnavailable:
+		info.Kind = RetryUnavailable
+	case llm.RetryKindNetwork:
+		info.Kind = RetryNetwork
+	default:
+		info.Kind = RetryBusy
+	}
+	return info
 }
 
 // SetOnEvent replaces all lifecycle event listeners with fn (or clears when nil).

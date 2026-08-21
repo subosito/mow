@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/subosito/mow/internal/agent"
@@ -204,13 +205,24 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	userTok := e.onToken
 	userReason := e.onReasoning
 	e.onTokenMu.Unlock()
+	// Pre-first-byte signal: the loop registers the current call's
+	// first-byte func on the engine (SetModelActive); the first streamed
+	// delta — content, reasoning, or any upstream frame (OnActivity) — ends
+	// the wait state before chat returns. Prompt is serialized by promptMu.
+	defer func() {
+		e.activeMu.Lock()
+		e.modelActiveFn = nil
+		e.activeMu.Unlock()
+	}()
 	onTok := func(delta string) {
+		e.signalModelActive()
 		if userTok != nil {
 			userTok(delta)
 		}
 		e.Emit(Event{Type: EventToken, RunID: runID, SessionID: sid, Delta: delta})
 	}
 	onReason := func(delta string) {
+		e.signalModelActive()
 		if userReason != nil {
 			userReason(delta)
 		}
@@ -222,6 +234,26 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	defer func() {
 		e.SetOnToken(userTok)
 		e.SetOnReasoning(userReason)
+	}()
+
+	// Retry reporting: the built-in client (and cooperative providers) fire
+	// this once per scheduled retry, before the backoff sleep. During the
+	// sleep the wait monitor's "gateway silent" copy would be a lie — the
+	// gateway is not being asked — so the gate suppresses wait ticks until
+	// the new attempt is in flight and the retry copy stays on screen.
+	gate := &retryGate{}
+	e.onTokenMu.Lock()
+	prevRetry := e.onRetryFn
+	e.onRetryFn = func(info RetryInfo) {
+		gate.note(info.Delay)
+		e.Emit(Event{Type: EventModelRetry, RunID: runID, SessionID: sid,
+			Model: model, Effort: e.requestEffort(), Delta: retryCopy(info)})
+	}
+	e.onTokenMu.Unlock()
+	defer func() {
+		e.onTokenMu.Lock()
+		e.onRetryFn = prevRetry
+		e.onTokenMu.Unlock()
 	}()
 
 	// Inject tool lifecycle events as outer hooks (do not mutate e.hooks permanently).
@@ -270,6 +302,23 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 			e.mu.Lock()
 			e.steerCancel = cancel
 			e.mu.Unlock()
+		},
+		OnModelWait: func(elapsed time.Duration) {
+			delta, suppress := gate.waitCopy(elapsed)
+			if suppress {
+				return
+			}
+			e.Emit(Event{Type: EventModelWait, RunID: runID, SessionID: sid,
+				Model: model, Effort: e.requestEffort(), Delta: delta})
+		},
+		OnModelActive: func() {
+			e.Emit(Event{Type: EventModelActive, RunID: runID, SessionID: sid,
+				Model: model, Effort: e.requestEffort()})
+		},
+		SetModelActive: func(signal func()) {
+			e.activeMu.Lock()
+			e.modelActiveFn = signal
+			e.activeMu.Unlock()
 		},
 		AllowTool: func(name string) error {
 			if !isAllowedTool(name, allowed) {
@@ -353,6 +402,71 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		return out, err
 	}
 	return out, nil
+}
+
+// retryGate tracks one run's backoff state so wait ticks stay honest: while
+// a retry sleep is in flight the gateway is not being asked, so the
+// "waiting for first response" copy would be misleading during backoff.
+type retryGate struct {
+	mu    sync.Mutex
+	until time.Time        // backoff sleep end ≈ next attempt start
+	now   func() time.Time // test hook; nil = time.Now
+}
+
+func (g *retryGate) timeNow() time.Time {
+	if g.now != nil {
+		return g.now()
+	}
+	return time.Now()
+}
+
+// note records a scheduled retry: the backoff sleep runs until now+delay.
+func (g *retryGate) note(delay time.Duration) {
+	g.mu.Lock()
+	g.until = g.timeNow().Add(delay)
+	g.mu.Unlock()
+}
+
+// waitCopy maps a monitor tick to honest copy. suppress=true means a backoff
+// sleep is in flight: emit nothing and keep the retry copy on screen. After
+// the sleep, silence is measured from the retry's end — approximately the
+// new attempt's start — not from the original request. A tick at elapsed 0
+// marks a new call and clears any prior call's marker.
+func (g *retryGate) waitCopy(elapsed time.Duration) (copy string, suppress bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if elapsed == 0 {
+		g.until = time.Time{}
+		return "request sent; waiting for response", false
+	}
+	if g.until.IsZero() {
+		return "waiting for first response", false
+	}
+	now := g.timeNow()
+	if now.Before(g.until) {
+		return "", true
+	}
+	return "waiting for first response", false
+}
+
+// retryCopy renders a scheduled retry as honest status copy. The status code
+// is the most it names — never URLs, headers, or bodies.
+func retryCopy(info RetryInfo) string {
+	d := info.Delay.Round(time.Second)
+	if d < time.Second {
+		d = time.Second
+	}
+	switch info.Kind {
+	case RetryUnavailable:
+		return fmt.Sprintf("provider unavailable · reconnecting in %s", d)
+	case RetryNetwork:
+		return fmt.Sprintf("network error · retrying in %s", d)
+	default:
+		if info.Status > 0 {
+			return fmt.Sprintf("provider busy · retrying in %s", d)
+		}
+		return fmt.Sprintf("provider busy · retrying in %s", d)
+	}
 }
 
 func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {

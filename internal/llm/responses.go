@@ -368,6 +368,7 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 	sc := bufio.NewScanner(streamBody)
 	sc.Buffer(make([]byte, 0, 64*1024), 2<<20)
 	var eventName string
+	activity := onceActivity(hooks.OnActivity)
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
@@ -387,6 +388,17 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "" || data == "[DONE]" {
 			continue
+		}
+		// response.created / response.in_progress only acknowledge the
+		// request — they arrive when the stream opens, before the model has
+		// produced anything, so they are not activity. Later frames (output
+		// items, deltas, completed, error) are real upstream work.
+		if activity != nil {
+			switch resolveSSEType(eventName, data) {
+			case "", "response.created", "response.in_progress":
+			default:
+				activity()
+			}
 		}
 		if err := applyResponsesSSE(data, eventName, &msg, &content, toolsByIdx, itemToIdx, hooks); err != nil {
 			return Message{}, err

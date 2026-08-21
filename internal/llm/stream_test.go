@@ -244,6 +244,70 @@ func TestChatStreamHooksCompleteToolCallAtLength(t *testing.T) {
 	}
 }
 
+func TestChatStreamActivitySilentOnKeepaliveOnlyStream(t *testing.T) {
+	// SSE comments, blank lines, and frames that decode to nothing carry no
+	// upstream work: OnActivity must never fire on them, or the host's wait
+	// would end while the model is still silent.
+	const body = "" +
+		": ping\n\n" +
+		"\n" +
+		"data: {}\n\n" +
+		"data: {\"choices\":[]}\n\n" +
+		"data: [DONE]\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
+	var activityN int
+	_, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+		OnActivity: func() { activityN++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activityN != 0 {
+		t.Fatalf("OnActivity fired %d times on a keepalive-only stream, want 0", activityN)
+	}
+}
+
+func TestChatStreamActivityFiresOnToolCallOnlyReply(t *testing.T) {
+	// A tool-call-only reply streams no content/reasoning deltas; the first
+	// decoded tool-call frame is still upstream work and must end the wait —
+	// exactly once, and not on the keepalive comment preceding it.
+	const body = "" +
+		": keepalive\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"glob\",\"arguments\":\"{}\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
+	var activityN, contentN int
+	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+		OnActivity: func() { activityN++ },
+		OnContent:  func(string) { contentN++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contentN != 0 {
+		t.Fatalf("OnContent fired %d times, want 0 (tool-call-only reply)", contentN)
+	}
+	if activityN != 1 {
+		t.Fatalf("OnActivity fired %d times, want exactly 1", activityN)
+	}
+	if len(msg.ToolCalls) != 1 || msg.ToolCalls[0].Function.Name != "glob" {
+		t.Fatalf("tool_calls=%+v", msg.ToolCalls)
+	}
+}
+
 func TestUsageParsedAcrossPaths(t *testing.T) {
 	t.Run("openai stream usage chunk", func(t *testing.T) {
 		body := "" +

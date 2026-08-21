@@ -213,6 +213,77 @@ func TestChatOpenAIResponsesStream(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamActivitySkipsLifecycleEnvelopes(t *testing.T) {
+	// response.created / response.in_progress arrive when the stream opens,
+	// before the model has produced anything — they must not count as
+	// activity. The first real frame (here a text delta) ends the wait,
+	// exactly once.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunks := []string{
+			"event: response.created\n" + `data: {"type":"response.created","response":{"status":"in_progress"}}` + "\n\n",
+			"event: response.in_progress\n" + `data: {"type":"response.in_progress","response":{"status":"in_progress"}}` + "\n\n",
+			"event: response.output_text.delta\n" + `data: {"type":"response.output_text.delta","delta":"Hi"}` + "\n\n",
+			"event: response.completed\n" + `data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":3,"output_tokens":1},"output":[]}}` + "\n\n",
+		}
+		for _, c := range chunks {
+			_, _ = io.WriteString(w, c)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
+	var activityN int
+	var content strings.Builder
+	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+		OnActivity: func() { activityN++ },
+		OnContent:  func(d string) { content.WriteString(d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content.String() != "Hi" {
+		t.Fatalf("content=%q", content.String())
+	}
+	if activityN != 1 {
+		t.Fatalf("OnActivity fired %d times, want exactly 1 (lifecycle envelopes excluded)", activityN)
+	}
+}
+
+func TestResponsesStreamActivitySilentOnEnvelopesOnlyStream(t *testing.T) {
+	// A stream of pure lifecycle envelopes (request accepted, then the
+	// connection drops) never evidences model work: zero activity.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunks := []string{
+			"event: response.created\n" + `data: {"type":"response.created","response":{"status":"in_progress"}}` + "\n\n",
+			"event: response.in_progress\n" + `data: {"type":"response.in_progress","response":{"status":"in_progress"}}` + "\n\n",
+		}
+		for _, c := range chunks {
+			_, _ = io.WriteString(w, c)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
+	var activityN int
+	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+		OnActivity: func() { activityN++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activityN != 0 {
+		t.Fatalf("OnActivity fired %d times on an envelopes-only stream, want 0", activityN)
+	}
+}
+
 func TestMessageFromResponsesProviderCalls(t *testing.T) {
 	tests := []struct {
 		name          string

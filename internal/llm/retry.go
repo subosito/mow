@@ -21,6 +21,42 @@ import (
 // maxHTTPAttempts for transient failures (429 / 5xx / some network errors).
 const maxHTTPAttempts = 3
 
+// RetryKind classifies a scheduled retry so hosts can render honest copy
+// instead of a generic "gateway silent" wait.
+type RetryKind int
+
+const (
+	// RetryKindBusy: the gateway answered a retryable status (429/5xx, or an
+	// overload error dressed as HTTP 200) — alive but overloaded.
+	RetryKindBusy RetryKind = iota
+	// RetryKindUnavailable: connection refused/reset at connect time — the
+	// gateway is down or restarting.
+	RetryKindUnavailable
+	// RetryKindNetwork: any other transient transport error.
+	RetryKindNetwork
+)
+
+// RetryInfo describes one scheduled retry of an LLM HTTP call. It carries no
+// URL, headers, or credentials — safe to surface to hosts as-is.
+type RetryInfo struct {
+	// Attempt is the 1-based ordinal of the upcoming retry (first retry = 1).
+	Attempt int
+	// Delay is the backoff sleep before the next attempt starts.
+	Delay time.Duration
+	// Status is the retryable HTTP status (429/5xx), or 0 for
+	// transport-level failures and in-body overload signals.
+	Status int
+	Kind   RetryKind
+}
+
+// notifyRetry fires the OnRetry callback once per scheduled retry, just
+// after the backoff is decided and before the sleep.
+func notifyRetry(fn func(RetryInfo), info RetryInfo) {
+	if fn != nil {
+		fn(info)
+	}
+}
+
 // maxConnRefusedAttempts is the extra budget for connection-refused errors
 // (upstream down/restarting): a gateway bounce can take tens of seconds, and a
 // run must survive it instead of dying at the ~1.4s generic burst. Once the
@@ -113,7 +149,7 @@ func (c *Client) doHTTPStream(req *http.Request) (*http.Response, error) {
 	if hc == nil {
 		hc = streamHTTPClient(c.firstByteTimeout())
 	}
-	return doWithRetry(hc, req, maxHTTPAttempts)
+	return doWithRetry(hc, req, maxHTTPAttempts, c.OnRetry)
 }
 
 // streamHTTPClient: no overall Timeout (SSE can be long); bound connect +
@@ -141,7 +177,7 @@ func streamHTTPClient(firstByte time.Duration) *http.Client {
 	}
 }
 
-func doWithRetry(hc *http.Client, req *http.Request, attempts int) (*http.Response, error) {
+func doWithRetry(hc *http.Client, req *http.Request, attempts int, onRetry func(RetryInfo)) (*http.Response, error) {
 	if attempts < 1 {
 		attempts = 1
 	}
@@ -196,16 +232,19 @@ func doWithRetry(hc *http.Client, req *http.Request, attempts int) (*http.Respon
 					return nil, err
 				}
 				wait = retryDelayRefused(refused)
+				notifyRetry(onRetry, RetryInfo{Attempt: refused, Delay: wait, Kind: RetryKindUnavailable})
 				continue
 			}
 			if i == attempts-1 {
 				return nil, err
 			}
 			wait = retryDelay(i+1, nil)
+			notifyRetry(onRetry, RetryInfo{Attempt: i + 1, Delay: wait, Kind: RetryKindNetwork})
 			continue
 		}
 		if retryableStatus(res.StatusCode) && i < attempts-1 {
 			wait = retryDelay(i+1, res)
+			notifyRetry(onRetry, RetryInfo{Attempt: i + 1, Delay: wait, Status: res.StatusCode, Kind: RetryKindBusy})
 			_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 1<<20))
 			res.Body.Close()
 			continue

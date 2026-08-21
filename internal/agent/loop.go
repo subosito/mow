@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/subosito/mow/internal/llm"
 )
@@ -105,6 +107,27 @@ type Options struct {
 	// call so a host can interrupt it mid-call (Engine.Steer). The loop then
 	// drains Steer and reissues with the steer appended — the run survives.
 	SetLLMCancel func(cancel context.CancelFunc)
+	// OnModelWait, when set, fires at elapsed 0 (immediately before each LLM
+	// call) and again at widening thresholds while the call has produced no
+	// streamed token/reasoning and has not returned. A gateway can hold a
+	// request for minutes with no bytes at all; this lets a host show an
+	// honest "request sent, upstream silent" state instead of looking hung.
+	// It never implies the model is reasoning — there is no upstream signal
+	// until bytes arrive.
+	OnModelWait func(elapsed time.Duration)
+	// OnModelActive, when set, fires exactly once per LLM call, ending the
+	// wait state: on the first streamed token/reasoning or upstream frame
+	// (signalled via SetModelActive) or, at the latest, when the call
+	// returns successfully (a tool-call-only reply may stream nothing, so
+	// the return itself is the activity signal). It does NOT fire when the
+	// call fails before any upstream activity — nothing was observed, so
+	// "responding" would be a lie; the run's terminal event clears the wait.
+	OnModelActive func()
+	// SetModelActive, when set, registers the CURRENT LLM call's first-byte
+	// signal so a host whose ChatFn streams can end the wait the moment the
+	// first token/reasoning delta arrives (mirrors SetLLMCancel). The loop
+	// clears the registration when the call returns.
+	SetModelActive func(signal func())
 	// UntrustedNonce, when set, frames external tool output (tools implementing
 	// UntrustedSource) in <untrusted-output nonce=…> before history. Empty
 	// still frames named external tools without the forgery guard.
@@ -280,7 +303,31 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		if opt.SetLLMCancel != nil {
 			opt.SetLLMCancel(callCancel)
 		}
+		// Pre-first-byte monitor: one per call. It observes host-side silence
+		// only — until the first delta or the return, there is no upstream
+		// signal, so the wait events must never read as "model is reasoning".
+		mon := newModelWaitMonitor(opt.OnModelWait, opt.OnModelActive)
+		if mon != nil {
+			if opt.SetModelActive != nil {
+				opt.SetModelActive(mon.signal)
+			}
+			mon.begin(callCtx)
+		}
 		msg, err := chat(callCtx, send, specs)
+		if mon != nil {
+			if err != nil {
+				// Error return with no upstream activity observed: stop the
+				// ticker (no leak, no further ticks) but do NOT fire active —
+				// "responding" would be a lie. The run's terminal event
+				// clears the host's wait state.
+				mon.abort()
+			} else {
+				mon.stop()
+			}
+			if opt.SetModelActive != nil {
+				opt.SetModelActive(nil)
+			}
+		}
 		// The child context is only needed while chat is in flight. Release its
 		// parent registration on every path and stop exposing a stale cancel.
 		callCancel()
@@ -467,6 +514,130 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	return Result{Messages: messages, Usage: usage}, fmt.Errorf(
 		"%w: %d (raise --max-turns / policy.max_turns, or set 0 for unlimited; prompt again keeps history)",
 		ErrMaxTurns, maxTurns)
+}
+
+// modelWaitSchedule holds the early tick offsets for the pre-first-byte
+// monitor: 10s catches a slow gateway quickly, 30s confirms it is not coming
+// back soon. modelWaitInterval is the steady-state spacing afterwards — fast
+// enough to keep a host status honest, slow enough to never spam the event
+// stream.
+var modelWaitSchedule = []time.Duration{10 * time.Second, 30 * time.Second}
+
+const modelWaitInterval = 30 * time.Second
+
+// modelWaitMonitor drives Options.OnModelWait / OnModelActive for one LLM
+// call. It fires OnModelWait at elapsed 0 (request just sent) and at the
+// scheduled thresholds while the call stays silent, and fires OnModelActive
+// exactly once — on the first streamed delta or upstream frame (signal) or,
+// at the latest, when chat returns successfully (stop). An error return
+// (abort) stops the ticker without firing active.
+type modelWaitMonitor struct {
+	onWait   func(elapsed time.Duration)
+	onActive func()
+	schedule []time.Duration
+	interval time.Duration
+	start    time.Time
+	// fireMu serializes wait ticks with signal/stop so a host never sees a
+	// wait event after active. active also stops the ticker cheaply.
+	fireMu   sync.Mutex
+	active   bool
+	stopOnce sync.Once
+	stopCh   chan struct{}
+	doneCh   chan struct{} // closed when the ticker goroutine exits
+}
+
+func newModelWaitMonitor(onWait func(time.Duration), onActive func()) *modelWaitMonitor {
+	if onWait == nil && onActive == nil {
+		return nil
+	}
+	return &modelWaitMonitor{
+		onWait:   onWait,
+		onActive: onActive,
+		schedule: modelWaitSchedule,
+		interval: modelWaitInterval,
+		stopCh:   make(chan struct{}),
+		doneCh:   make(chan struct{}),
+	}
+}
+
+// begin fires the immediate wait (request sent) and starts the ticker. The
+// ticker stops on signal/stop or when ctx is done, so a cancelled call never
+// leaks the goroutine.
+func (m *modelWaitMonitor) begin(ctx context.Context) {
+	m.start = time.Now()
+	if m.onWait == nil {
+		return
+	}
+	m.onWait(0)
+	go m.run(ctx)
+}
+
+func (m *modelWaitMonitor) run(ctx context.Context) {
+	defer close(m.doneCh)
+	ticks := 0
+	target := time.Duration(0)
+	for {
+		if ticks < len(m.schedule) {
+			target = m.schedule[ticks]
+		} else {
+			target += m.interval
+		}
+		ticks++
+		delay := time.Until(m.start.Add(target))
+		if delay < 0 {
+			delay = 0
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-m.stopCh:
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		m.fireMu.Lock()
+		if m.active {
+			m.fireMu.Unlock()
+			return
+		}
+		m.onWait(time.Since(m.start))
+		m.fireMu.Unlock()
+	}
+}
+
+// signal marks the call active: the first token/reasoning delta arrived.
+// Idempotent; safe from any goroutine.
+func (m *modelWaitMonitor) signal() {
+	m.stopOnce.Do(func() {
+		m.fireMu.Lock()
+		defer m.fireMu.Unlock()
+		m.active = true
+		close(m.stopCh)
+		if m.onActive != nil {
+			m.onActive()
+		}
+	})
+}
+
+// stop ends the wait when chat returns successfully. A tool-call-only reply
+// streams no deltas, so the return itself is the activity signal.
+func (m *modelWaitMonitor) stop() {
+	m.signal()
+}
+
+// abort ends the wait on an error return: the ticker stops (no goroutine
+// leak, no further wait ticks) but no active signal fires — nothing upstream
+// was observed, so "responding" would be a lie. The run's terminal event
+// clears the host's wait state.
+func (m *modelWaitMonitor) abort() {
+	m.stopOnce.Do(func() {
+		m.fireMu.Lock()
+		defer m.fireMu.Unlock()
+		m.active = true
+		close(m.stopCh)
+	})
 }
 
 // stallBarrenBatches is how many consecutive barren tool batches end the run

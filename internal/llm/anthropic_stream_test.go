@@ -108,3 +108,69 @@ func TestAnthropicStreamMaxTokensStopSurfaced(t *testing.T) {
 		t.Fatalf("StopReason=%q Truncated=%v want max_tokens/true", msg.StopReason, msg.Truncated())
 	}
 }
+
+func TestAnthropicStreamActivitySkipsPing(t *testing.T) {
+	// ping keepalives arrive while the model is still silent — they must not
+	// end the host's wait. message_start is the first real sign of work and
+	// fires OnActivity exactly once.
+	const body = "" +
+		"event: ping\n" +
+		"data: {\"type\":\"ping\"}\n\n" +
+		"event: message_start\n" +
+		"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n" +
+		"event: content_block_start\n" +
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n" +
+		"event: content_block_delta\n" +
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n" +
+		"event: message_stop\n" +
+		"data: {\"type\":\"message_stop\"}\n\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client()}
+	var activityN int
+	msg, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+		OnActivity: func() { activityN++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Content != "hi" {
+		t.Fatalf("content=%q", msg.Content)
+	}
+	if activityN != 1 {
+		t.Fatalf("OnActivity fired %d times, want exactly 1 (pings excluded)", activityN)
+	}
+}
+
+func TestAnthropicStreamActivitySilentOnPingOnlyStream(t *testing.T) {
+	// A keepalive-only stream never evidences model work: zero activity. The
+	// second ping omits the event: line (some proxies strip it) so the data
+	// payload's type field must carry the classification.
+	const body = "" +
+		"event: ping\n" +
+		"data: {\"type\":\"ping\"}\n\n" +
+		"data: {\"type\":\"ping\"}\n\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client()}
+	var activityN int
+	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+		OnActivity: func() { activityN++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activityN != 0 {
+		t.Fatalf("OnActivity fired %d times on a ping-only stream, want 0", activityN)
+	}
+}

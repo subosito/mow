@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -36,7 +37,7 @@ func TestDoWithRetrySucceedsAfter5xx(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, err := doWithRetry(srv.Client(), req, 3)
+	res, err := doWithRetry(srv.Client(), req, 3, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestDoWithRetryHonoursRetryAfter(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	res, err := doWithRetry(srv.Client(), req, 3)
+	res, err := doWithRetry(srv.Client(), req, 3, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +214,7 @@ func TestDoWithRetrySurvivesConnectionRefused(t *testing.T) {
 	rt := &refusedRoundTripper{}
 	hc := &http.Client{Transport: rt}
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil)
-	_, err := doWithRetry(hc, req, maxHTTPAttempts)
+	_, err := doWithRetry(hc, req, maxHTTPAttempts, nil)
 	if err == nil {
 		t.Fatal("expected connection-refused error")
 	}
@@ -248,7 +249,7 @@ func TestDoWithRetryGenericBurstUnchanged(t *testing.T) {
 	rt := &flakyRoundTripper{err: &net.OpError{Op: "dial", Net: "tcp", Err: io.EOF}}
 	hc := &http.Client{Transport: rt}
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil)
-	_, err := doWithRetry(hc, req, maxHTTPAttempts)
+	_, err := doWithRetry(hc, req, maxHTTPAttempts, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -303,7 +304,7 @@ func TestDoWithRetrySurvivesWrappedRefusedThenOK(t *testing.T) {
 		}, nil
 	})}
 	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:9420/v1/responses", nil)
-	res, err := doWithRetry(hc, req, maxHTTPAttempts)
+	res, err := doWithRetry(hc, req, maxHTTPAttempts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,3 +318,118 @@ type RoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f RoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// ---- retry observer (OnRetry) ----
+//
+// RetryInfo has no string fields at all: no err.Error(), no URL, no headers.
+// Leakage is therefore structural — these tests pin the classification
+// contract (Kind/Status/Attempt/Delay) hosts render copy from.
+
+func TestDoWithRetryNotifiesClassifiedBusy(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	req, err := newJSONRequest(context.Background(), http.MethodPost, srv.URL, []byte(`{"x":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []RetryInfo
+	res, err := doWithRetry(srv.Client(), req, 3, func(ri RetryInfo) { got = append(got, ri) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if len(got) != 1 {
+		t.Fatalf("notifications=%d want exactly 1 (one per scheduled retry)", len(got))
+	}
+	ri := got[0]
+	if ri.Attempt != 1 || ri.Status != http.StatusTooManyRequests || ri.Kind != RetryKindBusy {
+		t.Fatalf("RetryInfo=%+v want {Attempt:1 Status:429 Kind:RetryKindBusy}", ri)
+	}
+	if ri.Delay <= 0 {
+		t.Fatalf("Delay=%v want > 0 backoff", ri.Delay)
+	}
+}
+
+func TestDoWithRetryNotifiesClassifiedRefused(t *testing.T) {
+	shrinkRefusedBudget(t)
+	rt := &refusedRoundTripper{}
+	hc := &http.Client{Transport: rt}
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil)
+	var got []RetryInfo
+	_, err := doWithRetry(hc, req, maxHTTPAttempts, func(ri RetryInfo) { got = append(got, ri) })
+	if err == nil {
+		t.Fatal("expected connection-refused error")
+	}
+	// One notification per scheduled retry; the final failing attempt
+	// schedules nothing, so it does not notify.
+	if len(got) != maxConnRefusedAttempts {
+		t.Fatalf("notifications=%d want %d", len(got), maxConnRefusedAttempts)
+	}
+	for i, ri := range got {
+		if ri.Kind != RetryKindUnavailable || ri.Status != 0 || ri.Attempt != i+1 {
+			t.Fatalf("notification %d = %+v want {Attempt:%d Status:0 Kind:RetryKindUnavailable}", i, ri, i+1)
+		}
+		if ri.Delay <= 0 {
+			t.Fatalf("notification %d Delay=%v want > 0", i, ri.Delay)
+		}
+	}
+}
+
+func TestDoWithRetryNotifiesClassifiedNetwork(t *testing.T) {
+	rt := &flakyRoundTripper{err: &net.OpError{Op: "dial", Net: "tcp", Err: io.EOF}}
+	hc := &http.Client{Transport: rt}
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil)
+	var got []RetryInfo
+	_, err := doWithRetry(hc, req, maxHTTPAttempts, func(ri RetryInfo) { got = append(got, ri) })
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if len(got) != maxHTTPAttempts-1 {
+		t.Fatalf("notifications=%d want %d", len(got), maxHTTPAttempts-1)
+	}
+	for i, ri := range got {
+		if ri.Kind != RetryKindNetwork || ri.Status != 0 || ri.Attempt != i+1 {
+			t.Fatalf("notification %d = %+v want {Attempt:%d Status:0 Kind:RetryKindNetwork}", i, ri, i+1)
+		}
+	}
+}
+
+func TestDoJSONNotifiesInBodyOverload(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 1 {
+			// Overload dressed as success: HTTP 200 with an error body.
+			_, _ = w.Write([]byte(`{"error":{"message":"overloaded","type":"server_error"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{HTTP: srv.Client()}
+	var got []RetryInfo
+	c.OnRetry = func(ri RetryInfo) { got = append(got, ri) }
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", nil)
+	status, body, err := c.doJSON(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK || !strings.Contains(string(body), "ok") {
+		t.Fatalf("status=%d body=%q", status, body)
+	}
+	if len(got) != 1 {
+		t.Fatalf("notifications=%d want 1", len(got))
+	}
+	// An in-body overload carries no HTTP status — the body was 200.
+	if got[0].Kind != RetryKindBusy || got[0].Status != 0 || got[0].Attempt != 1 {
+		t.Fatalf("RetryInfo=%+v want {Attempt:1 Status:0 Kind:RetryKindBusy}", got[0])
+	}
+}

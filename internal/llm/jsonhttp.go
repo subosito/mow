@@ -87,12 +87,14 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 					return 0, nil, err
 				}
 				wait = retryDelayRefused(refused)
+				notifyRetry(c.OnRetry, RetryInfo{Attempt: refused, Delay: wait, Kind: RetryKindUnavailable})
 				continue
 			}
 			if attempt == maxHTTPAttempts {
 				return 0, nil, err
 			}
 			wait = retryDelay(attempt, nil)
+			notifyRetry(c.OnRetry, RetryInfo{Attempt: attempt, Delay: wait, Kind: RetryKindNetwork})
 			continue
 		}
 		lastStatus, lastBody = status, body
@@ -101,12 +103,14 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 			if retryableStatus(status) {
 				lastErr = fmt.Errorf("llm: HTTP %d", status)
 				wait = retryDelay(attempt, &http.Response{Header: hdr})
+				notifyRetry(c.OnRetry, RetryInfo{Attempt: attempt, Delay: wait, Status: status, Kind: RetryKindBusy})
 				continue
 			}
 			// HTTP 200 + {"error": ...}: overload dressed as success.
 			if msg, ok := transientBodyError(status, body); ok {
 				lastErr = fmt.Errorf("llm: %s", msg)
 				wait = retryDelay(attempt, &http.Response{Header: hdr})
+				notifyRetry(c.OnRetry, RetryInfo{Attempt: attempt, Delay: wait, Kind: RetryKindBusy})
 				continue
 			}
 		}
