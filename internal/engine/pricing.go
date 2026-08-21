@@ -129,6 +129,7 @@ func (e *Engine) Limits() ModelLimits {
 	if e == nil {
 		return ModelLimits{}
 	}
+	_ = e.ensureLLM()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.limitsLocked()

@@ -145,3 +145,46 @@ func TestNewPrefixedModelAdoptsBareCatalogDefaultEffort(t *testing.T) {
 	}
 }
 
+// mow rpc starts with DeferLLM, so handshake effort.list runs before Prompt.
+// DisplayEffort / Efforts must still load the catalog so the chip is not blank.
+func TestDeferLLMDisplayEffortLoadsCatalog(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" && r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{
+				"id":             "grok-4.6",
+				"facet":          "chat",
+				"efforts":        []string{"low", "high", "xhigh"},
+				"default_effort": "high",
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("MOW_HOME", t.TempDir())
+	t.Setenv("MOW_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	eng, err := mow.New(mow.Options{
+		NoSession:     true,
+		DeferLLM:      true,
+		BaseURL:       srv.URL + "/v1",
+		Model:         "grok-4.6",
+		ExplicitModel: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.Close() })
+
+	if got := eng.DisplayEffort(); got != "high" {
+		t.Fatalf("DisplayEffort()=%q want catalog default high (handshake before Prompt)", got)
+	}
+	if got := len(eng.Efforts()); got == 0 {
+		t.Fatal("Efforts() empty; effort.list would hide the chip")
+	}
+}

@@ -665,6 +665,9 @@ func New(opt Options) (*Engine, error) {
 					}
 				} else if e.cfg != nil {
 					e.cfg.LLM.Model = runtime.Model
+					if runtime.Wire != "" {
+						e.cfg.LLM.Wire = runtime.Wire
+					}
 				}
 			}
 			if runtime.Effort != "" && !opt.ExplicitEffort && !opt.ExplicitModel {

@@ -37,6 +37,7 @@ func (e *Engine) SetModel(id string) error {
 	if id == "" {
 		return fmt.Errorf("mow: empty model id")
 	}
+	_ = e.ensureLLM()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	curEffort := ""
@@ -340,6 +341,7 @@ func (e *Engine) SetEffort(effort string) error {
 	if e == nil {
 		return fmt.Errorf("mow: nil engine")
 	}
+	_ = e.ensureLLM()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var allowed []string
@@ -491,10 +493,14 @@ func (e *Engine) requestEffort() string {
 // Efforts returns catalog-advertised effort levels for the active model, or nil
 // when the gateway did not advertise them (no selectable effort — hosts must
 // not fall back to a static none|low|medium|high list).
+//
+// DeferLLM hosts (mow rpc) have no client until the first Prompt. Handshake
+// effort.list still has to paint a chip, so this loads the catalog first.
 func (e *Engine) Efforts() []string {
 	if e == nil {
 		return nil
 	}
+	_ = e.ensureLLM()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.client == nil {
@@ -508,6 +514,7 @@ func (e *Engine) DefaultEffort() string {
 	if e == nil {
 		return ""
 	}
+	_ = e.ensureLLM()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.client == nil {
@@ -524,6 +531,7 @@ func (e *Engine) DisplayEffort() string {
 	if e == nil {
 		return ""
 	}
+	_ = e.ensureLLM()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	cur := ""
