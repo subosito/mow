@@ -8,8 +8,9 @@
 // dangling reference in the loop.
 //
 // Behaviors (all soft — a run is never hard-killed by this pack):
-//  1. stub re-reads (read tool + bash cat/sed/head/tail/grep of unchanged paths)
-//  2. degrade then refuse repeated inventory (git status/log, ls, find, rg)
+//  1. degrade repeated views (read tool + bash cat/sed/head/tail of the same window)
+//  2. degrade then refuse repeated inventory (git status/ls/find; git log/show/diff
+//     and rg/grep keyed by args)
 //  3. block destructive git/rm that discards uncommitted work
 //  4. treat test/build/commit bash as productive (resets the explore streak)
 //  5. nag every turn after N consecutive explore-only turns
@@ -75,9 +76,9 @@ func setup(configPaths ...string) error {
 
 // register installs the four seams this pack rides on.
 func register(st *focusState) {
-	// PreTool: re-read stub (read) and the bash guard (destructive / repeated
-	// inventory past the hard limit). Both surface as Deny + Message; the
-	// message IS the stub the model sees.
+	// PreTool: bash guard (destructive / repeated inventory past the hard
+	// limit) surfaces as Deny + Message. Repeated read/bash views only park
+	// a Notice — the call still runs, PostTool caps the body.
 	ext.RegisterPreToolSource(hookSource, func(ctx context.Context, e ext.PreToolEvent) (ext.PreToolDecision, error) {
 		return preTool(st, ctx, e.Name, e.Args, e.ToolCallID)
 	})
@@ -187,17 +188,19 @@ func truncate(s string, maxChars int) string {
 
 var _ = json.RawMessage(nil)
 
-// preTool is the shared PreTool body: re-read stub + bash guard. Shared with
-// InstallForTest so the direct-agent path exercises identical logic.
+// preTool is the shared PreTool body: read/bash view notices + bash guard.
+// Shared with InstallForTest so the direct-agent path exercises identical logic.
 func preTool(st *focusState, ctx context.Context, name string, args json.RawMessage, callID string) (ext.PreToolDecision, error) {
 	n := strings.ToLower(strings.TrimSpace(name))
 	// Every call feeds the explore streak, including ones denied below:
-	// a stubbed re-read is still an explore turn.
+	// a capped re-read is still an explore turn.
 	st.noteCall(n, args)
 	switch n {
 	case "read":
-		if stub, ok := st.maybeDedupeRead(args); ok {
-			return ext.PreToolDecision{Deny: true, Message: stub}, nil
+		// Repetition alone does not refuse the call: it runs, and the
+		// post-tool hook caps the body and prepends the notice.
+		if notice := st.guardRead(args); notice != "" {
+			st.stashNotice(callID, notice)
 		}
 	case "bash":
 		guard := st.guardBash(args)

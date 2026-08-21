@@ -179,7 +179,7 @@ for it. Only the evidence signal hard-stops.
 
 The guards described above (`max_turns`, the evidence/`ErrStuck` backstop,
 context cancel, and the identical-batch nudge) are engine mechanism and live in
-core. The *workflow* heuristics — re-read stubs, inventory caps, the
+core. The *workflow* heuristics — re-read caps, inventory caps, the
 destructive-git block, and the explore-only nag — are not: they ship as the
 linked pack `ext/focus` and can be tuned under `extensions.focus` or dropped
 entirely by removing its blank import. See docs/extensions.md.

@@ -20,8 +20,8 @@ Engine and this pack could move to `packs/`.
 
 No CLI, no tools, no slash commands. The pack installs hooks at `BeforeNew`:
 
-1. re-read stubs — the same unchanged path via `read`, or `bash cat/sed/head/tail`
-2. inventory caps — repeated `git status`/`ls`/`find`/`rg` degrade, then refuse
+1. view caps — the same `read` window (path+offset+limit), or `bash cat/sed/head/tail`; the call still runs
+2. inventory caps — repeated `git status`/`ls`/`find` degrade, then refuse; `git log`/`show`/`diff` and `rg`/`grep` key on args
 3. a soft block on destructive `git`/`rm` that would discard uncommitted work
 4. productive bash (`go test`, `go build`, `git commit`, …) resets the streak
 5. a nag after N consecutive explore-only turns
@@ -36,7 +36,7 @@ All keys optional; defaults reproduce the pre-extraction core behavior.
 extensions:
   focus:
     explore_warn_every: 6       # nag after N explore-only turns
-    reread_limit: 1             # re-reads of an unchanged path before stubbing
+    reread_limit: 1             # repeats of the same view before results degrade
     inventory_limit: 2          # inventory calls before results degrade
     hard_inventory_limit: 4     # inventory calls before refusal
     degraded_result_limit: 2000 # cap (chars) on a degraded result body

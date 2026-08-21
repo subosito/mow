@@ -61,8 +61,8 @@ func TestRereadShortCircuit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rt.n != 1 {
-		t.Fatalf("Exec count=%d want 1 (second read short-circuited)", rt.n)
+	if rt.n != 2 {
+		t.Fatalf("Exec count=%d want 2 (second read still runs, result degraded)", rt.n)
 	}
 	var toolOuts []string
 	for _, m := range res.Messages {
@@ -77,7 +77,10 @@ func TestRereadShortCircuit(t *testing.T) {
 		t.Fatalf("first=%q", toolOuts[0])
 	}
 	if !strings.Contains(toolOuts[1], "already read") {
-		t.Fatalf("second=%q want already-read stub", toolOuts[1])
+		t.Fatalf("second=%q want already-read notice", toolOuts[1])
+	}
+	if !strings.Contains(toolOuts[1], "CONTENT:") {
+		t.Fatalf("second=%q want live content behind the notice", toolOuts[1])
 	}
 }
 
@@ -135,8 +138,8 @@ func TestRereadAllowedAfterEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rt.n != 2 {
-		t.Fatalf("read Exec count=%d want 2 (second read stubbed; post-edit read allowed)", rt.n)
+	if rt.n != 4 {
+		t.Fatalf("read Exec count=%d want 4 (repeats run; post-edit read allowed)", rt.n)
 	}
 	if et.n != 1 {
 		t.Fatalf("edit Exec count=%d want 1", et.n)
@@ -154,7 +157,10 @@ func TestRereadAllowedAfterEdit(t *testing.T) {
 		t.Fatalf("first read=%q", toolOuts[0])
 	}
 	if !strings.Contains(toolOuts[1], "already read") {
-		t.Fatalf("second read=%q want already-read stub", toolOuts[1])
+		t.Fatalf("second read=%q want already-read notice", toolOuts[1])
+	}
+	if !strings.Contains(toolOuts[1], "CONTENT:") {
+		t.Fatalf("second read=%q want live content behind the notice", toolOuts[1])
 	}
 	if !strings.HasPrefix(toolOuts[2], "EDITED:") {
 		t.Fatalf("edit=%q", toolOuts[2])
@@ -163,7 +169,10 @@ func TestRereadAllowedAfterEdit(t *testing.T) {
 		t.Fatalf("post-edit read=%q want live content", toolOuts[3])
 	}
 	if !strings.Contains(toolOuts[4], "already read") {
-		t.Fatalf("second post-edit read=%q want already-read stub", toolOuts[4])
+		t.Fatalf("second post-edit read=%q want already-read notice", toolOuts[4])
+	}
+	if !strings.Contains(toolOuts[4], "CONTENT:") {
+		t.Fatalf("second post-edit read=%q want live content behind the notice", toolOuts[4])
 	}
 }
 

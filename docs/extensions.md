@@ -508,7 +508,7 @@ core internals, and keep that surface narrow.
 The soft anti-thrash heuristics are a linked pack, not core loop behavior.
 Blank-importing `ext/focus` (the stock `mow` binary does) installs:
 
-1. re-read stubs — the same unchanged path via `read`, or `bash cat/sed/head/tail`
+1. re-read caps — the same unchanged path via `read`, or `bash cat/sed/head/tail`
 2. inventory caps — repeated `git status`/`ls`/`find`/`rg` degrade, then refuse
 3. a soft block on destructive `git`/`rm` that would discard uncommitted work
 4. productive bash (`go test`, `go build`, `git commit`, …) resets the streak

@@ -226,8 +226,8 @@ func TestBatchExploreOnly_productiveBashResets(t *testing.T) {
 func TestReadAndBashSharePathDedupe(t *testing.T) {
 	s := newFocusState("", Config{})
 	readArgs, _ := json.Marshal(map[string]string{"path": "pkg/x.go"})
-	if _, ok := s.maybeDedupeRead(readArgs); ok {
-		t.Fatal("first read should run")
+	if n := s.guardRead(readArgs); n != "" {
+		t.Fatalf("first read should run: %q", n)
 	}
 	bashArgs, _ := json.Marshal(map[string]string{"command": "cat pkg/x.go"})
 	g := s.guardBash(bashArgs)
@@ -237,13 +237,13 @@ func TestReadAndBashSharePathDedupe(t *testing.T) {
 }
 
 func TestInventoryKey_rgAndPythonListing(t *testing.T) {
-	if got := inventoryKey(`rg recall`); got != "rg" {
+	if got := inventoryKey(`rg recall`); got != "rg recall" {
 		t.Fatalf("rg: %q", got)
 	}
-	if got := inventoryKey(`cd "$(pwd)" && rg -n foo`); got != "rg" {
+	if got := inventoryKey(`cd "$(pwd)" && rg -n foo`); got != "rg foo" {
 		t.Fatalf("rg after cd: %q", got)
 	}
-	if got := inventoryKey(`grep -n foo`); got != "grep" {
+	if got := inventoryKey(`grep -n foo`); got != "grep foo" {
 		t.Fatalf("grep: %q", got)
 	}
 	if got := inventoryKey(`python3 -c "import os; os.walk('.')"`); got != "python-list" {
@@ -265,7 +265,7 @@ func TestGuardBash_rgInventory(t *testing.T) {
 			t.Fatalf("rg %d should run clean: %+v", i+1, g)
 		}
 	}
-	args, _ := json.Marshal(map[string]string{"command": `rg -n leftover src`})
+	args, _ := json.Marshal(map[string]string{"command": "rg leftover"})
 	g := s.guardBash(args)
 	if g.blocked() {
 		t.Fatalf("third rg must degrade, not refuse: %q", g.Block)
@@ -280,5 +280,49 @@ func TestNormalizeBashCmd_collidesStatus(t *testing.T) {
 	b := normalizeBashCmd(`git status --short`)
 	if inventoryKey(a) != inventoryKey(b) || inventoryKey(a) != "git-status" {
 		t.Fatalf("a=%q b=%q keyA=%q keyB=%q", a, b, inventoryKey(a), inventoryKey(b))
+	}
+}
+
+func TestInventoryKey_distinctSubjects(t *testing.T) {
+	if a, b := inventoryKey("git show abc"), inventoryKey("git show def"); a == b {
+		t.Fatalf("distinct SHAs must not share a key: %q %q", a, b)
+	}
+	if a, b := inventoryKey("git log --oneline -12"), inventoryKey("git log --oneline origin/main..HEAD"); a == b {
+		t.Fatalf("distinct git-log ranges must not share a key: %q %q", a, b)
+	}
+	if a, b := inventoryKey("rg already read"), inventoryKey("rg inventoryKey"); a == b {
+		t.Fatalf("distinct rg patterns must not share a key: %q %q", a, b)
+	}
+	if got := inventoryKey("git status --short"); got != "git-status" {
+		t.Fatalf("git status stays tree-wide: %q", got)
+	}
+}
+
+func TestInventoryKey_awkOfFileIsNotInventory(t *testing.T) {
+	if got := inventoryKey(`awk '{print}' internal/foo.go`); got != "" {
+		t.Fatalf("awk of a file is a viewer, not inventory: %q", got)
+	}
+}
+
+func TestInventoryKey_pathlibEditIsNotInventory(t *testing.T) {
+	cmd := `python3 -c 'from pathlib import Path; Path("x").write_text("y")'`
+	if got := inventoryKey(cmd); got != "" {
+		t.Fatalf("pathlib write is not a listing: %q", got)
+	}
+}
+
+func TestGuardRead_pagingIsANewView(t *testing.T) {
+	s := newFocusState("", Config{})
+	first, _ := json.Marshal(map[string]any{"path": "foo.go"})
+	if n := s.guardRead(first); n != "" {
+		t.Fatalf("first page should run clean: %q", n)
+	}
+	page, _ := json.Marshal(map[string]any{"path": "foo.go", "offset": 80.0, "limit": 40.0})
+	if n := s.guardRead(page); n != "" {
+		t.Fatalf("a later page is a new view: %q", n)
+	}
+	again, _ := json.Marshal(map[string]any{"path": "foo.go"})
+	if n := s.guardRead(again); n == "" || !strings.Contains(n, "already read") {
+		t.Fatalf("same first page should degrade: %q", n)
 	}
 }

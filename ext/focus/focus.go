@@ -11,8 +11,9 @@ import (
 
 // Soft exploration helpers — no hard kill on explore streak. Long runs stop on
 // model finish, ctx cancel, or MaxTurns. These:
-//  1. stub re-reads (read + bash cat/sed/head/tail/grep of same unchanged paths)
-//  2. stub repeated inventory (git status/log/ls/find/rg)
+//  1. degrade repeated views (read + bash cat/sed/head/tail of the same window)
+//  2. degrade then refuse repeated inventory (git status/ls/find; git log/show/diff
+//     and rg/grep keyed by args so distinct subjects do not collide)
 //  3. soft-block destructive git/rm that discards WIP
 //  4. treat test/build/commit bash as productive (resets explore streak)
 //  5. warn every turn after exploreWarnEvery consecutive explore turns
@@ -22,7 +23,7 @@ import (
 // via extensions.focus in config.
 const (
 	defaultExploreWarnEvery = 6
-	defaultRereadLimit      = 1 // second access to same path degrades (runs, capped)
+	defaultRereadLimit      = 1 // second access to the same view degrades (runs, capped)
 	defaultInventoryLimit   = 2 // third identical inventory class degrades
 	// defaultHardInventoryLimit is where degrading stops and refusal starts:
 	// the model has already been told twice and repeated the listing anyway.
@@ -66,7 +67,7 @@ type focusState struct {
 	mu        sync.Mutex
 	cfg       Config
 	workspace string // absolute; used to unify abs vs relative paths
-	// path → times accessed this Prompt (read tool + bash file views)
+	// view key → times accessed this Prompt (read tool windows + bash file views)
 	reads map[string]int
 	// inventory class key → times (git-status, ls, find, …)
 	inv map[string]int
@@ -166,15 +167,53 @@ func isDestructiveBash(cmd string) bool {
 
 var reDestructiveRM = regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-rf|-fr)\b`)
 
-func (s *focusState) maybeDedupeRead(args json.RawMessage) (string, bool) {
+// guardRead is the verdict for one read-tool call. Same three-state idea as
+// guardBash: repetition alone never refuses — the call runs, the body is
+// capped, and a Notice is prepended. Distinct offset/limit windows of the
+// same path are distinct views (paging is not thrash).
+func (s *focusState) guardRead(args json.RawMessage) string {
 	if s == nil {
-		return "", false
+		return ""
 	}
 	path := toolArgString(args, "path")
 	if path == "" {
-		return "", false
+		return ""
 	}
-	return s.notePathAccess(path)
+	key := s.readViewKey(path, toolArgInt(args, "offset"), toolArgInt(args, "limit"))
+	if key == "" {
+		return ""
+	}
+	s.mu.Lock()
+	n := s.reads[key]
+	s.reads[key] = n + 1
+	s.mu.Unlock()
+	if n < s.cfg.RereadLimit {
+		return ""
+	}
+	return fmt.Sprintf(
+		"(already read %q this prompt — content unchanged; do not re-read. "+
+			"Use the earlier result, then act (edit/write) or finish.)",
+		key,
+	)
+}
+
+// readViewKey groups one read-tool window. Omitted offset/limit are 0 so an
+// omitted first page and offset=0 share a key; a later page is a new view.
+func (s *focusState) readViewKey(path string, offset, limit int) string {
+	base := s.pathKey(path)
+	if base == "" {
+		return ""
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	if offset == 0 && limit == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s@%d:%d", base, offset, limit)
 }
 
 // bashGuard is the verdict for one bash call, decided before it runs.
@@ -191,7 +230,6 @@ type bashGuard struct {
 	Notice string
 }
 
-// blocked reports whether the call must not run.
 func (g bashGuard) blocked() bool { return g.Block != "" }
 
 // guardBash classifies a bash call: destructive → block, repeated inventory or
@@ -279,27 +317,8 @@ func (s *focusState) degradeToolResult(notice, out string) string {
 	return notice + "\n\n" + out
 }
 
-func (s *focusState) notePathAccess(path string) (string, bool) {
-	key := s.pathKey(path)
-	if key == "" {
-		return "", false
-	}
-	s.mu.Lock()
-	n := s.reads[key]
-	s.reads[key] = n + 1
-	s.mu.Unlock()
-	if n < s.cfg.RereadLimit {
-		return "", false
-	}
-	return fmt.Sprintf(
-		"(already read %q this prompt — content unchanged; do not re-read. "+
-			"Use the earlier result, then act (edit/write) or finish.)",
-		key,
-	), true
-}
-
-// forgetPath clears the re-read stub so the next read/cat of this path is
-// allowed. Call after a successful edit/write — the on-disk contents changed.
+// forgetPath clears every view of this path so the next read/cat is allowed.
+// Call after a successful edit/write — the on-disk contents changed.
 func (s *focusState) forgetPath(path string) {
 	if s == nil {
 		return
@@ -308,8 +327,14 @@ func (s *focusState) forgetPath(path string) {
 	if key == "" {
 		return
 	}
+	prefix := key + "@"
 	s.mu.Lock()
 	delete(s.reads, key)
+	for k := range s.reads {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.reads, k)
+		}
+	}
 	s.mu.Unlock()
 }
 
@@ -347,6 +372,12 @@ func (s *focusState) pathKey(p string) string {
 
 // inventoryKey groups repeated listing/status commands that thrash without
 // changing code. Empty = not inventory (path-viewer or other).
+// inventoryKey groups repeated listing/status commands that thrash without
+// changing code. Empty = not inventory (path-viewer or other).
+//
+// Tree-wide verbs (git status, ls, find) stay a single class: repeating the
+// listing is the thrash. Subject-bearing verbs (git log/show/diff, rg/grep)
+// append the remainder so distinct SHAs, ranges, or patterns do not collide.
 func inventoryKey(cmd string) string {
 	if isProductiveBash(cmd) {
 		return ""
@@ -364,22 +395,20 @@ func inventoryKey(cmd string) string {
 	case strings.Contains(low, "git status"):
 		return "git-status"
 	case strings.Contains(low, "git log"):
-		return "git-log"
+		return inventoryClass("git-log", c, "git log")
 	case strings.Contains(low, "git show"):
-		return "git-show"
+		return inventoryClass("git-show", c, "git show")
 	case strings.Contains(low, "git diff"):
-		return "git-diff"
+		return inventoryClass("git-diff", c, "git diff")
 	case strings.Contains(low, "git branch"):
 		return "git-branch"
 	case looksLikeFind(low):
 		return "find"
 	case looksLikeSearch(low):
 		if hasCmdToken(low, "rg") {
-			return "rg"
+			return inventoryClass("rg", c, "rg")
 		}
-		return "grep"
-	case looksLikeAWK(low):
-		return "awk"
+		return inventoryClass("grep", c, "grep")
 	case looksLikePythonListing(low):
 		return "python-list"
 	case looksLikeLS(low):
@@ -391,6 +420,34 @@ func inventoryKey(cmd string) string {
 	default:
 		return ""
 	}
+}
+
+// inventoryClass is "kind" plus non-flag remainder after verb, so two git-show
+// calls of different SHAs do not share a ledger. Flags-only remainder (or
+// none) collapses to the kind, matching the tree-wide verbs.
+func inventoryClass(kind, cmd, verb string) string {
+	low := strings.ToLower(cmd)
+	v := strings.ToLower(verb)
+	i := strings.Index(low, v)
+	if i < 0 {
+		return kind
+	}
+	rest := strings.TrimSpace(cmd[i+len(verb):])
+	if rest == "" {
+		return kind
+	}
+	fields := strings.Fields(rest)
+	var keep []string
+	for _, f := range fields {
+		if strings.HasPrefix(f, "-") {
+			continue
+		}
+		keep = append(keep, f)
+	}
+	if len(keep) == 0 {
+		return kind
+	}
+	return kind + " " + strings.Join(keep, " ")
 }
 
 func looksLikeLS(low string) bool {
@@ -424,15 +481,13 @@ func looksLikeSearch(low string) bool {
 	return hasCmdToken(low, "rg") || hasCmdToken(low, "grep") || hasCmdToken(low, "egrep") || hasCmdToken(low, "fgrep")
 }
 
-func looksLikeAWK(low string) bool {
-	return hasCmdToken(low, "awk")
-}
-
 func looksLikePythonListing(low string) bool {
 	if !hasCmdToken(low, "python") && !hasCmdToken(low, "python3") {
 		return false
 	}
-	for _, p := range []string{"os.walk", "os.listdir", "os.scandir", "pathlib", "glob.glob", "rglob"} {
+	// pathlib itself is how agents edit files in a one-liner; only the
+	// directory-walk APIs count as a listing.
+	for _, p := range []string{"os.walk", "os.listdir", "os.scandir", "glob.glob", "rglob", "pathlib.path("} {
 		if strings.Contains(low, p) {
 			return true
 		}
@@ -450,7 +505,7 @@ func hasCmdToken(low, name string) bool {
 }
 
 func looksLikeListing(low string) bool {
-	return looksLikeLS(low) || looksLikeFind(low) || looksLikeSearch(low) || looksLikeAWK(low) ||
+	return looksLikeLS(low) || looksLikeFind(low) || looksLikeSearch(low) ||
 		looksLikePythonListing(low) || strings.Contains(low, "git status") || strings.Contains(low, "git log")
 }
 
@@ -672,11 +727,32 @@ func toolArgString(args json.RawMessage, key string) string {
 	return strings.TrimSpace(v)
 }
 
+// toolArgInt reads a JSON number (float64 after encoding/json). Missing or
+// non-numeric is 0 — the same as an omitted read offset/limit.
+func toolArgInt(args json.RawMessage, key string) int {
+	if len(args) == 0 {
+		return 0
+	}
+	var m map[string]any
+	if json.Unmarshal(args, &m) != nil {
+		return 0
+	}
+	switch v := m[key].(type) {
+	case float64:
+		return int(v)
+	case json.Number:
+		n, _ := v.Int64()
+		return int(n)
+	default:
+		return 0
+	}
+}
+
 func exploreWarnMessage(streak int) string {
 	return fmt.Sprintf(
 		"Note: %d consecutive explore-only turns (read/grep/glob/ls/cat/git status). "+
 			"Stop surveying — next tools MUST be edit or write (or finish with a concrete blocker). "+
-			"Re-listing and re-catting the same tree will be stubbed. Soft signal; run continues but act now.",
+			"Re-listing and re-catting the same tree will be capped. Soft signal; run continues but act now.",
 		streak,
 	)
 }
