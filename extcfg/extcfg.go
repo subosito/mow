@@ -18,17 +18,23 @@ import (
 )
 
 // DecodeSection unmarshals extensions.<section> into dst from configPaths only
-// (first match wins). Returns true if a section was found.
+// (later files win). Returns true if a section was found.
 //
-// Paths are tried in order. Missing files are skipped; a present file with a
-// YAML error fails the call. Callers that want $MOW_HOME/config.yaml must
-// include it in configPaths (CLI/host via LoadUserConfig).
+// Paths are tried in order, matching Load / mergeExtensions: global, then
+// profile, then explicit --config. A later file that contains the named
+// section replaces an earlier one wholesale (not a field-wise merge). Missing
+// files and files without that section are skipped so they cannot wipe a
+// prior hit. A present file with a YAML error fails the call. Callers that
+// want $MOW_HOME/config.yaml must include it in configPaths (CLI/host via
+// LoadUserConfig).
 func DecodeSection(section string, configPaths []string, dst any) (bool, error) {
 	section = strings.TrimSpace(section)
 	if section == "" {
 		return false, nil
 	}
 	seen := map[string]bool{}
+	var found yaml.Node
+	hit := false
 	for _, p := range configPaths {
 		p = strings.TrimSpace(p)
 		if p == "" || seen[p] {
@@ -49,12 +55,16 @@ func DecodeSection(section string, configPaths []string, dst any) (bool, error) 
 		if !ok || n.Kind == 0 {
 			continue
 		}
-		if err := n.Decode(dst); err != nil {
-			return false, err
-		}
-		return true, nil
+		found = n
+		hit = true
 	}
-	return false, nil
+	if !hit {
+		return false, nil
+	}
+	if err := found.Decode(dst); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // IncludesUserConfig reports whether configPaths already contains the global
