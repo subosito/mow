@@ -91,7 +91,7 @@ export OPENAI_MODEL=gpt-5-mini
 import (for example `_ "github.com/subosito/mow/ext/acp"`) and its tools and
 subcommand disappear from that binary and help. `bin/mow` is the lean stock
 binary (acp, rpc, focus, proc, cmdhook, mcp); `bin/mow-full` adds the
-workflow packs (goal, job, ops, review, media, contextsink).
+workflow packs (goal, job, ops, review, media).
 
 Secure default tools: **read**, **glob**, **grep**. Power tools need
 `--allow-write` / `--allow-shell`. `--allow-shell` is the trust cliff:
@@ -123,9 +123,9 @@ Three Go modules (`go.work` wires them for local dev). Full public/internal map:
 |---|---|
 | `mow.go` + `internal/` | Public API re-export and implementation |
 | `ext/` + `cliutil/` + `extcfg/` | Core extensions, CLI helpers, extension config decode |
-| `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job, contextsink |
+| `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job |
 | `cmd/mow/` | Lean pack host (acp, rpc, focus, proc, cmdhook, mcp) |
-| `cmd/mow-full/` | Full pack host (lean set + goal, job, ops, review, media, contextsink) |
+| `cmd/mow-full/` | Full pack host (lean set + goal, job, ops, review, media) |
 
 ## Pick extensions when embedding
 

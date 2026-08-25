@@ -459,7 +459,7 @@ func ListExtensions(currentTurn int) []ExtensionStatus {
 // Tools registered while BeforeNew is running are tagged as config-sourced for
 // that generation so hermetic Engines can exclude leftovers from a prior host
 // setup while still accepting tools from the current BeforeNew (explicit
-// ConfigPaths) and static init registrations (proc, contextsink, …).
+// ConfigPaths) and static init registrations (proc, …).
 func RegisterTool(t Tool) {
 	if t == nil {
 		return

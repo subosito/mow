@@ -746,10 +746,6 @@ func New(opt Options) (*Engine, error) {
 		}
 		e.sid = sid
 		e.sess = &session.Store{Dir: sessDir, ID: sid}
-		// recall (recovery for compaction archives and stored tool
-		// results) is provided by the optional packs/contextsink pack, which
-		// registers it via ext.RegisterTool; the tool resolves the session
-		// dir from the engine at call time.
 		if mediaClient != nil && sid != "" {
 			if mediaClient.ExtraHeaders == nil {
 				mediaClient.ExtraHeaders = map[string]string{}

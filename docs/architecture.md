@@ -26,7 +26,7 @@ broker, host UI, or sibling repository is required for `mow.Engine`.
 | Module | Path | Role |
 |---|---|---|
 | `github.com/subosito/mow` | root | Public API, `internal/engine`, registration, core extensions, `cmd/mow`, `cmd/mow-full` |
-| `github.com/subosito/mow/packs` | `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job, contextsink |
+| `github.com/subosito/mow/packs` | `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job |
 
 `go.work` wires the two Go modules for local development. Import direction is
 one-way: the packs module depends on the root public API, never the reverse.
@@ -40,7 +40,7 @@ one-way: the packs module depends on the root public API, never the reverse.
 | `github.com/subosito/mow` | Thin aliases/wrappers: `Engine`, `Run`, options, events, hooks, providers |
 | `github.com/subosito/mow/ext` | Registration API: tools, lifecycle hooks, commands, `BeforeNew` |
 | `github.com/subosito/mow/ext/<name>` | Core protocol/runtime extensions: acp, rpc |
-| `github.com/subosito/mow/packs/<name>` | Optional packs: media, mcp, proc, goal, review, ops, job, contextsink |
+| `github.com/subosito/mow/packs/<name>` | Optional packs: media, mcp, proc, goal, review, ops, job |
 | `github.com/subosito/mow/cliutil` | CLI flags → Engine |
 | `github.com/subosito/mow/extcfg` | Decode `extensions.<name>` |
 
@@ -94,8 +94,6 @@ One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.m
 - `packs/review`: code/security review workflows
 - `packs/ops`: ops profiles, logs, actions, incidents, runbooks
 - `packs/job`: interval/cron jobs (depends on goal); ops depends on job
-- `packs/contextsink`: per-session store + stub for oversized tool results
-  (recovery via the core `recall` tool)
 
 ### Heavy nested modules
 
@@ -106,7 +104,7 @@ One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.m
 | Binary | Source | Ships |
 |---|---|---|
 | `mow` | `cmd/mow` | Lean CLI: acp, rpc, focus, proc, cmdhook, mcp |
-| `mow-full` | `cmd/mow-full` | Lean set plus goal, job, ops, review, media, contextsink |
+| `mow-full` | `cmd/mow-full` | Lean set plus goal, job, ops, review, media |
 | Rust `mowi` | sibling project/repository | Interactive TUI over `mow rpc` |
 
 The Rust `mowi` host launches `mow rpc` (present in both binaries) and owns

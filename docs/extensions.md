@@ -19,7 +19,7 @@ Customization modes:
 | Public Engine | `github.com/subosito/mow` | `Engine`, `Run`, hooks, events, providers |
 | Registration | `github.com/subosito/mow/ext` | `RegisterTool`, `RegisterCommand`, lifecycle hooks |
 | Core extensions | `github.com/subosito/mow/ext/<name>` | acp, rpc — privileged tier (may import internal/); one-pager in each `ext/<name>/README.md` |
-| Optional packs | `github.com/subosito/mow/packs/<name>` | focus, media, goal, review, ops, job, contextsink — `packs/<name>/README.md` |
+| Optional packs | `github.com/subosito/mow/packs/<name>` | focus, media, goal, review, ops, job — `packs/<name>/README.md` |
 
 ```go
 import (
@@ -27,7 +27,6 @@ import (
     _ "github.com/subosito/mow/ext/acp"
     _ "github.com/subosito/mow/packs/focus"
     _ "github.com/subosito/mow/packs/mcp"
-    _ "github.com/subosito/mow/packs/contextsink"
     _ "github.com/subosito/mow/packs/goal"
 )
 ```
@@ -37,8 +36,8 @@ Remove an import and the associated tools/subcommand/auto-wire disappear.
 ## Linked binaries
 
 - `cmd/mow` is the lean pack host: core extensions acp/rpc plus focus, proc,
-  cmdhook, mcp. `cmd/mow-full` links those plus goal, job, ops, review, media,
-  contextsink. Both share `cmd/internal/mowcli`.
+  cmdhook, mcp. `cmd/mow-full` links those plus goal, job, ops, review, media.
+  Both share `cmd/internal/mowcli`.
 - The Rust `mowi` sibling project launches `mow rpc`, owns terminal
   presentation, and receives the registered command/tool events over RPC.
   Spawn binary: `--mow-bin` / `$MOW_BIN` / host `$MOW_HOME/config.yaml`
@@ -273,7 +272,6 @@ Stock slash set is **`/goal`**, **`/review`**, **`/sec`**. Those drive the
   footgun; list/check stay CLI.
 - **ops** — catalog + tools + `mow ops run`. The model uses `ops_*` tools
   inside a tick; `/ops` would start or steer a daemon from chat.
-- **contextsink** — tools or config, not user-typed session commands.
 
 ### Ops (`packs/ops`)
 
@@ -315,63 +313,6 @@ runs.
 - Duplicate ids fail `mow job check` / `run`. Disabled entries are valid.
 - Schedules load once at daemon start. `mow ops run` is not listed here.
 - No `/job` slash and no job tools. Operator surface is `mow job` only.
-
-### Context sink (`packs/contextsink`)
-
-The full tool-result side channel, write side and read side together:
-
-- **Write side** — results above `max_inline_bytes` are stored beside the
-  session (`<sid>.tools/`) and replaced in live history with a short stub.
-- **Read side** — `recall` (registered via `ext.RegisterTool`, so it
-  needs no engine wiring): pattern search over the session's compaction
-  archives and stored results (stored files carry a `stored ` snippet header),
-  or recall of a stored stub (`id=…`, bounded window). It resolves
-  the session dir from the engine at call time and is read-only, so it works
-  in read-only prompts. Symlinks and non-regular files under the session
-  archive/tools dirs are ignored. Stub previews redact common secret shapes;
-  recovery via `recall` returns verbatim stored/archive text (product
-  choice — the model needs faithful detail when explicitly recovering).
-  Session tool I/O uses `O_NOFOLLOW` on Unix; other platforms use Lstat
-  containment plus post-open regular-file checks (residual TOCTOU on hostile
-  hosts — see `internal/session/safefile*` for the store and
-  `packs/contextsink/safefile*` for pinned-disk reads in tests).
-  Per-session retrieval budgets use deterministic LRU eviction (128 sessions);
-  unrelated sessions search in parallel.
-
-Storage is strictly session-scoped (search, recall, and the retrieval
-budget are all pinned to the engine's own `SessionDir`+`SessionID` — never a
-sibling session's), bounded (64 files / 32 MiB total, 8 MiB per file), and
-pruned.
-
-The pack registers entirely through the generic ext surface — the write side
-via `ext.RegisterPostTool`, the read side via `ext.RegisterTool` — with no
-context-specific engine slot. Hook ordering is plain registration order; the
-engine's event emitter runs before all hooks, so hosts still receive full tool
-bodies on `EventToolEnd` even when history carries a stub.
-
-The pack emits metadata-only observability events:
-
-- `harness.contextsink.store`: `tool`, `tool_call_id`, `stored_id`,
-  `original_bytes`, and `inline_bytes` (the replacement stub size).
-- `harness.contextsink.recover`: `tool`, optional `stored_id`,
-  `recovered_bytes`, and `recovery_mode` (`id` or `pattern`).
-
-Neither event includes stored or recovered content. Sum
-`original_bytes - inline_bytes` to estimate bytes removed from subsequent
-model context, and compare that with `recovered_bytes` to see how much was
-brought back on demand. When the OTEL pack is configured, it exports these as
-`mow.contextsink.stored_results`, `mow.contextsink.saved_bytes`, and
-`mow.contextsink.recovered_bytes` counters. Without the pack,
-results simply stay inline and no search tool exists. `mow-full` links it;
-lean `mow` does not. Library embeds opt in by blank-importing it. Config key
-`extensions.contextsink`.
-
-```yaml
-extensions:
-  contextsink:
-    enabled: true           # required; default: off
-    max_inline_bytes: 8000  # above this → store + stub (default; capped at 8 MiB)
-```
 
 ## TUI host
 

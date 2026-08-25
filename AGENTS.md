@@ -69,7 +69,7 @@ Source of truth for modules and public/internal: [docs/architecture.md](docs/arc
 | `extcfg/` | Decode `extensions.<name>` (shared by extensions and packs) |
 | `testutil/` | Shared test helpers (e.g. pin `$MOW_HOME` for `TestMain`) |
 | `ext/` | Registration (`ext.go`) + core extensions: acp, rpc |
-| `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): focus, proc, cmdhook, mcp, media, goal, review, ops, job, contextsink |
+| `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): focus, proc, cmdhook, mcp, media, goal, review, ops, job |
 | `internal/` | Implementation — **not** an integrator import surface |
 | `cmd/mow/` | Lean pack host; blank-imports the lean pack set |
 | `cmd/mow-full/` | Full pack host; blank-imports all packs |
@@ -82,11 +82,11 @@ do not tell them to import `internal/`.
 ## Packs
 
 - `cmd/mow` (lean) blank-imports acp, rpc, focus, proc, cmdhook, mcp.
-- `cmd/mow-full` adds goal, job, ops, review, media, contextsink. Both share `cmd/internal/mowcli`.
+- `cmd/mow-full` adds goal, job, ops, review, media. Both share `cmd/internal/mowcli`.
 - Core extensions live in `ext/` (root module): acp, rpc.
 - Optional packs live in `packs/` (separate Go module
   `github.com/subosito/mow/packs`): focus, proc, cmdhook, mcp, media, goal,
-  review, ops, job, contextsink.
+  review, ops, job.
 - `go.work` wires the root module and `packs/` together for local dev.
 - Remove import → subcommand/tools gone.
 - Extension config: `extensions.<name>` via `Engine.Extension` or `extcfg.DecodeSection`.
@@ -196,3 +196,4 @@ Also apply **Public samples (OSS)** above when the commit includes docs or fixtu
 | [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP |
 | [docs/rpc-acp.md](docs/rpc-acp.md) | `mow rpc` ↔ ACP coverage; dual-run notes |
 | [docs/review.md](docs/review.md) | `mow-full review` / `mow-full sec`: two-pass workflow, `--reviewer` / `--verifier`, report schema, exit codes |
+exit codes |

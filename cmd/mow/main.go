@@ -1,8 +1,8 @@
 // Command mow is the lean stock binary: core commands (run, tty, trust,
 // doctor, approvals, version, help) plus the lightweight extension set —
 // acp and rpc extensions, and the focus, proc, cmdhook, mcp packs. The
-// heavier/specialized packs (goal, job, ops, review, media, contextsink)
-// are linked by cmd/mow-full instead.
+// heavier/specialized packs (goal, job, ops, review, media) are linked by
+// cmd/mow-full instead.
 //
 // The CLI itself lives in cmd/internal/mowcli; this file's only job is the
 // blank-import list — drop an import and that subcommand disappears from

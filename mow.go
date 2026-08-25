@@ -92,26 +92,24 @@ var (
 
 // Event types (loop / harness bus).
 const (
-	EventRunStart           = engine.EventRunStart
-	EventRunEnd             = engine.EventRunEnd
-	EventCompactStart       = engine.EventCompactStart
-	EventCompact            = engine.EventCompact
-	EventGoalStart          = engine.EventGoalStart
-	EventGoalStep           = engine.EventGoalStep
-	EventGoalDone           = engine.EventGoalDone
-	EventGoalFail           = engine.EventGoalFail
-	EventGoalPartial        = engine.EventGoalPartial
-	EventGoalBlocked        = engine.EventGoalBlocked
-	EventToolStart          = engine.EventToolStart
-	EventToolEnd            = engine.EventToolEnd
-	EventCompactSummary     = engine.EventCompactSummary
-	EventContextSinkStore   = engine.EventContextSinkStore
-	EventContextSinkRecover = engine.EventContextSinkRecover
-	EventDelegateChunk      = engine.EventDelegateChunk
-	EventDelegateProgress   = engine.EventDelegateProgress
-	EventDelegateUsage      = engine.EventDelegateUsage
-	EventLSPDiagnostics     = engine.EventLSPDiagnostics
-	EventSteer              = engine.EventSteer
+	EventRunStart         = engine.EventRunStart
+	EventRunEnd           = engine.EventRunEnd
+	EventCompactStart     = engine.EventCompactStart
+	EventCompact          = engine.EventCompact
+	EventGoalStart        = engine.EventGoalStart
+	EventGoalStep         = engine.EventGoalStep
+	EventGoalDone         = engine.EventGoalDone
+	EventGoalFail         = engine.EventGoalFail
+	EventGoalPartial      = engine.EventGoalPartial
+	EventGoalBlocked      = engine.EventGoalBlocked
+	EventToolStart        = engine.EventToolStart
+	EventToolEnd          = engine.EventToolEnd
+	EventCompactSummary   = engine.EventCompactSummary
+	EventDelegateChunk    = engine.EventDelegateChunk
+	EventDelegateProgress = engine.EventDelegateProgress
+	EventDelegateUsage    = engine.EventDelegateUsage
+	EventLSPDiagnostics   = engine.EventLSPDiagnostics
+	EventSteer            = engine.EventSteer
 	// EventModelWait / EventModelActive bracket the pre-first-byte silence of
 	// an LLM call. The wait is a host-side observation of upstream silence,
 	// never proof the model is reasoning.

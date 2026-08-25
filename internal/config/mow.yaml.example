@@ -162,7 +162,7 @@ session:
   # dir: # default $MOW_HOME/sessions
 
 # Optional packs — config key extensions.<name>. Unused keys stay as yaml
-# blobs; lean mow ignores media/ops/job/review/goal/contextsink.
+# blobs; lean mow ignores media/ops/job/review/goal.
 # extensions:
 #   mowi:                             # host $MOW_HOME only (not project .mow/)
 #     mow_bin: mow                    # lean default; TUI spawn
@@ -170,15 +170,9 @@ session:
 #     theme: catppuccin-mocha
 #   media:                            # mow-full (packs/media); ignored by lean mow
 #     understand:
-#       image: gpt-4o
+#       image: gpt-5-mini
 #     # generate:
 #     #   image: gpt-image-1
-#   # Tool-result side channel (packs/contextsink; mow-full links it): store
-#   # oversized tool results per session and show the model a short stub
-#   # (full body recoverable via recall id=…). Off by default even when linked.
-#   contextsink:
-#     enabled: true
-#     max_inline_bytes: 8000    # above this → store + stub (default)
 #   mcp:
 #     mcpServers:
 #       context-mode:

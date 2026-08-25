@@ -613,7 +613,7 @@ framed text as data, not instructions. A forged closing tag inside the body is
 neutralized. Workspace file reads are **not** framed (they are already under
 the path jail / trust boundary).
 
-## Context archive and `recall`
+## Context archive
 
 When history is compacted (automatic soft compact or `Engine.Compact`), mow
 writes a plain-text archive under the session dir:
@@ -622,34 +622,15 @@ writes a plain-text archive under the session dir:
 \$MOW_HOME/sessions/<project>/<session-id>.archive/0001-….md
 ```
 
-Sessions enable a read-only `recall` tool (patterns only — no path arg,
-plus recall of stored tool stubs) so the agent can recover details
-dropped from the live window. The tool ships with the optional
-`packs/contextsink` pack (stock binaries link it) and resolves the session
-from the engine at call time. No embeddings or vector DB; fixed-string scan
-over a bounded set of newest archive files.
-
-Args: `pattern` (a string, or a list of strings — a line matching **any** of
-them hits), optional `max_results` and `context_lines`. Both budgets are
-clamped to hard ceilings, so a model cannot raise them.
-
-Results are **snippets**, not raw grep output: each hit is rendered under a
-stable `<session>.archive/<file>.md:<line>` reference with a few surrounding
-lines, the matched line marked `>`. Retrieval is bounded at every level —
-per-line length, per-snippet size, result count, and a hard total output cap
-well under the compaction budget it recovers from. Overlapping hits in one
-file merge into a single window, and identical snippets are reported once even
-when two compactions archived the same turn. A single tool instance also has a
-cumulative retrieval budget across calls, so repeating broad searches cannot
-refill the live context indefinitely. When a budget stops the scan the result
-ends with an explicit "refine the pattern" notice.
+Archives are append-only Markdown snapshots of what left the live window —
+host/TUI material for review, not something the agent reads back. No search
+tool ships with the spine: hosts that want pattern search over archives
+build it on the ext seam (a read-only tool resolving the session dir from
+the engine), and mow's own `Engine.Sessions()` listing covers resume.
 
 ### MCP as untrusted output
 
 MCP tool results are external server text. The MCP pack marks every `mcp_*`
 tool with `Untrusted() bool` so the agent loop frames results in
-`<untrusted-output>` the same way as `bash` and `acp_delegate`.
-
-the agent loop frames results in
 `<untrusted-output>` the same way as `bash` and `acp_delegate`.
 

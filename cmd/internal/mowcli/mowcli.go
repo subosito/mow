@@ -5,8 +5,7 @@
 // drop-in binary's feature set is exactly its import list.
 //
 // Two stock binaries share it: cmd/mow (lean: acp, rpc, focus, proc, cmdhook,
-// mcp) and cmd/mow-full (those plus goal, job, ops, review, media,
-// contextsink).
+// mcp) and cmd/mow-full (those plus goal, job, ops, review, media).
 package mowcli
 
 import (

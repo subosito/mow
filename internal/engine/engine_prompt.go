@@ -485,8 +485,8 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 	}}, pre...)
 	// Order: event emitter first (captures the full result for EventToolEnd),
 	// then ext + Options PostTool hooks in registration order. Packs that
-	// rewrite results for history (e.g. packs/contextsink's store-and-stub)
-	// register as ordinary ext hooks — there is no special tail slot.
+	// rewrite results for history register as ordinary ext hooks — there is
+	// no special tail slot.
 	post = append([]agent.PostToolFunc{func(ctx context.Context, ev agent.PostToolEvent) (agent.PostToolDecision, error) {
 		res := ev.Result
 		const max = 4000

@@ -73,8 +73,8 @@ func TestPrefixTracker(t *testing.T) {
 
 	t.Run("rewritten tool result is identified", func(t *testing.T) {
 		t.Parallel()
-		// This is the contextsink-style hazard: a result enters history, then
-		// gets replaced by a stub afterwards.
+		// This is the store-and-stub style hazard: a result enters history,
+		// then gets replaced by a stub afterwards.
 		before := []llm.Message{
 			{Role: "user", Content: "read it"},
 			{Role: "tool", Name: "read", Content: strings.Repeat("x", 5000)},

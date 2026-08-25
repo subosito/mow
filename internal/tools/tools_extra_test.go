@@ -37,7 +37,6 @@ func TestToolMetadataAndRegistry(t *testing.T) {
 	p.ExtraRoots = []string{t.TempDir()}
 
 	allTools := Registry(p, []string{"read", "write", "edit", "glob", "grep", "bash"})
-	// recall moved to packs/contextsink (covered by its own tests).
 	// media tools moved to packs/media (covered by packs/media tests).
 
 	for _, tool := range allTools {
