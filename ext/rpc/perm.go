@@ -80,11 +80,19 @@ func (s *Server) preTool(ctx context.Context, e mow.PreToolEvent) (mow.PreToolDe
 		s.permMu.Unlock()
 	}()
 
+	kind, title := toolTitle(e.Name, args)
 	s.notify("perm.ask", map[string]any{
 		"id":           id,
 		"name":         e.Name,
 		"args":         args,
 		"tool_call_id": e.ToolCallID,
+		"title":        title,
+		"kind":         kind,
+		"subject": map[string]any{
+			"kind":         "tool_call",
+			"tool":         e.Name,
+			"tool_call_id": e.ToolCallID,
+		},
 	})
 
 	select {

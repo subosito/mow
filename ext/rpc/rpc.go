@@ -208,6 +208,7 @@ var methodNames = []string{
 	"perm.set", "perm.decide",
 	"model.list", "model.set",
 	"effort.list", "effort.set",
+	"config.list",
 	"context", "compact", "rewind",
 	"skill.list", "skill.activate",
 	"plugin.list",
@@ -285,7 +286,11 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	if s.streamEvents() {
 		unsub := s.Engine.AddOnEvent(func(ev mow.Event) {
-			s.notify("event", capEvent(ev))
+			capped := capEvent(ev)
+			s.notify("event", capped)
+			if u := typedUpdate(capped); u != nil {
+				s.notify("update", u)
+			}
 		})
 		defer unsub()
 	}
@@ -450,6 +455,8 @@ func (s *Server) dispatch(ctx context.Context, req request, promptWG *sync.WaitG
 		s.handleEffortList(req)
 	case "effort.set":
 		s.handleEffortSet(req)
+	case "config.list":
+		s.handleConfigList(ctx, req)
 	case "context":
 		s.handleContext(req)
 	case "compact":

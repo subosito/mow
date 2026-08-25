@@ -43,6 +43,7 @@ Methods (requests may omit `"jsonrpc":"2.0"`):
 | `plugin.list` | `{plugins:[id], items?:[{id,name,version,description?,skills?}]}` |
 | `effort.list` | `{efforts:[{id,current}], current, default}` |
 | `effort.set` | `params {id}` → `{ok, effort}` |
+| `config.list` | additive catalog `{items:[{id,name,type,current,set,options?}]}` for perm/model/effort; typed `*.set` stay the mutators |
 | `perm.decide` | `params {id, decision}` where decision is `allow`, `deny` or `always` |
 | `capabilities` | `{rpc, methods[], control_methods[], features{}, optional?:{features[]}}` — feature-detect here |
 | `version` | `rpc` is `"1"` (compatibility epoch); clients require exact epoch match, then feature-detect |
@@ -78,16 +79,23 @@ that, `write`, `edit` and `bash` calls emit a notification and block until the
 UI answers:
 
 ```json
-{"jsonrpc":"2.0","method":"perm.ask","params":{"id":"perm-1","name":"write","args":{…},"tool_call_id":"call-1"}}
+{"jsonrpc":"2.0","method":"perm.ask","params":{"id":"perm-1","name":"write","args":{…},"tool_call_id":"call-1","title":"write note.txt","kind":"write","subject":{"kind":"tool_call","tool":"write","tool_call_id":"call-1"}}}
 {"id":9,"method":"perm.decide","params":{"id":"perm-1","decision":"allow"}}
 ```
 
-`always` allows and stops asking for that tool for the rest of the session;
-`deny` returns a denial as the tool result, so the turn still completes. Read
-tools (`read`, `glob`, `grep`) never ask. Cancelling the turn while a decision
-is outstanding aborts the run.
+`title`, `kind`, and `subject` are additive (feature `perm_subject`). Older
+hosts can keep reading `id` / `name` / `args`. `always` allows and stops
+asking for that tool for the rest of the session; `deny` returns a denial as
+the tool result, so the turn still completes. Read tools (`read`, `glob`,
+`grep`) never ask. Cancelling the turn while a decision is outstanding
+aborts the run.
 
-During prompt, unsolicited `{"method":"event","params":{…}}` lines may appear (`loop.token`, `harness.tool.start`, …). Event deltas and prompt text are size-capped (8k runes / 512k runes). Max stdin line is 1 MiB.
+During prompt, unsolicited `{"method":"event","params":{…}}` lines may appear
+(`loop.token`, `harness.tool.start`, …). When `features.typed_updates` is
+true, a parallel `{"method":"update","params":{"kind":"token|thought|tool|state|usage",…}}`
+notification is also emitted. `event` stays the source of truth. Event
+deltas and prompt text are size-capped (8k runes / 512k runes). Max stdin
+line is 1 MiB.
 
 ## Config
 

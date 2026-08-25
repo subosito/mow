@@ -134,12 +134,13 @@ func TestSessionCancelDuringPrompt(t *testing.T) {
 }
 
 type pipeClient struct {
-	in       io.Reader
-	out      io.Writer
-	next     int
-	pending  map[string]chan map[string]json.RawMessage
-	mu       sync.Mutex
-	onNotify func(method string, params json.RawMessage)
+	in        io.Reader
+	out       io.Writer
+	next      int
+	pending   map[string]chan map[string]json.RawMessage
+	mu        sync.Mutex
+	onNotify  func(method string, params json.RawMessage)
+	onRequest func(id json.RawMessage, method string, params json.RawMessage)
 }
 
 func newPipeClient(in io.Reader, out io.Writer) *pipeClient {
@@ -158,13 +159,17 @@ func (c *pipeClient) readLoop() {
 			continue
 		}
 		if raw, ok := msg["method"]; ok {
+			var method string
+			_ = json.Unmarshal(raw, &method)
 			if _, hasID := msg["id"]; !hasID {
 				if fn := c.onNotify; fn != nil {
-					var method string
-					_ = json.Unmarshal(raw, &method)
 					fn(method, msg["params"])
 				}
 				continue // notification
+			}
+			if fn := c.onRequest; fn != nil {
+				fn(msg["id"], method, msg["params"])
+				continue
 			}
 		}
 		var id string
@@ -183,6 +188,19 @@ func (c *pipeClient) notify(method string, params any) error {
 		"jsonrpc": "2.0", "method": method, "params": params,
 	})
 	_, err := c.out.Write(append(raw, '\n'))
+	return err
+}
+
+func (c *pipeClient) reply(id json.RawMessage, result any) error {
+	raw, err := json.Marshal(struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  any             `json:"result"`
+	}{JSONRPC: "2.0", ID: id, Result: result})
+	if err != nil {
+		return err
+	}
+	_, err = c.out.Write(append(raw, '\n'))
 	return err
 }
 
@@ -355,14 +373,23 @@ func (c *pipeClient) prompt(ctx context.Context, sid, text string) (string, mow.
 	var res struct {
 		StopReason string `json:"stopReason"`
 		Usage      *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens       int `json:"inputTokens"`
+			OutputTokens      int `json:"outputTokens"`
+			InputTokensSnake  int `json:"input_tokens"`
+			OutputTokensSnake int `json:"output_tokens"`
 		} `json:"usage"`
 	}
 	_ = json.Unmarshal(msg["result"], &res)
 	u := mow.Usage{}
 	if res.Usage != nil {
-		u = mow.Usage{InputTokens: res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens}
+		u.InputTokens = res.Usage.InputTokens
+		u.OutputTokens = res.Usage.OutputTokens
+		if u.InputTokens == 0 {
+			u.InputTokens = res.Usage.InputTokensSnake
+		}
+		if u.OutputTokens == 0 {
+			u.OutputTokens = res.Usage.OutputTokensSnake
+		}
 	}
 	return res.StopReason, u, nil
 }

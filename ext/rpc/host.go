@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/subosito/mow"
+	"github.com/subosito/mow/cliutil"
 	iproc "github.com/subosito/mow/internal/proc"
 	"github.com/subosito/mow/slash"
 )
@@ -288,6 +289,82 @@ func (s *Server) handleEffortSet(req request) {
 		return
 	}
 	s.replyTo(req, map[string]any{"ok": true, "effort": s.Engine.DisplayEffort()})
+}
+
+func toolTitle(name string, args json.RawMessage) (kind, title string) {
+	kind = strings.TrimSpace(name)
+	if kind == "" {
+		kind = "?"
+	}
+	line := strings.TrimSpace(cliutil.FormatToolProgress(kind, args))
+	if line == "" {
+		return kind, kind
+	}
+	return kind, line
+}
+
+func (s *Server) handleConfigList(ctx context.Context, req request) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	mode := "auto"
+	if s.AskMode() {
+		mode = "ask"
+	}
+	items := []map[string]any{
+		{
+			"id":      "perm",
+			"name":    "Permission",
+			"type":    "select",
+			"current": mode,
+			"set":     "perm.set",
+			"options": []map[string]any{
+				{"id": "ask", "name": "Ask"},
+				{"id": "auto", "name": "Auto"},
+			},
+		},
+	}
+	if s.Engine != nil {
+		cur := s.Engine.Model()
+		if infos, err := s.Engine.ListModels(ctx); err == nil {
+			opts := make([]map[string]any, 0, len(infos))
+			for _, m := range infos {
+				opts = append(opts, map[string]any{"id": m.ID, "name": m.ID})
+			}
+			items = append(items, map[string]any{
+				"id":      "model",
+				"name":    "Model",
+				"type":    "select",
+				"current": cur,
+				"set":     "model.set",
+				"options": opts,
+			})
+		} else if cur != "" {
+			items = append(items, map[string]any{
+				"id":      "model",
+				"name":    "Model",
+				"type":    "select",
+				"current": cur,
+				"set":     "model.set",
+			})
+		}
+		efforts := s.Engine.Efforts()
+		if len(efforts) > 0 {
+			opts := make([]map[string]any, 0, len(efforts))
+			for _, e := range efforts {
+				opts = append(opts, map[string]any{"id": e, "name": e})
+			}
+			items = append(items, map[string]any{
+				"id":      "effort",
+				"name":    "Effort",
+				"type":    "select",
+				"current": s.Engine.DisplayEffort(),
+				"set":     "effort.set",
+				"options": opts,
+			})
+		}
+	}
+	s.replyTo(req, map[string]any{"items": items})
 }
 
 // handleContext reports context-window usage so a UI can paint a gauge

@@ -18,6 +18,7 @@
 | [embedding.md](embedding.md) | Go integrators | Options, events, custom tools/providers, hooks, sessions — with code |
 | [harness.md](harness.md) | Implementers | Loop, tools, config, sessions, policy |
 | [extensions.md](extensions.md) | Integrators | `ext/` packs, CLI ownership, ACP, media, decisions |
+| [rpc-acp.md](rpc-acp.md) | Protocol | `mow rpc` ↔ ACP v1/v2 coverage; what stays first-party |
 | [context.md](context.md) | Implementers | Design: tool-result side-channel store + search (sink in the loop, per-session archive) |
 | [review.md](review.md) | CI + reviewers | Shared review scope, two-pass workflow, `--reviewer` / `--verifier`, schema, formats, budgets, exit codes |
 | [sec.md](sec.md) | Security reviewers | `mow sec`: evidence fields, safety contract, evidence levels, future stages |

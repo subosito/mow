@@ -19,11 +19,18 @@ Drop the import and `mow acp` / `acp_delegate` disappear.
 | CLI | `acp` (`mow acp`) — ACP agent on stdin/stdout |
 | Tool | `acp_delegate` — registered only when `agents` and/or `mow_agents` is non-empty |
 
-No slash commands.
+No slash commands registered by this package. Linked slash commands from
+other packs are advertised to the editor as `available_commands_update`
+and dispatched when `session/prompt` text starts with `/name`.
 
-`mow acp` speaks ACP on stdio for an editor. Native `mow_agents` spawn the
-current executable (`os.Executable()`), so the full `mow` host starts `mow acp`.
+`mow acp` speaks ACP v1 on stdio for an editor: initialize, session
+lifecycle, `session/prompt` + `session/update`, `session/request_permission`
+(agent→client for power tools), usage_update, config options, and
+terminals. Native `mow_agents` spawn the current executable
+(`os.Executable()`), so the full `mow` host starts `mow acp`.
 Peer processes are reused by agent + cwd + effective argv + permission mode.
+
+See [docs/rpc-acp.md](../../docs/rpc-acp.md) for how this maps to `mow rpc`.
 
 ## Config (`extensions.acp`)
 

@@ -194,4 +194,5 @@ Also apply **Public samples (OSS)** above when the commit includes docs or fixtu
 | [docs/embedding.md](docs/embedding.md) | Embedding in Go: options, events, custom tools/providers, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config, sessions |
 | [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP |
+| [docs/rpc-acp.md](docs/rpc-acp.md) | `mow rpc` ↔ ACP coverage; dual-run notes |
 | [docs/review.md](docs/review.md) | `mow-full review` / `mow-full sec`: two-pass workflow, `--reviewer` / `--verifier`, report schema, exit codes |

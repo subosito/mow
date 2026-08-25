@@ -50,9 +50,12 @@ Remove an import and the associated tools/subcommand/auto-wire disappear.
 
 ### ACP (`ext/acp`)
 
-[Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0:
+[Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0
+(v1; see [rpc-acp.md](rpc-acp.md)):
 
-- `mow acp`: run the current host as an ACP agent.
+- `mow acp`: run the current host as an ACP agent (session lifecycle,
+  `session/prompt` + `session/update`, `available_commands_update`,
+  agent→client `session/request_permission` for power tools, `usage_update`).
 - `acp_delegate`: delegate to named external or native peers.
 - Native `mow_agents` support model, effort, system prefix, cwd, permissions,
   and timeout. Peer processes are reused by **agent + cwd + effective argv +
@@ -123,16 +126,20 @@ extensions:
 - `ext/rpc`: JSON-lines prompt/event/cancel/status control plane. `mow rpc`
   always `Close`s the Engine on exit. Cancel/status use a dedicated channel so
   a full prompt queue cannot starve control methods; event deltas and prompt
-  text are size-capped. RPC `"3"` adds the host methods an external UI needs
-  without embedding Engine: `sessions`, `transcript`, `steer`, `slash.list`,
-  `slash`, and a permission gate (`perm.set` / `perm.decide` answering
-  `perm.ask` notifications for `write`, `edit`, `bash`). The gate is fail-open
-  until a UI selects ask mode, so headless scripts are unchanged. `status` and
+  text are size-capped. Host methods an external UI needs without embedding
+  Engine: `sessions`, `transcript`, `steer`, `slash.list`, `slash`,
+  `config.list`, and a permission gate (`perm.set` / `perm.decide` answering
+  `perm.ask` notifications for `write`, `edit`, `bash`). `perm.ask` may include
+  additive `title` / `subject`. Parallel `update` notifications (`kind`:
+  token/thought/tool/state/usage) ride next to `event` when
+  `features.typed_updates` is set. The gate is fail-open until a UI selects
+  ask mode, so headless scripts are unchanged. `status` and
   `session` include `extra_roots` security metadata and configured
   `extra_roots_rw` / `extra_roots_ro` counts; they do not include repository
   presentation metadata. `capabilities.optional.features` dynamically lists
   optional packages that register host-facing facilities and their event
   types. Optional slash commands remain discoverable through `slash.list`.
+  See [rpc-acp.md](rpc-acp.md) for the ACP comparison.
 - `packs/cmdhook`: Claude-style lifecycle shell hooks (`root` or `plugins` map,
   `min_turns`). Hooks re-register on every `BeforeNew` (no first-config pin);
   prior cmdhook hooks are cleared so profiles do not leak across Engines.

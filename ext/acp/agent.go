@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/internal/policy"
@@ -26,7 +27,10 @@ type AgentOptions struct {
 }
 
 // Agent serves ACP as an *agent* (editor/client → mow).
-// Methods: initialize, session/new, session/prompt; notification session/cancel.
+// Core: initialize, session/new, session/prompt, session/cancel.
+// Completeness: session/load|list|resume|close|delete, set_mode,
+// set_config_option, available_commands_update, session/request_permission
+// (agent→client), usage_update, slash dispatch, terminals.
 func Agent(ctx context.Context, opt AgentOptions) error {
 	if opt.Engine == nil {
 		return fmt.Errorf("acp: nil engine")
@@ -54,8 +58,13 @@ func Agent(ctx context.Context, opt AgentOptions) error {
 		name: name,
 		ver:  ver,
 		// sessionId → cancel for in-flight prompt
-		cancels: map[string]context.CancelFunc{},
+		cancels:      map[string]context.CancelFunc{},
+		pending:      map[string]chan incomingResponse{},
+		alwaysAllow:  map[string]bool{},
+		alwaysReject: map[string]bool{},
 	}
+	unsub := a.eng.AddPreTool(a.preTool)
+	defer unsub()
 	return a.serve(ctx, in)
 }
 
@@ -71,6 +80,12 @@ type agentServer struct {
 	sessions map[string]*acpSession
 	// PTY terminals for terminal/* methods
 	terms map[string]*termSession
+
+	nextID       atomic.Int64
+	pending      map[string]chan incomingResponse
+	alwaysAllow  map[string]bool
+	alwaysReject map[string]bool
+	activeSID    string
 }
 
 // acpSession is per-editor-session state (not the same as mow session JSONL id).
@@ -100,11 +115,16 @@ func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 			})
 			continue
 		}
-		// notification (no id)
+		// Incoming JSON-RPC: notification (no id), client response to an
+		// agent→client request (id, no method), or a client request.
 		if _, hasID := msg["id"]; !hasID {
 			var n notification
 			_ = json.Unmarshal([]byte(line), &n)
 			a.handleNotification(n)
+			continue
+		}
+		if _, hasMethod := msg["method"]; !hasMethod {
+			a.deliverClientResponse([]byte(line))
 			continue
 		}
 		var req request
@@ -199,6 +219,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			ID:      req.ID,
 			Result:  result,
 		})
+		a.advertiseCommands(sid)
 	case "session/load":
 		// Resume an existing mow session id (same Engine already holds transcript/prior when constructed with SessionID).
 		var p struct {
@@ -218,14 +239,21 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		a.mu.Unlock()
 		// Stream prior turns as session/update message history (best-effort).
 		for _, m := range a.eng.Transcript() {
+			kind := "user_message_chunk"
+			switch strings.ToLower(strings.TrimSpace(m.Role)) {
+			case "assistant":
+				kind = "agent_message_chunk"
+			case "system":
+				continue
+			}
 			a.write(notification{
 				JSONRPC: "2.0",
 				Method:  "session/update",
 				Params: mustJSON(map[string]any{
 					"sessionId": sid,
 					"update": map[string]any{
-						"sessionUpdate": "user_message_chunk",
-						"content":       map[string]any{"type": "text", "text": m.Role + ": " + m.Content},
+						"sessionUpdate": kind,
+						"content":       map[string]any{"type": "text", "text": m.Content},
 					},
 				}),
 			})
@@ -242,6 +270,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			ID:      req.ID,
 			Result:  loadResult,
 		})
+		a.advertiseCommands(sid)
 	case "fs/read_text_file":
 		var p struct {
 			Path string `json:"path"`
@@ -279,18 +308,6 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			return
 		}
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"ok": true}})
-	case "session/request_permission", "session/requestPermission":
-		// Auto-allow: mow policies already gate tools; editors may still call this.
-		var p struct {
-			SessionID string `json:"sessionId"`
-			ToolCall  any    `json:"toolCall"`
-		}
-		_ = json.Unmarshal(req.Params, &p)
-		a.write(response{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-			Result:  map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": "allow"}},
-		})
 	case "terminal/create":
 		var p struct {
 			SessionID string   `json:"sessionId"`
@@ -426,6 +443,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		ctx, cancel := context.WithCancel(parent)
 		a.mu.Lock()
 		a.cancels[p.SessionID] = cancel
+		a.activeSID = p.SessionID
 		mode := ModeCode
 		if s := a.sessions[p.SessionID]; s != nil && s.mode != "" {
 			mode = s.mode
@@ -437,8 +455,39 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			cancel()
 			a.mu.Lock()
 			delete(a.cancels, p.SessionID)
+			if a.activeSID == p.SessionID {
+				a.activeSID = ""
+			}
 			a.mu.Unlock()
 		}()
+
+		if body, exclusiveBusy, ok := a.trySlash(ctx, p.SessionID, text); ok {
+			if exclusiveBusy {
+				a.write(response{
+					JSONRPC: "2.0", ID: req.ID,
+					Error: &rpcError{Code: errInvalid, Message: "exclusive slash command cannot run while a turn is in flight"},
+				})
+				return
+			}
+			if body != "" {
+				a.write(notification{
+					JSONRPC: "2.0",
+					Method:  "session/update",
+					Params: mustJSON(sessionUpdateParams{
+						SessionID: p.SessionID,
+						Update: sessionUpdate{
+							SessionUpdate: "agent_message_chunk",
+							Content:       &chunkContent{Type: "text", Text: body},
+						},
+					}),
+				})
+			}
+			a.write(response{
+				JSONRPC: "2.0", ID: req.ID,
+				Result: map[string]any{"stopReason": "end_turn"},
+			})
+			return
+		}
 
 		// Stream main-model tokens + acp_delegate peer activity to the client.
 		writeAgentText := func(text string) {
@@ -535,6 +584,8 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 					status = "failed"
 				}
 				writeToolCall("tool_call_update", ev.ToolCallID, kind, title, status)
+			case mow.EventRunEnd:
+				a.emitUsage(p.SessionID, ev.InputTokens, ev.OutputTokens, ev.CachedInputTokens)
 			}
 		})
 		popt := mow.PromptOpts{}
@@ -627,18 +678,36 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			JSONRPC: "2.0", ID: req.ID,
 			Result: resumeResult,
 		})
+		a.advertiseCommands(sid)
 	case "session/list":
+		cwd := a.eng.Workspace()
 		a.mu.Lock()
-		list := make([]map[string]any, 0, len(a.sessions)+1)
+		list := make([]map[string]any, 0, len(a.sessions)+4)
 		seen := map[string]bool{}
 		for sid := range a.sessions {
-			list = append(list, map[string]any{"sessionId": sid, "cwd": a.eng.Workspace(), "title": sid})
+			list = append(list, map[string]any{"sessionId": sid, "cwd": cwd, "title": sid})
 			seen[sid] = true
 		}
-		if engSID := a.eng.SessionID(); engSID != "" && !seen[engSID] {
-			list = append(list, map[string]any{"sessionId": engSID, "cwd": a.eng.Workspace(), "title": engSID})
-		}
 		a.mu.Unlock()
+		if infos, err := a.eng.Sessions(); err == nil {
+			for _, in := range infos {
+				if seen[in.ID] {
+					continue
+				}
+				row := map[string]any{"sessionId": in.ID, "cwd": cwd, "title": in.ID}
+				if !in.Updated.IsZero() {
+					row["updatedAt"] = in.Updated.UTC().Format("2006-01-02T15:04:05Z")
+				}
+				if p := strings.TrimSpace(in.Preview); p != "" {
+					row["title"] = p
+				}
+				list = append(list, row)
+				seen[in.ID] = true
+			}
+		}
+		if engSID := a.eng.SessionID(); engSID != "" && !seen[engSID] {
+			list = append(list, map[string]any{"sessionId": engSID, "cwd": cwd, "title": engSID})
+		}
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"sessions": list}})
 	case "session/delete":
 		var p struct {
@@ -821,4 +890,48 @@ func nilIfRunning(t *termSession) any {
 		return nil
 	}
 	return int(t.code.Load())
+}
+
+func acpStopReason(reason string) string {
+	switch reason {
+	case mow.StopCancelled:
+		return "cancelled"
+	case mow.StopMaxTurns, mow.StopStuck, mow.StopBudget, mow.StopTruncated:
+		return "max_turn_requests"
+	case mow.StopError:
+		return "end_turn"
+	default:
+		return "end_turn"
+	}
+}
+
+func (a *agentServer) emitUsage(sessionID string, input, output, cached int) {
+	if a == nil || (input == 0 && output == 0 && cached == 0) {
+		return
+	}
+	used := map[string]any{
+		"inputTokens":  input,
+		"outputTokens": output,
+	}
+	if cached > 0 {
+		used["cachedReadTokens"] = cached
+	}
+	update := map[string]any{
+		"sessionUpdate": "usage_update",
+		"used":          used,
+	}
+	if a.eng != nil {
+		lim := a.eng.Limits()
+		if lim.ContextWindow > 0 {
+			update["size"] = map[string]any{"contextWindow": lim.ContextWindow}
+		}
+	}
+	a.write(notification{
+		JSONRPC: "2.0",
+		Method:  "session/update",
+		Params: mustJSON(map[string]any{
+			"sessionId": sessionID,
+			"update":    update,
+		}),
+	})
 }
