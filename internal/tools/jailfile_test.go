@@ -96,8 +96,8 @@ func TestOpenJailedSymlinkRace(t *testing.T) {
 		t.Fatalf("in-jail read: data=%q err=%v", data, err)
 	}
 
-	if runtime.GOOS != "linux" {
-		t.Logf("note: post-open check on %s uses EvalSymlinks(name), weaker than /proc/self/fd", runtime.GOOS)
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Logf("note: post-open check on %s uses EvalSymlinks(name), weaker than /proc/self/fd or F_GETPATH", runtime.GOOS)
 	}
 }
 

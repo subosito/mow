@@ -174,6 +174,54 @@ func (p *Policy) ResolvePathFor(rel string, write bool) (string, error) {
 	return "", fmt.Errorf("path %q escapes workspace (and extra roots)", rel)
 }
 
+// Beneath maps an absolute path to the jail root containing it, using the
+// same root selection as ResolvePathFor (longest match, read-only tie-break),
+// and returns the root's canonical (symlink-resolved) directory plus the path
+// relative to it. The pair is meant for descriptor-relative open (openat2
+// RESOLVE_BENEATH), where the KERNEL enforces confinement during resolution.
+// ok=false when the path is not under any root: callers fall back to the
+// legacy check-then-verify open.
+func (p *Policy) Beneath(abs string) (root, rel string, ok bool) {
+	if p == nil || p.Workspace == "" {
+		return "", "", false
+	}
+	roots, err := p.jailRoots()
+	if err != nil || len(roots) == 0 {
+		return "", "", false
+	}
+	candidate := filepath.Clean(abs)
+	if !filepath.IsAbs(candidate) {
+		return "", "", false
+	}
+	sep := string(filepath.Separator)
+	var matchedLen int
+	var canonical string
+	for i := range roots {
+		r := roots[i].Path
+		if resolvedRoot, err := filepath.EvalSymlinks(r); err == nil {
+			r = filepath.Clean(resolvedRoot)
+		}
+		if r == string(filepath.Separator) {
+			continue
+		}
+		if candidate == r || strings.HasPrefix(candidate, r+sep) {
+			// Longest-prefix / most-specific root match wins.
+			if len(r) > matchedLen || (len(r) == matchedLen && roots[i].ReadOnly) {
+				matchedLen = len(r)
+				canonical = r
+			}
+		}
+	}
+	if canonical == "" {
+		return "", "", false
+	}
+	sub, rerr := filepath.Rel(canonical, candidate)
+	if rerr != nil || sub == ".." || strings.HasPrefix(sub, ".."+string(filepath.Separator)) {
+		return "", "", false
+	}
+	return canonical, sub, true
+}
+
 // jailRoots returns cleaned absolute roots: workspace first, then ExtraRoots and ExtraRootsReadOnly.
 // The filesystem root ("/") is never a jail root: granting it disables the
 // jail, and the prefix check (`root+sep`) becomes "//" which matches nothing.

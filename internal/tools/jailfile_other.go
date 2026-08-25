@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !darwin
 
 package tools
 
@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 )
 
-// fdPath best-effort on non-Linux: re-resolve f.Name(). This catches the
+// fdPath best-effort on platforms with no handle-based lookup (no
+// /proc/self/fd, no F_GETPATH): re-resolve f.Name(). This catches the
 // common "open followed a symlink that still points outside" case, but is
-// weaker than Linux /proc/self/fd — a swap *back* inside between open and
-// this check can still pass while the fd references an outside inode.
+// weaker than Linux /proc/self/fd or darwin F_GETPATH — a swap *back*
+// inside between open and this check can still pass while the fd
+// references an outside inode.
 func fdPath(f *os.File) (string, error) {
 	if f == nil {
 		return "", fmt.Errorf("nil file")
