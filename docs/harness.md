@@ -22,7 +22,7 @@ Stack context: [architecture.md](architecture.md). Embedding in Go: [embedding.m
 
 - Not a multi-provider model gateway or credential broker (point at one HTTP endpoint).
 - Not a chat-channel product (hosts that need channels import mow or call its API).
-- Not a full IDE agent (goals/MCP/LSP live as packs or external hosts).
+- Not a full IDE agent (goals/MCP live as packs or external hosts).
 - Not ACP by default in the core library — ACP is the **`ext/acp` pack**.
 
 ---

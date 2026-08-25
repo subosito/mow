@@ -2,9 +2,8 @@
 
 **Rule:** if a capability is not required for a read-only agent over compatible
 LLM HTTP, it is detachable. Core protocols/runtime adapters live under `ext/`;
-workflow/domain integrations live in the separate `packs/` module; heavy OTEL
-dependencies live in a nested module. The Rust `mowi` sibling project is the
-external TUI over `mow rpc`.
+workflow/domain integrations live in the separate `packs/` module. The Rust
+`mowi` sibling project is the external TUI over `mow rpc`.
 
 Customization modes:
 

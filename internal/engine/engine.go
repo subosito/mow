@@ -787,13 +787,6 @@ func New(opt Options) (*Engine, error) {
 		}
 	}
 
-	// Optional OTLP export when otel.endpoint is set and the otel package
-	// registered an auto-wire hook (stock CLI blank-imports it). Empty
-	// endpoint → no-op; core stays free of the OTLP SDK import.
-	if err := runOTELAuto(e, otelCfgMap(e.cfg)); err != nil {
-		return nil, err
-	}
-
 	// Fail closed on an unenforceable spend ceiling. policy.max_run_usd on a
 	// model with no published price cannot fire; starting anyway would hand
 	// the operator a limit that silently never triggers, which is worse than

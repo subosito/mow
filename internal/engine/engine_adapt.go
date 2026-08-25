@@ -9,7 +9,6 @@ import (
 
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/internal/agent"
-	"github.com/subosito/mow/internal/config"
 	"github.com/subosito/mow/internal/llm"
 	"github.com/subosito/mow/internal/tools"
 )
@@ -491,22 +490,6 @@ func appendUnique(list []string, names ...string) []string {
 func projectHash(workspace string) string {
 	sum := sha256.Sum256([]byte(workspace))
 	return hex.EncodeToString(sum[:8])
-}
-
-// otelCfgMap projects config.OTEL into the loose map the auto-wire hook reads.
-func otelCfgMap(cfg *config.File) map[string]any {
-	if cfg == nil || strings.TrimSpace(cfg.OTEL.Endpoint) == "" {
-		return nil
-	}
-	m := map[string]any{
-		"endpoint":     cfg.OTEL.Endpoint,
-		"protocol":     cfg.OTEL.Protocol,
-		"service_name": cfg.OTEL.ServiceName,
-	}
-	if len(cfg.OTEL.Headers) > 0 {
-		m["headers"] = cfg.OTEL.Headers
-	}
-	return m
 }
 
 // cloneRequestClient snapshots the live client for one chat call and applies a

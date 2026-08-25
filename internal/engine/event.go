@@ -104,32 +104,6 @@ const (
 	// call (InputTokens/OutputTokens + Agent). Lets hosts show true spend
 	// including native mow peers.
 	EventDelegateUsage EventType = "harness.delegate.usage"
-	// EventLSPDiagnostics reports language-server findings for a file just
-	// written or edited. Emitted only when an LSP pack is configured and
-	// running (no config → no process → no event).
-	//
-	// Frozen payload shape (host contract — e.g. a TUI Problems panel):
-	//
-	//	{
-	//	  "type": "harness.lsp.diagnostics",
-	//	  "tool": "write",            // tool that produced the edit
-	//	  "path": "internal/x/y.go",  // workspace-relative when possible
-	//	  "count": 3,                 // total findings reported by the server
-	//	  "diagnostics": [            // bounded by MaxLSPDiagnostics
-	//	    {
-	//	      "severity": "error",         // error|warning|information|hint
-	//	      "message": "undefined: foo",
-	//	      "line": 42,                  // 1-based
-	//	      "column": 9,                 // 1-based; 0 when the server omits it
-	//	      "source": "compiler"         // producing tool, "" when absent
-	//	    }
-	//	  ]
-	//	}
-	//
-	// Diagnostics are sorted most severe first, then truncated, so a host that
-	// renders only the head still sees the errors. count may exceed
-	// len(diagnostics) when the list was truncated.
-	EventLSPDiagnostics EventType = "harness.lsp.diagnostics"
 )
 
 // CompactLayer identifies the most expensive projection layer used.
@@ -139,48 +113,6 @@ const (
 	CompactLayerSnip CompactLayer = "snip"
 	CompactLayerDrop CompactLayer = "drop"
 )
-
-// MaxLSPDiagnostics bounds how many findings ride along a tool result and an
-// EventLSPDiagnostics payload.
-const MaxLSPDiagnostics = 10
-
-// DiagnosticSeverity is the severity vocabulary of EventLSPDiagnostics.
-type DiagnosticSeverity string
-
-// Diagnostic severities, most severe first (see SeverityRank).
-const (
-	SeverityError       DiagnosticSeverity = "error"
-	SeverityWarning     DiagnosticSeverity = "warning"
-	SeverityInformation DiagnosticSeverity = "information"
-	SeverityHint        DiagnosticSeverity = "hint"
-)
-
-// SeverityRank orders severities for display and truncation: lower is more
-// severe. Unknown values sort last.
-func SeverityRank(s DiagnosticSeverity) int {
-	switch s {
-	case SeverityError:
-		return 0
-	case SeverityWarning:
-		return 1
-	case SeverityInformation:
-		return 2
-	case SeverityHint:
-		return 3
-	}
-	return 4
-}
-
-// Diagnostic is one language-server finding (see EventLSPDiagnostics).
-type Diagnostic struct {
-	Severity DiagnosticSeverity `json:"severity"`
-	Message  string             `json:"message"`
-	Line     int                `json:"line"`             // 1-based
-	Column   int                `json:"column,omitempty"` // 1-based; 0 when the server omits it
-	// Source is the producing tool as reported by the server (e.g. "compiler",
-	// "staticcheck"); empty when absent.
-	Source string `json:"source,omitempty"`
-}
 
 // Stop reasons for EventRunEnd / RunResult.StopReason.
 const (
@@ -303,11 +235,10 @@ type Event struct {
 	//	}
 	Goal *GoalEvent `json:"goal,omitempty"`
 
-	// LSP diagnostics (harness.lsp.diagnostics). Path is the edited file,
-	// Count the server total, Diagnostics bounded by MaxLSPDiagnostics.
-	Path        string       `json:"path,omitempty"`
-	Count       int          `json:"count,omitempty"`
-	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
+	// Path is the file a tool acts on (workspace-relative when possible).
+	// Carried on EventToolStart/EventToolEnd, including peer tool updates
+	// (ext/acp renders per-file cards from it).
+	Path string `json:"path,omitempty"`
 }
 
 // EventFunc receives lifecycle events. Must not block long.

@@ -29,8 +29,6 @@ func TestPacksDoNotImportInternal(t *testing.T) {
 			return err
 		}
 		if info.IsDir() {
-			// otel is a nested module with its own go.mod, but the same rule
-			// applies — walk it too.
 			if info.Name() == "testdata" || info.Name() == ".git" {
 				return filepath.SkipDir
 			}

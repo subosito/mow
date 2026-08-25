@@ -8,7 +8,7 @@ import "github.com/subosito/mow"
 const readOnlyToolPolicy = "builtin_read_inspect_only"
 
 // applyReviewEngineIsolation configures candidate and verifier engines so
-// constructing them does not run extension BeforeNew setup (MCP/cmdhook/LSP
+// constructing them does not run extension BeforeNew setup (MCP/cmdhook
 // processes) or inherit extension lifecycle hooks. User LLM config still loads;
 // extensions.review budgets are read by loadConfig before scope resolve.
 func applyReviewEngineIsolation(opt *mow.Options) {

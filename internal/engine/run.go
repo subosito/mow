@@ -45,7 +45,7 @@ type Options struct {
 	// SkipExtensionSetup, when true, skips ext.BeforeNew during New and does
 	// not merge process-global extension tools into the engine. User LLM
 	// config, workspace profiles, AGENTS/skills, and Options.Tools are
-	// unchanged. Review/sec use this so MCP/cmdhook/LSP processes and
+	// unchanged. Review/sec use this so MCP/cmdhook processes and
 	// config-driven extension tools are not initialized for read-only passes.
 	SkipExtensionSetup bool
 	// DisableExtensionHooks, when true, omits ext global lifecycle hooks

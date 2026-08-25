@@ -17,31 +17,13 @@ import (
 // Core fields stay lean. UI packs and other optional features put their knobs
 // under Extensions (e.g. extensions.acp) and decode with Extension().
 type File struct {
-	Workspace string        `yaml:"workspace"`
-	LLM       LLMConfig     `yaml:"llm"`
-	Tools     ToolsConfig   `yaml:"tools"`
-	Policy    PolicyConfig  `yaml:"policy"`
-	Session   SessionConfig `yaml:"session"`
-	Skills    SkillsConfig  `yaml:"skills"`
-	// OTEL is optional OpenTelemetry export. Empty Endpoint disables export
-	// (default). Host/user config only — stripped from project .mow/config.
-	OTEL       OTELConfig           `yaml:"otel"`
+	Workspace  string               `yaml:"workspace"`
+	LLM        LLMConfig            `yaml:"llm"`
+	Tools      ToolsConfig          `yaml:"tools"`
+	Policy     PolicyConfig         `yaml:"policy"`
+	Session    SessionConfig        `yaml:"session"`
+	Skills     SkillsConfig         `yaml:"skills"`
 	Extensions map[string]yaml.Node `yaml:"extensions"`
-}
-
-// OTELConfig wires the optional OTLP exporter when Endpoint is non-empty.
-// Default (zero value) is off — no exporter process, no network.
-type OTELConfig struct {
-	// Endpoint is the OTLP collector base URL, e.g. "http://127.0.0.1:4318"
-	// or "https://otlp.example.com:4318". Empty = disabled.
-	Endpoint string `yaml:"endpoint"`
-	// Protocol selects the OTLP transport. "http" (default) or "grpc".
-	Protocol string `yaml:"protocol"`
-	// ServiceName becomes resource service.name (default "mow").
-	ServiceName string `yaml:"service_name"`
-	// Headers are extra exporter headers (e.g. authorization).
-	Headers map[string]string `yaml:"headers"`
-	// endpoint means 1.0 (sample all). Use a small fraction in busy fleets.
 }
 
 type LLMConfig struct {
@@ -439,8 +421,6 @@ func mergeProjectFile(dst *File, path string) error {
 	overlay.LLM.InputPrice = 0
 	overlay.LLM.OutputPrice = 0
 	overlay.Session.Dir = ""
-	// OTEL exporter endpoint/headers are host/user only (not project).
-	overlay.OTEL = OTELConfig{}
 	// Extra FS roots expand the jail — host/CLI only (not project-controlled).
 	overlay.Policy.ExtraRoots = nil
 	overlay.Policy.ExtraRootsReadOnly = nil
@@ -655,32 +635,11 @@ func mergeOverlay(dst *File, overlay *File) {
 	if len(overlay.Skills.Explicit) > 0 {
 		dst.Skills.Explicit = mergeStringList(dst.Skills.Explicit, overlay.Skills.Explicit)
 	}
-	mergeOTEL(&dst.OTEL, overlay.OTEL)
 	mergeExtensions(dst, overlay.Extensions)
 }
 
 // mergeExtensions replaces whole named sections from overlay (last writer wins).
 // Sections are not deep-merged — an extension owns its blob.
-func mergeOTEL(dst *OTELConfig, o OTELConfig) {
-	if s := strings.TrimSpace(o.Endpoint); s != "" {
-		dst.Endpoint = s
-	}
-	if s := strings.TrimSpace(o.Protocol); s != "" {
-		dst.Protocol = s
-	}
-	if s := strings.TrimSpace(o.ServiceName); s != "" {
-		dst.ServiceName = s
-	}
-	if len(o.Headers) > 0 {
-		if dst.Headers == nil {
-			dst.Headers = map[string]string{}
-		}
-		for k, v := range o.Headers {
-			dst.Headers[k] = v
-		}
-	}
-}
-
 func mergeExtensions(dst *File, overlay map[string]yaml.Node) {
 	if len(overlay) == 0 {
 		return
@@ -815,15 +774,6 @@ func applyEnv(f *File) {
 	}
 	if v := firstEnv("MOW_EFFORT"); v != "" {
 		f.LLM.Effort = v
-	}
-	if v := firstEnv("MOW_OTEL_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"); v != "" {
-		f.OTEL.Endpoint = v
-	}
-	if v := firstEnv("MOW_OTEL_PROTOCOL", "OTEL_EXPORTER_OTLP_PROTOCOL"); v != "" {
-		f.OTEL.Protocol = v
-	}
-	if v := firstEnv("MOW_OTEL_SERVICE_NAME", "OTEL_SERVICE_NAME"); v != "" {
-		f.OTEL.ServiceName = v
 	}
 }
 
@@ -991,23 +941,6 @@ func (f *File) normalize() error {
 			roots = append(roots, abs)
 		}
 		f.Policy.ExtraRootsReadOnly = roots
-	}
-	if s := strings.TrimSpace(f.OTEL.Endpoint); s != "" {
-		f.OTEL.Endpoint = s
-		proto := strings.ToLower(strings.TrimSpace(f.OTEL.Protocol))
-		switch proto {
-		case "", "http", "http/protobuf":
-			f.OTEL.Protocol = "http"
-		case "grpc":
-			f.OTEL.Protocol = "grpc"
-		default:
-			return fmt.Errorf("otel.protocol %q: want http or grpc", f.OTEL.Protocol)
-		}
-		if f.OTEL.ServiceName == "" {
-			f.OTEL.ServiceName = "mow"
-		}
-	} else {
-		f.OTEL = OTELConfig{} // keep disabled clean
 	}
 	return nil
 }

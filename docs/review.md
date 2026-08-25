@@ -218,7 +218,7 @@ Each pass runs with `ReadOnly` + `Ephemeral` prompts and a strict per-call
 `AllowedTools` allowlist of `read`, `glob`, and `grep` only. Candidate and
 verifier engines are built with `Options.SkipExtensionSetup` and
 `Options.DisableExtensionHooks`, so constructing them does not run extension
-`BeforeNew` setup (MCP/cmdhook/LSP processes) or inherit extension lifecycle
+`BeforeNew` setup (MCP/cmdhook processes) or inherit extension lifecycle
 hooks. User LLM config still loads; `extensions.review` budgets are read before
 scope resolve via the pack's own config loader, not via engine construction.
 The report records

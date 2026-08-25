@@ -47,10 +47,8 @@ func TestPublicTypesResolve(t *testing.T) {
 	var _ mow.ModelSwitcher
 	var _ mow.ChatFunc
 	var _ mow.EventFunc
-	var _ mow.OTELAutoFunc
 	var _ mow.EventType
 	var _ mow.CompactLayer
-	var _ mow.DiagnosticSeverity
 }
 
 func TestPublicFuncsResolve(t *testing.T) {
@@ -60,14 +58,12 @@ func TestPublicFuncsResolve(t *testing.T) {
 	_ = mow.StripThinking
 	_ = mow.ContextWithEngine
 	_ = mow.EngineFromContext
-	_ = mow.SeverityRank
 	_ = mow.FilterChatModels
 	_ = mow.IsChatModel
 	_ = mow.WorkspaceTrusted
 	_ = mow.TrustWorkspace
 	_ = mow.RevokeWorkspaceTrust
 	_ = mow.TrustedWorkspaces
-	_ = mow.SetOTELAuto
 	_ = mow.ProcSanitizeID
 	_ = mow.ProcStoreDir
 	_ = mow.ProcStart
@@ -105,7 +101,6 @@ func TestPublicConstsResolve(t *testing.T) {
 	_ = mow.EventDelegateChunk
 	_ = mow.EventDelegateProgress
 	_ = mow.EventDelegateUsage
-	_ = mow.EventLSPDiagnostics
 
 	// Stop reasons.
 	_ = mow.StopCompleted
@@ -116,14 +111,7 @@ func TestPublicConstsResolve(t *testing.T) {
 	_ = mow.StopError
 
 	// Misc consts.
-	_ = mow.MaxLSPDiagnostics
 	_ = mow.Version
-
-	// Diagnostic severities.
-	_ = mow.SeverityError
-	_ = mow.SeverityWarning
-	_ = mow.SeverityInformation
-	_ = mow.SeverityHint
 
 	// Compact layers.
 	_ = mow.CompactLayerSnip

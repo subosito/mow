@@ -154,7 +154,7 @@ Docs: [docs/extensions.md](docs/extensions.md).
 | [docs/review.md](docs/review.md) | Shared review workflow, `--reviewer` / `--verifier`, scope, formats, CI |
 | [docs/sec.md](docs/sec.md) | Read-only security review and evidence model |
 | [packs/*/README.md](packs/), [ext/*/README.md](ext/) | Per-pack / per-extension one-pagers |
-| [docs/extensions.md](docs/extensions.md) | Core extensions, optional packs, ACP, MCP/LSP, media |
+| [docs/extensions.md](docs/extensions.md) | Core extensions, optional packs, ACP, MCP, media |
 
 ## License
 

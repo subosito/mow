@@ -43,8 +43,6 @@ type PluginInfo = engine.PluginInfo
 
 type EventType = engine.EventType
 type CompactLayer = engine.CompactLayer
-type DiagnosticSeverity = engine.DiagnosticSeverity
-type Diagnostic = engine.Diagnostic
 type GoalNode = engine.GoalNode
 type GoalEvent = engine.GoalEvent
 type Event = engine.Event
@@ -72,7 +70,6 @@ type StopEvent = engine.StopEvent
 type StopFunc = engine.StopFunc
 type Hooks = engine.Hooks
 
-type OTELAutoFunc = engine.OTELAutoFunc
 type ProcInfo = engine.ProcInfo
 type MediaClient = engine.MediaClient
 type MediaImageResult = engine.MediaImageResult
@@ -108,7 +105,6 @@ const (
 	EventDelegateChunk    = engine.EventDelegateChunk
 	EventDelegateProgress = engine.EventDelegateProgress
 	EventDelegateUsage    = engine.EventDelegateUsage
-	EventLSPDiagnostics   = engine.EventLSPDiagnostics
 	EventSteer            = engine.EventSteer
 	// EventModelWait / EventModelActive bracket the pre-first-byte silence of
 	// an LLM call. The wait is a host-side observation of upstream silence,
@@ -130,12 +126,11 @@ const (
 
 // Misc consts.
 const (
-	MaxLSPDiagnostics = engine.MaxLSPDiagnostics
-	StopCompleted     = engine.StopCompleted
-	StopCancelled     = engine.StopCancelled
-	StopMaxTurns      = engine.StopMaxTurns
-	StopStuck         = engine.StopStuck
-	StopBudget        = engine.StopBudget
+	StopCompleted = engine.StopCompleted
+	StopCancelled = engine.StopCancelled
+	StopMaxTurns  = engine.StopMaxTurns
+	StopStuck     = engine.StopStuck
+	StopBudget    = engine.StopBudget
 )
 
 // Version is the fallback release string (overridden by ldflags / git tags).
@@ -148,14 +143,6 @@ var ErrBudget = engine.ErrBudget
 var (
 	StopTruncated = engine.StopTruncated
 	StopError     = engine.StopError
-)
-
-// Diagnostic severities.
-const (
-	SeverityError       = engine.SeverityError
-	SeverityWarning     = engine.SeverityWarning
-	SeverityInformation = engine.SeverityInformation
-	SeverityHint        = engine.SeverityHint
 )
 
 // Compact layers.
@@ -205,7 +192,6 @@ func ContextWithEngine(ctx context.Context, eng *Engine) context.Context {
 	return engine.ContextWithEngine(ctx, eng)
 }
 func EngineFromContext(ctx context.Context) *Engine { return engine.EngineFromContext(ctx) }
-func SeverityRank(s DiagnosticSeverity) int         { return engine.SeverityRank(s) }
 func FilterChatModels(list []ModelInfo) []ModelInfo { return engine.FilterChatModels(list) }
 func IsChatModel(m ModelInfo) bool                  { return engine.IsChatModel(m) }
 func WorkspaceTrusted(workspace string) bool        { return engine.WorkspaceTrusted(workspace) }
@@ -217,7 +203,6 @@ func TrustedWorkspaces() []string                   { return engine.TrustedWorks
 func SplitExtraRootSpec(raw string) (path string, readOnly bool) {
 	return engine.SplitExtraRootSpec(raw)
 }
-func SetOTELAuto(fn OTELAutoFunc)     { engine.SetOTELAuto(fn) }
 func ProcSanitizeID(id string) string { return engine.ProcSanitizeID(id) }
 func ProcStoreDir(home, workspace string) string {
 	return engine.ProcStoreDir(home, workspace)
