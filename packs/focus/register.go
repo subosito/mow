@@ -25,7 +25,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"sync"
 	"unicode/utf8"
 
 	"os"
@@ -38,14 +37,10 @@ import (
 // replaces the previous generation instead of stacking duplicates.
 const hookSource = "focus"
 
-// state is per-Engine. BeforeNew fires once per Engine construction, so a
-// fresh streak/read/inventory ledger is installed for each run rather than
-// leaking counts across engines in the same process.
-var (
-	mu  sync.Mutex
-	cur *focusState
-)
-
+// state is captured per-Engine in the hook closures registered below.
+// BeforeNew fires once per Engine construction, so each run gets a fresh
+// streak/read/inventory ledger; engines built concurrently in one process
+// never share a ledger (there is no process-global pointer).
 func init() {
 	ext.RegisterBeforeNew(func(configPaths ...string) error {
 		return setup(configPaths...)
@@ -65,10 +60,6 @@ func setup(configPaths ...string) error {
 	// unavailable the ledger simply falls back to literal path matching.
 	ws, _ := os.Getwd()
 	st := newFocusState(ws, cfg)
-
-	mu.Lock()
-	cur = st
-	mu.Unlock()
 
 	ext.ClearHookSource(hookSource)
 	register(st)
