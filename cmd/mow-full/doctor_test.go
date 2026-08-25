@@ -13,7 +13,7 @@ func TestDoctorAcceptsMediaEnableWhenPackLinked(t *testing.T) {
 		t.Skip("mowBinary unset")
 	}
 	home := t.TempDir()
-	body := "llm:\n  model: gpt-5-mini\ntools:\n  enable: [read, glob, grep, understand_image]\nextensions:\n  media:\n    understand:\n      image: gpt-4o\n"
+	body := "llm:\n  model: gpt-5-mini\ntools:\n  enable: [read, glob, grep, understand_image]\nextensions:\n  media:\n    understand:\n      image: gpt-5-mini\n"
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

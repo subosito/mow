@@ -10,7 +10,4 @@ require (
 
 require github.com/kr/text v0.2.0 // indirect
 
-replace (
-	github.com/subosito/mow/packs => ./packs
-	github.com/subosito/mow/packs/otel => ./packs/otel
-)
+replace github.com/subosito/mow/packs => ./packs
