@@ -137,7 +137,9 @@ func TestBashOutputIsBoundedWhileRunning(t *testing.T) {
 	}
 }
 
-func TestBashListingExecIsClamped(t *testing.T) {
+// Bash output passes through as-is (byte-budgeted only); no line-based
+// clamping or command recognition — that policy belongs to packs/extensions.
+func TestBashOutputPassesThroughAsIs(t *testing.T) {
 	root := t.TempDir()
 	for i := 0; i < 150; i++ {
 		name := filepath.Join(root, "f"+strconv.Itoa(i)+".txt")
@@ -151,16 +153,16 @@ func TestBashListingExecIsClamped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "listing cap") {
-		t.Fatalf("ls of 150 files must hit the listing cap, got %d bytes:\n%.200s", len(out), out)
+	if n := strings.Count(out, "\n"); n < 149 {
+		t.Fatalf("ls of 150 files lost entries: %d lines", n)
 	}
-	// A non-listing dump stays on the 100 KiB head+tail path, not the 100-line cap.
+	if strings.Contains(out, "listing cap") {
+		t.Fatal("bash must not clamp listings")
+	}
+	// The byte budget still bounds total volume.
 	seq, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"seq 1 200"}`))
 	if err != nil {
 		t.Fatal(err)
-	}
-	if strings.Contains(seq, "listing cap") {
-		t.Fatal("seq must not be treated as a listing")
 	}
 	if !strings.Contains(seq, "200") {
 		t.Fatalf("seq lost the tail: %.80q", seq)

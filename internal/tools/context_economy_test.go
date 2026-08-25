@@ -66,63 +66,6 @@ func TestCappedBufferSingleByteWrites(t *testing.T) {
 	}
 }
 
-func TestIsListingOrSearchBash(t *testing.T) {
-	t.Parallel()
-	yes := []string{
-		"rg recall",
-		`cd . && rg -n leftover`,
-		"grep -R foo .",
-		"find . -name '*.go'",
-		"ls -la internal",
-		"awk '{print}' src/app.rs",
-		`python3 -c "import os; os.walk('.')"`,
-	}
-	for _, c := range yes {
-		if !isListingOrSearchBash(c) {
-			t.Errorf("want listing/search: %q", c)
-		}
-	}
-	no := []string{
-		"go test ./...",
-		"go test ./packs/contextsink | rg FAIL",
-		"cargo test",
-		"echo hello",
-		`python3 -c "print(1+1)"`,
-		"git status --short",
-	}
-	for _, c := range no {
-		if isListingOrSearchBash(c) {
-			t.Errorf("must not clamp: %q", c)
-		}
-	}
-}
-
-func TestClampListingOutput(t *testing.T) {
-	t.Parallel()
-	var b strings.Builder
-	for i := 1; i <= grepMaxMatches+40; i++ {
-		b.WriteString("hit ")
-		b.WriteByte(byte('0' + i%10))
-		b.WriteByte('\n')
-	}
-	got := clampListingOutput(b.String())
-	if !strings.Contains(got, "listing cap") {
-		t.Fatalf("want listing cap notice, got %.200q", got)
-	}
-	if n := strings.Count(got, "\n"); n > grepMaxMatches+2 {
-		t.Fatalf("clamped listing still has %d lines", n)
-	}
-	// Short listing is unchanged aside from a possible trailing newline trim.
-	if got := clampListingOutput("a\nb\n"); got != "a\nb" {
-		t.Fatalf("short listing altered: %q", got)
-	}
-	long := strings.Repeat("m", grepMaxLineChars*3)
-	clipped := clampListingOutput(long)
-	if !strings.Contains(clipped, "line clipped") {
-		t.Fatalf("want line clip, got %d chars", len(clipped))
-	}
-}
-
 func TestClampGrepLine(t *testing.T) {
 	t.Parallel()
 	// A match inside a minified bundle must not eat the whole result budget.
