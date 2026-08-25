@@ -61,6 +61,36 @@ func NormalizeEffortFor(s string, allowed []string) (string, error) {
 	}
 }
 
+// reEffortToken is the shape of an effort tier: one bare word, no spaces.
+var reEffortToken = regexp.MustCompile(`^[a-z0-9]+(?:[-_][a-z0-9]+)*$`)
+
+// NormalizeEffortConfigured canonicalizes an effort that arrives before any
+// catalog is loaded — config files, --effort, the ACP handshake.
+//
+// The static none|low|medium|high set is only a fallback for gateways that
+// publish no efforts metadata; models routinely advertise their own tiers
+// (max, xhigh, ultra). Rejecting those at load time makes a valid model
+// unusable and kills the process during initialize, which is how a peer with
+// `effort: max` fails to start at all.
+//
+// So this validates shape, not membership: aliases fold to none, anything that
+// looks like a tier token is taken as-is, and real membership is settled once
+// the catalog is known (NormalizeEffortFor / SyncEffortToModel, which lands on
+// the model's default_effort when the tier is not allowed).
+func NormalizeEffortConfigured(s string) (string, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "", "default", "auto":
+		return "", nil
+	case "off", "minimal", "min":
+		return EffortNone, nil
+	}
+	if !reEffortToken.MatchString(s) {
+		return "", fmt.Errorf("effort must be a single tier word (e.g. none|low|medium|high, or a tier your model advertises), got %q", s)
+	}
+	return s, nil
+}
+
 // StripEffortTiers removes a trailing -low|-medium|-high tier from a model id.
 // Used only to migrate legacy configs / collapse catalogs — not for request rewriting.
 func StripEffortTiers(model string) string {

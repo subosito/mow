@@ -33,6 +33,41 @@ func TestNormalizeEffort(t *testing.T) {
 	}
 }
 
+func TestNormalizeEffortConfiguredAcceptsCatalogOnlyTiers(t *testing.T) {
+	// The static none|low|medium|high set is a no-catalog fallback. A model
+	// that advertises max / xhigh must not be rejected before GET /models has
+	// even run — that killed `mow acp` during initialize.
+	cases := []struct {
+		in, want string
+		err      bool
+	}{
+		{"", "", false},
+		{"auto", "", false},
+		{"default", "", false},
+		{"off", "none", false},
+		{"min", "none", false},
+		{"HIGH", "high", false},
+		{"max", "max", false},
+		{"xhigh", "xhigh", false},
+		{"ultra", "ultra", false},
+		{"x-high", "x-high", false},
+		{"very high", "", true},
+		{"high;rm -rf", "", true},
+	}
+	for _, tc := range cases {
+		got, err := NormalizeEffortConfigured(tc.in)
+		if tc.err {
+			if err == nil {
+				t.Fatalf("%q: want error", tc.in)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Fatalf("%q: got %q err=%v want %q", tc.in, got, err, tc.want)
+		}
+	}
+}
+
 func TestStripEffortTiers(t *testing.T) {
 	if got := StripEffortTiers("gemini-2.5-flash-medium"); got != "gemini-2.5-flash" {
 		t.Fatalf("got %q", got)

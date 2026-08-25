@@ -807,8 +807,10 @@ func (f *File) normalize() error {
 		}
 	}
 	if s := strings.TrimSpace(f.LLM.Effort); s != "" {
-		// Validate early; empty is ok (provider default).
-		norm, err := llm.NormalizeEffort(s)
+		// Validate shape only; empty is ok (provider default). Membership is
+		// a catalog question and the catalog is not loaded yet — a model that
+		// advertises "max" must not be rejected at file-load time.
+		norm, err := llm.NormalizeEffortConfigured(s)
 		if err != nil {
 			return fmt.Errorf("llm.effort: %w", err)
 		}

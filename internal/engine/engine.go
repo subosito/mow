@@ -241,7 +241,10 @@ func New(opt Options) (*Engine, error) {
 		cfg.LLM.Model = m
 	}
 	if e := strings.TrimSpace(opt.Effort); e != "" {
-		norm, nerr := llm.NormalizeEffort(e)
+		// Shape check only: --effort / handshake effort arrives before the
+		// catalog, so catalog-only tiers (max, xhigh) stay legal here and are
+		// reconciled by SyncEffortToModel once GET /models lands.
+		norm, nerr := llm.NormalizeEffortConfigured(e)
 		if nerr != nil {
 			return nil, fmt.Errorf("effort: %w", nerr)
 		}
