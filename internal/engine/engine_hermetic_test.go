@@ -352,3 +352,36 @@ func TestNewLoadUserConfigBeforeNewIncludesGlobal(t *testing.T) {
 		t.Fatalf("LoadUserConfig BeforeNew paths=%v want to include %q", got, want)
 	}
 }
+
+// tools.write/shell in config derive the enable list the same way
+// --allow-write/--allow-shell do — the user-facing knob form, so nobody has
+// to maintain tools.enable by hand.
+func TestToolsWriteShellKnobsDeriveEnable(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "knobs.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+tools:
+  write: true
+  shell: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := New(Options{
+		ConfigPaths: []string{cfgPath},
+		NoSession:   true,
+		Chat:        hermeticChat(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	for _, name := range []string{"write", "edit", "bash"} {
+		if !eng.cfg.ToolEnabled(name) {
+			t.Fatalf("tools.%s knob did not enable %q: %v", "write/shell", name, eng.cfg.Tools.Enable)
+		}
+	}
+	// Policy derivation follows the same source of truth.
+	if !eng.pol.AllowWrite || !eng.pol.AllowShell {
+		t.Fatalf("policy not derived from knobs: write=%v shell=%v", eng.pol.AllowWrite, eng.pol.AllowShell)
+	}
+}

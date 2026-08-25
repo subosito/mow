@@ -97,24 +97,17 @@ llm:
   # folding it into another segment does not satisfy the check.
 
 tools:
-  # Secure default when omitted: read, glob, grep
-  enable:
-    - read
-    - glob
-    - grep
+  # Built-in defaults: read, glob, grep. You normally never touch enable —
+  # power tools have simple knobs that match the CLI flags:
+  # write: true    # add write + edit  (= --allow-write)
+  # shell: true    # add bash          (= --allow-shell)
+  # Host/user config only; a project .mow/config cannot set write/shell.
   # hashline: true   # optional N:hash|line read + line_hash edit
-  # Power tools: CLI --allow-write / --allow-shell, or list them here:
-  #   - write
-  #   - edit
-  #   - bash
-  # Media names are opt-in and only exist when this process is mow-full
-  # (packs/media). Lean mow ignores them in the tool list; `mow doctor` warns.
-  #   - understand_image
-  #   - understand_voice
-  #   - understand_video
-  #   - generate_image
-  #   - generate_speech
-  #   - generate_video
+  #
+  # enable is the explicit override form for hosts (rarely needed):
+  #   enable: [read, glob, grep, write, edit, bash]
+  # Media tools (generate_*/understand_*) are NOT listed here: linking
+  # packs/media + configuring extensions.media registers them automatically.
 
 policy:
   # max_turns: 200                # cap LLM round-trips per Prompt. Default: unlimited —

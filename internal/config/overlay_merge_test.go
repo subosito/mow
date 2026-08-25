@@ -259,3 +259,35 @@ policy:
 			f.Policy.MaxRunTokens, f.Policy.MaxRunUSD, f.Policy.CompactSummary)
 	}
 }
+
+// tools.write/shell are the config form of --allow-write/--allow-shell:
+// granting power tools is a host/user trust decision, so a project overlay
+// that sets them must be stripped.
+func TestProjectOverlayCannotSetToolWriteShell(t *testing.T) {
+	isolateOverlayHome(t)
+	t.Setenv("MOW_TRUST_PROJECT", "1")
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, ".mow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	host := writeYAML(t, t.TempDir(), "user.yaml", "workspace: "+ws+"\n")
+	if err := os.WriteFile(filepath.Join(ws, ".mow", "config.yaml"), []byte(`
+tools:
+  write: true
+  shell: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := config.Load(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Tools.Write || f.Tools.Shell {
+		t.Fatalf("project granted power tools: write=%v shell=%v", f.Tools.Write, f.Tools.Shell)
+	}
+	for _, name := range []string{"write", "edit", "bash"} {
+		if f.ToolEnabled(name) {
+			t.Fatalf("project enabled power tool %q", name)
+		}
+	}
+}

@@ -122,7 +122,17 @@ type LLMConfig struct {
 }
 
 type ToolsConfig struct {
+	// Enable is the built-in tool list. Users normally don't touch it: the
+	// Write/Shell booleans below (or --allow-write/--allow-shell) derive it.
+	// Kept as the explicit override form for hosts and project overlays
+	// (which may only *add* safe tools to it — see dropProjectTools).
 	Enable []string `yaml:"enable"`
+	// Write enables the write/edit tools by default — the config form of
+	// --allow-write. Host/user config only; project overlays cannot set it.
+	Write bool `yaml:"write"`
+	// Shell enables bash by default — the config form of --allow-shell.
+	// Host/user config only; project overlays cannot set it.
+	Shell bool `yaml:"shell"`
 	// Hashline enables hashline read/edit protocol (config-only; no env).
 	Hashline bool `yaml:"hashline"`
 }
@@ -449,6 +459,10 @@ func mergeProjectFile(dst *File, path string) error {
 	// generate_*). Handle outside mergeOverlay's replace semantics.
 	safeEnable := dropProjectTools(overlay.Tools.Enable)
 	overlay.Tools.Enable = nil
+	// tools.write/shell are the config form of --allow-write/--allow-shell:
+	// a power-tool grant is a host/user trust decision, not a project one.
+	overlay.Tools.Write = false
+	overlay.Tools.Shell = false
 
 	// skills.dirs: project may only add dirs under the workspace (no
 	// absolute paths into $HOME/.ssh etc.). Union, do not replace.
@@ -565,6 +579,14 @@ func mergeOverlay(dst *File, overlay *File) {
 	// secure default is off anyway).
 	if overlay.Tools.Hashline {
 		dst.Tools.Hashline = true
+	}
+	// Write/Shell are the config form of --allow-write/--allow-shell: same
+	// bool semantics — only a true overlay turns them on.
+	if overlay.Tools.Write {
+		dst.Tools.Write = true
+	}
+	if overlay.Tools.Shell {
+		dst.Tools.Shell = true
 	}
 	// MaxTurns: positive sets the cap; -1 (or any negative) means unlimited (→ 0).
 	// Plain 0 in a YAML overlay is indistinguishable from "absent", so use -1

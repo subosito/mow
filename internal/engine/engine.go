@@ -259,6 +259,15 @@ func New(opt Options) (*Engine, error) {
 	if len(opt.SystemPrefix) > 0 {
 		cfg.LLM.SystemPrefix = append([]string(nil), opt.SystemPrefix...)
 	}
+	// tools.write/shell are the config form of --allow-write/--allow-shell:
+	// derive the enable list from them the same way flags do below, so the
+	// user never maintains the list by hand. Flags still layer on top.
+	if cfg.Tools.Write {
+		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit")
+	}
+	if cfg.Tools.Shell {
+		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "bash")
+	}
 	if opt.AllowWrite {
 		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit")
 	}
