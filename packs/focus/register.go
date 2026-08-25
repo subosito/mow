@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"os"
 
@@ -178,12 +179,17 @@ func (s *focusState) streak() int {
 	return s.exploreStreak
 }
 
-// truncate mirrors agent.TruncateToolResult for the degraded-body cap.
+// truncate bounds the degraded body (same role as agent.TruncateToolResult).
+// Rune-safe: never splits a multi-byte character at the cut.
 func truncate(s string, maxChars int) string {
 	if maxChars <= 0 || len(s) <= maxChars {
 		return s
 	}
-	return s[:maxChars] + "\n… (truncated)"
+	cut := maxChars
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "\n… (truncated)"
 }
 
 var _ = json.RawMessage(nil)

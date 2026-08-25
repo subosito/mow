@@ -372,8 +372,6 @@ func (s *focusState) pathKey(p string) string {
 
 // inventoryKey groups repeated listing/status commands that thrash without
 // changing code. Empty = not inventory (path-viewer or other).
-// inventoryKey groups repeated listing/status commands that thrash without
-// changing code. Empty = not inventory (path-viewer or other).
 //
 // Tree-wide verbs (git status, ls, find) stay a single class: repeating the
 // listing is the thrash. Subject-bearing verbs (git log/show/diff, rg/grep)
@@ -451,26 +449,13 @@ func inventoryClass(kind, cmd, verb string) string {
 }
 
 func looksLikeLS(low string) bool {
-	// "ls", "ls -la", "ls foo", not "pulse" etc.
-	fields := strings.Fields(low)
-	for _, f := range fields {
-		if f == "ls" || strings.HasPrefix(f, "ls ") {
-			return true
-		}
+	// "ls", "ls -la", "ls foo" — an exact token, so "pulse" etc. never match.
+	for _, f := range strings.Fields(low) {
 		if f == "ls" {
 			return true
 		}
 	}
-	for i, f := range fields {
-		if f == "ls" {
-			return true
-		}
-		// ls often first after cd
-		if i > 0 && fields[i-1] != "cd" && f == "ls" {
-			return true
-		}
-	}
-	return len(fields) > 0 && fields[0] == "ls" || strings.Contains(low, " ls ") || strings.HasSuffix(low, " ls") || strings.HasPrefix(low, "ls ") || low == "ls"
+	return false
 }
 
 func looksLikeFind(low string) bool {
