@@ -905,15 +905,6 @@ func lineHash(s string) string {
 	return hex.EncodeToString(sum[:4])
 }
 
-func formatHashline(content string) string {
-	lines := strings.Split(content, "\n")
-	var b strings.Builder
-	for i, line := range lines {
-		fmt.Fprintf(&b, "%6d:%s|%s\n", i+1, lineHash(line), line)
-	}
-	return b.String()
-}
-
 func applyHashlineEdit(content, hash, newLine string) (string, error) {
 	hash = strings.ToLower(strings.TrimSpace(hash))
 	if len(hash) < 8 {

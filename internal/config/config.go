@@ -318,34 +318,6 @@ func loadConfig(loadUserConfig bool, profile string, paths ...string) (*File, er
 	return f, nil
 }
 
-// LoadExplicit is the hermetic loader for embedded Engines: it merges only
-//
-//	defaults → explicit paths → environment
-//
-// It never reads $MOW_HOME/config.yaml, never applies a workspace profile
-// overlay, and never merges a trusted project .mow/config.yaml, so a
-// poisoned or merely populated home directory cannot influence an Engine
-// built by a library caller. Environment variables still apply: they are
-// process-explicit input from the embedding program, not on-disk user state.
-// CLI-facing code keeps LoadWithProfile semantics via Options.LoadUserConfig.
-func LoadExplicit(paths ...string) (*File, error) {
-	f := defaults()
-	for _, p := range paths {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if err := mergeFile(f, p); err != nil {
-			return nil, err
-		}
-	}
-	applyEnv(f)
-	if err := f.normalize(); err != nil {
-		return nil, err
-	}
-	return f, nil
-}
-
 // ProjectConfigAllowed reports whether workspace/.mow/config.yaml may load.
 // Trust is stored out-of-band (Home()/trusted, `mow trust`) — never inside
 // the workspace, where a cloned repo could grant itself trust.
@@ -514,12 +486,6 @@ func dropProjectTools(enable []string) []string {
 		out = append(out, t)
 	}
 	return out
-}
-
-// dropPowerTools is the historical name used in tests/docs; same filter as
-// dropProjectTools (power + media-write).
-func dropPowerTools(enable []string) []string {
-	return dropProjectTools(enable)
 }
 
 // skillDirsUnder keeps only skill directories that resolve under workspace.

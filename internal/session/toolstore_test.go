@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -82,17 +83,22 @@ func TestToolResultPrunesFileCount(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	files, err := s.ToolFiles()
+	entries, err := os.ReadDir(s.ToolDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != toolResultKeepFiles {
-		t.Fatalf("len(files)=%d, want %d", len(files), toolResultKeepFiles)
+	if len(entries) != toolResultKeepFiles {
+		t.Fatalf("len(files)=%d, want %d", len(entries), toolResultKeepFiles)
 	}
-	if base := filepath.Base(files[0]); !strings.HasPrefix(base, "0069-") {
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	sort.Strings(names)
+	if base := names[len(names)-1]; !strings.HasPrefix(base, "0069-") {
 		t.Fatalf("newest file = %q, want sequence 0069", base)
 	}
-	if base := filepath.Base(files[len(files)-1]); !strings.HasPrefix(base, "0006-") {
+	if base := names[0]; !strings.HasPrefix(base, "0006-") {
 		t.Fatalf("oldest retained file = %q, want sequence 0006", base)
 	}
 }
@@ -107,19 +113,21 @@ func TestToolResultPrunesTotalBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	bytes, err := s.ToolBytes()
+	entries, err := os.ReadDir(s.ToolDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes > toolResultMaxDirBytes {
-		t.Fatalf("ToolBytes()=%d, exceeds cap %d", bytes, toolResultMaxDirBytes)
+	var total int64
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
+			total += info.Size()
+		}
 	}
-	files, err := s.ToolFiles()
-	if err != nil {
-		t.Fatal(err)
+	if total > toolResultMaxDirBytes {
+		t.Fatalf("tool dir bytes=%d, exceeds cap %d", total, toolResultMaxDirBytes)
 	}
-	if len(files) != 4 {
-		t.Fatalf("len(files)=%d, want 4 after byte pruning", len(files))
+	if len(entries) != 4 {
+		t.Fatalf("len(files)=%d, want 4 after byte pruning", len(entries))
 	}
 }
 
@@ -142,17 +150,6 @@ func TestToolResultPermissions(t *testing.T) {
 	}
 	if got := fileInfo.Mode().Perm(); got != 0o600 {
 		t.Fatalf("tool file permissions=%#o, want 0600", got)
-	}
-}
-
-func TestToolFilesMissingDir(t *testing.T) {
-	s := &Store{Dir: t.TempDir(), ID: "session"}
-	files, err := s.ToolFiles()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) != 0 {
-		t.Fatalf("ToolFiles()=%v, want empty", files)
 	}
 }
 

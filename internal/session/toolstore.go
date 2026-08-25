@@ -163,63 +163,6 @@ func (s *Store) ensureToolDirLocked() (string, error) {
 	return dir, nil
 }
 
-// ToolFiles lists this session's stored tool results newest-first (by their
-// zero-padded sequence prefix). Missing dir is empty, not an error.
-func (s *Store) ToolFiles() ([]string, error) {
-	dir := s.ToolDir()
-	if dir == "" {
-		return nil, nil
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() || !toolResultIDPattern.MatchString(e.Name()) {
-			continue
-		}
-		names = append(names, e.Name())
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(names)))
-	out := make([]string, len(names))
-	for i, name := range names {
-		out[i] = filepath.Join(dir, name)
-	}
-	return out, nil
-}
-
-// ToolBytes returns the total bytes occupied by stored tool-result files.
-// Missing dir is zero, not an error.
-func (s *Store) ToolBytes() (int64, error) {
-	dir := s.ToolDir()
-	if dir == "" {
-		return 0, nil
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	var total int64
-	for _, e := range entries {
-		if e.IsDir() || !toolResultIDPattern.MatchString(e.Name()) {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		total += info.Size()
-	}
-	return total, nil
-}
-
 func sanitizeToolName(tool string) string {
 	tool = strings.ToLower(strings.TrimSpace(tool))
 	if tool == "" {

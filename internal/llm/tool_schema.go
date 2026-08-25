@@ -112,17 +112,3 @@ func stripSchemaMeta(v any) (any, bool) {
 		return v, false
 	}
 }
-
-// SanitizeToolSpecs applies SanitizeToolSchema to every spec's parameters.
-// Specs are copied; the caller's slice and schemas are not modified.
-func SanitizeToolSpecs(specs []ToolSpec) []ToolSpec {
-	if len(specs) == 0 {
-		return specs
-	}
-	out := make([]ToolSpec, len(specs))
-	copy(out, specs)
-	for i := range out {
-		out[i].Function.Parameters = SanitizeToolSchema(out[i].Function.Parameters)
-	}
-	return out
-}

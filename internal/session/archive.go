@@ -75,35 +75,6 @@ func (s *Store) ArchiveCompact(messages []llm.Message, layer string, charsSaved 
 	return path, nil
 }
 
-// ArchiveFiles lists this session's archive files oldest-first (by their
-// zero-padded sequence prefix). Missing dir is empty, not an error.
-func (s *Store) ArchiveFiles() ([]string, error) {
-	dir := s.ArchiveDir()
-	if dir == "" {
-		return nil, nil
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		names = append(names, e.Name())
-	}
-	sort.Strings(names)
-	out := make([]string, len(names))
-	for i, n := range names {
-		out[i] = filepath.Join(dir, n)
-	}
-	return out, nil
-}
-
 // nextArchiveName returns NNNN-<utc-stamp>.md with NNNN one past the current
 // max so lexicographic order == chronological order.
 func nextArchiveName(dir string) string {

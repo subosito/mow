@@ -28,8 +28,11 @@ func TestArchiveCompactRoundTrip(t *testing.T) {
 	if !strings.Contains(string(b), "needle-alpha") {
 		t.Fatalf("archive missing content: %s", b)
 	}
-	files, err := s.ArchiveFiles()
-	if err != nil || len(files) != 1 {
-		t.Fatalf("files=%v err=%v", files, err)
+	entries, err := os.ReadDir(s.ArchiveDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("archive files=%v, want 1", entries)
 	}
 }

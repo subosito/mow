@@ -475,14 +475,14 @@ func TestJailfileAndHelpersExtra(t *testing.T) {
 		}
 	})
 
-	t.Run("VerifyFDInJail nil file and helper", func(t *testing.T) {
+	t.Run("VerifyFDInJailFor nil file", func(t *testing.T) {
 		t.Parallel()
-		err := VerifyFDInJail(p, nil)
+		err := VerifyFDInJailFor(p, nil, false)
 		if err == nil || !strings.Contains(err.Error(), "nil file") {
 			t.Fatalf("expected nil file error, got %v", err)
 		}
-		if err := VerifyFDInJail(p, nil); err == nil {
-			t.Fatal("expected error from VerifyFDInJail")
+		if err := VerifyFDInJailFor(p, nil, true); err == nil {
+			t.Fatal("expected error from VerifyFDInJailFor")
 		}
 	})
 

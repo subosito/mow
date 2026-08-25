@@ -25,11 +25,6 @@ func PluginsDir() string {
 // PluginInfo is one Agent Plugin (plugin.json + optional skills/).
 type PluginInfo = contextload.PluginInfo
 
-// ListPlugins lists discovered plugins across the given roots.
-func ListPlugins(roots []string) []PluginInfo {
-	return contextload.ListPlugins(roots)
-}
-
 // AvailableSkillNames returns the sorted, deduplicated skill folder names
 // that contain a SKILL.md entry point across the given directories. It lists
 // what is discoverable without reading skill bodies. Hosts (e.g. the TUI

@@ -13,6 +13,7 @@ const maxDigestTurnBytes = 8 << 10
 // MarkdownDigest reconstructs a bounded Markdown transcript from canonical
 // JSONL. It is a pure read: callers may atomically persist the returned string,
 // but this function never writes or modifies the session store.
+// Host-facing: the greppable projection hosts export for review.
 func (s *Store) MarkdownDigest() (string, error) {
 	turns, err := s.LoadTranscript()
 	if err != nil {

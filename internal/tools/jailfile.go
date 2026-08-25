@@ -148,13 +148,6 @@ func writeFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode
 	return WriteFileJailed(p, rel, data, perm)
 }
 
-// VerifyFDInJail ensures the file the kernel opened is still under the jail.
-// Uses the platform fd→path mapping (see jailfile_*.go); fails closed if the
-// path cannot be determined.
-func VerifyFDInJail(p *policy.Policy, f *os.File) error {
-	return VerifyFDInJailFor(p, f, false)
-}
-
 // VerifyFDInJailFor verifies the opened fd stays inside the path jail for
 // read or write. Uses the platform fd→path mapping (see jailfile_*.go);
 // fails closed if the path cannot be determined.

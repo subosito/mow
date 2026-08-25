@@ -49,6 +49,7 @@ type Store struct {
 
 // Path returns the session file path. ID must pass ValidateID so Join cannot
 // escape Dir (filepath.Join cleans ".." segments into a path outside Dir).
+// Host-facing: hosts/TUIs use it to locate a session's JSONL on disk.
 func (s *Store) Path() string {
 	p, err := s.resolvedPath()
 	if err != nil {
@@ -290,6 +291,9 @@ func (s *Store) LoadTranscriptEvents() ([]Event, error) {
 	return turns, nil
 }
 
+// LoadTranscript returns user/assistant turns for display. Host-facing:
+// TUI/host history views read sessions through this projection (no tool
+// dumps, no system prompts).
 func (s *Store) LoadTranscript() ([]llm.Message, error) {
 	path, err := s.resolvedPath()
 	if err != nil {

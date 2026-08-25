@@ -118,38 +118,30 @@ func TestSanitizeToolSchemaAllMeta(t *testing.T) {
 	}
 }
 
-func TestSanitizeToolSpecs(t *testing.T) {
-	specs := []ToolSpec{
-		{Type: "function", Function: ToolSpecFunction{
-			Name:       "dirty",
-			Parameters: json.RawMessage(`{"$schema":"x","type":"object"}`),
-		}},
-		{Type: "function", Function: ToolSpecFunction{
-			Name:       "clean",
-			Parameters: json.RawMessage(`{"type":"object"}`),
-		}},
-	}
-	original := string(specs[0].Function.Parameters)
+func TestSanitizeToolSchema(t *testing.T) {
+	dirty := json.RawMessage(`{"$schema":"x","type":"object"}`)
+	original := string(dirty)
 
-	out := SanitizeToolSpecs(specs)
-	if strings.Contains(string(out[0].Function.Parameters), "$schema") {
-		t.Error("spec was not sanitized")
+	out := SanitizeToolSchema(dirty)
+	if strings.Contains(string(out), "$schema") {
+		t.Error("schema was not sanitized")
 	}
-	if out[0].Function.Name != "dirty" || out[1].Function.Name != "clean" {
-		t.Error("spec identity was disturbed")
+	// Sanitize returns new bytes; the caller's input must be untouched.
+	if string(dirty) != original {
+		t.Error("SanitizeToolSchema mutated the caller's input")
 	}
-	// The caller's slice must be untouched: specs are often reused across
-	// turns, and mutating a caller's input is a nasty surprise.
-	if string(specs[0].Function.Parameters) != original {
-		t.Error("SanitizeToolSpecs mutated the caller's specs")
+	// Already-clean input passes through unchanged in content.
+	clean := SanitizeToolSchema(json.RawMessage(`{"type":"object"}`))
+	if !strings.Contains(string(clean), `"type":"object"`) {
+		t.Errorf("clean schema altered: %s", clean)
 	}
 }
 
-func TestSanitizeToolSpecsEmpty(t *testing.T) {
-	if got := SanitizeToolSpecs(nil); got != nil {
+func TestSanitizeToolSchemaEmpty(t *testing.T) {
+	if got := SanitizeToolSchema(nil); got != nil {
 		t.Errorf("nil = %v, want nil", got)
 	}
-	if got := SanitizeToolSpecs([]ToolSpec{}); len(got) != 0 {
+	if got := SanitizeToolSchema(json.RawMessage{}); len(got) != 0 {
 		t.Errorf("empty = %v, want empty", got)
 	}
 }
