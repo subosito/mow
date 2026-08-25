@@ -1,6 +1,13 @@
 # Investigation: model requests timing out at exactly 120s before response headers
 
-Status: investigation report — no code changes made.
+Status: **partially shipped**. Recommendation 1 (config knobs) landed as
+`llm.first_byte_timeout_sec` (default 300s, non-retried hard failure) and
+`llm.call_timeout_sec` (default 120s) in `internal/config` / `internal/llm` —
+see `mow.yaml.example`. The rest stays open: typed upstream-stall
+classification (recommendation 2), `llm.attempt_failed` events and
+structured failure diagnostics (recommendation 3). Sections below are kept
+as written for that remaining scope; the knob names used here predate the
+shipped pair.
 
 ## Where the 120s comes from
 

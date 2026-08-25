@@ -103,6 +103,17 @@ Linux — a filesystem/home jail, not a VM; network stays on; a missing
 `mow trust` (stored out-of-band under `$MOW_HOME`, so a cloned repo cannot trust
 itself), and never set credentials, endpoints, or power tools.
 
+## Supported platforms
+
+Linux and macOS. The engine relies on Unix process semantics
+(process-group kill for `bash`/`proc_start`, advisory `flock` on session
+files), and its strongest security guarantees are OS-specific: openat2
+`RESOLVE_BENEATH` and the bwrap `--sandbox` on Linux 5.6+, `fcntl
+F_GETPATH` fd verification on macOS. Windows is intentionally unsupported
+(the build fails on purpose-relevant syscalls). On kernels without openat2
+the path jail falls back to check-then-verify — documented, not TOCTOU
+containment.
+
 ## Modules and layout
 
 Three Go modules (`go.work` wires them for local dev). Full public/internal map:
@@ -146,8 +157,5 @@ Docs: [docs/extensions.md](docs/extensions.md).
 | [docs/extensions.md](docs/extensions.md) | Core extensions, optional packs, ACP, MCP/LSP, media |
 
 ## License
-
-MIT
-se
 
 MIT
