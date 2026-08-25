@@ -147,7 +147,7 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	if res.Messages == nil {
 		return CompactReport{}, fmt.Errorf("engine: compact failed (nil result)")
 	}
-	// Best-effort archive of pre-compact history for recall.
+	// Best-effort archive of pre-compact history.
 	e.mu.Lock()
 	sess := e.sess
 	e.mu.Unlock()

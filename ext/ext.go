@@ -209,6 +209,12 @@ type hookEntry[T any] struct {
 	source string // empty for anonymous; packs use a stable id for ClearHookSource
 }
 
+// SystemSegmentFunc returns a system-prompt segment for the given config
+// paths (the same paths BeforeNew receives). Empty means: contribute nothing.
+// Packs use it to teach the model about their tools — guidance travels with
+// the capability, so engines without the pack get no advice for it.
+type SystemSegmentFunc func(configPaths ...string) string
+
 var (
 	mu               sync.Mutex
 	tools            []toolEntry
@@ -224,6 +230,7 @@ var (
 	afterTurn        []hookEntry[AfterTurnFunc]
 	afterTurnDecide  []hookEntry[AfterTurnDecisionFunc]
 	stop             []hookEntry[StopFunc]
+	sysSegments      []hookEntry[SystemSegmentFunc]
 
 	extInstances map[string]*ExtensionState
 
@@ -348,6 +355,7 @@ func ClearHookSource(source string) {
 	preModel = filterHookSource(preModel, source)
 	afterTurn = filterHookSource(afterTurn, source)
 	stop = filterHookSource(stop, source)
+	sysSegments = filterHookSource(sysSegments, source)
 }
 
 func filterHookSource[T any](in []hookEntry[T], source string) []hookEntry[T] {
@@ -611,6 +619,42 @@ func RegisterStopSource(source string, fn StopFunc) {
 	mu.Lock()
 	defer mu.Unlock()
 	stop = append(stop, hookEntry[StopFunc]{fn: fn, gen: currentRegGen(), source: source})
+}
+
+// RegisterSystemSegment appends a system-prompt segment provider (see
+// SystemSegmentFunc). Static init registrations are the normal use.
+func RegisterSystemSegment(fn SystemSegmentFunc) { RegisterSystemSegmentSource("", fn) }
+
+// RegisterSystemSegmentSource is RegisterSystemSegment with a pack source id
+// for ClearHookSource.
+func RegisterSystemSegmentSource(source string, fn SystemSegmentFunc) {
+	if fn == nil {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	sysSegments = append(sysSegments, hookEntry[SystemSegmentFunc]{fn: fn, gen: currentRegGen(), source: source})
+}
+
+// SystemSegments returns the non-empty system-prompt segments contributed by
+// registered packs, in registration order, given the same config paths
+// BeforeNew receives. Hermetic engines pass loadUserConfig=false semantics
+// through configPaths: empty paths simply yield whatever each provider
+// decides from them.
+func SystemSegments(configPaths ...string) []string {
+	mu.Lock()
+	entries := append([]hookEntry[SystemSegmentFunc](nil), sysSegments...)
+	mu.Unlock()
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.fn == nil {
+			continue
+		}
+		if s := strings.TrimSpace(e.fn(configPaths...)); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // RegisterPreModel appends a global pre-model hook (spend gate, kill switch).
@@ -989,6 +1033,7 @@ func Reset() {
 	preModel = nil
 	afterTurn = nil
 	stop = nil
+	sysSegments = nil
 	extInstances = nil
 	beforeNewGen = 0
 	beforeNewActive = false

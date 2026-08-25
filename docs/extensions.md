@@ -30,7 +30,10 @@ import (
 )
 ```
 
-Remove an import and the associated tools/subcommand/auto-wire disappear.
+Remove an import and the associated tools/subcommand/auto-wire disappear —
+including the system-prompt guidance for that capability. Packs contribute
+it via `ext.RegisterSystemSegment`, so the model only ever sees advice for
+tools it actually has.
 
 ## Linked binaries
 

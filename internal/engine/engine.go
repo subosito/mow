@@ -438,7 +438,11 @@ func New(opt Options) (*Engine, error) {
 	// Concrete workspace + extra roots so the model does not refuse --extra-root
 	// paths as "restricted" (policy already allows them; instructions must match).
 	jailFacts := contextload.PathJailFacts(cfg.Workspace, pol.ExtraRoots, pol.ExtraRootsReadOnly)
-	sys := contextload.ComposeSystem(jailFacts, agents, skills, opt.SystemAppend)
+	// Packs contribute their own system-prompt segments (guidance for their
+	// tools) via ext.RegisterSystemSegment, so advice travels with the
+	// capability: no pack linked, no segment.
+	sysParts := append([]string{jailFacts, agents, skills}, ext.SystemSegments(opt.ConfigPaths...)...)
+	sys := contextload.ComposeSystem(append(sysParts, opt.SystemAppend)...)
 
 	loopHooks, life := mergeHooks(opt)
 

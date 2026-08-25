@@ -29,7 +29,21 @@ func init() {
 		Layer:   "ext",
 		Run:     procCmd,
 	})
+	// Guidance travels with the pack: engines that don't link packs/proc get
+	// no proc advice. The spine's harness rules stay workspace/tool-agnostic.
+	ext.RegisterSystemSegmentSource("proc", func(configPaths ...string) string {
+		return procSystemSegment
+	})
 }
+
+// procSystemSegment teaches the model to reach for proc_start instead of
+// bash's backgrounding idioms, which die with the tool call.
+const procSystemSegment = `Long-lived processes (dev servers, watchers, mocks, daemons): use the
+proc tools — proc_start (background), proc_status (log tail), proc_stop.
+NEVER start them with bash: "cmd &", "nohup …", "disown", or leaving a
+server in the foreground. The bash tool kills its whole process group
+when the call returns, so a backgrounded process dies with the tool call
+and a foreground server blocks the tool until timeout.`
 
 // storeDir is $MOW_HOME/proc/<workspace-hash> — per-project, so processes from
 // different repos don't collide. The `mow proc` CLI resolves the same dir from

@@ -268,21 +268,6 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		e.mu.Unlock()
 	}()
 
-	// Per-run searchable-archive advertisement: the compaction stub mentions
-	// recall only when the pack is linked AND this run has a session.
-	// Sessionless runs compact nothing searchable, so advertising the tool
-	// would send the model on a doomed turn.
-	archiveAvailable := false
-	if e.sess != nil {
-		for _, tool := range tools {
-			if tool.Name() == "recall" {
-				archiveAvailable = true
-				break
-			}
-		}
-	}
-	agent.SetArchiveAvailable(archiveAvailable)
-
 	res, err := agent.Run(ctx, chat, text, agent.Options{
 		System:             sys,
 		MaxTurns:           maxTurns,
@@ -544,7 +529,7 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 	}}, after...)
 	h.PreTool = pre
 	h.PostTool = post
-	// Archive pre-compact history so recall can recover dropped turns.
+	// Archive pre-compact history for hosts/review.
 	preC := append([]agent.PreCompactFunc(nil), h.PreCompact...)
 	preC = append(preC, func(ctx context.Context, ev agent.PreCompactEvent) (agent.PreCompactDecision, error) {
 		// Tell hosts a compact is starting before archive / optional summary
