@@ -272,8 +272,12 @@ func TestServerRestartingAndRefusedDelay(t *testing.T) {
 		t.Fatal("string-wrapped connection refused must classify as restarting")
 	}
 	reset := &url.Error{Op: "Post", URL: "http://127.0.0.1:9420/v1/responses", Err: syscall.ECONNRESET}
-	if !serverRestarting(reset) {
-		t.Fatal("ECONNRESET must classify as restarting")
+	if serverRestarting(reset) {
+		t.Fatal("bare post-connect ECONNRESET must NOT classify as restarting (connect-phase only)")
+	}
+	connectReset := fmt.Errorf(`Post "http://127.0.0.1:9420/v1/responses": dial tcp 127.0.0.1:9420: connect: connection reset by peer`)
+	if !serverRestarting(connectReset) {
+		t.Fatal("connect-time reset must classify as restarting")
 	}
 	if serverRestarting(io.EOF) || serverRestarting(nil) {
 		t.Fatal("non-refused errors must not classify as restarting")

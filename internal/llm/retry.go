@@ -69,26 +69,30 @@ var maxConnRefusedAttempts = 12
 var connRefusedBaseDelay = time.Second
 
 // serverRestarting reports whether err is the local gateway bouncing:
-// nothing listening (ECONNREFUSED), peer reset during drain, or a
-// connect-time EOF. These deserve a much longer retry window than generic
-// transients. http.Client wraps the net error in *url.Error, so we match
-// both errors.Is and the usual dial strings.
+// nothing listening (ECONNREFUSED), a connect-time reset, or a connect-time
+// EOF. These deserve a much longer retry window than generic transients.
+// http.Client wraps the net error in *url.Error, so we match both errors.Is
+// and the usual dial strings.
+//
+// Only CONNECT-phase resets count: a reset after the request went out is
+// just a dropped call (the generic burst retries it), not evidence of a
+// restart — treating it as one would park the caller in a 40s window.
 func serverRestarting(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) {
+	if errors.Is(err, syscall.ECONNREFUSED) {
 		return true
 	}
 	s := strings.ToLower(err.Error())
 	if strings.Contains(s, "connection refused") {
 		return true
 	}
-	if strings.Contains(s, "connection reset by peer") {
-		return true
-	}
-	// Connect-time close while systemd is restarting the listener.
-	if strings.Contains(s, "connect:") && strings.Contains(s, "connection reset") {
+	// Dial-phase reset only ("dial tcp …: connect: connection reset by
+	// peer"); "connection" alone contains "connect", so require the op
+	// markers the dial string carries.
+	if strings.Contains(s, "connection reset") &&
+		(strings.Contains(s, "connect:") || strings.Contains(s, "dial tcp")) {
 		return true
 	}
 	return false
