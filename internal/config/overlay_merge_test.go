@@ -291,3 +291,33 @@ tools:
 		}
 	}
 }
+
+// policy.sandbox is a host/user trust decision: a cloned workspace must not
+// flip the shell jail on or off.
+func TestProjectOverlayCannotSetSandbox(t *testing.T) {
+	isolateOverlayHome(t)
+	t.Setenv("MOW_TRUST_PROJECT", "1")
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, ".mow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	host := writeYAML(t, t.TempDir(), "user.yaml", `
+workspace: `+ws+`
+policy:
+  sandbox: bwrap
+`)
+	project := `
+policy:
+  sandbox: none
+`
+	if err := os.WriteFile(filepath.Join(ws, ".mow", "config.yaml"), []byte(project), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := config.Load(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Policy.Sandbox != "bwrap" {
+		t.Fatalf("project changed sandbox: %q, want host's bwrap preserved", f.Policy.Sandbox)
+	}
+}
