@@ -501,17 +501,18 @@ session.
 > flag does not. Treat it like root-adjacent, not a sibling of
 > `--allow-write`.
 >
-> **Opt-in OS jail (`--sandbox=bwrap`).** When you also pass `--sandbox=bwrap`
-> (config: `policy.sandbox: bwrap`), both `bash` and `proc_start` are wrapped
-> in [bubblewrap](https://github.com/containers/bubblewrap) on Linux. The
+> **Opt-in OS jail (`--sandbox`).** When you also pass `--sandbox` (or
+> explicitly `--sandbox=bwrap`; config: `policy.sandbox: bwrap`), both `bash`
+> and `proc_start` are wrapped in
+> [bubblewrap](https://github.com/containers/bubblewrap) on Linux. The
 > workspace and extra roots are bound the same way as the FS jail (`:ro` →
 > `--ro-bind`); `$HOME` is **not** bound unless it is one of those roots. A
 > missing `bwrap` binary is a hard error — mow never silently falls back to a
 > raw shell. This is a **filesystem/home jail, not a VM and not malware
 > containment**: network stays on (no `--unshare-net`), so `curl | sh` still
-> works. macOS has no backend; `--sandbox=bwrap` errors there. Default remains
-> unsandboxed (`none`). For stronger containment, run all of mow in a
-> container with the filesystem restricted at the OS level.
+> works. macOS has no backend, so the flag is not registered there at all.
+> Default remains unsandboxed (`none`). For stronger containment, run all of
+> mow in a container with the filesystem restricted at the OS level.
 
 An extra root grants the **same** permissions as the workspace: if `--allow-write`
 is on, files under an extra root are writable too. There is currently no

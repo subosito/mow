@@ -28,8 +28,9 @@ type EngineFlags struct {
 	DisallowShell bool
 	DisallowWrite bool
 	ReadOnly      bool
-	// Sandbox is --sandbox: none (default) | bwrap. Only meaningful with
-	// --allow-shell; an invalid value always errors.
+	// Sandbox is --sandbox: bwrap when the flag is present (bare form), else
+	// empty (= none). Linux only — the flag is not registered off-Linux since
+	// no sandbox backend exists there. An invalid value always errors.
 	Sandbox string
 	// MaxTurns is the parsed --max-turns value. Only applied when MaxTurnsSet
 	// (omit flag → config default; --max-turns 0 → unlimited).
@@ -54,8 +55,12 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.Effort, "effort", "", "reasoning effort (catalog efforts when listed; else none|low|medium|high)")
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
 	fs.Var((*stringList)(&f.SystemPrefix), "system-prefix", "system prompt prefix (repeatable)")
-	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash/proc (unsandboxed — not path-jailed; see --sandbox)")
-	fs.StringVar(&f.Sandbox, "sandbox", "", sandboxFlagHelp())
+	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash/proc (not path-jailed; see --sandbox)")
+	// Linux only: off-Linux there is no sandbox backend, so the flag is not
+	// registered at all (hidden), and --sandbox is an "unknown flag" error.
+	if runtime.GOOS == "linux" {
+		fs.Var(&sandboxFlagValue{f: f}, "sandbox", "wrap bash/proc in a bubblewrap jail (host fs read-only, workspace rw, network on; --sandbox=none disables)")
+	}
 	fs.BoolVar(&f.AllowWrite, "allow-write", false, "enable write/edit")
 	fs.BoolVar(&f.DisallowShell, "disallow-shell", false, "disable bash even when enabled in config")
 	fs.BoolVar(&f.DisallowWrite, "disallow-write", false, "disable write/edit even when enabled in config")
@@ -71,12 +76,34 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.Var((*stringList)(&f.Skills), "skill", "load a named skill unconditionally regardless of selector (repeatable; use `/skill` in the TUI to list or activate)")
 }
 
-func sandboxFlagHelp() string {
-	if runtime.GOOS == "linux" {
-		return "none|bwrap: opt-in bubblewrap jail for bash/proc (not a VM; network on)"
+// sandboxFlagValue makes --sandbox bool-style: bare "--sandbox" means bwrap,
+// and an explicit value ("--sandbox none|bwrap") still parses. IsBoolFlag
+// keeps the flag package from demanding an argument for the bare form.
+type sandboxFlagValue struct{ f *EngineFlags }
+
+func (s *sandboxFlagValue) String() string {
+	if s == nil || s.f == nil {
+		return ""
 	}
-	return "none: OS jail is Linux-only (bwrap); omit or none on " + runtime.GOOS
+	return s.f.Sandbox
 }
+
+func (s *sandboxFlagValue) Set(v string) error {
+	// The flag package passes "" for "=" forms without a value and the
+	// literal "true" for the bare bool-style form; both mean "opt in".
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "true":
+		s.f.Sandbox = "bwrap"
+	case "false":
+		s.f.Sandbox = "none"
+	default:
+		s.f.Sandbox = strings.TrimSpace(v) // validated in Validate()
+	}
+	return nil
+}
+
+// IsBoolFlag lets "--sandbox" appear without a value.
+func (s *sandboxFlagValue) IsBoolFlag() bool { return true }
 
 // stringList is a repeatable flag.String-like value (append on each Set).
 type stringList []string
