@@ -8,7 +8,6 @@
 - **Operating the CLI?** [../README.md](../README.md) to run it → [harness.md](harness.md) for config, tools, sessions, and the token/policy knobs.
 - **Writing or wiring a pack?** [extensions.md](extensions.md) — core-vs-pack boundary, CLI ownership, hooks table, ACP, media, cmdhook.
 - **Security review or CI?** [review.md](review.md) for shared mechanics → [sec.md](sec.md) for security evidence and command boundaries.
-- **Large tool results / context window pressure?** [context.md](context.md) — design note: native tool-result side-channel.
 - **Contributing / an AI agent working here?** [../CONTRIBUTING.md](../CONTRIBUTING.md) and [../AGENTS.md](../AGENTS.md).
 
 | Doc | Audience | Contents |
@@ -19,7 +18,6 @@
 | [harness.md](harness.md) | Implementers | Loop, tools, config, sessions, policy |
 | [extensions.md](extensions.md) | Integrators | `ext/` packs, CLI ownership, ACP, media, decisions |
 | [rpc-acp.md](rpc-acp.md) | Protocol | `mow rpc` ↔ ACP v1/v2 coverage; what stays first-party |
-| [context.md](context.md) | Implementers | Design: tool-result side-channel store + search (sink in the loop, per-session archive) |
 | [review.md](review.md) | CI + reviewers | Shared review scope, two-pass workflow, `--reviewer` / `--verifier`, schema, formats, budgets, exit codes |
 | [sec.md](sec.md) | Security reviewers | `mow sec`: evidence fields, safety contract, evidence levels, future stages |
 | [workspace-profiles.md](workspace-profiles.md) | CLI operators | Named workspace topology, config, skills, instructions, and scoped peers |

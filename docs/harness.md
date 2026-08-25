@@ -3,7 +3,7 @@
 **Binary:** `mow`  
 **Module:** `github.com/subosito/mow`  
 
-Stack context: [architecture.md](architecture.md). Embedding in Go: [embedding.md](embedding.md). Packs: [extensions.md](extensions.md). Large tool results / side-channel store (design): [context.md](context.md).
+Stack context: [architecture.md](architecture.md). Embedding in Go: [embedding.md](embedding.md). Packs: [extensions.md](extensions.md).
 
 ---
 

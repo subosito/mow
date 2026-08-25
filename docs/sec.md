@@ -184,7 +184,7 @@ Reports record `run.read_only: true` and `run.tool_policy: builtin_read_inspect_
 Each review pass uses `PromptOpts.AllowedTools` limited to `read`, `glob`, and
 `grep` in addition to `ReadOnly`/`Ephemeral`. Extension, MCP, and ACP tools are
 not exposed to the model and cannot execute, even when they declare
-`ReadOnly() true`. `recall`, `understand_*`, write, edit, and bash are
+`ReadOnly() true`. `understand_*`, write, edit, and bash are
 excluded.
 
 This boundary is intentional. Adding a quiet execution flag to `mow sec` would

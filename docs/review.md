@@ -224,7 +224,7 @@ scope resolve via the pack's own config loader, not via engine construction.
 The report records
 `run.read_only: true` and `run.tool_policy: builtin_read_inspect_only`. MCP, ACP,
 and other extension tools are omitted from tool specs and denied at execution even
-when they declare `ReadOnly() true`. Write, edit, bash, `recall`, and
+when they declare `ReadOnly() true`. Write, edit, bash, and
 `understand_*` are excluded. Extension authors must not rely on review exposing
 their tools.
 
