@@ -409,7 +409,8 @@ func mergeFile(dst *File, path string) error {
 // mergeProjectFile merges a workspace-local config with a reduced privilege
 // set: a project file may tune policy knobs, benign tools, and extensions, but
 // never credentials, the LLM endpoint/wire, headers, media model routing,
-// session location, extra FS roots, or power/media-write tools — a
+// session location, extra FS roots, spend ceilings (max_tokens, max_run_*,
+// prompt_cache, catalog prices), or power/media-write tools — a
 // trusted-but-hostile repo must not redirect the API key, flip the wire
 // (which changes credential preference), grant itself shell/write, or opt
 // into generate_* (those write under media/ without --allow-write).
@@ -447,6 +448,14 @@ func mergeProjectFile(dst *File, path string) error {
 	// Network timeouts are host/user behavior (not project-controlled).
 	overlay.LLM.FirstByteTimeoutSec = 0
 	overlay.LLM.CallTimeoutSec = 0
+	// Reply cap, prompt cache, and catalog metering are host/user spend
+	// decisions: a cloned workspace must not raise max_tokens, disable
+	// caching, or lie about context_window / prices.
+	overlay.LLM.MaxTokens = 0
+	overlay.LLM.PromptCache = nil
+	overlay.LLM.ContextWindow = 0
+	overlay.LLM.InputPrice = 0
+	overlay.LLM.OutputPrice = 0
 	overlay.Session.Dir = ""
 	// OTEL exporter endpoint/headers are host/user only (not project).
 	overlay.OTEL = OTELConfig{}
@@ -457,6 +466,11 @@ func mergeProjectFile(dst *File, path string) error {
 	// able to turn the jail off (policy.sandbox: none) — or on, which would
 	// silently break builds the operator never opted into.
 	overlay.Policy.Sandbox = ""
+	// Spend ceilings and compact_summary (an extra billed LLM call) are
+	// host/user only — a project must not set or raise them.
+	overlay.Policy.MaxRunTokens = 0
+	overlay.Policy.MaxRunUSD = 0
+	overlay.Policy.CompactSummary = false
 
 	// tools.enable: project may only *add* safe tools; never replace the
 	// host list (which would drop user-granted power tools or sneak in
@@ -620,6 +634,17 @@ func mergeOverlay(dst *File, overlay *File) {
 	if overlay.Policy.MaxToolResultChars > 0 {
 		dst.Policy.MaxToolResultChars = overlay.Policy.MaxToolResultChars
 	}
+	// 0 is omit (no spend ceiling). A later overlay cannot clear an earlier cap.
+	if overlay.Policy.MaxRunTokens > 0 {
+		dst.Policy.MaxRunTokens = overlay.Policy.MaxRunTokens
+	}
+	if overlay.Policy.MaxRunUSD > 0 {
+		dst.Policy.MaxRunUSD = overlay.Policy.MaxRunUSD
+	}
+	// Bool flag: yaml false is indistinguishable from absent (default off).
+	if overlay.Policy.CompactSummary {
+		dst.Policy.CompactSummary = true
+	}
 	if len(overlay.Policy.ExtraRoots) > 0 {
 		dst.Policy.ExtraRoots = mergeStringList(dst.Policy.ExtraRoots, overlay.Policy.ExtraRoots)
 	}
@@ -752,6 +777,23 @@ func mergeLLM(dst *LLMConfig, o LLMConfig) {
 	}
 	if o.CallTimeoutSec != 0 {
 		dst.CallTimeoutSec = o.CallTimeoutSec
+	}
+	// 0 is omit (use catalog / provider default), same as other positive-only knobs.
+	if o.MaxTokens > 0 {
+		dst.MaxTokens = o.MaxTokens
+	}
+	if o.PromptCache != nil {
+		v := *o.PromptCache
+		dst.PromptCache = &v
+	}
+	if o.ContextWindow > 0 {
+		dst.ContextWindow = o.ContextWindow
+	}
+	if o.InputPrice > 0 {
+		dst.InputPrice = o.InputPrice
+	}
+	if o.OutputPrice > 0 {
+		dst.OutputPrice = o.OutputPrice
 	}
 }
 
