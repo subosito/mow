@@ -58,6 +58,9 @@ tools it actually has.
   `session/prompt` + `session/update`, `available_commands_update`,
   agent→client `session/request_permission` for power tools, `usage_update`).
 - `acp_delegate`: delegate to named external or native peers.
+  Peer failures are contained to the tool call: a spawn or handshake error
+  surfaces as the tool's result, never as a parent-session abort — the run
+  proceeds and the model decides how to react.
 - Native `mow_agents` support model, effort, system prefix, cwd, permissions,
   and timeout. Peer processes are reused by **agent + cwd + effective argv +
   permission_mode** (a model/policy change starts a new process). At delegate
