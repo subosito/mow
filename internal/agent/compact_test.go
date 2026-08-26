@@ -366,7 +366,7 @@ func TestApplyCompactReportsLayerAndSavings(t *testing.T) {
 	var event AfterCompactEvent
 	opt := Options{MaxContextChars: 4_000, MaxToolResultChars: 24_000,
 		Hooks: Hooks{AfterCompact: []AfterCompactFunc{func(_ context.Context, e AfterCompactEvent) { event = e }}}}
-	if _, _, err := applyCompact(context.Background(), msgs, opt, newRatioCalibrator()); err != nil {
+	if _, _, err := applyCompact(t.Context(), msgs, opt, newRatioCalibrator()); err != nil {
 		t.Fatal(err)
 	}
 	if event.Layer != "snip" || event.CharsSaved <= 0 {

@@ -1,10 +1,11 @@
 package contextload
 
 import (
+	"cmp"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -16,7 +17,7 @@ type PluginInfo struct {
 	// ID is the on-disk directory name (stable key).
 	ID string
 	// Name is plugin.json `name` when set, otherwise ID.
-	Name string
+	Name        string
 	Version     string
 	Description string
 	// Path is the plugin root (contains plugin.json).
@@ -93,7 +94,7 @@ func ListPlugins(roots []string) []PluginInfo {
 				folders = append(folders, e.Name())
 			}
 		}
-		sort.Strings(folders)
+		slices.Sort(folders)
 		for _, name := range folders {
 			lc := strings.ToLower(name)
 			if seen[lc] {
@@ -107,8 +108,8 @@ func ListPlugins(roots []string) []PluginInfo {
 			out = append(out, info)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return strings.ToLower(out[i].ID) < strings.ToLower(out[j].ID)
+	slices.SortFunc(out, func(a, b PluginInfo) int {
+		return cmp.Compare(strings.ToLower(a.ID), strings.ToLower(b.ID))
 	})
 	return out
 }

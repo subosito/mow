@@ -91,9 +91,7 @@ func (r *Runner) runParallelStep(ctx context.Context, exec *Executor, st State, 
 
 	var wg sync.WaitGroup
 	for i, item := range items {
-		wg.Add(1)
-		go func(i int, item PlanItem) {
-			defer wg.Done()
+		wg.Go(func() {
 			out[i].Item = item
 			eng, err := r.EngineFactory()
 			if err != nil {
@@ -118,7 +116,7 @@ func (r *Runner) runParallelStep(ctx context.Context, exec *Executor, st State, 
 			if err != nil {
 				cancel() // fail fast: siblings stop at the next tool boundary
 			}
-		}(i, item)
+		})
 	}
 	wg.Wait()
 

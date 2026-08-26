@@ -169,7 +169,7 @@ func TestLoopReportsPrefixDrift(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "done"}, nil
 	}
-	_, err := Run(context.Background(), chat, "go", Options{
+	_, err := Run(t.Context(), chat, "go", Options{
 		MaxTurns: 5,
 		Tools:    []Tool{&countingWriteTool{}},
 		// A tiny budget forces compaction, which rewrites history.
@@ -199,7 +199,7 @@ func TestNilDriftHookIsSafe(t *testing.T) {
 	chat := func(ctx context.Context, _ []llm.Message, _ []llm.ToolSpec) (llm.Message, error) {
 		return llm.Message{Role: "assistant", Content: "ok"}, nil
 	}
-	if _, err := Run(context.Background(), chat, "hi", Options{MaxTurns: 2}); err != nil {
+	if _, err := Run(t.Context(), chat, "hi", Options{MaxTurns: 2}); err != nil {
 		t.Fatal(err)
 	}
 }

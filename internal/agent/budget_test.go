@@ -73,7 +73,7 @@ func TestBudgetGateTokenCeiling(t *testing.T) {
 
 	t.Run("allows a call that fits", func(t *testing.T) {
 		t.Parallel()
-		d, err := gate(context.Background(), PreModelEvent{
+		d, err := gate(t.Context(), PreModelEvent{
 			Turn:            1,
 			Usage:           llm.Usage{InputTokens: 1000, OutputTokens: 200},
 			SentChars:       4000, // ~1000 tok at 4 chars/tok
@@ -92,7 +92,7 @@ func TestBudgetGateTokenCeiling(t *testing.T) {
 		t.Parallel()
 		// Admission control, not a tripwire: 9k consumed is still under the
 		// limit, but this call would carry it past, so it must not be made.
-		d, err := gate(context.Background(), PreModelEvent{
+		d, err := gate(t.Context(), PreModelEvent{
 			Turn:            9,
 			Usage:           llm.Usage{InputTokens: 9000, OutputTokens: 0},
 			SentChars:       4000,
@@ -117,7 +117,7 @@ func TestBudgetGateTokenCeiling(t *testing.T) {
 		// The case post-hoc checking gets wrong: nothing consumed yet, but
 		// this single call is 500k tokens. Overshoot would exceed the entire
 		// budget many times over.
-		d, err := gate(context.Background(), PreModelEvent{
+		d, err := gate(t.Context(), PreModelEvent{
 			Turn:          1,
 			SentChars:     2_000_000, // ~500k tokens
 			CharsPerToken: 4,
@@ -141,7 +141,7 @@ func TestBudgetGateUSDCeiling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d, err := gate(context.Background(), PreModelEvent{
+	d, err := gate(t.Context(), PreModelEvent{
 		Turn:            20,
 		Usage:           llm.Usage{InputTokens: 300_000, OutputTokens: 5_000}, // $0.90 + $0.075
 		SentChars:       40_000,
@@ -220,7 +220,7 @@ func TestRunStopsOnBudgetGate(t *testing.T) {
 		return llm.Message{Role: "assistant", Content: "done"}, nil
 	}
 
-	res, err := Run(context.Background(), chatWithTools, "go", Options{
+	res, err := Run(t.Context(), chatWithTools, "go", Options{
 		MaxTurns:        10,
 		Tools:           []Tool{tool},
 		MaxOutputTokens: 2000,
@@ -259,7 +259,7 @@ func TestPreModelFirstStopWins(t *testing.T) {
 		t.Error("chat must not be called")
 		return llm.Message{}, nil
 	}
-	_, err := Run(context.Background(), chat, "go", Options{
+	_, err := Run(t.Context(), chat, "go", Options{
 		MaxTurns: 3,
 		Hooks:    Hooks{PreModel: []PreModelFunc{stop, never}},
 	})
@@ -283,7 +283,7 @@ func TestPreModelErrorAbortsRun(t *testing.T) {
 		t.Error("chat must not be called when the gate errored")
 		return llm.Message{}, nil
 	}
-	_, err := Run(context.Background(), chat, "go", Options{
+	_, err := Run(t.Context(), chat, "go", Options{
 		MaxTurns: 3,
 		Hooks: Hooks{PreModel: []PreModelFunc{
 			func(ctx context.Context, e PreModelEvent) (PreModelDecision, error) {
@@ -308,7 +308,7 @@ func TestPreModelEventFields(t *testing.T) {
 			Usage: llm.Usage{InputTokens: 500, OutputTokens: 50},
 		}, nil
 	}
-	_, err := Run(context.Background(), chat, "hello", Options{
+	_, err := Run(t.Context(), chat, "hello", Options{
 		MaxTurns:        1,
 		MaxOutputTokens: 4096,
 		Hooks: Hooks{PreModel: []PreModelFunc{

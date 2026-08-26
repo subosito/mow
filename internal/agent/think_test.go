@@ -58,7 +58,7 @@ func TestLoopStripsInlineThinking(t *testing.T) {
 		return llm.Message{Role: "assistant",
 			Content: "<think>secret plan</think>the answer"}, nil
 	}
-	res, err := Run(context.Background(), chat, "q", Options{})
+	res, err := Run(t.Context(), chat, "q", Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

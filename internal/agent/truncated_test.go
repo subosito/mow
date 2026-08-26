@@ -14,7 +14,7 @@ func TestRunTruncatedEmptyFinalTurn(t *testing.T) {
 	chat := func(ctx context.Context, _ []llm.Message, _ []llm.ToolSpec) (llm.Message, error) {
 		return llm.Message{Role: "assistant", Content: "", StopReason: "length"}, nil
 	}
-	res, err := Run(context.Background(), chat, "hi", Options{MaxTurns: 2})
+	res, err := Run(t.Context(), chat, "hi", Options{MaxTurns: 2})
 	if !errors.Is(err, ErrTruncated) {
 		t.Fatalf("want ErrTruncated, got %v", err)
 	}
@@ -31,7 +31,7 @@ func TestRunTruncatedWithTextIsSuccess(t *testing.T) {
 	chat := func(ctx context.Context, _ []llm.Message, _ []llm.ToolSpec) (llm.Message, error) {
 		return llm.Message{Role: "assistant", Content: "partial answer", StopReason: "max_tokens"}, nil
 	}
-	res, err := Run(context.Background(), chat, "hi", Options{MaxTurns: 2})
+	res, err := Run(t.Context(), chat, "hi", Options{MaxTurns: 2})
 	if err != nil {
 		t.Fatalf("want success, got %v", err)
 	}
@@ -45,7 +45,7 @@ func TestRunPropagatesStopReason(t *testing.T) {
 	chat := func(ctx context.Context, _ []llm.Message, _ []llm.ToolSpec) (llm.Message, error) {
 		return llm.Message{Role: "assistant", Content: "done", StopReason: "stop"}, nil
 	}
-	res, err := Run(context.Background(), chat, "hi", Options{MaxTurns: 2})
+	res, err := Run(t.Context(), chat, "hi", Options{MaxTurns: 2})
 	if err != nil || res.StopReason != "stop" {
 		t.Fatalf("got %+v err=%v", res, err)
 	}

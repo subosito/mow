@@ -35,7 +35,7 @@ func TestSteerInjectedAsSyntheticUser(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "done"}, nil
 	}
-	res, err := Run(context.Background(), chat, "real prompt", Options{
+	res, err := Run(t.Context(), chat, "real prompt", Options{
 		Tools: []Tool{syntheticProbeTool{}},
 		Steer: func() []string { return []string{"steer note"} },
 	})

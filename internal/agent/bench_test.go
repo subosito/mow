@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -45,7 +44,7 @@ func BenchmarkCompactOptsUnderBudget(b *testing.B) {
 	msgs := benchMessages(10_000)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = CompactOpts(msgs, 100_000, "", 24_000)
 	}
 }
@@ -55,7 +54,7 @@ func BenchmarkRatioCalibrator(b *testing.B) {
 	c := newRatioCalibrator()
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		c.Observe(1000, 250)
 		_ = c.Ratio()
 	}
@@ -78,7 +77,7 @@ func BenchmarkApplyCompactUnderBudget(b *testing.B) {
 	calib := newRatioCalibrator()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, _, err := applyCompact(context.Background(), msgs, opt, calib); err != nil {
+		if _, _, err := applyCompact(b.Context(), msgs, opt, calib); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -1,12 +1,13 @@
 package llm
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -150,7 +151,7 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		}
 		out = append(out, info)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	slices.SortFunc(out, func(a, b ModelInfo) int { return cmp.Compare(a.ID, b.ID) })
 	collapsed := CollapseEffortTiersInCatalog(out)
 	chat := filterChatModels(collapsed)
 	c.SetCatalogModels(chat)

@@ -31,7 +31,7 @@ func TestModelWaitMonitorTicksUntilSignal(t *testing.T) {
 		active++
 		mu.Unlock()
 	})
-	m.begin(context.Background())
+	m.begin(t.Context())
 	// The immediate wait fired synchronously in begin, before any tick.
 	mu.Lock()
 	if len(waits) != 1 || waits[0] != 0 {
@@ -71,7 +71,7 @@ func TestModelWaitMonitorStopsOnContextCancel(t *testing.T) {
 		waits++
 		mu.Unlock()
 	}, nil)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	m.begin(ctx)
 	cancel()
 	select {
@@ -103,7 +103,7 @@ func TestRunModelWaitAndActive(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := Run(context.Background(), chat, "hi", Options{
+		_, err := Run(t.Context(), chat, "hi", Options{
 			OnModelWait: func(el time.Duration) {
 				mu.Lock()
 				waits = append(waits, el)

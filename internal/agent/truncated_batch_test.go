@@ -51,7 +51,7 @@ func TestTruncatedToolBatchIsNotExecuted(t *testing.T) {
 		return llm.Message{Role: "assistant", Content: "recovered"}, nil
 	}
 
-	res, err := Run(context.Background(), chat, "hi", Options{
+	res, err := Run(t.Context(), chat, "hi", Options{
 		MaxTurns: 5,
 		Tools:    []Tool{tool},
 	})
@@ -96,7 +96,7 @@ func TestTruncatedToolBatchGivesUp(t *testing.T) {
 			}},
 		}, nil
 	}
-	_, err := Run(context.Background(), chat, "hi", Options{MaxTurns: 20, Tools: []Tool{tool}})
+	_, err := Run(t.Context(), chat, "hi", Options{MaxTurns: 20, Tools: []Tool{tool}})
 	if !errors.Is(err, ErrTruncated) {
 		t.Fatalf("want ErrTruncated after repeated truncation, got %v", err)
 	}
@@ -125,7 +125,7 @@ func TestUntruncatedToolBatchStillRuns(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "ok"}, nil
 	}
-	if _, err := Run(context.Background(), chat, "hi", Options{MaxTurns: 5, Tools: []Tool{tool}}); err != nil {
+	if _, err := Run(t.Context(), chat, "hi", Options{MaxTurns: 5, Tools: []Tool{tool}}); err != nil {
 		t.Fatal(err)
 	}
 	if tool.runs != 1 {

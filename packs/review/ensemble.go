@@ -92,9 +92,7 @@ func (e *EnsembleReviewer) askCandidates(ctx context.Context, system, prompt str
 	sem := make(chan struct{}, e.maxParallel)
 	var wg sync.WaitGroup
 	for _, member := range e.members {
-		wg.Add(1)
-		go func(member EnsembleMember) {
-			defer wg.Done()
+		wg.Go(func() {
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
@@ -108,7 +106,7 @@ func (e *EnsembleReviewer) askCandidates(ctx context.Context, system, prompt str
 				return
 			}
 			responses <- response{member: member, env: env}
-		}(member)
+		})
 	}
 	go func() { wg.Wait(); close(responses) }()
 

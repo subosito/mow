@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -398,7 +398,7 @@ func List(dir string) ([]Info, error) {
 			Preview: firstUserLine(filepath.Join(dir, e.Name())),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Updated.After(out[j].Updated) })
+	slices.SortFunc(out, func(a, b Info) int { return b.Updated.Compare(a.Updated) })
 	return out, nil
 }
 

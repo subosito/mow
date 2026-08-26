@@ -37,7 +37,7 @@ func TestPreToolRewriteAndPostToolRewrite(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "ok"}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 5,
 		Tools:    []agent.Tool{echoTool{}},
 		Hooks: agent.Hooks{
@@ -98,7 +98,7 @@ func TestPreToolDeny(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "fail"}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 5,
 		Tools:    []agent.Tool{echoTool{}},
 		Hooks: agent.Hooks{
@@ -134,7 +134,7 @@ func TestPreCompactSummary(t *testing.T) {
 		prior = append(prior, llm.Message{Role: "user", Content: strings.Repeat("x", 80)})
 		prior = append(prior, llm.Message{Role: "assistant", Content: strings.Repeat("y", 80)})
 	}
-	_, err := agent.Run(context.Background(), chat, "next", agent.Options{
+	_, err := agent.Run(t.Context(), chat, "next", agent.Options{
 		System:          "sys",
 		PriorMessages:   prior,
 		MaxContextChars: 500,
@@ -176,7 +176,7 @@ func TestAfterTurnSeesToolCalls(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "final"}, nil
 	}
-	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	_, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 5,
 		Tools:    []agent.Tool{echoTool{}},
 		Hooks: agent.Hooks{

@@ -227,9 +227,7 @@ func RunParallel(ctx context.Context, specs []Spec, newEng func() (*mow.Engine, 
 	errs := make([]error, len(specs))
 	var wg sync.WaitGroup
 	for i := range specs {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			eng, err := newEng()
 			if err != nil {
 				errs[i] = err
@@ -241,7 +239,7 @@ func RunParallel(ctx context.Context, specs []Spec, newEng func() (*mow.Engine, 
 			st, err := r.RunSpec(ctx, specs[i])
 			out[i] = st
 			errs[i] = err
-		}(i)
+		})
 	}
 	wg.Wait()
 	var first error

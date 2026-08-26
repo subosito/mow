@@ -1,9 +1,10 @@
 package contextload
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -82,8 +83,8 @@ func AvailableSkillNames(dirs []string) []string {
 // (spec name, description). Body is omitted — listing must not inject.
 func AvailableSkillInfos(dirs []string) []SkillInfo {
 	infos := collectSkills(dirs, skillLoadAll)
-	sort.Slice(infos, func(i, j int) bool {
-		return strings.ToLower(infos[i].Folder) < strings.ToLower(infos[j].Folder)
+	slices.SortFunc(infos, func(a, b SkillInfo) int {
+		return cmp.Compare(strings.ToLower(a.Folder), strings.ToLower(b.Folder))
 	})
 	for i := range infos {
 		infos[i].Body = ""
@@ -133,7 +134,7 @@ func collectSkills(dirs []string, keep skillFilter) []SkillInfo {
 				folders = append(folders, e.Name())
 			}
 		}
-		sort.Strings(folders)
+		slices.Sort(folders)
 		for _, name := range folders {
 			lc := strings.ToLower(name)
 			if seen[lc] {

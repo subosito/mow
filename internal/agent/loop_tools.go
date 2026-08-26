@@ -62,10 +62,7 @@ func runToolBatchParallel(ctx context.Context, calls []llm.ToolCall, byName map[
 	var hardErr error
 
 	for i, tc := range calls {
-		i, tc := i, tc
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
@@ -87,7 +84,7 @@ func runToolBatchParallel(ctx context.Context, calls []llm.ToolCall, byName map[
 				hardMu.Unlock()
 				cancel() // fail-fast: stop siblings
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

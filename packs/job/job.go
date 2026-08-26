@@ -249,11 +249,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 				continue
 			}
 			started++
-			wg.Add(1)
-			go func(j Job, sched *cronSched) {
-				defer wg.Done()
+			wg.Go(func() {
 				d.runCronLoop(ctx, j, sched)
-			}(j, sched)
+			})
 			continue
 		}
 		if everyExpr == "" {
@@ -270,11 +268,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 			dur = minEvery
 		}
 		started++
-		wg.Add(1)
-		go func(j Job, every time.Duration) {
-			defer wg.Done()
-			d.runEveryLoop(ctx, j, every)
-		}(j, dur)
+		wg.Go(func() {
+			d.runEveryLoop(ctx, j, dur)
+		})
 	}
 	if started == 0 {
 		return fmt.Errorf("job: no runnable schedules")

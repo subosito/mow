@@ -28,7 +28,7 @@ func TestUnlimitedRunsUntilDone(t *testing.T) {
 			}},
 		}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns:         0, // unlimited
 		MaxParallelTools: 1,
 		Tools:            []agent.Tool{echoTool{}},

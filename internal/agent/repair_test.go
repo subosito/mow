@@ -73,7 +73,7 @@ func TestRunHistoryHasNoOrphanToolCalls(t *testing.T) {
 	chat := func(ctx context.Context, _ []llm.Message, _ []llm.ToolSpec) (llm.Message, error) {
 		return llm.Message{Role: "assistant", ToolCalls: calls}, nil
 	}
-	res, err := Run(context.Background(), chat, "go", Options{
+	res, err := Run(t.Context(), chat, "go", Options{
 		Tools:            []Tool{hardFailTool{name: "boom"}},
 		MaxTurns:         3,
 		MaxParallelTools: 4,

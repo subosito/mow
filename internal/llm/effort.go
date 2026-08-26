@@ -1,10 +1,11 @@
 package llm
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -180,7 +181,7 @@ func CollapseEffortTiersInCatalog(list []ModelInfo) []ModelInfo {
 	for _, k := range order {
 		out = append(out, byKey[k].info)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	slices.SortFunc(out, func(a, b ModelInfo) int { return cmp.Compare(a.ID, b.ID) })
 	return out
 }
 

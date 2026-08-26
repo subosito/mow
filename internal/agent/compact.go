@@ -1,8 +1,9 @@
 package agent
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -231,7 +232,7 @@ func snipLongestToolResults(messages []llm.Message, target, maxToolChars int) []
 			candidates = append(candidates, candidate{i, len(out[i].Content)})
 		}
 	}
-	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].size > candidates[j].size })
+	slices.SortStableFunc(candidates, func(a, b candidate) int { return cmp.Compare(b.size, a.size) })
 	need := EstChars(out) - target
 	for _, c := range candidates {
 		limit := maxToolChars

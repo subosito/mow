@@ -270,8 +270,7 @@ func isHeaderTimeout(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	var ne net.Error
-	if errors.As(err, &ne) && ne.Timeout() {
+	if ne, ok := errors.AsType[net.Error](err); ok && ne.Timeout() {
 		s := err.Error()
 		if strings.Contains(s, "response header") || strings.Contains(s, "timeout awaiting response") {
 			return true
@@ -334,16 +333,19 @@ func retryableNetErr(err error) bool {
 		return false
 	}
 	// Permanent failures — retrying cannot help.
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+	if dnsErr, ok := errors.AsType[*net.DNSError](err); ok && dnsErr.IsNotFound {
 		return false
 	}
-	var tlsVerify *tls.CertificateVerificationError
-	var unknownCA x509.UnknownAuthorityError
-	var certInvalid x509.CertificateInvalidError
-	var hostname x509.HostnameError
-	if errors.As(err, &tlsVerify) || errors.As(err, &unknownCA) ||
-		errors.As(err, &certInvalid) || errors.As(err, &hostname) {
+	if _, ok := errors.AsType[*tls.CertificateVerificationError](err); ok {
+		return false
+	}
+	if _, ok := errors.AsType[x509.UnknownAuthorityError](err); ok {
+		return false
+	}
+	if _, ok := errors.AsType[x509.CertificateInvalidError](err); ok {
+		return false
+	}
+	if _, ok := errors.AsType[x509.HostnameError](err); ok {
 		return false
 	}
 	return true

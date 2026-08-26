@@ -95,7 +95,7 @@ func (p *prefixTracker) note(turn int, send []llm.Message) *driftReport {
 	}
 
 	n := min(len(prev), len(hashes))
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if prev[i] == hashes[i] {
 			continue
 		}

@@ -58,7 +58,7 @@ func BenchmarkConfigLoadWithFile(b *testing.B) {
 	p := benchConfigFile(b)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := config.Load(p); err != nil {
 			b.Fatal(err)
 		}
@@ -72,7 +72,7 @@ func BenchmarkConfigLoadDefaults(b *testing.B) {
 	b.Setenv("OPENAI_MODEL", "m")
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := config.Load(); err != nil {
 			b.Fatal(err)
 		}

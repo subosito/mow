@@ -45,7 +45,7 @@ func TestToolSchemasReachWireSanitized(t *testing.T) {
 		return llm.Message{Role: "assistant", Content: "ok"}, nil
 	}
 
-	_, err := agent.Run(context.Background(), chat, "go", agent.Options{
+	_, err := agent.Run(t.Context(), chat, "go", agent.Options{
 		Tools: []agent.Tool{mcpStyleTool{}, echoTool{}},
 	})
 	if err != nil {
@@ -98,7 +98,7 @@ func TestEmptyToolSchemaStaysValid(t *testing.T) {
 		sent = tools
 		return llm.Message{Role: "assistant", Content: "ok"}, nil
 	}
-	if _, err := agent.Run(context.Background(), chat, "go", agent.Options{
+	if _, err := agent.Run(t.Context(), chat, "go", agent.Options{
 		Tools: []agent.Tool{noParamTool{}},
 	}); err != nil {
 		t.Fatal(err)

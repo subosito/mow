@@ -35,7 +35,7 @@ func TestRunWithPriorMessages(t *testing.T) {
 		got = append([]llm.Message(nil), messages...)
 		return llm.Message{Role: "assistant", Content: "ok"}, nil
 	}
-	_, err := agent.Run(context.Background(), chat, "next", agent.Options{
+	_, err := agent.Run(t.Context(), chat, "next", agent.Options{
 		System: "sys",
 		PriorMessages: []llm.Message{
 			{Role: "system", Content: "sys"},
@@ -85,7 +85,7 @@ func TestRunCompactionIsDurableAcrossTurns(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "done"}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "continue", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "continue", agent.Options{
 		Tools:           []agent.Tool{echoTool{}},
 		PriorMessages:   prior,
 		MaxContextChars: 4_000, // well under the ~18k history → must compact
@@ -142,7 +142,7 @@ func TestRunWithFakeLLMToolThenText(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "done: from-tool"}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 5,
 		Tools:    []agent.Tool{echoTool{}},
 	})
@@ -168,7 +168,7 @@ func TestMaxTurnsReturnsErrMaxTurns(t *testing.T) {
 			}},
 		}, nil
 	}
-	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	_, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 2,
 		Tools:    []agent.Tool{echoTool{}},
 	})
@@ -196,7 +196,7 @@ func TestMaxTurnsZeroIsUnlimited(t *testing.T) {
 			}},
 		}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 0,
 		Tools:    []agent.Tool{echoTool{}},
 	})
@@ -235,7 +235,7 @@ func TestErrDoneEndsLoopSuccessfully(t *testing.T) {
 			}},
 		}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 10,
 		Tools:    []agent.Tool{doneTool{}},
 	})
@@ -275,7 +275,7 @@ func TestSameToolWarnDoesNotHardStop(t *testing.T) {
 			}},
 		}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 20,
 		Tools:    []agent.Tool{&tickTool{}},
 	})
@@ -318,7 +318,7 @@ func TestAllowToolDeniesExec(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "fail"}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 5,
 		AllowTool: func(name string) error {
 			return errors.New("denied by policy")
@@ -369,7 +369,7 @@ func TestCancelAbortsRemainingToolsInBatch(t *testing.T) {
 			},
 		}, nil
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	first := &countingTool{name: "a", n: &n1, block: true, onExec: func() { close(entered) }}
 	second := &countingTool{name: "b", n: &n2}
@@ -398,7 +398,7 @@ func TestCancelAbortsRemainingToolsInBatch(t *testing.T) {
 
 func TestCancelBetweenToolsSkipsRest(t *testing.T) {
 	var n1, n2 atomic.Int32
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
 		return llm.Message{
@@ -430,7 +430,7 @@ func TestCancelBetweenToolsSkipsRest(t *testing.T) {
 
 func TestCancelBeforeTurnSkipsChat(t *testing.T) {
 	var n atomic.Int32
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
 		t.Fatal("chat should not run on cancelled ctx")
@@ -500,7 +500,7 @@ func TestParallelToolsRunConcurrently(t *testing.T) {
 		return llm.Message{Role: "assistant", Content: "done"}, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	res, err := agent.Run(ctx, chat, "hi", agent.Options{
 		MaxTurns:         5,
@@ -546,7 +546,7 @@ func TestParallelCancelFailFast(t *testing.T) {
 			},
 		}, nil
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
@@ -584,7 +584,7 @@ func TestPostToolReceivesDuration(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "ok"}, nil
 	}
-	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	_, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 5,
 		Tools:    []agent.Tool{echoTool{}},
 		Hooks: agent.Hooks{
@@ -659,7 +659,7 @@ func TestStallOnNoNewEvidence(t *testing.T) {
 			}},
 		}, nil
 	}
-	_, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	_, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 50,
 		Tools:    []agent.Tool{echoTool{}},
 	})
@@ -689,7 +689,7 @@ func TestTwoBarrenBatchesDoNotStall(t *testing.T) {
 			}},
 		}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 50,
 		Tools:    []agent.Tool{echoTool{}},
 	})
@@ -719,7 +719,7 @@ func TestNoStallOnSharedResultPrefix(t *testing.T) {
 			}},
 		}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 50,
 		Tools:    []agent.Tool{echoTool{}},
 	})
@@ -749,7 +749,7 @@ func TestNoStallWhenDifferentCallsShareResult(t *testing.T) {
 			}},
 		}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 50,
 		Tools:    []agent.Tool{sameResultTool{}},
 	})
@@ -777,7 +777,7 @@ func TestNoStallWhenResultsDiffer(t *testing.T) {
 			}},
 		}, nil
 	}
-	res, err := agent.Run(context.Background(), chat, "hi", agent.Options{
+	res, err := agent.Run(t.Context(), chat, "hi", agent.Options{
 		MaxTurns: 50,
 		Tools:    []agent.Tool{&tickTool{}},
 	})
@@ -815,7 +815,7 @@ func TestRunReissuesOnMidTurnSteer(t *testing.T) {
 			return []string{"course correct"}
 		},
 	}
-	res, err := agent.Run(context.Background(), chat, "original ask", opt)
+	res, err := agent.Run(t.Context(), chat, "original ask", opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -837,7 +837,7 @@ func TestRunInterruptedChatFailsWithoutSteer(t *testing.T) {
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
 		return llm.Message{}, context.Canceled
 	}
-	_, err := agent.Run(context.Background(), chat, "ask", agent.Options{MaxTurns: 3})
+	_, err := agent.Run(t.Context(), chat, "ask", agent.Options{MaxTurns: 3})
 	if err == nil {
 		t.Fatal("expected cancellation error")
 	}
@@ -850,7 +850,7 @@ func TestRunRealChatErrorNotSwallowedBySteer(t *testing.T) {
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
 		return llm.Message{}, errors.New("upstream 500: model exploded")
 	}
-	_, err := agent.Run(context.Background(), chat, "ask", agent.Options{
+	_, err := agent.Run(t.Context(), chat, "ask", agent.Options{
 		MaxTurns: 3,
 		Steer:    func() []string { return []string{"course correct"} },
 	})
@@ -915,7 +915,7 @@ func TestCalibrationCountsToolOverhead(t *testing.T) {
 		}
 		return llm.Message{Role: "assistant", Content: "done", Usage: llm.Usage{InputTokens: 26000, OutputTokens: 1}}, nil
 	}
-	_, err := agent.Run(context.Background(), chat, "hello", agent.Options{
+	_, err := agent.Run(t.Context(), chat, "hello", agent.Options{
 		System:             "sys",
 		Tools:              tools,
 		PriorMessages:      prior,
