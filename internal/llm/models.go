@@ -56,6 +56,22 @@ type ModelInfo struct {
 	NativeTools []map[string]any `json:"native_tools,omitempty"`
 }
 
+// SupportsNativeTool returns true if the model declares a native tool with the given type or name.
+func (m ModelInfo) SupportsNativeTool(toolType string) bool {
+	if toolType == "" {
+		return false
+	}
+	for _, tool := range m.NativeTools {
+		if t, ok := tool["type"].(string); ok && t == toolType {
+			return true
+		}
+		if n, ok := tool["name"].(string); ok && n == toolType {
+			return true
+		}
+	}
+	return false
+}
+
 // ModelPricing is the optional pricing object on GET /v1/models entries.
 // Chat metering uses InputPerMTok / OutputPerMTok (USD per 1M tokens).
 // Media models may use PerUnit/Unit instead; those are ignored for chat Limits.
