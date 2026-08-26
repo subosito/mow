@@ -73,6 +73,36 @@ func ComposeSystem(parts ...string) string {
 	return strings.Join(out, "\n\n")
 }
 
+// PluginInstallFacts teaches the agent where plugin folders belong for this
+// run. Roots must be in discovery precedence order: global, optional workspace
+// profile, then optional trusted project.
+func PluginInstallFacts(globalRoot, workspaceRoot, projectRoot string) string {
+	roots := []struct {
+		label string
+		path  string
+	}{{"Global", globalRoot}, {"Workspace", workspaceRoot}, {"Project", projectRoot}}
+	var b strings.Builder
+	b.WriteString("Agent Plugin locations (discovery precedence: global → workspace → project):\n")
+	count := 0
+	for _, root := range roots {
+		root.path = strings.TrimSpace(root.path)
+		if root.path == "" {
+			continue
+		}
+		count++
+		b.WriteString("- ")
+		b.WriteString(root.label)
+		b.WriteString(": ")
+		b.WriteString(root.path)
+		b.WriteString("/<id>/plugin.json\n")
+	}
+	if count == 0 {
+		return ""
+	}
+	b.WriteString("- Install by dropping or cloning a plugin folder into the appropriate root; `/plugins` only lists discovered installs.")
+	return strings.TrimSpace(b.String())
+}
+
 // PathJailFacts is a short system segment listing the workspace and any extra
 // FS roots so the model uses absolute paths under extra roots instead of
 // refusing them as "restricted".

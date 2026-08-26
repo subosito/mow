@@ -390,6 +390,7 @@ func New(opt Options) (*Engine, error) {
 	}
 	skillDirs := append([]string(nil), cfg.Skills.Dirs...)
 	var pluginRoots []string
+	var workspacePluginRoot, projectPluginRoot string
 	// Profile-local skills are the most specific operator-authored skills, so
 	// search them before global/config/project sources.
 	if activeProfile != nil && activeProfile.HasSkills() {
@@ -411,8 +412,15 @@ func New(opt Options) (*Engine, error) {
 		// Global $MOW_HOME/skills — host only.
 		skillDirs = append([]string{config.SkillsDir()}, skillDirs...)
 		pluginRoots = []string{config.PluginsDir()}
+		if activeProfile != nil {
+			workspacePluginRoot = activeProfile.PluginsDir()
+			if activeProfile.HasPlugins() {
+				pluginRoots = append(pluginRoots, workspacePluginRoot)
+			}
+		}
 		if contextload.ProjectTrusted(cfg.Workspace) {
-			pluginRoots = append(pluginRoots, filepath.Join(cfg.Workspace, ".mow", "plugins"))
+			projectPluginRoot = filepath.Join(cfg.Workspace, ".mow", "plugins")
+			pluginRoots = append(pluginRoots, projectPluginRoot)
 		}
 		skillDirs = append(skillDirs, contextload.PluginSkillDirs(pluginRoots)...)
 	}
@@ -441,10 +449,11 @@ func New(opt Options) (*Engine, error) {
 	// Concrete workspace + extra roots so the model does not refuse --extra-root
 	// paths as "restricted" (policy already allows them; instructions must match).
 	jailFacts := contextload.PathJailFacts(cfg.Workspace, pol.ExtraRoots, pol.ExtraRootsReadOnly)
+	pluginFacts := contextload.PluginInstallFacts(config.PluginsDir(), workspacePluginRoot, projectPluginRoot)
 	// Packs contribute their own system-prompt segments (guidance for their
 	// tools) via ext.RegisterSystemSegment, so advice travels with the
 	// capability: no pack linked, no segment.
-	sysParts := append([]string{jailFacts, agents, skills}, ext.SystemSegments(opt.ConfigPaths...)...)
+	sysParts := append([]string{jailFacts, pluginFacts, agents, skills}, ext.SystemSegments(opt.ConfigPaths...)...)
 	sys := contextload.ComposeSystem(append(sysParts, opt.SystemAppend)...)
 
 	loopHooks, life := mergeHooks(opt)

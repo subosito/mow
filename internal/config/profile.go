@@ -26,6 +26,7 @@ type WorkspaceSet struct {
 //	                config.yaml may)
 //	AGENTS.md       optional profile instructions
 //	skills/         optional profile skills
+//	plugins/        optional profile Agent Plugins
 //
 // Profiles replace the single flat $MOW_HOME/workspaces.yaml registry: each
 // profile is self-contained, and per-profile config is what makes ACP
@@ -145,6 +146,15 @@ func (p Profile) SkillsDir() string { return filepath.Join(p.Dir, "skills") }
 // HasSkills reports whether the profile ships a skills directory.
 func (p Profile) HasSkills() bool {
 	fi, err := os.Stat(p.SkillsDir())
+	return err == nil && fi.IsDir()
+}
+
+// PluginsDir is the profile plugins directory (may not exist).
+func (p Profile) PluginsDir() string { return filepath.Join(p.Dir, "plugins") }
+
+// HasPlugins reports whether the profile ships a plugins directory.
+func (p Profile) HasPlugins() bool {
+	fi, err := os.Stat(p.PluginsDir())
 	return err == nil && fi.IsDir()
 }
 

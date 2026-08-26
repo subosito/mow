@@ -153,6 +153,26 @@ func TestLoadExplicitPathBeatsGlobal(t *testing.T) {
 	}
 }
 
+func TestProfilePluginsDir(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv(config.EnvHome, home)
+	writeProfileConfig(t, home, "monorepo", workspace, "")
+	p, found, err := config.LoadProfile("monorepo")
+	if err != nil || !found {
+		t.Fatalf("LoadProfile: found=%v err=%v", found, err)
+	}
+	if p.HasPlugins() {
+		t.Fatal("expected HasPlugins=false before plugins dir created")
+	}
+	if err := os.MkdirAll(p.PluginsDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !p.HasPlugins() {
+		t.Fatal("expected HasPlugins=true after plugins dir created")
+	}
+}
+
 func TestOverlayConfigPathsOrdersProfileBeforeExplicit(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

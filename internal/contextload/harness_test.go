@@ -67,6 +67,21 @@ func TestComposeSystem_rulesFirst(t *testing.T) {
 	}
 }
 
+func TestPluginInstallFacts(t *testing.T) {
+	got := contextload.PluginInstallFacts("/home/plugins", "/home/workspaces/mow/plugins", "/repo/.mow/plugins")
+	for _, want := range []string{
+		"global → workspace → project",
+		"Global: /home/plugins/<id>/plugin.json",
+		"Workspace: /home/workspaces/mow/plugins/<id>/plugin.json",
+		"Project: /repo/.mow/plugins/<id>/plugin.json",
+		"`/plugins` only lists",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("plugin facts missing %q: %q", want, got)
+		}
+	}
+}
+
 func TestPathJailFacts(t *testing.T) {
 	got := contextload.PathJailFacts("/ws", []string{"/extra/lib"})
 	if !strings.Contains(got, "/ws") || !strings.Contains(got, "/extra/lib") {
