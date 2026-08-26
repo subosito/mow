@@ -68,7 +68,13 @@ type Config struct {
 var (
 	sharedMu       sync.Mutex
 	sharedDelegate *delegateTool
+	sharedGen      int
+	orphanedByGen  = map[int][]*delegateTool{}
 )
+
+func init() {
+	ext.RegisterGenerationRelease(releaseSharedPeers)
+}
 
 // RegisterFromConfig loads config (same path list as mow.New / BeforeNew) and
 // registers acp_delegate when agents and/or mow_agents are non-empty.
@@ -118,12 +124,17 @@ func RegisterFromEngine(eng *mow.Engine) error {
 	if len(indexed) == 0 {
 		return nil
 	}
-	return eng.AddTool(&delegateTool{
+	tool := &delegateTool{
 		agents:    indexed,
 		workspace: eng.Workspace(),
 		peerIdle:  peerIdleDuration(c.PeerIdleSec),
 		peers:     map[string]*peerSlot{},
-	})
+	}
+	if err := eng.AddTool(tool); err != nil {
+		return err
+	}
+	eng.RegisterCleanup(func() { tool.closeAll() })
+	return nil
 }
 
 // replaceSharedAgents installs a new process-global acp_delegate from the
@@ -132,9 +143,13 @@ func RegisterFromEngine(eng *mow.Engine) error {
 func replaceSharedAgents(agents []AgentSpec, workspace string, peerIdleSec int) error {
 	indexed := indexAgents(agents)
 	sharedMu.Lock()
-	defer sharedMu.Unlock()
+	old := sharedDelegate
+	oldGen := sharedGen
 	if len(indexed) == 0 {
 		sharedDelegate = nil
+		sharedGen = 0
+		sharedMu.Unlock()
+		retireShared(old, oldGen)
 		return nil
 	}
 	sharedDelegate = &delegateTool{
@@ -143,8 +158,47 @@ func replaceSharedAgents(agents []AgentSpec, workspace string, peerIdleSec int) 
 		peerIdle:  peerIdleDuration(peerIdleSec),
 		peers:     map[string]*peerSlot{},
 	}
+	sharedGen = ext.BeforeNewGeneration()
+	sharedMu.Unlock()
+	retireShared(old, oldGen)
 	ext.RegisterTool(sharedDelegate)
 	return nil
+}
+
+func retireShared(t *delegateTool, gen int) {
+	if t == nil {
+		return
+	}
+	if gen > 0 && ext.GenerationEngineRefs(gen) > 0 {
+		sharedMu.Lock()
+		orphanedByGen[gen] = append(orphanedByGen[gen], t)
+		sharedMu.Unlock()
+		return
+	}
+	t.closeAll()
+}
+
+// releaseSharedPeers kills leftover acp_delegate subprocesses when the last
+// Engine for a BeforeNew generation closes (mow rpc/acp/run exit). Idle
+// eviction only runs on the next tool call, so without this a peer can
+// reparent to PID 1 and live for hours.
+func releaseSharedPeers(gen int) {
+	if gen <= 0 {
+		return
+	}
+	sharedMu.Lock()
+	var toClose []*delegateTool
+	if sharedGen == gen && sharedDelegate != nil {
+		toClose = append(toClose, sharedDelegate)
+	}
+	if orph := orphanedByGen[gen]; len(orph) > 0 {
+		toClose = append(toClose, orph...)
+		delete(orphanedByGen, gen)
+	}
+	sharedMu.Unlock()
+	for _, t := range toClose {
+		t.closeAll()
+	}
 }
 
 // AppendAgents merges peer specs into acp_delegate (creating the tool if needed).
@@ -168,6 +222,7 @@ func AppendAgents(agents []AgentSpec, workspace string, peerIdleSec int) {
 			peerIdle:  peerIdleDuration(peerIdleSec),
 			peers:     map[string]*peerSlot{},
 		}
+		sharedGen = ext.BeforeNewGeneration()
 	} else if sharedDelegate.workspace == "" && strings.TrimSpace(workspace) != "" {
 		sharedDelegate.workspace = strings.TrimSpace(workspace)
 	}
@@ -578,6 +633,27 @@ func (t *delegateTool) dropPeer(key string, slot *peerSlot) {
 	}
 	t.peersMu.Unlock()
 	if slot.client != nil {
+		_ = slot.client.Close()
+	}
+}
+
+// closeAll drops every pooled peer. Does not wait for slot.mu — shutdown
+// must not stall on an in-flight Prompt.
+func (t *delegateTool) closeAll() {
+	if t == nil {
+		return
+	}
+	t.peersMu.Lock()
+	slots := make([]*peerSlot, 0, len(t.peers))
+	for k, slot := range t.peers {
+		delete(t.peers, k)
+		slots = append(slots, slot)
+	}
+	t.peersMu.Unlock()
+	for _, slot := range slots {
+		if slot == nil || slot.client == nil {
+			continue
+		}
 		_ = slot.client.Close()
 	}
 }

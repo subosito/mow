@@ -29,6 +29,8 @@ lifecycle, `session/prompt` + `session/update`, `session/request_permission`
 terminals. Native `mow_agents` spawn the current executable
 (`os.Executable()`), so the full `mow` host starts `mow acp`.
 Peer processes are reused by agent + cwd + effective argv + permission mode.
+`Engine.Close` (deferred by `mow acp` and `mow rpc`) SIGTERM then SIGKILL the
+peer process group so delegated trees do not reparent to PID 1.
 
 See [docs/rpc-acp.md](../../docs/rpc-acp.md) for how this maps to `mow rpc`.
 

@@ -7,6 +7,26 @@ import (
 	"time"
 )
 
+func TestClientCloseKillsSleepingPeer(t *testing.T) {
+	c := &Client{Command: []string{"sleep", "60"}}
+	if err := c.startProcess(); err != nil {
+		t.Fatalf("startProcess: %v", err)
+	}
+	if !c.Alive() {
+		t.Fatal("expected peer alive after start")
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for c.Alive() {
+		if time.Now().After(deadline) {
+			t.Fatal("Alive() still true after Close")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestAliveFlipsAfterExit(t *testing.T) {
 	c := &Client{Command: []string{"true"}}
 	if err := c.startProcess(); err != nil {

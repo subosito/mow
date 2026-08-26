@@ -80,6 +80,12 @@ tools it actually has.
   (does not wait for `timeout_sec`).
 - On spawn/protocol failures, the last ~16KiB of peer stderr (secrets redacted)
   is appended to the error.
+- `Engine.Close` (and `mow acp` / `mow rpc`, which defer it) SIGTERM then
+  SIGKILL the peer process group so npx/node trees do not reparent to PID 1.
+  `RegisterFromEngine` registers that cleanup on the Engine; process-global
+  `RegisterFromConfig` peers are released when the last Engine of that
+  BeforeNew generation closes. Idle eviction alone is not enough — a host
+  that exits without Close used to leave peer process trees reparented to init.
 
 ```yaml
 extensions:

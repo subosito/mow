@@ -240,7 +240,12 @@ func (c *Client) Close() error {
 			select {
 			case <-exited:
 			case <-time.After(3 * time.Second):
-				// Reaper stuck — do not block dropPeer forever.
+				killPeerTreeHard(cmd)
+				select {
+				case <-exited:
+				case <-time.After(2 * time.Second):
+					// Reaper stuck — do not block dropPeer forever.
+				}
 			}
 		} else {
 			_, _ = cmd.Process.Wait()

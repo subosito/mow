@@ -75,6 +75,23 @@ func TestEvictIdlePeers(t *testing.T) {
 	}
 }
 
+func TestCloseAllDropsPooledClient(t *testing.T) {
+	c, cleanup := fakePeerClient()
+	defer cleanup()
+	tool := &delegateTool{
+		peers: map[string]*peerSlot{
+			"k": {client: c, sessionID: "s1", lastUsed: time.Now()},
+		},
+	}
+	tool.closeAll()
+	if len(tool.peers) != 0 {
+		t.Fatalf("peers after closeAll: %v", tool.peers)
+	}
+	if c.Alive() {
+		t.Fatal("fake client still Alive after closeAll")
+	}
+}
+
 // fakePeerClient wires a Client to an in-process peer (no subprocess) that
 // echoes each session/prompt back as one agent_message_chunk.
 func fakePeerClient() (*Client, func()) {
