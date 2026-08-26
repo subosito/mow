@@ -145,8 +145,15 @@ extensions:
   types. Optional slash commands remain discoverable through `slash.list`.
   See [rpc-acp.md](rpc-acp.md) for the ACP comparison.
 - `packs/cmdhook`: Claude-style lifecycle shell hooks (`root` or `plugins` map,
-  `min_turns`). Hooks re-register on every `BeforeNew` (no first-config pin);
-  prior cmdhook hooks are cleared so profiles do not leak across Engines.
+  `min_turns`). Host-owned Agent Plugins (`$MOW_HOME/plugins` and workspace
+  profile `plugins/`) that ship `hooks/hooks.json` register automatically;
+  YAML of the same name wins so a plugin is not hooked twice. Plugin MCP and
+  cmdhook set `CLAUDE_PLUGIN_ROOT` to the plugin folder and, when unset,
+  `CLAUDE_CONFIG_DIR` to `$MOW_HOME` so Claude-shaped plugins (e.g. context-mode)
+  store state under mow rather than `~/.claude`. A process or plugin-manifest
+  `CLAUDE_CONFIG_DIR` still wins. Hooks re-register
+  on every `BeforeNew` (no first-config pin); prior cmdhook hooks are cleared
+  so profiles do not leak across Engines.
   Hermetic engines only see the current generation of hooks. Hook stdout/stderr
   are capped (~64KiB); diagnostics redact common secrets. Default is **fail-open**
   on timeout/non-2 exit (warn only); set `fail_closed: true` to block like exit 2.

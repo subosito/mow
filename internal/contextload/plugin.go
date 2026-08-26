@@ -10,9 +10,9 @@ import (
 )
 
 // PluginInfo is one Agent Plugin (https://agent-plugins.org/specification):
-// a folder with plugin.json that may ship a skills/ directory of Agent Skills.
-// MCP servers declared on the plugin are not registered here — packs/mcp stays
-// the tool surface. /plugins lists installs; /skills still activates.
+// a folder with plugin.json (or .claude-plugin/plugin.json) that may ship
+// skills/, hooks/, and mcpServers. Skills load here; MCP and cmdhook consume
+// MCPServers / HooksFile from host-owned roots only.
 type PluginInfo struct {
 	// ID is the on-disk directory name (stable key).
 	ID string
@@ -20,7 +20,7 @@ type PluginInfo struct {
 	Name        string
 	Version     string
 	Description string
-	// Path is the plugin root (contains plugin.json).
+	// Path is the plugin root (contains plugin.json or .claude-plugin/).
 	Path string
 	// SkillsDir is the resolved skills/ directory when it exists.
 	SkillsDir string
@@ -31,16 +31,40 @@ type PluginInfo struct {
 	DefaultSkills []string
 	// Always means every skill in this plugin is treated as default.
 	Always bool
+	// MCPServers are stdio/HTTP servers declared on the plugin. Empty when
+	// the manifest has none. Callers must not start these from a project
+	// plugin root — only HostOwnedPluginRoots.
+	MCPServers []PluginMCPServer
+	// HooksFile is an existing hooks/hooks.json relative to Path, ready for
+	// cmdhook. Empty when the plugin has no hooks.
+	HooksFile string
+}
+
+// PluginMCPServer is one mcpServers entry from plugin.json.
+type PluginMCPServer struct {
+	Name    string
+	Command string
+	Args    []string
+	Env     map[string]string
+	URL     string
 }
 
 type pluginJSON struct {
-	Name           string          `json:"name"`
-	Version        string          `json:"version"`
-	Description    string          `json:"description"`
-	Skills         string          `json:"skills"`
-	Always         bool            `json:"always"`
-	DefaultSkills  jsonStringSlice `json:"default-skills"`
-	DefaultSkills2 jsonStringSlice `json:"defaultSkills"`
+	Name           string                     `json:"name"`
+	Version        string                     `json:"version"`
+	Description    string                     `json:"description"`
+	Skills         string                     `json:"skills"`
+	Always         bool                       `json:"always"`
+	DefaultSkills  jsonStringSlice            `json:"default-skills"`
+	DefaultSkills2 jsonStringSlice            `json:"defaultSkills"`
+	MCPServers     map[string]pluginMCPServer `json:"mcpServers"`
+}
+
+type pluginMCPServer struct {
+	Command any               `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
+	URL     string            `json:"url"`
 }
 
 // jsonStringSlice accepts a JSON string or array of strings.
@@ -149,7 +173,7 @@ func PluginDefaultSkillNames(roots []string) []string {
 }
 
 func readPlugin(dir, id string) (PluginInfo, bool) {
-	raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
+	raw, err := readPluginManifest(dir)
 	if err != nil {
 		return PluginInfo{}, false
 	}
@@ -184,5 +208,137 @@ func readPlugin(dir, id string) (PluginInfo, bool) {
 	defaults := append([]string{}, meta.DefaultSkills...)
 	defaults = append(defaults, meta.DefaultSkills2...)
 	info.DefaultSkills = defaults
+	info.MCPServers = parsePluginMCPServers(meta.MCPServers, dir)
+	info.HooksFile = resolveHooksFile(dir)
 	return info, true
+}
+
+func readPluginManifest(dir string) ([]byte, error) {
+	for _, rel := range []string{
+		"plugin.json",
+		filepath.Join(".claude-plugin", "plugin.json"),
+	} {
+		raw, err := os.ReadFile(filepath.Join(dir, rel))
+		if err == nil {
+			return raw, nil
+		}
+	}
+	return nil, os.ErrNotExist
+}
+
+func parsePluginMCPServers(raw map[string]pluginMCPServer, pluginRoot string) []PluginMCPServer {
+	if len(raw) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(raw))
+	for name := range raw {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	var out []PluginMCPServer
+	for _, name := range names {
+		e := raw[name]
+		cmd, extra := parsePluginCommand(e.Command)
+		args := append(append([]string{}, extra...), e.Args...)
+		cmd = ExpandPluginVars(cmd, pluginRoot)
+		for i, a := range args {
+			args[i] = ExpandPluginVars(a, pluginRoot)
+		}
+		env := map[string]string{}
+		for k, v := range e.Env {
+			env[k] = ExpandPluginVars(v, pluginRoot)
+		}
+		out = append(out, PluginMCPServer{
+			Name:    strings.TrimSpace(name),
+			Command: strings.TrimSpace(cmd),
+			Args:    args,
+			Env:     env,
+			URL:     strings.TrimSpace(e.URL),
+		})
+	}
+	return out
+}
+
+func parsePluginCommand(v any) (command string, args []string) {
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t), nil
+	case []any:
+		var parts []string
+		for _, x := range t {
+			s, ok := x.(string)
+			if !ok {
+				continue
+			}
+			s = strings.TrimSpace(s)
+			if s != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) == 0 {
+			return "", nil
+		}
+		return parts[0], parts[1:]
+	default:
+		return "", nil
+	}
+}
+
+func resolveHooksFile(dir string) string {
+	path := filepath.Join(dir, "hooks", "hooks.json")
+	if fi, err := os.Stat(path); err == nil && fi.Mode().IsRegular() {
+		return filepath.Join("hooks", "hooks.json")
+	}
+	return ""
+}
+
+// HostOwnedPluginRoots is $MOW_HOME/plugins plus workspace-profile plugins/
+// directories derived from overlay config paths. A profile overlay is
+// recognized from $MOW_HOME/workspaces/<name>/config.yaml even when that
+// file does not exist (plugins-only profiles). Project .mow/plugins is not
+// included — skills may load from there; MCP and hooks must not auto-spawn
+// from the workspace.
+func HostOwnedPluginRoots(home string, configPaths []string) []string {
+	home = strings.TrimSpace(home)
+	var out []string
+	if home != "" {
+		out = append(out, filepath.Join(home, "plugins"))
+	}
+	ws := ""
+	if home != "" {
+		ws = filepath.Join(filepath.Clean(home), "workspaces")
+	}
+	seen := map[string]bool{}
+	for _, p := range out {
+		seen[p] = true
+	}
+	for _, p := range configPaths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		p = filepath.Clean(p)
+		if !strings.EqualFold(filepath.Base(p), "config.yaml") {
+			continue
+		}
+		dir := filepath.Dir(p)
+		if ws == "" || filepath.Dir(dir) != ws {
+			continue
+		}
+		plug := filepath.Join(dir, "plugins")
+		if seen[plug] {
+			continue
+		}
+		seen[plug] = true
+		out = append(out, plug)
+	}
+	return out
+}
+
+// ExpandPluginVars replaces ${CLAUDE_PLUGIN_ROOT} the way Claude Code does.
+func ExpandPluginVars(s, pluginRoot string) string {
+	if s == "" || pluginRoot == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, "${CLAUDE_PLUGIN_ROOT}", pluginRoot)
 }

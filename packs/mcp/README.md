@@ -22,6 +22,12 @@ client process.
 
 No slash commands. Client instances register with `min_turns` (dormant until that turn). There is no `mow ext on|off` — change config to enable or disable a server.
 
+Host-owned Agent Plugins (`$MOW_HOME/plugins`, workspace profile `plugins/`)
+that declare `mcpServers` in `plugin.json` (or `.claude-plugin/plugin.json`)
+are started automatically. YAML / `mcp.json` of the same server name wins so a
+plugin is not spawned twice. Project `.mow/plugins` is skills-only — MCP does
+not auto-start from the workspace. `${CLAUDE_PLUGIN_ROOT}` is expanded.
+
 ## Config (`extensions.mcp`)
 
 Accepts the ecosystem `mcpServers` map and a `servers` list. First match:

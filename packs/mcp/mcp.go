@@ -142,7 +142,7 @@ func registerAll(configPaths ...string) error {
 			return err
 		}
 	}
-	return RegisterServers(c.resolved())
+	return RegisterServers(mergePluginMCPServers(c.resolved(), configPaths))
 }
 
 // loadWorkspaceMCPJSON reads <workspace>/mcp.json when the project is trusted.
@@ -166,6 +166,68 @@ func loadWorkspaceMCPJSON(configPaths []string, c *Config) error {
 		return fmt.Errorf("mcp: %s: %w", path, err)
 	}
 	return nil
+}
+
+// mergePluginMCPServers appends servers declared on host-owned Agent Plugins
+// (global + workspace profile). YAML / mcp.json names win: a plugin server
+// with the same name is skipped so dual context-mode does not spawn twice.
+func mergePluginMCPServers(servers []ServerConfig, configPaths []string) []ServerConfig {
+	if !extcfg.IncludesUserConfig(configPaths) {
+		return servers
+	}
+	seen := map[string]bool{}
+	for _, s := range servers {
+		name := strings.ToLower(strings.TrimSpace(s.Name))
+		if name != "" {
+			seen[name] = true
+		}
+	}
+	roots := mow.HostOwnedPluginRoots(mow.Home(), configPaths)
+	for _, p := range mow.ListPlugins(roots) {
+		for _, ms := range p.MCPServers {
+			name := strings.TrimSpace(ms.Name)
+			if name == "" {
+				name = p.ID
+			}
+			if seen[strings.ToLower(name)] {
+				continue
+			}
+			if strings.TrimSpace(ms.Command) == "" && strings.TrimSpace(ms.URL) == "" {
+				continue
+			}
+			seen[strings.ToLower(name)] = true
+			servers = append(servers, ServerConfig{
+				Name:    name,
+				Command: ms.Command,
+				Args:    ms.Args,
+				Env:     pluginMCPEnv(p.Path, ms.Env),
+				URL:     ms.URL,
+			})
+		}
+	}
+	return servers
+}
+
+// pluginMCPEnv is the stdio env for a host-owned plugin MCP server.
+// CLAUDE_PLUGIN_ROOT is always the plugin folder. CLAUDE_CONFIG_DIR defaults
+// to $MOW_HOME so context-mode (and similar) store sessions under mow rather
+// than ~/.claude — but only when neither the process nor the plugin manifest
+// already set it, so a real Claude Code session and an explicit plugin env
+// still win.
+func pluginMCPEnv(pluginRoot string, extra map[string]string) map[string]string {
+	env := map[string]string{}
+	if pluginRoot != "" {
+		env["CLAUDE_PLUGIN_ROOT"] = pluginRoot
+	}
+	if _, ok := extra["CLAUDE_CONFIG_DIR"]; !ok && strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")) == "" {
+		if home := strings.TrimSpace(mow.Home()); home != "" {
+			env["CLAUDE_CONFIG_DIR"] = home
+		}
+	}
+	for k, v := range extra {
+		env[k] = v
+	}
+	return env
 }
 
 // workspaceRootFromConfigPaths returns the workspace that owns a

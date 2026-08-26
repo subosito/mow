@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -73,5 +75,58 @@ func TestWithCallTimeoutRespectsShorterParentDeadline(t *testing.T) {
 	}
 	if time.Until(deadline) > 200*time.Millisecond {
 		t.Fatalf("parent deadline should win: until %v", time.Until(deadline))
+	}
+}
+
+func TestMergePluginMCPServersYAMLWinsOnName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	dir := filepath.Join(home, "plugins", "context-mode", ".claude-plugin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"context-mode","mcpServers":{"context-mode":{"command":"node","args":["start.mjs"]}}}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	userCfg := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(userCfg, []byte("llm: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	yamlServers := []ServerConfig{{Name: "context-mode", Command: "from-yaml"}}
+	got := mergePluginMCPServers(yamlServers, []string{userCfg})
+	if len(got) != 1 || got[0].Command != "from-yaml" {
+		t.Fatalf("yaml should win: %+v", got)
+	}
+	got = mergePluginMCPServers(nil, []string{userCfg})
+	if len(got) != 1 || got[0].Name != "context-mode" || got[0].Command != "node" {
+		t.Fatalf("plugin should fill empty yaml: %+v", got)
+	}
+	if got[0].Env["CLAUDE_PLUGIN_ROOT"] == "" {
+		t.Fatal("plugin root env missing")
+	}
+	if got[0].Env["CLAUDE_CONFIG_DIR"] != home {
+		t.Fatalf("CLAUDE_CONFIG_DIR=%q want $MOW_HOME %q", got[0].Env["CLAUDE_CONFIG_DIR"], home)
+	}
+}
+
+func TestPluginMCPEnvConfigDirPrecedence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	got := pluginMCPEnv("/plug", nil)
+	if got["CLAUDE_CONFIG_DIR"] != home {
+		t.Fatalf("default CLAUDE_CONFIG_DIR=%q want %q", got["CLAUDE_CONFIG_DIR"], home)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", "/from-process")
+	got = pluginMCPEnv("/plug", nil)
+	if _, ok := got["CLAUDE_CONFIG_DIR"]; ok {
+		t.Fatalf("process CLAUDE_CONFIG_DIR should inherit, not copy into env: %+v", got)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	got = pluginMCPEnv("/plug", map[string]string{"CLAUDE_CONFIG_DIR": "/from-plugin"})
+	if got["CLAUDE_CONFIG_DIR"] != "/from-plugin" {
+		t.Fatalf("plugin env should win: %q", got["CLAUDE_CONFIG_DIR"])
 	}
 }

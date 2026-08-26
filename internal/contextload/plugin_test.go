@@ -74,3 +74,74 @@ func TestListPluginsSkipsFolderWithoutManifest(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestListPluginsReadsClaudePluginMCPAndHooks(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "context-mode")
+	if err := os.MkdirAll(filepath.Join(dir, ".claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name": "context-mode",
+		"mcpServers": {
+			"context-mode": {
+				"command": "node",
+				"args": ["${CLAUDE_PLUGIN_ROOT}/start.mjs"]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, ".claude-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hooks", "hooks.json"), []byte(`{"hooks":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := ListPlugins([]string{root})
+	if len(got) != 1 {
+		t.Fatalf("plugins=%v", got)
+	}
+	p := got[0]
+	if p.ID != "context-mode" || p.HooksFile != filepath.Join("hooks", "hooks.json") {
+		t.Fatalf("meta: %+v", p)
+	}
+	if len(p.MCPServers) != 1 || p.MCPServers[0].Name != "context-mode" {
+		t.Fatalf("mcp=%+v", p.MCPServers)
+	}
+	want := filepath.Join(dir, "start.mjs")
+	if p.MCPServers[0].Command != "node" || len(p.MCPServers[0].Args) != 1 || p.MCPServers[0].Args[0] != want {
+		t.Fatalf("command=%q args=%v", p.MCPServers[0].Command, p.MCPServers[0].Args)
+	}
+}
+
+func TestHostOwnedPluginRootsSkipsProjectDotMow(t *testing.T) {
+	home := t.TempDir()
+	profile := filepath.Join(home, "workspaces", "mow", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(profile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), ".mow", "config.yaml")
+	got := HostOwnedPluginRoots(home, []string{profile, project})
+	want := []string{
+		filepath.Join(home, "plugins"),
+		filepath.Join(home, "workspaces", "mow", "plugins"),
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+func TestHostOwnedPluginRootsIncludesProfileWithoutConfigFile(t *testing.T) {
+	home := t.TempDir()
+	overlay := filepath.Join(home, "workspaces", "mow", "config.yaml")
+	got := HostOwnedPluginRoots(home, []string{overlay})
+	want := []string{
+		filepath.Join(home, "plugins"),
+		filepath.Join(home, "workspaces", "mow", "plugins"),
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}

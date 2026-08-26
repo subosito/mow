@@ -15,6 +15,11 @@ displays its RPC-driven results.
 
 No pack CLI, no tools, no slash commands. Hooks re-register on every `BeforeNew` (prior cmdhook hooks are cleared so profiles do not leak). There is no `mow ext` toggle — use config / `min_turns`.
 
+Host-owned Agent Plugins (`$MOW_HOME/plugins`, workspace profile `plugins/`)
+that ship `hooks/hooks.json` register automatically. YAML of the same plugin
+name or root wins so PostToolUse does not run twice. Project `.mow/plugins` is
+skills-only.
+
 Supported hook events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`, `PreCompact`. Tool names are translated to Claude conventions for matchers (`read` → `Read`, `mcp_srv_x` → `mcp__srv_x`). A PreToolUse `permissionDecision` of `"ask"` is treated as deny.
 
 Default is **fail-open** on timeout / non-2 exit (warn only). Set `fail_closed: true` to block like exit 2. Hook stdout/stderr are capped (~64 KiB); diagnostics redact common secrets.

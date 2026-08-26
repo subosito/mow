@@ -176,3 +176,31 @@ func TestContextModeRealHook(t *testing.T) {
 	}
 	t.Logf("context-mode additionalContext delivered (%d bytes)", len(joined))
 }
+
+func TestMergePluginHooksYAMLWinsOnName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	dir := filepath.Join(home, "plugins", "context-mode")
+	if err := os.MkdirAll(filepath.Join(dir, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"context-mode"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hooks", "hooks.json"), []byte(`{"hooks":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	userCfg := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(userCfg, []byte("llm: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	yaml := []PluginConfig{{Name: "context-mode", Root: "/explicit"}}
+	got := mergePluginHooks(yaml, []string{userCfg}, Config{})
+	if len(got) != 1 || got[0].Root != "/explicit" {
+		t.Fatalf("yaml should win: %+v", got)
+	}
+	got = mergePluginHooks(nil, []string{userCfg}, Config{})
+	if len(got) != 1 || got[0].Name != "context-mode" || got[0].HooksFile != filepath.Join("hooks", "hooks.json") {
+		t.Fatalf("plugin should fill empty yaml: %+v", got)
+	}
+}

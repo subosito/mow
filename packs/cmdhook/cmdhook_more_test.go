@@ -352,9 +352,13 @@ func TestTimeouts(t *testing.T) {
 
 func TestClaudePluginRootAndEnv(t *testing.T) {
 	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	// Both the literal ${CLAUDE_PLUGIN_ROOT} substitution and the env vars
-	// must resolve to the plugin root / project dir.
-	sh := scriptAt(t, root, "env.sh", `printf '%s|%s|%s' "${CLAUDE_PLUGIN_ROOT}" "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PROJECT_DIR"`)
+	// must resolve to the plugin root / project dir. CLAUDE_CONFIG_DIR
+	// defaults to $MOW_HOME when the process did not set it.
+	sh := scriptAt(t, root, "env.sh", `printf '%s|%s|%s|%s' "${CLAUDE_PLUGIN_ROOT}" "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PROJECT_DIR" "$CLAUDE_CONFIG_DIR"`)
 	writeHooksJSON(t, root, oneEntry("", sh+" "+`'`+`dummy`+`'`)) // silence unused
 	writeHooksJSON(t, root, oneEntry("", sh))
 	b := mustLoad(t, Config{Root: root})
@@ -362,7 +366,7 @@ func TestClaudePluginRootAndEnv(t *testing.T) {
 	if len(out.contexts) != 1 {
 		t.Fatalf("contexts: %+v", out)
 	}
-	want := root + "|" + root + "|" + root
+	want := root + "|" + root + "|" + root + "|" + home
 	if out.contexts[0] != want {
 		t.Fatalf("env context = %q want %q", out.contexts[0], want)
 	}

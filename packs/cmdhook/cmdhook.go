@@ -111,7 +111,50 @@ func (c Config) resolved() []PluginConfig {
 	return out
 }
 
-// hooksFile is the Claude Code plugin hooks.json schema (subset).
+// mergePluginHooks appends hooks.json from host-owned Agent Plugins when YAML
+// did not already name that plugin. YAML wins so dual context-mode does not
+// run PostToolUse twice.
+func mergePluginHooks(plugins []PluginConfig, configPaths []string, c Config) []PluginConfig {
+	if !extcfg.IncludesUserConfig(configPaths) {
+		return plugins
+	}
+	seen := map[string]bool{}
+	for _, p := range plugins {
+		name := strings.ToLower(strings.TrimSpace(p.Name))
+		if name != "" {
+			seen[name] = true
+		}
+		root := strings.ToLower(filepath.Clean(strings.TrimSpace(p.Root)))
+		if root != "" {
+			seen[root] = true
+		}
+	}
+	fc := c.FailClosed
+	roots := mow.HostOwnedPluginRoots(mow.Home(), configPaths)
+	for _, info := range mow.ListPlugins(roots) {
+		if strings.TrimSpace(info.HooksFile) == "" {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(info.ID))
+		root := strings.ToLower(filepath.Clean(info.Path))
+		if seen[id] || seen[root] {
+			continue
+		}
+		seen[id] = true
+		seen[root] = true
+		fail := fc
+		plugins = append(plugins, PluginConfig{
+			Name:       info.ID,
+			Root:       info.Path,
+			HooksFile:  info.HooksFile,
+			TimeoutSec: c.TimeoutSec,
+			MinTurns:   c.MinTurns,
+			FailClosed: &fail,
+		})
+	}
+	return plugins
+}
+
 type hooksFile struct {
 	Hooks map[string][]matcherEntry `json:"hooks"`
 }
@@ -189,7 +232,7 @@ func setup(configPaths ...string) error {
 			}
 		}
 	}
-	plugins := c.resolved()
+	plugins := mergePluginHooks(c.resolved(), configPaths, c)
 	if len(plugins) == 0 {
 		return nil
 	}
@@ -385,6 +428,11 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 		"CLAUDE_PLUGIN_ROOT="+b.root,
 		"CLAUDE_PROJECT_DIR="+cwd,
 	)
+	if strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")) == "" {
+		if home := strings.TrimSpace(mow.Home()); home != "" {
+			cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+home)
+		}
+	}
 	in, err := json.Marshal(payload)
 	if err != nil {
 		return ho, false, "", false
