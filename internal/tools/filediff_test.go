@@ -218,3 +218,13 @@ func TestReplaceDiffIdenticalContent(t *testing.T) {
 		t.Fatalf("identical content reported changes: %v\n%s", body, out)
 	}
 }
+
+func TestFormatEditDiffUsesFileLine(t *testing.T) {
+	got := formatEditDiff("f.go", "old", "new", 12)
+	if !strings.Contains(got, "@@ -12,1 +12,1 @@") {
+		t.Fatalf("want file line 12 in hunk header, got:\n%s", got)
+	}
+	if firstLineOf("a\nb\nold\nc", "old") != 3 {
+		t.Fatal("firstLineOf")
+	}
+}

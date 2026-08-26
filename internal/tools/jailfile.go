@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/subosito/mow/internal/policy"
 )
@@ -129,7 +130,7 @@ func WriteFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode
 	if err != nil {
 		return path, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := mkdirAllJailed(p, filepath.Dir(path)); err != nil {
 		return path, err
 	}
 	f, path, err := openJailed(p, path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
@@ -146,6 +147,67 @@ func WriteFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode
 
 func writeFileJailed(p *policy.Policy, rel string, data []byte, perm os.FileMode) (string, error) {
 	return WriteFileJailed(p, rel, data, perm)
+}
+
+// mkdirAllJailed creates missing parents of dir, one component at a time,
+// refusing symlink components that escape the jail. Unlike os.MkdirAll it
+// never follows an escaping link to create directories outside the workspace.
+func mkdirAllJailed(p *policy.Policy, dir string) error {
+	if p == nil {
+		return fmt.Errorf("workspace not set")
+	}
+	dir = filepath.Clean(dir)
+	root, rel, ok := p.Beneath(dir)
+	if !ok {
+		if _, err := p.ResolvePathFor(dir, true); err != nil {
+			return err
+		}
+		root, rel, ok = p.Beneath(dir)
+		if !ok {
+			return fmt.Errorf("path %q escapes workspace (and extra roots)", dir)
+		}
+	}
+	if rel == "" || rel == "." {
+		return nil
+	}
+	cur := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		next := filepath.Join(cur, part)
+		fi, err := os.Lstat(next)
+		if err == nil {
+			if fi.Mode()&os.ModeSymlink != 0 {
+				resolved, rerr := filepath.EvalSymlinks(next)
+				if rerr != nil {
+					return rerr
+				}
+				if _, err := p.ResolvePathFor(resolved, true); err != nil {
+					return err
+				}
+				cur = resolved
+				continue
+			}
+			if !fi.IsDir() {
+				return fmt.Errorf("mkdir: %s is not a directory", next)
+			}
+			cur = next
+			continue
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.Mkdir(next, 0o755); err != nil && !os.IsExist(err) {
+			return err
+		}
+		if _, err := p.ResolvePathFor(next, true); err != nil {
+			_ = os.Remove(next)
+			return err
+		}
+		cur = next
+	}
+	return nil
 }
 
 // VerifyFDInJailFor verifies the opened fd stays inside the path jail for

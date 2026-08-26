@@ -231,9 +231,9 @@ func writeWholeFileBody(b *strings.Builder, oldLines, newLines []string) {
 }
 
 // formatEditDiff reports a search-replace edit with path and the changed hunk.
-// Emits a numbered @@ header so UIs can show line ranges (relative to the hunk;
-// absolute file offsets are unknown for search-replace).
-func formatEditDiff(path, oldString, newString string) string {
+// start is the 1-based file line of the first replaced (or inserted) line so
+// UIs can paint a real gutter; 0/negative is treated as 1.
+func formatEditDiff(path, oldString, newString string, start int) string {
 	var b strings.Builder
 	b.WriteString("edited " + path + "\n")
 	b.WriteString("--- " + path + "\n")
@@ -241,19 +241,34 @@ func formatEditDiff(path, oldString, newString string) string {
 	oldLines := splitLines(oldString)
 	newLines := splitLines(newString)
 	oc, nc := len(oldLines), len(newLines)
+	if start < 1 {
+		start = 1
+	}
 	switch {
 	case oc == 0 && nc == 0:
-		b.WriteString("@@ -0,0 +0,0 @@\n")
+		fmt.Fprintf(&b, "@@ -%d,0 +%d,0 @@\n", start, start)
 	case oc == 0:
-		b.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", nc))
+		fmt.Fprintf(&b, "@@ -%d,0 +%d,%d @@\n", start, start, nc)
 	case nc == 0:
-		b.WriteString(fmt.Sprintf("@@ -1,%d +0,0 @@\n", oc))
+		fmt.Fprintf(&b, "@@ -%d,%d +%d,0 @@\n", start, oc, start)
 	default:
-		b.WriteString(fmt.Sprintf("@@ -1,%d +1,%d @@\n", oc, nc))
+		fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@\n", start, oc, start, nc)
 	}
 	writePrefixed(&b, "-", oldLines, maxDiffBodyLines)
 	writePrefixed(&b, "+", newLines, maxDiffBodyLines)
 	return b.String()
+}
+
+// firstLineOf returns the 1-based line of snippet in content, or 1 if missing.
+func firstLineOf(content, snippet string) int {
+	if snippet == "" {
+		return 1
+	}
+	idx := strings.Index(content, snippet)
+	if idx < 0 {
+		return 1
+	}
+	return strings.Count(content[:idx], "\n") + 1
 }
 
 func splitLines(s string) []string {

@@ -2,6 +2,7 @@
 package tools
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -92,7 +93,7 @@ func (t *readTool) Description() string {
 		" Prefer this over bash cat/head/tail/sed for reading source."
 }
 func (t *readTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"1-based first line to return (default 1)"},"limit":{"type":"integer","description":"max lines to return; omit for the whole file"}},"required":["path"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"1-based first line to return (default 1)"},"limit":{"type":"integer","description":"max lines to return (default 2000)"}},"required":["path"]}`)
 }
 
 // defaultReadLines caps an unpaged read. A model asking for a 6000-line file
@@ -100,6 +101,13 @@ func (t *readTool) Parameters() json.RawMessage {
 // tokens on every later turn. The notice below tells it how to continue, so
 // the cap is a paging hint rather than a dead end.
 const defaultReadLines = 2000
+
+// sniffBytes is the prefix inspected for NULs before a read is treated as text.
+const sniffBytes = 8192
+
+// maxReadLineBytes is one Scanner token. A minified one-line blob larger than
+// this is refused as binary rather than loaded into the session.
+const maxReadLineBytes = 1 << 20
 
 func (t *readTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
@@ -113,8 +121,6 @@ func (t *readTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	f, path, err := openJailed(t.p, a.Path, os.O_RDONLY, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Models guess conventional filenames; naming the real neighbors
-			// turns a wasted turn into an immediate correction.
 			return "", fmt.Errorf("read %s: no such file%s", a.Path, nearbyHint(path))
 		}
 		return "", err
@@ -124,35 +130,35 @@ func (t *readTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if lim <= 0 {
 		lim = 2 << 20
 	}
-	data, err := io.ReadAll(io.LimitReader(f, int64(lim+1)))
-	if err != nil {
-		return "", err
-	}
-	byteCut := false
-	if len(data) > lim {
-		data = data[:lim]
-		byteCut = true
+	br := bufio.NewReaderSize(f, 64*1024)
+	peek, _ := br.Peek(sniffBytes)
+	if isBinaryPrefix(peek) {
+		return "", fmt.Errorf("read %s: not a UTF-8 text file (binary)", a.Path)
 	}
 	hashline := t.p != nil && t.p.Hashline
-	return renderRead(string(data), a.Offset, a.Limit, hashline, byteCut, lim), nil
+	return renderReadFrom(br, a.Offset, a.Limit, hashline, lim, a.Path)
 }
 
-// renderRead slices content to the requested line window and appends a notice
-// that names the exact next call when there is more to read.
-//
-// Line numbers stay absolute (file lines, not window-relative) so a hashline
-// edit made from a paged read still addresses the right line.
+func isBinaryPrefix(b []byte) bool {
+	if bytes.IndexByte(b, 0) >= 0 {
+		return true
+	}
+	if len(b) > 0 && len(b) < sniffBytes && !utf8.Valid(b) {
+		return true
+	}
+	return false
+}
+
+// renderRead is the in-memory paging helper used by tests. Exec uses
+// renderReadFrom so offset applies before the byte cap.
 func renderRead(content string, offset, limit int, hashline, byteCut bool, byteLim int) string {
 	lines := strings.Split(content, "\n")
-	// A trailing newline yields a final empty element that is not a line;
-	// remember it so a whole-file read returns the file's exact bytes.
 	trailingNL := false
 	if n := len(lines); n > 0 && lines[n-1] == "" {
 		lines = lines[:n-1]
 		trailingNL = true
 	}
 	total := len(lines)
-
 	start := offset - 1
 	if offset <= 0 {
 		start = 0
@@ -168,7 +174,6 @@ func renderRead(content string, offset, limit int, hashline, byteCut bool, byteL
 	if end > total {
 		end = total
 	}
-
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		if i > start {
@@ -180,23 +185,148 @@ func renderRead(content string, offset, limit int, hashline, byteCut bool, byteL
 			b.WriteString(lines[i])
 		}
 	}
-	// Preserve the file's own trailing newline on a whole-file read so byte
-	// -exact round-trips (and existing callers) are unaffected by paging.
 	if trailingNL && end == total && end > start {
 		b.WriteByte('\n')
 	}
-
 	switch {
 	case end < total:
 		fmt.Fprintf(&b, "\n…(showing lines %d-%d of %d; continue with offset=%d)", start+1, end, total, end+1)
 	case byteCut:
-		// The byte cap hit before the line window ran out: there are more
-		// lines on disk than we read, so no honest offset can be named.
-		fmt.Fprintf(&b, "\n…(truncated at the %d-byte read cap; use bash with sed/tail to inspect the rest)", byteLim)
+		fmt.Fprintf(&b, "\n…(truncated at the %d-byte read cap)", byteLim)
 	case start > 0:
 		fmt.Fprintf(&b, "\n…(showing lines %d-%d of %d; end of file)", start+1, end, total)
 	}
 	return b.String()
+}
+
+// renderReadFrom pages by skipping offset-1 lines first, then collecting at
+// most limit lines (default 2000) or byteLim of returned content.
+func renderReadFrom(r io.Reader, offset, limit int, hashline bool, byteLim int, name string) (string, error) {
+	if offset <= 0 {
+		offset = 1
+	}
+	if limit <= 0 {
+		limit = defaultReadLines
+	}
+	if byteLim <= 0 {
+		byteLim = 2 << 20
+	}
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		br = bufio.NewReaderSize(r, 64*1024)
+	}
+	skip := offset - 1
+	var lines []string
+	n := 0
+	bytesOut := 0
+	more := false
+	byteCut := false
+	for {
+		line, err := br.ReadString('\n')
+		if len(line) == 0 && err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", err
+		}
+		n++
+		hadNL := strings.HasSuffix(line, "\n")
+		text := strings.TrimSuffix(line, "\n")
+		if n <= skip {
+			if err != nil && !errors.Is(err, io.EOF) {
+				return "", err
+			}
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			continue
+		}
+		add := len(text)
+		if hadNL {
+			add++
+		}
+		if len(lines) >= limit {
+			more = true
+			break
+		}
+		if bytesOut+add > byteLim {
+			more = true
+			byteCut = true
+			if len(lines) == 0 {
+				cut := byteLim
+				if cut > len(text) {
+					cut = len(text)
+				}
+				for cut > 0 && cut < len(text) && !utf8.RuneStart(text[cut]) {
+					cut--
+				}
+				if cut == 0 {
+					cut = min(byteLim, len(text))
+				}
+				lines = append(lines, text[:cut])
+			}
+			break
+		}
+		if hadNL {
+			lines = append(lines, text+"\n")
+		} else {
+			lines = append(lines, text)
+		}
+		bytesOut += add
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", err
+		}
+	}
+	start := offset
+	var b strings.Builder
+	shown := 0
+	for i, line := range lines {
+		b.WriteString(line)
+		shown++
+		_ = i
+	}
+	end := start + shown - 1
+	if shown == 0 {
+		end = start - 1
+	}
+	body := b.String()
+	if hashline {
+		var hb strings.Builder
+		raw := body
+		parts := strings.SplitAfter(raw, "\n")
+		ln := start
+		first := true
+		for _, part := range parts {
+			if part == "" {
+				continue
+			}
+			nl := strings.HasSuffix(part, "\n")
+			text := strings.TrimSuffix(part, "\n")
+			if !first {
+				hb.WriteByte('\n')
+			}
+			first = false
+			fmt.Fprintf(&hb, "%6d:%s|%s", ln, lineHash(text), text)
+			if nl {
+				hb.WriteByte('\n')
+			}
+			ln++
+		}
+		body = hb.String()
+	}
+	switch {
+	case more && !byteCut:
+		fmt.Fprintf(&b, "")
+		body += fmt.Sprintf("\n…(showing lines %d-%d; continue with offset=%d)", start, end, end+1)
+	case byteCut:
+		body += fmt.Sprintf("\n…(truncated at the %d-byte read cap; continue with offset=%d)", byteLim, end+1)
+	case start > 1 && !more:
+		body += fmt.Sprintf("\n…(showing lines %d-%d; end of file)", start, end)
+	}
+	return body, nil
 }
 
 type globTool struct{ p *policy.Policy }
@@ -222,18 +352,16 @@ func (t *globTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if pat == "" {
 		pat = "*"
 	}
-	// Confine to workspace: join pattern with root if relative
 	root := t.p.Workspace
 	full := pat
 	if !filepath.IsAbs(pat) {
 		full = filepath.Join(root, pat)
+	} else if jail, _, ok := t.p.Beneath(filepath.Clean(pat)); ok {
+		root = jail
 	}
 	var matches []string
 	var err error
 	if hasDoublestar(full) {
-		// filepath.Glob has no recursive wildcard: it treats ** as a single
-		// path segment, so "**/x.go" matches only one level down and never a
-		// file at the root. The tool advertises **/*.go, so implement it.
 		matches, err = globRecursive(root, full)
 	} else {
 		matches, err = filepath.Glob(full)
@@ -391,8 +519,14 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	var hits []grepHit
 	truncated := false
 	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
 			return err
+		}
+		if info.IsDir() {
+			if path != root && skipDirNames[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if info.Size() > int64(t.p.MaxReadBytes) && t.p.MaxReadBytes > 0 {
 			return nil
@@ -519,29 +653,23 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	// Workspace-relative display (same rationale as write): in-workspace files
 	// never print "../mow", extra-root files print "../mowi/…".
 	rel := workspaceRel(t.p.Workspace, path)
-	s := string(data)
+	orig := string(data)
+	s := orig
 	var oldSnippet string
 	if h := strings.TrimSpace(a.LineHash); h != "" {
-		// Hashline replace one line.
-		oldLines := strings.Split(s, "\n")
-		hh := strings.ToLower(h)
+		s2, err := applyHashlineEdit(s, h, a.NewString)
+		if err != nil {
+			return "", err
+		}
+		hh := strings.ToLower(strings.TrimSpace(h))
 		if len(hh) > 8 {
 			hh = hh[:8]
 		}
-		found := false
-		for _, line := range oldLines {
+		for _, line := range strings.Split(s, "\n") {
 			if lineHash(line) == hh {
 				oldSnippet = line
-				found = true
 				break
 			}
-		}
-		if !found {
-			return "", fmt.Errorf("edit: line_hash %s not found — re-read the file for a fresh N:hash|line", hh)
-		}
-		s2, err := applyHashlineEdit(s, hh, a.NewString)
-		if err != nil {
-			return "", err
 		}
 		s = s2
 	} else {
@@ -557,7 +685,7 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if _, err := writeFileJailed(t.p, a.Path, []byte(s), 0o644); err != nil {
 		return "", err
 	}
-	return formatEditDiff(rel, oldSnippet, a.NewString), nil
+	return formatEditDiff(rel, oldSnippet, a.NewString, firstLineOf(orig, oldSnippet)), nil
 }
 
 const (
@@ -735,26 +863,34 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	var buf cappedBuffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
+	// Background children (`cmd &`) keep stdout open; without WaitDelay,
+	// Wait hangs until they exit. Bound that, then kill the group.
+	cmd.WaitDelay = 200 * time.Millisecond
 
 	if err := cmd.Start(); err != nil {
 		return "", err
 	}
 	pid := cmd.Process.Pid
+	pgid := pid
+	if g, gerr := syscall.Getpgid(pid); gerr == nil {
+		pgid = g
+	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 
 	var err error
 	select {
 	case err = <-done:
-		// finished within budget
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		if err != nil && errors.Is(err, exec.ErrWaitDelay) {
+			err = nil
+		}
 	case <-cctx.Done():
-		// Kill entire process group (negative pgid). Best-effort; then reap with a bound.
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		select {
 		case err = <-done:
 		case <-time.After(2 * time.Second):
-			// Wait stuck (grandchild holding pipes, zombie race) — abandon Wait.
 			err = context.DeadlineExceeded
 		}
 	}
@@ -803,18 +939,31 @@ func lineHash(s string) string {
 
 func applyHashlineEdit(content, hash, newLine string) (string, error) {
 	hash = strings.ToLower(strings.TrimSpace(hash))
-	if len(hash) < 8 {
+	if len(hash) != 8 {
 		return "", fmt.Errorf("hashline: hash must be 8 hex chars")
 	}
-	hash = hash[:8]
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		if lineHash(line) == hash {
-			lines[i] = newLine
-			return strings.Join(lines, "\n"), nil
+	for i := 0; i < 8; i++ {
+		c := hash[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", fmt.Errorf("hashline: hash must be 8 hex chars")
 		}
 	}
-	return "", fmt.Errorf("edit: line_hash %s not found — re-read the file for a fresh N:hash|line", hash)
+	lines := strings.Split(content, "\n")
+	found := -1
+	for i, line := range lines {
+		if lineHash(line) != hash {
+			continue
+		}
+		if found >= 0 {
+			return "", fmt.Errorf("edit: line_hash %s matches more than one line — use old_string with a unique snippet or re-read", hash)
+		}
+		found = i
+	}
+	if found < 0 {
+		return "", fmt.Errorf("edit: line_hash %s not found — re-read the file for a fresh N:hash|line", hash)
+	}
+	lines[found] = newLine
+	return strings.Join(lines, "\n"), nil
 }
 
 // nearbyHint suggests real files when a read path does not exist: name-stem

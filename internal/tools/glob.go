@@ -116,8 +116,8 @@ func walkBase(root, pat string) string {
 	if fi, err := os.Stat(base); err != nil || !fi.IsDir() {
 		return root
 	}
-	// Never walk above the workspace root, whatever the pattern claims.
-	if !strings.HasPrefix(base+"/", root+"/") && base != root {
+	// Never walk above the containing jail root.
+	if root != "" && base != root && !strings.HasPrefix(base+string(os.PathSeparator), root+string(os.PathSeparator)) {
 		return root
 	}
 	return base

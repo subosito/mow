@@ -116,3 +116,33 @@ func TestOpenJailedRejectsExistingSymlinkEscape(t *testing.T) {
 		t.Fatal("expected symlink escape to fail")
 	}
 }
+
+func TestWriteFileJailedCreatesNestedParents(t *testing.T) {
+	ws := t.TempDir()
+	p := &policy.Policy{Workspace: ws, AllowWrite: true}
+	path, err := WriteFileJailed(p, "a/b/c.txt", []byte("ok"), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "ok" {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+}
+
+func TestWriteFileJailedDoesNotMkdirOutsideViaSymlinkParent(t *testing.T) {
+	ws := t.TempDir()
+	outside := t.TempDir()
+	link := filepath.Join(ws, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: ws, AllowWrite: true}
+	_, err := WriteFileJailed(p, "escape/nested/x.txt", []byte("nope"), 0o644)
+	if err == nil {
+		t.Fatal("expected jail error")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "nested")); err == nil {
+		t.Fatal("created directory outside the jail")
+	}
+}

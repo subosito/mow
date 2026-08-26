@@ -3,6 +3,7 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -389,5 +390,119 @@ func TestEditDiffPathExtraRootRelative(t *testing.T) {
 	}
 	if !strings.Contains(out, "edited ../"+filepath.Base(other)+"/x.go") {
 		t.Fatalf("want extra-root relative path, got %q", out)
+	}
+}
+
+func TestReadPagesPastByteCapAndRefusesBinary(t *testing.T) {
+	root := t.TempDir()
+	var b strings.Builder
+	for i := 1; i <= 80; i++ {
+		fmt.Fprintf(&b, "LINE-%d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin.dat"), []byte("hi\x00there"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: root, MaxReadBytes: 40}
+	reg := tools.Registry(p, []string{"read"})
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"path":"big.txt","offset":70,"limit":5}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "LINE-70") {
+		t.Fatalf("offset must reach past the first MaxReadBytes, got %q", out)
+	}
+	if strings.Contains(strings.ToLower(out), "bash") || strings.Contains(out, "sed") {
+		t.Fatalf("must not send the model to bash: %q", out)
+	}
+	_, err = reg[0].Exec(context.Background(), json.RawMessage(`{"path":"bin.dat"}`))
+	if err == nil {
+		t.Fatal("binary read must fail")
+	}
+	if !strings.Contains(err.Error(), "binary") {
+		t.Fatalf("want binary error, got %v", err)
+	}
+}
+
+func TestGrepSkipsDotGitUnlessPathIsDotGit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "secret.txt"), []byte("PATTERN in git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "a.go"), []byte("PATTERN in src\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
+	reg := tools.Registry(p, []string{"grep"})
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"pattern":"PATTERN"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "a.go") {
+		t.Fatalf("want src hit, got %q", out)
+	}
+	if strings.Contains(out, "secret.txt") || strings.Contains(out, ".git") {
+		t.Fatalf(".git must be skipped from .: %q", out)
+	}
+	gitOut, err := reg[0].Exec(context.Background(), json.RawMessage(`{"pattern":"PATTERN","path":".git"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gitOut, "secret.txt") {
+		t.Fatalf("explicit .git path must be searched: %q", gitOut)
+	}
+}
+
+func TestHashlineEditRejectsDuplicateLines(t *testing.T) {
+	root := t.TempDir()
+	body := "dup\nother\ndup\n"
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: root, AllowWrite: true, Hashline: true}
+	reg := tools.Registry(p, []string{"read", "edit"})
+	readOut, err := reg[0].Exec(context.Background(), json.RawMessage(`{"path":"f.txt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First hashline token after "1:"
+	line := strings.Split(readOut, "\n")[0]
+	parts := strings.SplitN(line, "|", 2)
+	hash := strings.TrimSpace(strings.Split(parts[0], ":")[1])
+	_, err = reg[1].Exec(context.Background(), json.RawMessage(
+		`{"path":"f.txt","line_hash":"`+hash+`","new_string":"changed"}`))
+	if err == nil {
+		t.Fatal("duplicate hash must fail")
+	}
+	got, _ := os.ReadFile(filepath.Join(root, "f.txt"))
+	if string(got) != body {
+		t.Fatalf("file mutated: %q", got)
+	}
+}
+
+func TestBashKillsBackgroundChildOnReturn(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, "bg.txt")
+	p := &policy.Policy{Workspace: root, AllowShell: true}
+	reg := tools.Registry(p, []string{"bash"})
+	cmd := "(sleep 8; echo leaked > " + marker + ") & echo started"
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":`+jsonQuote(cmd)+`}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "started") {
+		t.Fatalf("got %q", out)
+	}
+	time.Sleep(2 * time.Second)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("background child survived bash return")
 	}
 }

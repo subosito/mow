@@ -177,6 +177,39 @@ func TestGlobRecursiveStaysInJail(t *testing.T) {
 	}
 }
 
+func TestGlobRecursiveExtraRoot(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	extra := t.TempDir()
+	nested := filepath.Join(extra, "pkg", "foo.rs")
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nested, []byte("fn"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "main.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: ws, ExtraRoots: []string{extra}, MaxReadBytes: 1 << 20}
+	tool := &globTool{p: p}
+	out, err := tool.Exec(context.Background(),
+		json.RawMessage(`{"pattern":`+mustJSON(filepath.Join(extra, "**", "*.rs"))+`}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "foo.rs") {
+		t.Fatalf("extra-root ** glob missed foo.rs: %q", out)
+	}
+	rel, err := tool.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.rs"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rel, "foo.rs") {
+		t.Fatalf("relative **/*.rs must not search extra roots: %q", rel)
+	}
+}
+
 func mustJSON(s string) string {
 	b, err := json.Marshal(s)
 	if err != nil {
