@@ -48,13 +48,14 @@ func checkURLScheme(raw string, insecure bool) error {
 // httpTransport implements MCP Streamable HTTP: POST JSON-RPC to a single URL.
 // Accepts application/json or text/event-stream responses.
 type httpTransport struct {
-	url     string
-	headers map[string]string
-	auth    *tokenSource
-	client  *http.Client
-	nextID  atomic.Int64
-	mu      sync.Mutex
-	session string // optional Mcp-Session-Id from server
+	url      string
+	headers  map[string]string
+	auth     *tokenSource
+	client   *http.Client
+	nextID   atomic.Int64
+	mu       sync.Mutex
+	session  string // optional Mcp-Session-Id from server
+	callWait time.Duration
 }
 
 func newHTTPTransport(s ServerConfig) (*httpTransport, error) {
@@ -66,9 +67,10 @@ func newHTTPTransport(s ServerConfig) (*httpTransport, error) {
 		return nil, err
 	}
 	h := &httpTransport{
-		url:     u,
-		headers: s.Headers,
-		client:  &http.Client{Timeout: 120 * time.Second},
+		url:      u,
+		headers:  s.Headers,
+		client:   &http.Client{Timeout: 120 * time.Second},
+		callWait: s.callTimeout(),
 	}
 	if typ := strings.TrimSpace(s.Auth.Type); typ != "" && !strings.EqualFold(typ, "none") {
 		h.auth = newTokenSource(s.Auth)
@@ -106,7 +108,9 @@ func (h *httpTransport) callTool(ctx context.Context, name string, args json.Raw
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	raw, err := h.call(ctx, "tools/call", map[string]any{
+	callCtx, cancel := withCallTimeout(ctx, h.callWait)
+	defer cancel()
+	raw, err := h.call(callCtx, "tools/call", map[string]any{
 		"name": name, "arguments": json.RawMessage(args),
 	})
 	if err != nil {

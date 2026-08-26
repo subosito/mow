@@ -40,6 +40,7 @@ extensions:
         args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
         env: {}
         min_turns: 0
+        # timeout_sec: 30  # tools/call bound; omit = 30s; -1 = wait until turn cancel
       remote:
         url: https://mcp.example/mcp
         insecure: false
@@ -61,7 +62,7 @@ extensions:
     #     command: npx
 ```
 
-Per-server keys: `name`, `command`, `args`, `env`, `url`, `insecure`, `headers`, `auth`, `min_turns`. Stdio uses `command`; streamable HTTP uses `url`.
+Per-server keys: `name`, `command`, `args`, `env`, `url`, `insecure`, `headers`, `auth`, `min_turns`, `timeout_sec`. Stdio uses `command`; streamable HTTP uses `url`. `timeout_sec` bounds one `tools/call` (default 30s). Set `-1` to wait until the turn is cancelled. A silent stdio server otherwise pins the turn.
 
 ## Docs
 

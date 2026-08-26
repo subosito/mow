@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -45,5 +47,31 @@ func TestMCPToolUntrusted(t *testing.T) {
 	var tool mcpTool
 	if !tool.Untrusted() {
 		t.Fatal("mcp tools must frame output as untrusted")
+	}
+}
+
+func TestCallTimeoutDefaultAndOverride(t *testing.T) {
+	if (ServerConfig{}).callTimeout() != defaultMCPCallTimeout {
+		t.Fatalf("zero timeout_sec = %v want %v", ServerConfig{}.callTimeout(), defaultMCPCallTimeout)
+	}
+	if (ServerConfig{TimeoutSec: 5}).callTimeout() != 5*time.Second {
+		t.Fatalf("timeout_sec 5 = %v", ServerConfig{TimeoutSec: 5}.callTimeout())
+	}
+	if (ServerConfig{TimeoutSec: -1}).callTimeout() != 0 {
+		t.Fatalf("negative timeout_sec should disable extra deadline")
+	}
+}
+
+func TestWithCallTimeoutRespectsShorterParentDeadline(t *testing.T) {
+	parent, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	ctx, stop := withCallTimeout(parent, time.Second)
+	defer stop()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("expected deadline")
+	}
+	if time.Until(deadline) > 200*time.Millisecond {
+		t.Fatalf("parent deadline should win: until %v", time.Until(deadline))
 	}
 }

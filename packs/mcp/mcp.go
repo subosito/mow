@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -43,6 +44,10 @@ type ServerConfig struct {
 	Headers  map[string]string `yaml:"headers"`
 	Auth     AuthConfig        `yaml:"auth"`
 	MinTurns int               `yaml:"min_turns"`
+	// TimeoutSec bounds one tools/call (and HTTP RPC). 0 uses
+	// defaultMCPCallTimeout. Negative disables the extra deadline (turn
+	// cancel still applies). A silent stdio server otherwise waits forever.
+	TimeoutSec int `yaml:"timeout_sec"`
 }
 
 // Config is extensions.mcp. It accepts the ecosystem-standard mcpServers map
@@ -54,6 +59,32 @@ type Config struct {
 	MCPServers map[string]ServerConfig `yaml:"mcpServers"`
 	// Servers is the list form (each entry carries its own name).
 	Servers []ServerConfig `yaml:"servers"`
+}
+
+// defaultMCPCallTimeout is the tools/call bound when timeout_sec is omitted.
+// context-mode (and similar) omit their own timer and expect the host to
+// govern; without this, a silent stdio reply pins the turn until cancel.
+const defaultMCPCallTimeout = 30 * time.Second
+
+func (s ServerConfig) callTimeout() time.Duration {
+	if s.TimeoutSec < 0 {
+		return 0
+	}
+	if s.TimeoutSec == 0 {
+		return defaultMCPCallTimeout
+	}
+	return time.Duration(s.TimeoutSec) * time.Second
+}
+
+// withCallTimeout adds d unless ctx already has an earlier deadline.
+func withCallTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if d <= 0 {
+		return ctx, func() {}
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= d {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, d)
 }
 
 // resolved merges both config forms into a name-ordered server list.
@@ -296,7 +327,9 @@ func (r *reconnectingClient) callTool(ctx context.Context, name string, args jso
 	if c == nil {
 		return "", fmt.Errorf("mcp: %s: client unavailable (server restarting)", name)
 	}
-	out, err := c.callTool(ctx, name, args)
+	callCtx, cancel := withCallTimeout(ctx, r.cfg.callTimeout())
+	defer cancel()
+	out, err := c.callTool(callCtx, name, args)
 	if err == nil {
 		return out, nil
 	}
@@ -315,7 +348,9 @@ func (r *reconnectingClient) callTool(ctx context.Context, name string, args jso
 	if c == nil {
 		return "", fmt.Errorf("mcp: %s: client unavailable after reconnect", name)
 	}
-	return c.callTool(ctx, name, args)
+	retryCtx, retryCancel := withCallTimeout(ctx, r.cfg.callTimeout())
+	defer retryCancel()
+	return c.callTool(retryCtx, name, args)
 }
 
 func (r *reconnectingClient) Close() error {
@@ -642,7 +677,11 @@ func (t *mcpTool) Exec(ctx context.Context, args json.RawMessage) (string, error
 	if !ext.IsExtensionActive("mcp:"+t.prefix, ext.TurnFromContext(ctx)) {
 		return fmt.Sprintf("mcp server %q is dormant (min_turns not reached) or disabled", t.prefix), nil
 	}
-	return t.client.callTool(ctx, t.name, args)
+	out, err := t.client.callTool(ctx, t.name, args)
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		return "", fmt.Errorf("mcp %s: tools/call timed out", t.prefix)
+	}
+	return out, err
 }
 
 func sanitize(s string) string {
