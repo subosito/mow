@@ -20,7 +20,7 @@
 | [rpc-acp.md](rpc-acp.md) | Protocol | `mow rpc` ↔ ACP v1/v2 coverage; what stays first-party |
 | [review.md](review.md) | CI + reviewers | Shared review scope, two-pass workflow, `--reviewer` / `--verifier`, schema, formats, budgets, exit codes |
 | [sec.md](sec.md) | Security reviewers | `mow sec`: evidence fields, safety contract, evidence levels, future stages |
-| [workspace-profiles.md](workspace-profiles.md) | CLI operators | Named workspace topology, config, skills, instructions, and scoped peers |
+| [workspace-profiles.md](workspace-profiles.md) | CLI operators | `$MOW_HOME/workspaces/<name>/`: roots, overlay, skills, plugins, scoped ACP peers |
 
 Per-pack / per-extension one-pagers live next to the code (`ext/*/README.md`, `packs/*/README.md`). Longer how-tos stay here.
 
@@ -28,7 +28,7 @@ Per-pack / per-extension one-pagers live next to the code (`ext/*/README.md`, `p
 
 ```bash
 devenv shell -- just verify
-devenv shell -- just build    # → bin/mow
+devenv shell -- just build    # → bin/mow + bin/mow-full
 ```
 
 ## Name

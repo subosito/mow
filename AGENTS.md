@@ -1,199 +1,103 @@
 # AGENTS.md — working in the mow repo
 
-mow is a public library plus detachable extensions and optional hosts. The
-interactive TUI is the Rust `mowi` sibling project, which drives `mow rpc`;
-do not move TUI dependencies into the root module or `internal/engine`.
-
-mow is **standalone**: a Go workspace (root and packs modules), OpenAI/Anthropic-compatible HTTP. No other
-repo, gateway product, or host is required to build, test, or run. The Rust
-`mowi` sibling project is an external TUI that drives `mow rpc`.
+mow is a **standalone** Go workspace (root + `packs/`): OpenAI/Anthropic-compatible HTTP. No gateway or sibling repo is required to build, test, or run. The Rust **mowi** TUI is external and drives `mow rpc` — never import TUI deps into the root module or `internal/engine`.
 
 ## Build, test, run
 
-Requires **Go 1.26.4+** (pinned in `go.mod`). Prefer `devenv shell` (sets
-`GOTOOLCHAIN=local` from devenv.lock).
+Requires **Go 1.26.4+** (`go.mod`). Prefer `devenv shell` (`GOTOOLCHAIN=local`).
 
 ```bash
-devenv shell -- just verify    # vet + go test -race + build  — gate before commit
-devenv shell -- just verify-ci # same, but with no credentials and an empty MOW_HOME
+devenv shell -- just verify    # vet + go test -race + build — gate before commit
+devenv shell -- just verify-ci # same, no credentials, empty MOW_HOME
 devenv shell -- just build     # → bin/mow (lean) + bin/mow-full
-devenv shell -- just test      # fast inner loop (no race detector)
+devenv shell -- just test      # fast inner loop (no race)
 ```
 
-`just verify` mirrors `.github/workflows/ci.yml` step for step, so a green
-verify means a green CI. Run it **after changes and before commit** — the race
-detector is part of the gate because CI runs `-race`, and unsynchronized test
-helpers pass plain `go test`. If you add a CI step, add it to `verify` too.
+`just verify` matches `.github/workflows/ci.yml`. Race is part of the gate. Adding a CI step means adding it to `verify` too. **Before push: `just verify-ci`** — a developer `~/.mow` and API key make Engine tests pass locally and fail on CI. Packs that construct an Engine need `TestMain` pinning `MOW_HOME`, `MOW_API_KEY`, `MOW_MODEL` (`testutil.RunWithProvider`; see `packs/job`).
 
-**Before pushing, run `just verify-ci`.** CI has no API key and no `~/.mow`;
-a developer box has both, so tests that build an Engine can pass locally and
-fail on CI. `verify-ci` runs the suite with credentials unset and a throwaway
-`MOW_HOME`. Packs whose tests construct an Engine need a `TestMain` that pins
-`MOW_HOME`, `MOW_API_KEY`, and `MOW_MODEL` (use `testutil.RunWithProvider`; see
-`packs/job`).
+A test may not assume anything is listening on a port. Use `httptest.NewServer`. Format with `gofmt`. No Make/npm scripts.
 
-**A test may not assume anything is listening on a port.** CI runs no
-collector, database, or peer; a hard-coded `127.0.0.1:PORT` passes only on a
-box that happens to run that service. Start an `httptest.NewServer` and use
-its URL. `verify-ci` does not sandbox the network, so this one is on review.
+## Request flow
 
-No separate lint step. Format with `gofmt`. Do not invent Make/npm scripts.
+`Engine.Prompt` / `PromptWith`: config → tools + hooks → `internal/agent` loop → `internal/llm` → `internal/tools` + `internal/policy` jail → session JSONL. Start at **`internal/engine/engine.go`** + **`engine_prompt.go`**, then `internal/agent/loop.go`.
 
-## Request flow (spine)
-
-`Engine.Prompt` / `PromptWith`: load config → tools + hooks → agent loop
-(`internal/agent`) → LLM (`internal/llm`) → tools (`internal/tools`) with
-policy jail (`internal/policy`) → session JSONL. Study
-**`internal/engine/engine.go`** + **`internal/engine/engine_prompt.go`** first,
-then `internal/agent/loop.go`.
-
-**System prompt:** `llm.system_prefix` (optional identity) → optional default
-“You are mow” only if no prefix applies → harness rules (always) → project
-AGENTS/skills. See `internal/contextload/harness.go`.
-
-Events: `OnEvent` / `AddOnEvent` / `Emit` (`internal/engine/event.go`; `tool.end`
-includes `duration_ms`, `run.end` includes token usage). Inline `<think>` CoT is
-stripped by the loop (`internal/agent/think.go`) — committed history/sessions
-are always tag-free. Cancel: `Engine.Cancel()` (fail-fast mid tool batch). Tool
-batches: `policy.max_parallel_tools` (default 8).
+System prompt: `llm.system_prefix` → optional “You are mow” if no prefix → harness rules (always) → this file / skills. See `internal/contextload/harness.go`. Events: `internal/engine/event.go`. Cancel: `Engine.Cancel()`. Tool batches: `policy.max_parallel_tools` (default 8). CoT `<think>` is stripped; committed history is tag-free.
 
 ## Layout
 
-Source of truth for modules and public/internal: [docs/architecture.md](docs/architecture.md).
+Source of truth: [docs/architecture.md](docs/architecture.md).
 
 | Path | Role |
 |------|------|
-| `mow.go` | Thin public aliases/wrappers for `Engine`, `Run`, events, hooks, providers |
-| `internal/engine/` | Engine implementation and behavior tests |
+| `mow.go` | Public aliases: `Engine`, `Run`, events, hooks, providers |
+| `internal/engine/` | Engine + behavior tests |
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
-| `extcfg/` | Decode `extensions.<name>` (shared by extensions and packs) |
-| `testutil/` | Shared test helpers (e.g. pin `$MOW_HOME` for `TestMain`) |
-| `ext/` | Registration (`ext.go`) + core extensions: acp, rpc |
-| `packs/` | Optional packs (separate Go module `github.com/subosito/mow/packs`): focus, proc, cmdhook, mcp, media, goal, review, ops, job |
-| `internal/` | Implementation — **not** an integrator import surface |
-| `cmd/mow/` | Lean pack host; blank-imports the lean pack set |
-| `cmd/mow-full/` | Full pack host; blank-imports all packs |
-| `cmd/internal/mowcli/` | Shared CLI frontend (run/tty/trust/doctor/…) for both binaries |
-| `docs/` | architecture, harness, extensions |
+| `extcfg/` | Decode `extensions.<name>` |
+| `testutil/` | Shared tests (pin `$MOW_HOME`) |
+| `ext/` | Registration + core: acp, rpc |
+| `packs/` | Optional module `github.com/subosito/mow/packs` |
+| `internal/` | Implementation — **not** an integrator import |
+| `cmd/mow/` | Lean host |
+| `cmd/mow-full/` | Full host |
+| `cmd/internal/mowcli/` | Shared CLI |
 
-Public vs internal: if integrators need something in `internal/`, re-export —
-do not tell them to import `internal/`.
+If integrators need something in `internal/`, re-export — do not tell them to import `internal/`.
 
 ## Packs
 
-- `cmd/mow` (lean) blank-imports acp, rpc, focus, proc, cmdhook, mcp.
-- `cmd/mow-full` adds goal, job, ops, review, media. Both share `cmd/internal/mowcli`.
-- Core extensions live in `ext/` (root module): acp, rpc.
-- Optional packs live in `packs/` (separate Go module
-  `github.com/subosito/mow/packs`): focus, proc, cmdhook, mcp, media, goal,
-  review, ops, job.
-- `go.work` wires the root module and `packs/` together for local dev.
-- Remove import → subcommand/tools gone.
-- Extension config: `extensions.<name>` via `Engine.Extension` or `extcfg.DecodeSection`.
-- MCP only activates when configured (no config → no process).
+- Lean (`cmd/mow`): acp, rpc, focus, proc, cmdhook, mcp.
+- Full adds goal, job, ops, review, media. Both use `cmd/internal/mowcli`.
+- Core extensions in `ext/` (root module); optional packs in `packs/` (`go.work` for local dev).
+- Remove import → subcommand/tools gone. Config: `extensions.<name>` via `Engine.Extension` or `extcfg.DecodeSection`. MCP only if configured.
 
 ## Conventions
 
-- Match surrounding style; scoped diffs; no drive-by refactors.
-- Test non-trivial logic; table-driven like nearest `*_test.go`.
-- Prefer stdlib; no new deps without a clear need.
+Match surrounding style; scoped diffs; no drive-by refactors. Test non-trivial logic (table-driven like nearest `*_test.go`). Prefer stdlib; no new deps without a clear need.
 
 ## Public samples (OSS)
 
-This module is **open source**. Anything a stranger reads on GitHub must not
-imply a private fleet, host product, or in-house gateway.
+Strangers on GitHub must not infer a private fleet, host product, or in-house gateway.
 
 | Do | Don't |
 |----|--------|
-| Current public provider ids (`gpt-5-mini`, `gpt-5.4-mini`, `deepseek-chat`, `claude-sonnet-4`, `gemini-2.5-flash`) | Stale ids (`gpt-4o`, `gpt-4.1`, …), host-only catalog nicknames, private revs, or peer names that only exist on the home fleet |
-| Generic roles (`peer-agent`, `api`, `gateway`, `embedders`, `host UIs`) | Private product binaries, TUI host names, ops profile names from the home fleet |
-| “OpenAI-compatible gateway”, “when the peer CLI accepts `--reasoning-effort`” | Naming a sibling monorepo product as if it were part of mow |
-| `http://127.0.0.1:PORT/v1`, `https://api.openai.com/v1` | Home-lab ports, real keys, `$HOME` paths to other repos |
-| `facet` / `efforts` described as optional **gateway** metadata | Documenting a specific private catalog product as required |
+| Current public ids (`gpt-5-mini`, `gpt-5.4-mini`, `deepseek-chat`, `claude-sonnet-4`, `gemini-2.5-flash`) | Stale ids, host-only nicknames, private revs, home-fleet peer names |
+| Generic roles (`peer-agent`, `api`, `gateway`, `embedders`, `host UIs`) | Private product binaries, TUI host names, ops profile names |
+| “OpenAI-compatible gateway”; `http://127.0.0.1:PORT/v1`, `https://api.openai.com/v1` | Sibling monorepos as part of mow; home-lab ports, real keys, `$HOME` paths to other repos |
+| `facet` / `efforts` as optional **gateway** metadata | A private catalog product as required |
 
-**Where this applies:** `docs/`, `README.md`, `internal/config/mow.yaml.example`,
-CLI help strings, public Go doc comments, and **test fixtures that look like
-examples** (ids in `*_test.go` that readers treat as “how to configure”).
-
-**OK to keep:** real public wire names (`openai-responses`, `anthropic-messages`),
-stdlib/third-party protocol brands the code actually speaks, and implementation
-comments that describe wire fields without advertising a private stack.
-
-**Before commit:** if the diff touches docs, examples, or fixture model ids,
-re-read for host/fleet names **and** stale model generations. Prefer current
-public ids (GPT-5 family, current Claude/Gemini/DeepSeek lines) over last year’s
-defaults. Behavior that supports a gateway prefix (e.g. Gemini-family heuristics)
-may stay; **wording and samples** stay generic and up to date.
+Applies to `docs/`, `README.md`, `internal/config/mow.yaml.example`, CLI help, public Go comments, and fixture ids that read as examples. OK: real wire names (`openai-responses`, `anthropic-messages`) and comments that describe wire fields. Before commit on docs/examples/fixtures: no host/fleet names, no stale model generations. Gateway-prefix heuristics may stay; wording stays generic and current.
 
 ## Commits
 
-**Always use [Conventional Commits](https://www.conventionalcommits.org/)** when
-creating a git commit in this repo (agents and humans). Informal subjects
-(`run`, `updates`, `wip`, `fix stuff`) are not acceptable.
-
-Format:
-
-```
-type(optional-scope): short imperative subject
-
-Optional body: why this change, not a file list.
-```
-
-| Rule | Detail |
-|------|--------|
-| Types | `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf` (pick one) |
-| Scope | Prefer when clear: `llm`, `agent`, `goal`, `job`, `engine`, `cli`, `mcp`, `rpc`, `tools`, `config`, pack name, … |
-| Subject | Imperative, lowercase after the colon, no trailing period, ~72 chars max |
-| Body | Blank line after subject; explain *why* when non-obvious |
-| Splits | One logical change per commit when practical; do not dump unrelated work into one subject |
-
-Examples:
+[Conventional Commits](https://www.conventionalcommits.org/): `type(optional-scope): short imperative subject` (no trailing period, ~72 chars). Types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`. Body after a blank line: *why*, not a file list. One logical change per commit. Informal subjects (`wip`, `fix stuff`) are not acceptable.
 
 ```
 feat(llm): add openai-responses wire
 fix(goal): raise max_steps on resume via --max-steps
-docs: document openai-responses in harness
-chore: remove obsolete review notes
 ```
 
-Gate: `devenv shell -- just verify` before commit when the change is non-trivial.
-Also apply **Public samples (OSS)** above when the commit includes docs or fixtures.
+Non-trivial change: `devenv shell -- just verify` before commit. Docs/fixtures also follow **Public samples** above.
 
 ## Security invariants (do not regress)
 
-- Default tools: **read, glob, grep** only. Write/shell require `--allow-write` /
-  `--allow-shell` or config.
-- Workspace path jail on FS tools (optional `policy.extra_roots` / repeatable
-  `--extra-root` expand the jail — host/CLI only; fixed at `mow.New`).
-  The jail covers **FS tools only** — `bash` is not path-jailed. It is a
-  guardrail against accidental scope creep, not containment against a hostile
-  model; `--allow-shell` is the real trust decision. See
-  [docs/harness.md](docs/harness.md) § Extra FS roots.
-- Workspace trust is out-of-band (`$MOW_HOME/trusted`, `mow trust`) — never a
-  marker inside the workspace. Project config may not set credentials,
-  `llm.base_url`, headers, `session.dir`, power tools, or `extra_roots`.
-- No secrets in logs. Config paths under `$MOW_HOME` (default `~/.mow`).
-- Optional HTTP attribution labels: `X-Mow-*` (ignored by plain providers).
+- Default tools: **read, glob, grep**. Write/shell need `--allow-write` / `--allow-shell` or config.
+- FS tools are path-jailed (`policy.extra_roots` / `--extra-root` expand the jail — host/CLI only; fixed at `mow.New`). **`bash` is not path-jailed**; `--allow-shell` is the trust decision. See [docs/harness.md](docs/harness.md) § Extra FS roots.
+- Workspace trust is out-of-band (`$MOW_HOME/trusted`, `mow trust`) — never a marker in the repo. Project config may not set credentials, `llm.base_url`, headers, `session.dir`, power tools, or `extra_roots`.
+- No secrets in logs. Config under `$MOW_HOME` (default `~/.mow`). Optional `X-Mow-*` labels (ignored by plain providers).
 
 ## Gotchas
 
 - Always `devenv shell --` for go/just when `devenv.nix` is present.
-- Engine split under `internal/engine/`: `engine.go` (New), `engine_prompt.go`,
-  `engine_model.go`, `engine_control.go`, `engine_adapt.go`, `run.go` (Options/Run).
-- The root module stays headless and lean. The Rust `mowi` sibling project is
-  the interactive UI and drives `mow rpc`; never import TUI dependencies into
-  the root module.
-- Tests isolate `$MOW_HOME` via `TestMain` + `github.com/subosito/mow/testutil`;
-  do not rely on the developer’s real `~/.mow`.
+- Engine split: `engine.go` (New), `engine_prompt.go`, `engine_model.go`, `engine_control.go`, `engine_adapt.go`, `run.go` (Options/Run).
+- Tests isolate `$MOW_HOME` via `TestMain` + `github.com/subosito/mow/testutil` — not the real `~/.mow`.
 
 ## Docs map
 
 | Doc | Read when |
 |-----|-----------|
-| [docs/architecture.md](docs/architecture.md) | Public/internal, LLM endpoint model |
-| [docs/embedding.md](docs/embedding.md) | Embedding in Go: options, events, custom tools/providers, hooks, sessions |
+| [docs/architecture.md](docs/architecture.md) | Public/internal, LLM endpoint |
+| [docs/embedding.md](docs/embedding.md) | Embed in Go: options, events, tools, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config, sessions |
 | [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP |
-| [docs/rpc-acp.md](docs/rpc-acp.md) | `mow rpc` ↔ ACP coverage; dual-run notes |
-| [docs/review.md](docs/review.md) | `mow-full review` / `mow-full sec`: two-pass workflow, `--reviewer` / `--verifier`, report schema, exit codes |
-exit codes |
+| [docs/rpc-acp.md](docs/rpc-acp.md) | `mow rpc` ↔ ACP |
+| [docs/review.md](docs/review.md) | `mow-full review` / `sec`: two-pass, flags, schema, exit codes |

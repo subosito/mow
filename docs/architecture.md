@@ -52,7 +52,7 @@ one-way: the packs module depends on the root public API, never the reverse.
 | `internal/agent` | Tool-calling loop, compact, steer, stall handling |
 | `internal/llm` | HTTP wires, model catalog/filtering, effort/native tools |
 | `internal/tools` | Built-in FS/shell tools |
-| `internal/config` | YAML/env config and workspace sets |
+| `internal/config` | YAML/env config and workspace profiles |
 | `internal/policy` | Path jail and power-tool gates |
 | `internal/session` | JSONL sessions and context archive |
 | `internal/contextload` | Project instructions and skills |
@@ -135,3 +135,4 @@ use the workspace/extra-root jail; shell is a separate explicit trust decision.
 - [embedding.md](embedding.md) — public API and custom integrations
 - [harness.md](harness.md) — loop, tools, config, sessions
 - [extensions.md](extensions.md) — extension and pack details
+- [workspace-profiles.md](workspace-profiles.md) — `$MOW_HOME/workspaces/<name>/`

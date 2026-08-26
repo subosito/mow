@@ -18,7 +18,7 @@ No pack CLI, no tools, no slash commands. Hooks re-register on every `BeforeNew`
 Host-owned Agent Plugins (`$MOW_HOME/plugins`, workspace profile `plugins/`)
 that ship `hooks/hooks.json` register automatically. YAML of the same plugin
 name or root wins so PostToolUse does not run twice. Project `.mow/plugins` is
-skills-only.
+skills-only. When unset, hooks also receive `CLAUDE_CONFIG_DIR=$MOW_HOME`.
 
 Supported hook events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`, `PreCompact`. Tool names are translated to Claude conventions for matchers (`read` → `Read`, `mcp_srv_x` → `mcp__srv_x`). A PreToolUse `permissionDecision` of `"ask"` is treated as deny.
 
