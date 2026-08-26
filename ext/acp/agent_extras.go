@@ -3,6 +3,8 @@ package acp
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/subosito/mow"
 )
 
 // extraCapabilities is advertised under agentCapabilities.experimental so a
@@ -10,11 +12,15 @@ import (
 // ACP clients ignore unknown capability keys.
 func extraCapabilities() map[string]any {
 	return map[string]any{
-		"steer":   true,
-		"compact": true,
-		"rewind":  true,
-		"skill":   true,
-		"plugin":  true,
+		"steer":      true,
+		"compact":    true,
+		"rewind":     true,
+		"skill":      true,
+		"plugin":     true,
+		"transcript": true,
+		"status":     true,
+		"context":    true,
+		"proc":       true,
 	}
 }
 
@@ -22,6 +28,7 @@ func extraMethodNames() []string {
 	return []string{
 		"steer", "compact", "rewind",
 		"skill.list", "skill.activate", "plugin.list",
+		"transcript", "status", "context", "proc.list",
 	}
 }
 
@@ -155,7 +162,118 @@ func (a *agentServer) handleExtra(req request) bool {
 			Result: map[string]any{"plugins": names, "items": items},
 		})
 		return true
+	case "transcript":
+		turns := a.eng.Transcript()
+		msgs := make([]map[string]any, 0, len(turns))
+		for _, m := range turns {
+			role := strings.ToLower(strings.TrimSpace(m.Role))
+			if role != "user" && role != "assistant" {
+				continue
+			}
+			msgs = append(msgs, map[string]any{
+				"role":    role,
+				"content": m.Content,
+			})
+		}
+		a.write(response{
+			JSONRPC: "2.0", ID: req.ID,
+			Result: map[string]any{"messages": msgs},
+		})
+		return true
+	case "status":
+		st := a.eng.Status()
+		out := map[string]any{
+			"busy":        st.Busy,
+			"allow_write": st.AllowWrite,
+			"allow_shell": st.AllowShell,
+		}
+		if st.RunID != "" {
+			out["run_id"] = st.RunID
+		}
+		if st.SessionID != "" {
+			out["session_id"] = st.SessionID
+		}
+		if st.Workspace != "" {
+			out["workspace"] = st.Workspace
+		}
+		if st.Model != "" {
+			out["model"] = st.Model
+		}
+		if st.Wire != "" {
+			out["wire"] = st.Wire
+		}
+		out["extra_roots"] = extraRootRows(a.eng)
+		out["procs"] = procRows(a.eng)
+		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: out})
+		return true
+	case "context":
+		used := a.eng.ContextTokens()
+		lim := a.eng.Limits()
+		if lim.ContextWindow > 0 && used > lim.ContextWindow {
+			used = (used + 2) / 4
+			if used > lim.ContextWindow {
+				used = lim.ContextWindow
+			}
+		}
+		out := map[string]any{"tokens": used}
+		if lim.ContextWindow > 0 {
+			out["context_window"] = lim.ContextWindow
+			out["remaining"] = max(lim.ContextWindow-used, 0)
+			out["percent"] = float64(used) / float64(lim.ContextWindow) * 100
+		}
+		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: out})
+		return true
+	case "proc.list":
+		a.write(response{
+			JSONRPC: "2.0", ID: req.ID,
+			Result: map[string]any{"items": procRows(a.eng)},
+		})
+		return true
 	default:
 		return false
 	}
+}
+
+func extraRootRows(eng *mow.Engine) []map[string]any {
+	rows := make([]map[string]any, 0)
+	if eng == nil {
+		return rows
+	}
+	ro := map[string]bool{}
+	for _, p := range eng.ExtraRootsReadOnly() {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		ro[p] = true
+		rows = append(rows, map[string]any{"path": p, "read_only": true})
+	}
+	for _, p := range eng.ExtraRoots() {
+		p = strings.TrimSpace(p)
+		if p == "" || ro[p] {
+			continue
+		}
+		rows = append(rows, map[string]any{"path": p, "read_only": false})
+	}
+	return rows
+}
+
+func procRows(eng *mow.Engine) []map[string]any {
+	rows := make([]map[string]any, 0)
+	if eng == nil {
+		return rows
+	}
+	list, err := mow.ProcList(mow.ProcStoreDir(mow.Home(), eng.Workspace()))
+	if err != nil {
+		return rows
+	}
+	for _, p := range list {
+		rows = append(rows, map[string]any{
+			"id":    p.ID,
+			"pid":   p.PID,
+			"alive": p.Alive,
+			"log":   p.Log,
+		})
+	}
+	return rows
 }

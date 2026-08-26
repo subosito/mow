@@ -493,10 +493,12 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		}
 
 		// Stream main-model tokens + acp_delegate peer activity to the client.
+		var streamed atomic.Bool
 		writeAgentText := func(text string) {
 			if text == "" {
 				return
 			}
+			streamed.Store(true)
 			a.write(notification{
 				JSONRPC: "2.0",
 				Method:  "session/update",
@@ -614,8 +616,8 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			return
 		}
 		// If no streaming happened, emit full text as one chunk for clients that only listen to updates.
-		if res.Text != "" {
-			// already streamed; still OK
+		if !streamed.Load() && res.Text != "" {
+			writeAgentText(res.Text)
 		}
 		a.write(response{
 			JSONRPC: "2.0", ID: req.ID,

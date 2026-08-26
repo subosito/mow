@@ -36,6 +36,7 @@ Status:
 - **same** — both sides can do the job
 - **shape** — same job, different envelope
 - **rpc** — first-party only; keep on RPC
+- **extra** — optional method on the same `mow acp` connection; RPC still has it
 - **acp** — editor/interop only; do not copy into RPC
 - **steal** — ACP shape is cleaner; fold into RPC additively (epoch 1)
 
@@ -51,20 +52,20 @@ Status:
 | Thoughts | `event` `loop.reasoning` | `agent_thought_chunk` | same | shape |
 | Tool chrome | `harness.tool.start` / `.end` | `tool_call` / `tool_call_update` | omit/`null`/value merge | steal |
 | Cancel | `cancel` request `{ok}` | `session/cancel` notification | same | shape |
-| Usage / ctx chip | `prompt.usage` + `context` | often omitted; we emit `usage` + `usage_update` | first-class `usage_update` | steal |
+| Usage / ctx chip | `prompt.usage` + `context` | `usage` + `usage_update`; extra `context` | first-class `usage_update` | steal |
 | Ask / auto | `perm.set` | `session/set_mode` + `configOptions` | `configOptions` `mode` | shape |
 | Permission prompt | `perm.ask` + `perm.decide` | agent→client `session/request_permission` | same + `title` / `subject` | steal |
 | Always-allow | `decision: always` (this tool, session) | `allow_always` option | `allow_always` / `reject_always` | same |
 | Slash list | `slash.list` (name, exclusive, aliases) | `available_commands_update` | same | shape |
 | Slash run | `slash` method (`help` without Run, `{title,body,error}`) | `"/name …"` inside `session/prompt` | same | **rpc** |
 | Exclusive while busy | `slash` refuses | not specified | not specified | **rpc** |
-| Steer | `steer` | — | — | **rpc** |
+| Steer | `steer` | — | — | **extra** |
 | Ephemeral `/btw` | `prompt.ephemeral` | — | — | **rpc** |
-| Compact / rewind | `compact`, `rewind` | — | — | **rpc** |
+| Compact / rewind | `compact`, `rewind` | — | — | **extra** |
 | Model / effort | `model.*`, `effort.*` | `configOptions` + `set_config_option` | same | steal |
-| Skills / plugins | `skill.*`, `plugin.list` | — | — | **rpc** |
-| Extra roots | `status`/`session` `{path,read_only}` | spawn cwd only | `additionalDirectories` (no ro/rw) | **rpc** |
-| Live status | `status` (`busy`, `ask_mode`, `pending_perm`, `procs`) | — | `state_update` | steal |
+| Skills / plugins | `skill.*`, `plugin.list` | — | — | **extra** |
+| Extra roots | `status`/`session` `{path,read_only}` | spawn cwd only | `additionalDirectories` (no ro/rw) | **extra** |
+| Live status | `status` (`busy`, `ask_mode`, `pending_perm`, `procs`) | extra `status` / `proc.list` | `state_update` | **extra** |
 | UI config | `extension.config` `{name:mowi}` | not an agent concern | not an agent concern | **rpc** |
 | Goal / delegate events | `graph.goal.*`, `harness.delegate.*` | `plan` / thought / `_meta` | `plan_update` | **rpc** |
 | `@path` attachments | host jail + `attached[]` | content blocks (image/resource) | same | shape |
@@ -86,8 +87,10 @@ It should **not** require steer, rewind, exclusive slash, extra-root chrome,
 or `extension.config` of a generic ACP client. Those are optional methods on
 the same `mow acp` connection (`agentCapabilities.experimental` /
 `agentCapabilities.extras`: `steer`, `compact`, `rewind`, `skill.list`,
-`skill.activate`, `plugin.list`). Power clients feature-detect; unknown
-methods stay `-32601`. RPC still exposes them until mowi speaks ACP.
+`skill.activate`, `plugin.list`, `transcript`, `status`, `context`,
+`proc.list`). Power clients feature-detect; unknown methods stay `-32601`.
+RPC still exposes them until mowi speaks ACP. Theme / `extension.config`
+stay host-local. Exclusive slash and ephemeral prompt stay RPC-only.
 
 ## What RPC steals (epoch 1, additive)
 
