@@ -186,6 +186,9 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 					"auth": map[string]any{
 						"logout": map[string]any{},
 					},
+					// Optional mow extras (same connection). Generic clients ignore.
+					"experimental": extraCapabilities(),
+					"extras":       extraMethodNames(),
 				},
 				"agentInfo": map[string]any{
 					"name": a.name, "version": a.ver,
@@ -838,6 +841,9 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		t.kill()
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
 	default:
+		if a.handleExtra(req) {
+			return
+		}
 		a.write(response{
 			JSONRPC: "2.0", ID: req.ID,
 			Error: &rpcError{Code: errMethod, Message: "method not found: " + req.Method},

@@ -1,8 +1,17 @@
 # `mow rpc` ↔ ACP coverage
 
 How the native host protocol (`mow rpc`, epoch 1) maps onto Agent Client
-Protocol v1 (stable) and v2 (draft). This is a comparison, not a cutover
-plan. Mowi stays on RPC. Editors and `acp_delegate` peers stay on ACP.
+Protocol v1 (stable) and v2 (draft).
+
+**Direction:** ACP is the public host protocol (editors, desktop, third-party
+clients). RPC is a first-party dialect for mowi until mowi is an ACP client.
+Do not grow new product on RPC-only. Leftovers that ACP does not specify
+(steer, compact, rewind, skills/plugins, extra-root ro/rw) belong as
+**optional methods on the same `mow acp` connection**, capability-gated —
+not a second process and not `_mow/*` as a parallel product.
+
+Mowi should see ACP + those extras on one JSON-RPC session. Generic ACP
+clients see only the standard.
 
 Sources: [ACP v1 overview](https://agentclientprotocol.com/protocol/v1/overview),
 [v2 overview](https://agentclientprotocol.com/protocol/v2/overview),
@@ -73,8 +82,12 @@ should assert:
 4. Linked slash names appear (`slash.list` vs `available_commands_update`).
 5. Usage numbers are present on both wires.
 
-It should **not** assert steer, rewind, exclusive slash, extra-root chrome,
-or `extension.config` on ACP. Those stay RPC.
+It should **not** require steer, rewind, exclusive slash, extra-root chrome,
+or `extension.config` of a generic ACP client. Those are optional methods on
+the same `mow acp` connection (`agentCapabilities.experimental` /
+`agentCapabilities.extras`: `steer`, `compact`, `rewind`, `skill.list`,
+`skill.activate`, `plugin.list`). Power clients feature-detect; unknown
+methods stay `-32601`. RPC still exposes them until mowi speaks ACP.
 
 ## What RPC steals (epoch 1, additive)
 
