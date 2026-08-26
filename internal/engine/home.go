@@ -22,8 +22,24 @@ func PluginsDir() string {
 	return config.PluginsDir()
 }
 
-// PluginInfo is one Agent Plugin (plugin.json + optional skills/).
+// PluginInfo is one Agent Plugin (plugin.json + optional skills/hooks/MCP).
 type PluginInfo = contextload.PluginInfo
+
+// PluginMCPServer is one mcpServers entry from a plugin manifest.
+type PluginMCPServer = contextload.PluginMCPServer
+
+// ListPlugins walks plugin roots (each child dir with plugin.json).
+func ListPlugins(roots []string) []PluginInfo {
+	return contextload.ListPlugins(roots)
+}
+
+// HostOwnedPluginRoots is $MOW_HOME/plugins plus workspace-profile plugins/
+// directories derived from overlay config paths (the overlay path is
+// recognized even when config.yaml is absent). Project .mow/plugins is not
+// included.
+func HostOwnedPluginRoots(home string, configPaths []string) []string {
+	return contextload.HostOwnedPluginRoots(home, configPaths)
+}
 
 // AvailableSkillNames returns the sorted, deduplicated skill folder names
 // that contain a SKILL.md entry point across the given directories. It lists

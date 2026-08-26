@@ -158,21 +158,31 @@ func (p Profile) HasPlugins() bool {
 	return err == nil && fi.IsDir()
 }
 
-// OverlayConfigPaths prepends the profile config overlay (when present) to
-// explicit config paths for callers that only have a path list (e.g.
-// ext.BeforeNew → RegisterFromConfig). With Load's file order
-// (global < paths), putting the profile first among paths yields:
+// OverlayConfigPaths prepends the profile config overlay path to explicit
+// config paths for callers that only have a path list (e.g. ext.BeforeNew →
+// RegisterFromConfig). The overlay path is included even when the file is
+// absent so path-only plugin discovery can still see
+// $MOW_HOME/workspaces/<name>/plugins/. Loaders must skip missing files.
+// With Load's file order (global < paths), putting the profile first among
+// paths yields:
 //
 //	global < profile config.yaml < explicit --config paths
 //
 // Prefer LoadWithProfile(name, explicitPaths) when the profile name is known;
 // this helper exists for path-only hooks that cannot pass a profile name.
 func (p Profile) OverlayConfigPaths(paths []string) []string {
-	if !p.HasConfig() {
+	cfg := p.ConfigPath()
+	if strings.TrimSpace(cfg) == "" {
 		return paths
 	}
+	want := filepath.Clean(cfg)
+	for _, existing := range paths {
+		if filepath.Clean(strings.TrimSpace(existing)) == want {
+			return paths
+		}
+	}
 	out := make([]string, 0, len(paths)+1)
-	out = append(out, p.ConfigPath())
+	out = append(out, cfg)
 	return append(out, paths...)
 }
 

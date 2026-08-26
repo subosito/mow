@@ -194,3 +194,28 @@ func TestOverlayConfigPathsOrdersProfileBeforeExplicit(t *testing.T) {
 		t.Fatalf("second path should be explicit, got %q", paths[1])
 	}
 }
+
+func TestOverlayConfigPathsIncludesMissingConfig(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv(config.EnvHome, home)
+	writeProfileConfig(t, home, "plugins-only", workspace, "")
+	p, found, err := config.LoadProfile("plugins-only")
+	if err != nil || !found {
+		t.Fatalf("LoadProfile: found=%v err=%v", found, err)
+	}
+	if p.HasConfig() {
+		t.Fatal("expected HasConfig=false")
+	}
+	paths := p.OverlayConfigPaths(nil)
+	if len(paths) != 1 {
+		t.Fatalf("paths=%v", paths)
+	}
+	if !strings.HasSuffix(paths[0], filepath.Join("workspaces", "plugins-only", "config.yaml")) {
+		t.Fatalf("want profile overlay path, got %q", paths[0])
+	}
+	again := p.OverlayConfigPaths(paths)
+	if len(again) != 1 || again[0] != paths[0] {
+		t.Fatalf("duplicate overlay: %v", again)
+	}
+}

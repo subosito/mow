@@ -40,6 +40,7 @@ type CompactReport = engine.CompactReport
 type SessionInfo = engine.SessionInfo
 type SkillInfo = engine.SkillInfo
 type PluginInfo = engine.PluginInfo
+type PluginMCPServer = engine.PluginMCPServer
 
 type EventType = engine.EventType
 type CompactLayer = engine.CompactLayer
@@ -198,6 +199,16 @@ func WorkspaceTrusted(workspace string) bool        { return engine.WorkspaceTru
 func TrustWorkspace(workspace string) error         { return engine.TrustWorkspace(workspace) }
 func RevokeWorkspaceTrust(workspace string) error   { return engine.RevokeWorkspaceTrust(workspace) }
 func TrustedWorkspaces() []string                   { return engine.TrustedWorkspaces() }
+
+// ListPlugins walks plugin roots (each child dir with plugin.json).
+func ListPlugins(roots []string) []PluginInfo { return engine.ListPlugins(roots) }
+
+// HostOwnedPluginRoots is $MOW_HOME/plugins plus workspace-profile plugins/
+// directories derived from overlay config paths (the overlay path is
+// recognized even when config.yaml is absent).
+func HostOwnedPluginRoots(home string, configPaths []string) []string {
+	return engine.HostOwnedPluginRoots(home, configPaths)
+}
 
 // SplitExtraRootSpec parses an extra-root spec ("PATH", "PATH:ro", "PATH:rw").
 func SplitExtraRootSpec(raw string) (path string, readOnly bool) {

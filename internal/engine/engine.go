@@ -138,7 +138,9 @@ func New(opt Options) (*Engine, error) {
 	//
 	// Resolve the profile before pre-New extension setup so its config.yaml
 	// participates in config-driven registration (e.g. acp_delegate peers).
-	// Path-only BeforeNew hooks receive the profile via OverlayConfigPaths;
+	// Path-only BeforeNew hooks receive the profile via OverlayConfigPaths
+	// (the overlay path is passed even when config.yaml is absent, so
+	// plugin MCP/hooks still discover $MOW_HOME/workspaces/<name>/plugins/).
 	// when LoadUserConfig, the global config path is prepended so DecodeSection
 	// / RegisterFromConfig see host state without each pack re-opening Home.
 	// Main load precedence (LoadUserConfig true):
@@ -157,7 +159,7 @@ func New(opt Options) (*Engine, error) {
 		}
 	}
 	beforePaths := append([]string(nil), opt.ConfigPaths...)
-	if activeProfile != nil && activeProfile.HasConfig() {
+	if activeProfile != nil {
 		beforePaths = activeProfile.OverlayConfigPaths(beforePaths)
 	}
 	if opt.LoadUserConfig {
