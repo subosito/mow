@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/subosito/mow"
-	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/internal/sandbox"
 )
 
@@ -41,8 +40,6 @@ type EngineFlags struct {
 	Continue    bool
 	Stream      bool
 	Verbose     bool
-	EnableExt   []string // repeatable --enable-ext
-	DisableExt  []string // repeatable --disable-ext
 	Skills      []string // repeatable --skill
 }
 
@@ -71,8 +68,6 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.BoolVar(&f.Continue, "continue", false, "resume latest session")
 	fs.BoolVar(&f.Stream, "stream", false, "stream token deltas")
 	fs.BoolVar(&f.Verbose, "verbose", false, "debug lifecycle logs (run/tool) on stderr")
-	fs.Var((*stringList)(&f.EnableExt), "enable-ext", "force enable extension instance by name (repeatable)")
-	fs.Var((*stringList)(&f.DisableExt), "disable-ext", "force disable extension instance by name (repeatable)")
 	fs.Var((*stringList)(&f.Skills), "skill", "load a named skill unconditionally regardless of selector (repeatable; use `/skill` in the TUI to list or activate)")
 }
 
@@ -249,12 +244,6 @@ func (f *EngineFlags) Validate() error {
 func (f *EngineFlags) NewEngine() (*mow.Engine, error) {
 	if err := f.Validate(); err != nil {
 		return nil, err
-	}
-	for _, name := range f.EnableExt {
-		ext.SetExtensionEnabled(name, true)
-	}
-	for _, name := range f.DisableExt {
-		ext.SetExtensionEnabled(name, false)
 	}
 	return mow.NewHarness(f.Options())
 }
