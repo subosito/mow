@@ -47,6 +47,10 @@ func (a *agentServer) preTool(ctx context.Context, e mow.PreToolEvent) (mow.PreT
 	}
 	name := strings.ToLower(strings.TrimSpace(e.Name))
 
+	if a.sessionApprovals() == ApprovalAlways {
+		return mow.PreToolDecision{}, nil
+	}
+
 	a.mu.Lock()
 	if a.alwaysAllow[name] {
 		a.mu.Unlock()

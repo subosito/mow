@@ -309,17 +309,20 @@ func TestSessionNewAdvertisesModelConfig(t *testing.T) {
 	if res.SessionID == "" || len(res.ConfigOptions) == 0 {
 		t.Fatalf("%+v", res)
 	}
-	if len(res.ConfigOptions) < 3 {
-		t.Fatalf("want mode+model+effort, got %v", res.ConfigOptions)
+	if len(res.ConfigOptions) < 4 {
+		t.Fatalf("want mode+approvals+model+effort, got %v", res.ConfigOptions)
 	}
 	if res.ConfigOptions[0]["id"] != "mode" || res.ConfigOptions[0]["currentValue"] != "code" {
 		t.Fatalf("mode option=%v", res.ConfigOptions[0])
 	}
-	if res.ConfigOptions[1]["id"] != "model" || res.ConfigOptions[1]["currentValue"] != "m1" {
-		t.Fatalf("model option=%v", res.ConfigOptions[1])
+	if res.ConfigOptions[1]["id"] != "approvals" || res.ConfigOptions[1]["currentValue"] != "prompt" {
+		t.Fatalf("approvals option=%v", res.ConfigOptions[1])
 	}
-	if res.ConfigOptions[2]["id"] != "effort" || res.ConfigOptions[2]["category"] != "thought_level" {
-		t.Fatalf("effort option=%v", res.ConfigOptions[2])
+	if res.ConfigOptions[2]["id"] != "model" || res.ConfigOptions[2]["currentValue"] != "m1" {
+		t.Fatalf("model option=%v", res.ConfigOptions[2])
+	}
+	if res.ConfigOptions[3]["id"] != "effort" || res.ConfigOptions[3]["category"] != "thought_level" {
+		t.Fatalf("effort option=%v", res.ConfigOptions[3])
 	}
 	msg, err = cl.call(ctx, "session/set_config_option", map[string]any{
 		"sessionId": res.SessionID,

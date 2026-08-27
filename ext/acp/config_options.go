@@ -11,9 +11,10 @@ import (
 
 // ACP session config option ids (session/set_config_option configId).
 const (
-	configIDModel  = "model"
-	configIDMode   = "mode"
-	configIDEffort = "effort"
+	configIDModel     = "model"
+	configIDMode      = "mode"
+	configIDEffort    = "effort"
+	configIDApprovals = "approvals"
 )
 
 // modelConfigMax is the max catalog entries advertised in the picker.
@@ -29,7 +30,7 @@ func (a *agentServer) sessionConfigOptions(ctx context.Context, mode string) []m
 	}
 	// Refresh catalog so efforts match the gateway (best-effort).
 	_, _ = a.eng.ListModels(ctx)
-	out := []map[string]any{modeConfigOption(mode)}
+	out := []map[string]any{modeConfigOption(mode), approvalsConfigOption(a.sessionApprovals())}
 	if opt := a.modelConfigOption(ctx); opt != nil {
 		out = append(out, opt)
 	}
@@ -171,6 +172,32 @@ func modeConfigOption(current string) map[string]any {
 	}
 }
 
+func approvalsConfigOption(current string) map[string]any {
+	if current != ApprovalPrompt && current != ApprovalAlways {
+		current = ApprovalPrompt
+	}
+	return map[string]any{
+		"id":           configIDApprovals,
+		"name":         "Approvals",
+		"description":  "Prompt = confirm each power tool; Always = skip the overlay (yolo). Distinct from mode.",
+		"category":     "approvals",
+		"type":         "select",
+		"currentValue": current,
+		"options": []map[string]any{
+			{
+				"value":       ApprovalPrompt,
+				"name":        "Prompt",
+				"description": "Ask before write/edit/bash/proc",
+			},
+			{
+				"value":       ApprovalAlways,
+				"name":        "Always",
+				"description": "Skip the overlay; still gated by --allow-write / --allow-shell",
+			},
+		},
+	}
+}
+
 func (a *agentServer) modelConfigOption(ctx context.Context) map[string]any {
 	eng := a.eng
 	// Lean id for picker (AG tiers live in effort, not model name).
@@ -302,6 +329,41 @@ func (a *agentServer) applyModelConfig(ctx context.Context, value string) error 
 	return nil
 }
 
+func (a *agentServer) sessionApprovals() string {
+	if a == nil {
+		return ApprovalPrompt
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	sid := a.activeSID
+	if sid == "" {
+		for id := range a.sessions {
+			sid = id
+			break
+		}
+	}
+	if s := a.sessions[sid]; s != nil && s.approvals != "" {
+		return s.approvals
+	}
+	return ApprovalPrompt
+}
+
+func (a *agentServer) applyApprovalsConfig(sessionID, value string) error {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value != ApprovalPrompt && value != ApprovalAlways {
+		return fmt.Errorf("approvals must be prompt or always")
+	}
+	sid := strings.TrimSpace(sessionID)
+	a.mu.Lock()
+	if a.sessions[sid] == nil {
+		a.sessions[sid] = &acpSession{mode: ModeCode, approvals: value}
+	} else {
+		a.sessions[sid].approvals = value
+	}
+	a.mu.Unlock()
+	return nil
+}
+
 func (a *agentServer) applyModeConfig(sessionID, mode string) error {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode != ModeAsk && mode != ModeCode {
@@ -310,7 +372,7 @@ func (a *agentServer) applyModeConfig(sessionID, mode string) error {
 	sid := strings.TrimSpace(sessionID)
 	a.mu.Lock()
 	if a.sessions[sid] == nil {
-		a.sessions[sid] = &acpSession{mode: mode}
+		a.sessions[sid] = &acpSession{mode: mode, approvals: ApprovalPrompt}
 	} else {
 		a.sessions[sid].mode = mode
 	}

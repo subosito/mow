@@ -90,7 +90,8 @@ type agentServer struct {
 
 // acpSession is per-editor-session state (not the same as mow session JSONL id).
 type acpSession struct {
-	mode string // ModeAsk | ModeCode
+	mode      string // ModeAsk | ModeCode
+	approvals string // ApprovalPrompt | ApprovalAlways
 }
 
 func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
@@ -246,7 +247,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		sid := strings.TrimSpace(p.SessionID)
 		a.mu.Lock()
 		if a.sessions[sid] == nil {
-			a.sessions[sid] = &acpSession{mode: ModeCode}
+			a.sessions[sid] = &acpSession{mode: ModeCode, approvals: ApprovalPrompt}
 		}
 		mode := a.sessions[sid].mode
 		a.mu.Unlock()
@@ -462,7 +463,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		if s := a.sessions[p.SessionID]; s != nil && s.mode != "" {
 			mode = s.mode
 		} else if a.sessions[p.SessionID] == nil {
-			a.sessions[p.SessionID] = &acpSession{mode: ModeCode}
+			a.sessions[p.SessionID] = &acpSession{mode: ModeCode, approvals: ApprovalPrompt}
 		}
 		a.mu.Unlock()
 		defer func() {
@@ -845,6 +846,12 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				val = ""
 			}
 			if err := a.eng.SetEffort(val); err != nil {
+				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
+				return
+			}
+		case configIDApprovals:
+			val, _ := p.Value.(string)
+			if err := a.applyApprovalsConfig(sid, val); err != nil {
 				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
 				return
 			}

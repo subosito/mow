@@ -340,7 +340,7 @@ runs.
 
 The Rust `mowi` sibling project/repository is the interactive terminal host.
 It launches `mow acp` and renders sessions, streaming, model/effort pickers,
-tool approval, peer streams, and pack command results. `extensions.mowi.mow_bin`
+tool approval, peer streams, and pack command results. `mowi.mow_bin`
 in host `$MOW_HOME/config.yaml` selects `mow` vs `mowx` (CLI `--mow-bin`
 and `$MOW_BIN` win; project `.mow/` is never read for this). See that project
 for installation and release instructions.

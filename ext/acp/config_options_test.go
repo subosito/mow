@@ -122,12 +122,32 @@ func TestSessionConfigOptionsIncludesModeModelEffort(t *testing.T) {
 	if opts[0]["id"] != configIDMode || opts[0]["category"] != "mode" || opts[0]["currentValue"] != ModeAsk {
 		t.Fatalf("mode opt=%v", opts[0])
 	}
-	if opts[1]["id"] != configIDModel || opts[1]["category"] != "model" {
-		t.Fatalf("model opt=%v", opts[1])
+	if opts[1]["id"] != configIDApprovals || opts[1]["currentValue"] != ApprovalPrompt {
+		t.Fatalf("approvals opt=%v", opts[1])
+	}
+	if opts[2]["id"] != configIDModel || opts[2]["category"] != "model" {
+		t.Fatalf("model opt=%v", opts[2])
 	}
 	// Provider ListModels has no efforts → static effort selector.
-	if len(opts) < 3 || opts[2]["id"] != configIDEffort {
+	if len(opts) < 4 || opts[3]["id"] != configIDEffort {
 		t.Fatalf("want static effort option, got %v", opts)
+	}
+}
+
+func TestApplyApprovalsConfig(t *testing.T) {
+	a := &agentServer{sessions: map[string]*acpSession{}}
+	if err := a.applyApprovalsConfig("s1", "always"); err != nil {
+		t.Fatal(err)
+	}
+	if a.sessions["s1"].approvals != ApprovalAlways {
+		t.Fatalf("%v", a.sessions["s1"])
+	}
+	a.activeSID = "s1"
+	if a.sessionApprovals() != ApprovalAlways {
+		t.Fatalf("got %q", a.sessionApprovals())
+	}
+	if err := a.applyApprovalsConfig("s1", "nope"); err == nil {
+		t.Fatal("want error")
 	}
 }
 

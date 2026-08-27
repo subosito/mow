@@ -385,10 +385,10 @@ tools:
     - grep
     # - understand_image               # mowx + extensions.media.understand.image
     # - generate_image
+mowi:
+  # mow_bin: mowx                # host yaml only; TUI spawn (not project .mow/)
+  theme: catppuccin-mocha
 extensions:
-  mowi:
-    # mow_bin: mowx                # host yaml only; TUI spawn (not project .mow/)
-    theme: catppuccin-mocha
   media:
     understand:
       image: gpt-5-mini

@@ -166,6 +166,12 @@ func (u *sessionUpdate) UnmarshalJSON(data []byte) error {
 const (
 	ModeCode = "code" // full tools per engine policy
 	ModeAsk  = "ask"  // read-only tools for this session's prompts
+
+	// ApprovalPrompt asks the editor before each power tool (default).
+	// ApprovalAlways skips session/request_permission (yolo); still gated
+	// by --allow-write / --allow-shell. Distinct from session mode.
+	ApprovalPrompt = "prompt"
+	ApprovalAlways = "always"
 )
 
 func availableModes() []map[string]any {

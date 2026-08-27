@@ -143,13 +143,17 @@ skills:
 session:
   # dir: # default $MOW_HOME/sessions
 
+# TUI host config (mowi). Host $MOW_HOME only — not project .mow/.
+# mowi:
+#   mow_bin: mow                    # lean default; TUI spawn
+#   # mow_bin: mowx             # --mow-bin > $MOW_BIN > this > mow
+#   theme: catppuccin-mocha
+#   mode: code                      # ask | code
+#   approvals: prompt               # prompt | always (skip overlay / yolo)
+
 # Optional packs — config key extensions.<name>. Unused keys stay as yaml
 # blobs; lean mow ignores media/ops/job/review/goal.
 # extensions:
-#   mowi:                             # host $MOW_HOME only (not project .mow/)
-#     mow_bin: mow                    # lean default; TUI spawn
-#     # mow_bin: mowx             # --mow-bin > $MOW_BIN > this > mow
-#     theme: catppuccin-mocha
 #   media:                            # mowx (packs/media); ignored by lean mow
 #     understand:
 #       image: gpt-5-mini
