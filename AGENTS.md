@@ -1,6 +1,6 @@
 # AGENTS.md — working in the mow repo
 
-mow is a **standalone** Go workspace (root + `packs/`): OpenAI/Anthropic-compatible HTTP. No gateway or sibling repo is required to build, test, or run. The Rust **mowi** TUI is external and drives `mow rpc` — never import TUI deps into the root module or `internal/engine`.
+mow is a **standalone** Go workspace (root + `packs/`): OpenAI/Anthropic-compatible HTTP. No gateway or sibling repo is required to build, test, or run. The Rust **mowi** TUI is external and drives `mow acp` — never import TUI deps into the root module or `internal/engine`.
 
 ## Build, test, run
 
@@ -99,5 +99,5 @@ Non-trivial change: `devenv shell -- just verify` before commit. Docs/fixtures a
 | [docs/embedding.md](docs/embedding.md) | Embed in Go: options, events, tools, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config, sessions |
 | [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP |
-| [docs/rpc-acp.md](docs/rpc-acp.md) | `mow rpc` ↔ ACP |
+| [docs/rpc-acp.md](docs/rpc-acp.md) | `mow acp` + extras |
 | [docs/review.md](docs/review.md) | `mow-full review` / `sec`: two-pass, flags, schema, exit codes |

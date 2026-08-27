@@ -42,14 +42,14 @@ func runMow(t *testing.T, args ...string) (string, int) {
 	return "", -1
 }
 
-// The lean binary links acp, rpc, focus, proc, cmdhook, mcp — and must not
+// The lean binary links acp, focus, proc, cmdhook, mcp — and must not
 // show the mow-full packs in help.
 func TestLeanHelpListsLeanCommands(t *testing.T) {
 	output, code := runMow(t, "help")
 	if code != 0 {
 		t.Fatalf("exit code = %d\n%s", code, output)
 	}
-	for _, want := range []string{"mow acp", "mow rpc", "mow mcp", "mow proc"} {
+	for _, want := range []string{"mow acp", "mow mcp", "mow proc"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("lean help missing %q:\n%s", want, output)
 		}

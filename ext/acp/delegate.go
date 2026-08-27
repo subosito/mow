@@ -179,7 +179,7 @@ func retireShared(t *delegateTool, gen int) {
 }
 
 // releaseSharedPeers kills leftover acp_delegate subprocesses when the last
-// Engine for a BeforeNew generation closes (mow rpc/acp/run exit). Idle
+// Engine for a BeforeNew generation closes (mow acp/run exit). Idle
 // eviction only runs on the next tool call, so without this a peer can
 // reparent to PID 1 and live for hours.
 func releaseSharedPeers(gen int) {

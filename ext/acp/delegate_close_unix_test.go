@@ -63,7 +63,7 @@ func TestEngineCloseKillsPooledPeer(t *testing.T) {
 }
 
 // TestReleaseSharedPeersKillsPooledClient covers the RegisterFromConfig /
-// BeforeNew generation-release hook (mow rpc/acp/run exit).
+// BeforeNew generation-release hook (mow acp/run exit).
 func TestReleaseSharedPeersKillsPooledClient(t *testing.T) {
 	parent, child, c := startSleepingTree(t)
 	tool := &delegateTool{

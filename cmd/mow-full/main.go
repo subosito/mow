@@ -1,5 +1,5 @@
 // Command mow-full is the full stock binary: everything cmd/mow links
-// (acp, rpc, focus, proc, cmdhook, mcp) plus the remaining packs — goal,
+// (acp, focus, proc, cmdhook, mcp) plus the remaining packs — goal,
 // job, ops, review, media.
 //
 // The CLI itself lives in cmd/internal/mowcli; this file's only job is the
@@ -14,7 +14,6 @@ import (
 
 	// Linked extensions/packs — each registers tools/commands in init.
 	_ "github.com/subosito/mow/ext/acp"
-	_ "github.com/subosito/mow/ext/rpc"
 	_ "github.com/subosito/mow/packs/cmdhook"
 	_ "github.com/subosito/mow/packs/focus"
 	_ "github.com/subosito/mow/packs/goal"

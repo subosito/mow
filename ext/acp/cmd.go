@@ -45,7 +45,7 @@ func runCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "mow acp: %v\n", err)
 		return 1
 	}
-	defer eng.Close() // drop acp_delegate peers (same as mow rpc)
+	defer eng.Close() // drop acp_delegate peers
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := Agent(ctx, AgentOptions{Engine: eng, In: os.Stdin, Out: os.Stdout}); err != nil {

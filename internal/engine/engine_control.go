@@ -75,7 +75,7 @@ func retryInfoFromLLM(ri llm.RetryInfo) RetryInfo {
 }
 
 // SetOnEvent replaces all lifecycle event listeners with fn (or clears when nil).
-// Prefer AddOnEvent when multiple consumers share one Engine (e.g. host + mow rpc).
+// Prefer AddOnEvent when multiple consumers share one Engine (e.g. host + mow acp).
 func (e *Engine) SetOnEvent(fn EventFunc) {
 	if e == nil {
 		return

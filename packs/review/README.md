@@ -16,7 +16,7 @@ displays its RPC-driven results.
 | Surface | Name |
 |---|---|
 | CLI | `review`, `sec` (`mow review` / `mow sec`) |
-| Slash | `/review`, `/sec` (`mow tty` and the Rust `mowi` TUI over `mow rpc`) |
+| Slash | `/review`, `/sec` (`mow tty` and the Rust `mowi` TUI over `mow acp`) |
 
 No tools. Slash commands are exclusive (hosts refuse them mid-turn).
 

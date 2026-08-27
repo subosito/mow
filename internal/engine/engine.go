@@ -734,7 +734,7 @@ func New(opt Options) (*Engine, error) {
 						norm = n
 					}
 				} else {
-					// DeferLLM (mow rpc): no catalog yet, and the static
+					// DeferLLM (mow acp): no catalog yet, and the static
 					// none|low|medium|high list would reject catalog-only
 					// tiers (max, xhigh) — exactly what a session persists.
 					// Take the recorded tier as-is; ensureLLM runs

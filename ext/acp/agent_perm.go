@@ -86,7 +86,7 @@ func (a *agentServer) preTool(ctx context.Context, e mow.PreToolEvent) (mow.PreT
 	})
 	if err != nil {
 		if errors.Is(err, errClientMethod) {
-			// Editor does not implement the method — fail-open like mow rpc
+			// Editor does not implement the method — fail-open like a headless agent
 			// default, so a partial client is not bricked.
 			return mow.PreToolDecision{}, nil
 		}

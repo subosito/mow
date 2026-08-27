@@ -19,7 +19,7 @@ integrate against; the CLI and every pack are thin shells over it. So:
   `ext/` or an **optional pack** under `packs/` (blank-imported into
   `cmd/mow` and/or `cmd/mow-full`),
   or an external host that imports mow. The Rust `mowi` sibling project is the
-  interactive TUI and drives `mow rpc`.
+  interactive TUI and drives `mow acp`.
 
 Read [docs/architecture.md](docs/architecture.md) once for the public/internal
 line, then [docs/embedding.md](docs/embedding.md) to see the API from an
@@ -55,9 +55,9 @@ Layout and module boundaries: [docs/architecture.md](docs/architecture.md)
 | A built-in tool or the path jail | `internal/tools/`, `internal/policy/` |
 | Config, env, trust | `internal/config/`, `internal/contextload/` |
 | An LLM wire | `internal/llm/` |
-| A core extension (acp, rpc) | `ext/<name>/` |
+| A core extension (acp) | `ext/<name>/` |
 | An optional pack (focus, mcp, proc, goal, review, ops, job, media) | `packs/<name>/` |
-| Interactive TUI | Rust `mowi` sibling project over `mow rpc` |
+| Interactive TUI | Rust `mowi` sibling project over `mow acp` |
 
 Engine construction is `internal/engine/engine.go` (`New`); prompt/model/control
 split across `engine_prompt.go`, `engine_model.go`, `engine_control.go`,

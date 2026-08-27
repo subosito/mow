@@ -507,7 +507,7 @@ func (e *Engine) requestEffort() string {
 // when the gateway did not advertise them (no selectable effort — hosts must
 // not fall back to a static none|low|medium|high list).
 //
-// DeferLLM hosts (mow rpc) have no client until the first Prompt. Handshake
+// DeferLLM hosts (mow acp) have no client until the first Prompt. Handshake
 // effort.list still has to paint a chip, so this loads the catalog first.
 func (e *Engine) Efforts() []string {
 	if e == nil {

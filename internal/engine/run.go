@@ -54,7 +54,7 @@ type Options struct {
 	// SkipExtensionSetup for strict read-only workflows.
 	DisableExtensionHooks bool
 	// DeferLLM, when true, skips the API-key / model / provider handshake in
-	// New. Control-plane hosts (mow rpc ping/version) can start without
+	// New. Control-plane hosts (mow acp initialize) can start without
 	// credentials. The first Prompt / ListModels / chat call still requires a
 	// key unless Options.Chat or Options.Provider was injected.
 	DeferLLM bool

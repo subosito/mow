@@ -212,7 +212,7 @@ func (f *EngineFlags) Options() mow.Options {
 }
 
 // OptionsDeferLLM is Options with DeferLLM set so New can start without an
-// API key (mow rpc ping/version). The first Prompt still requires credentials.
+// API key (mow acp initialize / ping). The first Prompt still requires credentials.
 func (f *EngineFlags) OptionsDeferLLM() mow.Options {
 	opt := f.Options()
 	opt.DeferLLM = true

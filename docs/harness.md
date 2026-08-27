@@ -87,8 +87,7 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `ext` | Register tools, hooks, **CLI commands**, BeforeNew (registration only) |
 | `cliutil` | Shared CLI flags / `--long` help / `NewEngine` — **not** a pack |
 | `extcfg` | Decode `extensions.<name>` — shared by extensions and packs |
-| `ext/rpc` | JSON-lines embed protocol + `mow rpc` |
-| `ext/acp` | ACP agent + client + `acp_delegate` + `mow acp` |
+| `ext/acp` | ACP agent + extras + client + `acp_delegate` + `mow acp` |
 | `packs/mcp` | MCP servers → tools (config opt-in) |
 | `packs/proc` / `packs/cmdhook` | Background proc tools, command hooks |
 | `packs/media` | Media tool pack: `generate_*` / `understand_*` (`mow-full`, config-gated) |

@@ -145,7 +145,7 @@ func TestNewPrefixedModelAdoptsBareCatalogDefaultEffort(t *testing.T) {
 	}
 }
 
-// mow rpc starts with DeferLLM, so handshake effort.list runs before Prompt.
+// mow acp starts with DeferLLM, so handshake config options run before Prompt.
 // DisplayEffort / Efforts must still load the catalog so the chip is not blank.
 func TestDeferLLMDisplayEffortLoadsCatalog(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -3,7 +3,7 @@
 **Rule:** if a capability is not required for a read-only agent over compatible
 LLM HTTP, it is detachable. Core protocols/runtime adapters live under `ext/`;
 workflow/domain integrations live in the separate `packs/` module. The Rust
-`mowi` sibling project is the external TUI over `mow rpc`.
+`mowi` sibling project is the external TUI over `mow acp`.
 
 Customization modes:
 
@@ -17,7 +17,7 @@ Customization modes:
 |---|---|---|
 | Public Engine | `github.com/subosito/mow` | `Engine`, `Run`, hooks, events, providers |
 | Registration | `github.com/subosito/mow/ext` | `RegisterTool`, `RegisterCommand`, lifecycle hooks |
-| Core extensions | `github.com/subosito/mow/ext/<name>` | acp, rpc — privileged tier (may import internal/); one-pager in each `ext/<name>/README.md` |
+| Core extensions | `github.com/subosito/mow/ext/<name>` | acp — privileged tier (may import internal/); one-pager in each `ext/<name>/README.md` |
 | Optional packs | `github.com/subosito/mow/packs/<name>` | focus, media, goal, review, ops, job — `packs/<name>/README.md` |
 
 ```go
@@ -37,11 +37,11 @@ tools it actually has.
 
 ## Linked binaries
 
-- `cmd/mow` is the lean pack host: core extensions acp/rpc plus focus, proc,
+- `cmd/mow` is the lean pack host: core extension acp plus focus, proc,
   cmdhook, mcp. `cmd/mow-full` links those plus goal, job, ops, review, media.
   Both share `cmd/internal/mowcli`.
-- The Rust `mowi` sibling project launches `mow rpc`, owns terminal
-  presentation, and receives the registered command/tool events over RPC.
+- The Rust `mowi` sibling project launches `mow acp`, owns terminal
+  presentation, and receives registered command/tool events over ACP + extras.
   Spawn binary: `--mow-bin` / `$MOW_BIN` / host `$MOW_HOME/config.yaml`
   `extensions.mowi.mow_bin` (not project `.mow/`) / `mow`.
 - `mow_agents` start the currently running executable (`os.Executable()`), so
@@ -80,7 +80,7 @@ tools it actually has.
   (does not wait for `timeout_sec`).
 - On spawn/protocol failures, the last ~16KiB of peer stderr (secrets redacted)
   is appended to the error.
-- `Engine.Close` (and `mow acp` / `mow rpc`, which defer it) SIGTERM then
+- `Engine.Close` (and `mow acp`, which defers it) SIGTERM then
   SIGKILL the peer process group so npx/node trees do not reparent to PID 1.
   `RegisterFromEngine` registers that cleanup on the Engine; process-global
   `RegisterFromConfig` peers are released when the last Engine of that
@@ -129,27 +129,10 @@ extensions:
         url: https://mcp.example/mcp
 ```
 
-### Process / RPC / command hooks / eval
+### Process / command hooks / eval
 
 - `packs/proc`: `proc_start`, `proc_status`, `proc_stop` and `mow proc`. Stop
   signals the process group; log tails are size-capped.
-- `ext/rpc`: JSON-lines prompt/event/cancel/status control plane. `mow rpc`
-  always `Close`s the Engine on exit. Cancel/status use a dedicated channel so
-  a full prompt queue cannot starve control methods; event deltas and prompt
-  text are size-capped. Host methods an external UI needs without embedding
-  Engine: `sessions`, `transcript`, `steer`, `slash.list`, `slash`,
-  `config.list`, and a permission gate (`perm.set` / `perm.decide` answering
-  `perm.ask` notifications for `write`, `edit`, `bash`). `perm.ask` may include
-  additive `title` / `subject`. Parallel `update` notifications (`kind`:
-  token/thought/tool/state/usage) ride next to `event` when
-  `features.typed_updates` is set. The gate is fail-open until a UI selects
-  ask mode, so headless scripts are unchanged. `status` and
-  `session` include `extra_roots` security metadata and configured
-  `extra_roots_rw` / `extra_roots_ro` counts; they do not include repository
-  presentation metadata. `capabilities.optional.features` dynamically lists
-  optional packages that register host-facing facilities and their event
-  types. Optional slash commands remain discoverable through `slash.list`.
-  See [rpc-acp.md](rpc-acp.md) for the ACP comparison.
 - `packs/cmdhook`: Claude-style lifecycle shell hooks (`root` or `plugins` map,
   `min_turns`). Host-owned Agent Plugins (`$MOW_HOME/plugins` and workspace
   profile `plugins/`) that ship `hooks/hooks.json` register automatically;
@@ -240,7 +223,7 @@ start an ensemble. ACP / `acp_delegate` is denied in the review jail.
 
 A pack can own a command a user types into an interactive session. Registering
 one in `init` is all it takes: every host that dispatches through the registry
-— `mow tty` and the Rust `mowi` TUI over `mow rpc` — gains the command because the pack is linked,
+— `mow tty` and the Rust `mowi` TUI over `mow acp` — gains the command because the pack is linked,
 and loses it when the blank import is dropped. No host names a pack.
 
 ```go
@@ -335,7 +318,7 @@ runs.
 ## TUI host
 
 The Rust `mowi` sibling project/repository is the interactive terminal host.
-It launches `mow rpc` and renders sessions, streaming, model/effort pickers,
+It launches `mow acp` and renders sessions, streaming, model/effort pickers,
 tool approval, peer streams, and pack command results. `extensions.mowi.mow_bin`
 in host `$MOW_HOME/config.yaml` selects `mow` vs `mow-full` (CLI `--mow-bin`
 and `$MOW_BIN` win; project `.mow/` is never read for this). See that project

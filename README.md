@@ -1,11 +1,11 @@
 # mow
 
-**Minimal, secure-by-default agentic harness** (Go). The **library is the product API**; protocol extensions and workflow packs are detachable modules. The Rust `mowi` sibling project is the TUI host over mow's RPC interface.
+**Minimal, secure-by-default agentic harness** (Go). The **library is the product API**; protocol extensions and workflow packs are detachable modules. The Rust `mowi` sibling project is the TUI host over `mow acp`.
 
 ```text
 Embedder / tests ──┐
 CLI (run/tty) ────┼──▶  mow.Engine  ──▶  LLM HTTP (any compatible endpoint)
-mow / mow-full ───┘     (lean: acp · rpc · focus · proc · mcp
+mow / mow-full ───┘     (lean: acp · focus · proc · mcp
                          full: + goal · review · ops · media · …)
 ```
 
@@ -17,7 +17,7 @@ and never enters a library-only embed.
 
 > Version is the single line in [`VERSION`](VERSION) (currently `1.0.0-rc.1`).
 > Tag `v$(cat VERSION)` after bumping that file. Nix and GitHub Releases read
-> the same file. RPC epoch is still `"1"` (unrelated to the tag).
+> the same file.
 
 ## Library
 
@@ -73,8 +73,7 @@ export OPENAI_MODEL=gpt-5-mini
 
 ./bin/mow run -p "Reply with exactly: hi"
 ./bin/mow tty
-./bin/mow acp                                 # ext/acp — ACP agent
-./bin/mow rpc                                 # ext/rpc — JSON-lines
+./bin/mow acp                                 # ext/acp — ACP agent + extras
 ./bin/mow help                                # linked commands, dynamically
 
 # mow-full links the workflow packs on top of mow:

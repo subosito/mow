@@ -154,7 +154,7 @@ const maxPromptRefBytes = 100_000
 
 var promptFileRefRE = regexp.MustCompile(`@([A-Za-z0-9._/\-]+)`)
 
-// expandPromptFileRefs resolves jail-safe @path references the same way mow rpc
+// expandPromptFileRefs resolves jail-safe @path references on session/prompt.
 // does. Missing, denied, and directory refs stay unexpanded.
 func expandPromptFileRefs(eng *mow.Engine, text string) string {
 	if eng == nil || !strings.Contains(text, "@") {

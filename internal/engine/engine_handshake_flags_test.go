@@ -13,7 +13,7 @@ import (
 )
 
 // Handshake getters (effort.list / model.list / context) must work before
-// Prompt on a DeferLLM engine — that is mow rpc. Combinations of --continue,
+// Prompt on a DeferLLM engine — that is mow acp. Combinations of --continue,
 // --model, and --effort must not hide the chip or restore the wrong runtime.
 func TestHandshakeFlagMatrix(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

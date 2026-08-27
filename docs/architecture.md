@@ -7,7 +7,7 @@
 
 **mow** is a secure-by-default Go agent harness: tool loop + sessions + config,
 extended by detachable protocol extensions, workflow packs, and telemetry. The
-Rust `mowi` sibling project provides the interactive TUI over `mow rpc`.
+Rust `mowi` sibling project provides the interactive TUI over `mow acp`.
 
 LLM access is plain OpenAI-compatible or Anthropic-compatible HTTP. No gateway,
 broker, host UI, or sibling repository is required for `mow.Engine`.
@@ -79,10 +79,9 @@ Embedder / cmd/mow / packs
 
 ### Core extensions (`ext/`, root module)
 
-- `ext/acp`: ACP agent + peer delegation (`acp_delegate`)
+- `ext/acp`: ACP agent + extras + peer delegation (`acp_delegate`)
 - `packs/mcp`: MCP server + configured MCP client tools
 - `packs/proc`: detached process tools/command
-- `ext/rpc`: JSON-lines control plane
 - `packs/cmdhook`: configured command hooks
 
 ### Optional packs (`packs/` module)
@@ -97,19 +96,18 @@ One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.m
 
 ### Heavy nested modules
 
-- Rust `mowi`: external TUI host that drives `mow rpc`
+- Rust `mowi`: external TUI host that drives `mow acp`
 
 ## Binaries
 
 | Binary | Source | Ships |
 |---|---|---|
-| `mow` | `cmd/mow` | Lean CLI: acp, rpc, focus, proc, cmdhook, mcp |
+| `mow` | `cmd/mow` | Lean CLI: acp, focus, proc, cmdhook, mcp |
 | `mow-full` | `cmd/mow-full` | Lean set plus goal, job, ops, review, media |
-| Rust `mowi` | sibling project/repository | Interactive TUI over `mow rpc` |
+| Rust `mowi` | sibling project/repository | Interactive TUI over `mow acp` |
 
-The Rust `mowi` host launches `mow rpc` (present in both binaries) and owns
-terminal presentation; pack commands and tools remain registered in the mow
-host that is on `PATH`.
+The Rust `mowi` host launches `mow acp` and owns terminal presentation; pack
+commands and tools remain registered in the mow host that is on `PATH`.
 
 ## Catalog behavior
 
@@ -136,3 +134,4 @@ use the workspace/extra-root jail; shell is a separate explicit trust decision.
 - [harness.md](harness.md) — loop, tools, config, sessions
 - [extensions.md](extensions.md) — extension and pack details
 - [workspace-profiles.md](workspace-profiles.md) — `$MOW_HOME/workspaces/<name>/`
+ `$MOW_HOME/workspaces/<name>/`
