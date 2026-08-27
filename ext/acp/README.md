@@ -32,7 +32,8 @@ Peer processes are reused by agent + cwd + effective argv + permission mode.
 `Engine.Close` (deferred by `mow acp`) SIGTERM then SIGKILL the
 peer process group so delegated trees do not reparent to PID 1.
 
-See [docs/rpc-acp.md](../../docs/rpc-acp.md) for extras on the same connection.
+See [docs/acp.md](../../docs/acp.md) for extras on the same connection.
+
 
 ## Config (`extensions.acp`)
 

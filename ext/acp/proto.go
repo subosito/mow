@@ -168,7 +168,7 @@ const (
 	ModeAsk  = "ask"  // read-only tools for this session's prompts
 
 	// ApprovalPrompt asks the editor before each power tool (default).
-	// ApprovalAlways skips session/request_permission (yolo); still gated
+	// ApprovalAlways skips session/request_permission; still gated
 	// by --allow-write / --allow-shell. Distinct from session mode.
 	ApprovalPrompt = "prompt"
 	ApprovalAlways = "always"

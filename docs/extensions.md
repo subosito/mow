@@ -42,7 +42,8 @@ tools it actually has.
   adds goal, job, ops, review, media. Drop an import and that subcommand is gone.
 - Host UIs launch `mow acp` (`ext/acp`), own terminal presentation, and receive
   registered command/tool events over ACP + extras. Spawn binary: `--mow-bin` /
-  `$MOW_BIN` / host `$MOW_HOME/config.yaml` `extensions.mowi.mow_bin` (not project
+  `$MOW_BIN` / host `$MOW_HOME/config.yaml` `mowi.mow_bin` (not project
+
   `.mow/`) / `mow`. `ext/acp` does not import `ext/cli`.
 - `mow_agents` start the currently running executable (`os.Executable()`), so
   native ACP peers remain self-contained.
@@ -72,7 +73,8 @@ Does not import `ext/acp`. Same engine flags as `mow run`. In-session: `/model`,
 ### ACP (`ext/acp`)
 
 [Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0
-(v1; see [rpc-acp.md](rpc-acp.md)):
+(v1; see [acp.md](acp.md)):
+
 
 - `mow acp`: run the current host as an ACP agent (session lifecycle,
   `session/prompt` + `session/update`, `available_commands_update`,

@@ -17,7 +17,7 @@
 | [embedding.md](embedding.md) | Go integrators | Options, events, custom tools/providers, hooks, sessions — with code |
 | [harness.md](harness.md) | Implementers | Loop, tools, config, sessions, policy |
 | [extensions.md](extensions.md) | Integrators | `ext/` packs, CLI ownership, ACP, media, decisions |
-| [rpc-acp.md](rpc-acp.md) | Protocol | `mow acp` + extras vs ACP v1/v2 |
+| [acp.md](acp.md) | Protocol | `mow acp` + extras vs ACP v1/v2 |
 | [review.md](review.md) | CI + reviewers | Shared review scope, two-pass workflow, `--reviewer` / `--verifier`, schema, formats, budgets, exit codes |
 | [sec.md](sec.md) | Security reviewers | `mow sec`: evidence fields, safety contract, evidence levels, future stages |
 | [workspace-profiles.md](workspace-profiles.md) | CLI operators | `$MOW_HOME/workspaces/<name>/`: roots, overlay, skills, plugins, scoped ACP peers |

@@ -1,35 +1,3 @@
-# `mow acp` + extras
+# Moved
 
-Public host protocol is Agent Client Protocol v1 on `mow acp`. Leftovers that
-ACP does not specify (steer, compact, rewind, skills/plugins, extra-root
-ro/rw, exclusive slash, ephemeral `/btw`) are **optional methods on the same
-connection**, capability-gated — not a second process and not `_mow/*`.
-
-Generic ACP clients see only the standard. Mowi speaks ACP plus extras the
-agent advertised on `initialize`. Session ask/auto is ACP **mode**
-(`session/set_mode`, `modeId` ask/code). Tool confirmation is ACP
-**permission** (`session/request_permission`).
-
-Sources: [ACP v1 overview](https://agentclientprotocol.com/protocol/v1/overview),
-[v2 overview](https://agentclientprotocol.com/protocol/v2/overview),
-[`ext/acp`](../ext/acp/README.md).
-
-## Roles
-
-| Surface | Process | Audience |
-|---|---|---|
-| `mow acp` | ACP agent on stdio + extras | editors, desktop, mowi |
-| `acp_delegate` | mow as ACP *client* | named peers (`agents[]`, `mow_agents`) |
-| `mow.Engine` | in-process library | Go embedders |
-
-## Extras (`agentCapabilities.experimental`)
-
-`steer`, `compact`, `rewind`, `skill.list`, `skill.activate`, `plugin.list`,
-`transcript`, `status`, `context`, `proc.list`, `ping`, `slash`. Unknown
-methods stay `-32601`. Theme / `extension.config` stay host-local.
-
-Ephemeral aside is an extra field on `session/prompt`. Exclusive slash is the
-extra `slash` method (busy refuse) plus `exclusive` on
-`available_commands_update`. Jail-safe `@path` expands on `session/prompt`.
-
-v2 stays behind `protocolVersion` negotiation. Do not drop v1.
+This page is now [acp.md](acp.md) (`mow acp` + extras).

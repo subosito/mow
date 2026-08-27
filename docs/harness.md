@@ -388,6 +388,8 @@ tools:
 mowi:
   # mow_bin: mowx                # host yaml only; TUI spawn (not project .mow/)
   theme: catppuccin-mocha
+  mode: code                     # ask | code
+  approvals: prompt              # prompt | always (skip overlay)
 extensions:
   media:
     understand:

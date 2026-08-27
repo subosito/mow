@@ -100,5 +100,5 @@ Non-trivial change: `devenv shell -- just verify` before commit. Docs/fixtures a
 | [docs/embedding.md](docs/embedding.md) | Embed in Go: options, events, tools, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config, sessions |
 | [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP |
-| [docs/rpc-acp.md](docs/rpc-acp.md) | `mow acp` + extras |
+| [docs/acp.md](docs/acp.md) | `mow acp` + extras |
 | [docs/review.md](docs/review.md) | `mowx review` / `sec`: two-pass, flags, schema, exit codes |

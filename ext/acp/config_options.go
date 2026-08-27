@@ -177,9 +177,10 @@ func approvalsConfigOption(current string) map[string]any {
 		current = ApprovalPrompt
 	}
 	return map[string]any{
-		"id":           configIDApprovals,
-		"name":         "Approvals",
-		"description":  "Prompt = confirm each power tool; Always = skip the overlay (yolo). Distinct from mode.",
+		"id":          configIDApprovals,
+		"name":        "Approvals",
+		"description": "Prompt = confirm each power tool; Always = skip the overlay. Distinct from mode.",
+
 		"category":     "approvals",
 		"type":         "select",
 		"currentValue": current,

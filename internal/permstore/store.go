@@ -1,5 +1,6 @@
 // Package permstore is a durable, per-workspace remember/revoke list for
-// power-tool approvals. Session "always" still lives in the RPC host;
+// power-tool approvals. Session "always" still lives in the ACP host;
+
 // these rules survive resume.
 package permstore
 

@@ -30,4 +30,5 @@ Uses `mow.NewHarness` and the same engine flags as `mow run`.
 ## Docs
 
 - [docs/extensions.md](../../docs/extensions.md) — blank-import model
-- [docs/rpc-acp.md](../../docs/rpc-acp.md) — host UIs over `mow acp`
+- [docs/acp.md](../../docs/acp.md) — host UIs over `mow acp`
+

@@ -149,7 +149,8 @@ session:
 #   # mow_bin: mowx             # --mow-bin > $MOW_BIN > this > mow
 #   theme: catppuccin-mocha
 #   mode: code                      # ask | code
-#   approvals: prompt               # prompt | always (skip overlay / yolo)
+#   approvals: prompt               # prompt | always (skip overlay)
+
 
 # Optional packs — config key extensions.<name>. Unused keys stay as yaml
 # blobs; lean mow ignores media/ops/job/review/goal.
