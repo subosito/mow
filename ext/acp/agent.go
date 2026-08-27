@@ -134,7 +134,7 @@ func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 			continue
 		}
 		switch req.Method {
-		case "session/prompt", "terminal/wait_for_exit", "terminal/waitForExit", "compact", "slash", "rewind", "skill.activate", "transcript":
+		case "session/prompt", "session/load", "terminal/wait_for_exit", "terminal/waitForExit", "compact", "slash", "rewind", "skill.activate", "transcript":
 			// Long-blocking methods run off the read loop so session/cancel
 			// (and other traffic) is still read while they are in flight.
 			// compact rewrites in-memory history and can take long enough that
@@ -215,11 +215,15 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		// Prefer engine session id for continuity.
 		sid := a.eng.SessionID()
 		if sid == "" {
+			a.mu.Lock()
 			sid = "mow-" + fmt.Sprintf("%d", len(a.sessions)+1)
+			a.mu.Unlock()
 		}
 		a.mu.Lock()
-		a.sessions[sid] = &acpSession{mode: ModeCode}
-		mode := ModeCode
+		if a.sessions[sid] == nil {
+			a.sessions[sid] = &acpSession{mode: ModeCode, approvals: ApprovalPrompt}
+		}
+		mode := a.sessions[sid].mode
 		a.mu.Unlock()
 		result := map[string]any{
 			"sessionId": sid,
@@ -523,84 +527,68 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				}),
 			})
 		}
-		writeThought := func(text string) {
-			if text == "" {
-				return
-			}
-			a.write(notification{
-				JSONRPC: "2.0",
-				Method:  "session/update",
-				Params: mustJSON(sessionUpdateParams{
-					SessionID: p.SessionID,
-					Update: sessionUpdate{
-						SessionUpdate: "agent_thought_chunk",
-						Content:       &chunkContent{Type: "text", Text: text},
-					},
-				}),
-			})
-		}
 		// writeToolCall emits ACP tool_call / tool_call_update so hosts can show
 		// "read engine.go" / "grep foo in pkg/" instead of bare "→ read".
-		writeToolCall := func(updateKind, callID, kind, title, status string) {
+		writeToolCall := func(updateKind, callID, kind, title, status string, args json.RawMessage, result string) {
 			if kind == "" && title == "" {
 				return
 			}
-			a.write(notification{
-				JSONRPC: "2.0",
-				Method:  "session/update",
-				Params: mustJSON(sessionUpdateParams{
-					SessionID: p.SessionID,
-					Update: sessionUpdate{
-						SessionUpdate: updateKind,
-						ToolCallID:    callID,
-						Kind:          kind,
-						Title:         title,
-						Status:        status,
-					},
-				}),
-			})
+			update := map[string]any{
+				"sessionUpdate": updateKind,
+				"toolCallId":    callID,
+				"kind":          kind,
+				"title":         title,
+				"status":        status,
+			}
+			if len(args) > 0 && string(args) != "null" {
+				update["rawInput"] = json.RawMessage(args)
+			}
+			if result != "" {
+				update["rawOutput"] = result
+				update["content"] = []map[string]any{
+					{"type": "content", "content": map[string]any{"type": "text", "text": result}},
+				}
+			}
+			a.emitSessionUpdate(p.SessionID, update)
 		}
 		a.eng.SetOnToken(writeAgentText)
 		// Fan-in peer events while Prompt runs (does not replace host listeners).
 		unsub := a.eng.AddOnEvent(func(ev mow.Event) {
 			switch ev.Type {
 			case mow.EventDelegateChunk:
-				// A nested delegate's answer is NOT this agent's reply: the
-				// host dedupes EventDelegateChunk text against the final
-				// Prompt result, so forwarding it as agent_message_chunk would
-				// commit the nested answer twice (once chunked, once in the
-				// full reply) — corrupting markdown rendering on the host.
-				// Show it as collapsible thought progress instead.
+				// A nested delegate's answer is NOT this agent's reply.
+				// Forward as an extra update so mowi /peers can paint it
+				// without committing it as the host answer.
 				agent := strings.TrimSpace(ev.Agent)
 				line := strings.TrimSpace(ev.Delta)
 				if line != "" {
-					if agent != "" {
-						line = "[" + agent + "] " + line
-					}
-					writeThought(line + "\n")
+					a.emitSessionUpdate(p.SessionID, map[string]any{
+						"sessionUpdate": "delegate_chunk",
+						"agent":         agent,
+						"delta":         line,
+					})
 				}
 			case mow.EventDelegateProgress:
-				// Nested peer tool/thought. Prefer thought_chunk so clients can
-				// collapse it; include agent label for multi-peer clarity.
 				agent := strings.TrimSpace(ev.Agent)
 				line := strings.TrimSpace(ev.Delta)
 				if line == "" {
 					return
 				}
-				if agent != "" {
-					line = "[" + agent + "] " + line
-				}
-				writeThought(line + "\n")
+				a.emitSessionUpdate(p.SessionID, map[string]any{
+					"sessionUpdate": "delegate_progress",
+					"agent":         agent,
+					"phase":         line,
+				})
 			case mow.EventToolStart:
 				kind, title := toolCallKindTitle(ev.Tool, ev.Args)
-				writeToolCall("tool_call", ev.ToolCallID, kind, title, "in_progress")
+				writeToolCall("tool_call", ev.ToolCallID, kind, title, "in_progress", ev.Args, "")
 			case mow.EventToolEnd:
 				kind, title := toolCallKindTitle(ev.Tool, ev.Args)
 				status := "completed"
 				if ev.Denied || strings.TrimSpace(ev.Error) != "" {
 					status = "failed"
 				}
-				writeToolCall("tool_call_update", ev.ToolCallID, kind, title, status)
+				writeToolCall("tool_call_update", ev.ToolCallID, kind, title, status, ev.Args, ev.Result)
 			case mow.EventCompactStart:
 				a.emitSessionUpdate(p.SessionID, map[string]any{
 					"sessionUpdate": "compact_start",
@@ -657,8 +645,10 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		a.write(response{
 			JSONRPC: "2.0", ID: req.ID,
 			Result: map[string]any{
-				"stopReason": "end_turn",
+				"stopReason": acpStopReason(res.StopReason),
 				"usage": map[string]int{
+					"inputTokens":   res.Usage.InputTokens,
+					"outputTokens":  res.Usage.OutputTokens,
 					"input_tokens":  res.Usage.InputTokens,
 					"output_tokens": res.Usage.OutputTokens,
 				},

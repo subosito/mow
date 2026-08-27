@@ -203,6 +203,18 @@ func (c *pipeClient) reply(id json.RawMessage, result any) error {
 	return c.writeLine(raw)
 }
 
+func (c *pipeClient) replyError(id json.RawMessage, code int, message string) error {
+	raw, err := json.Marshal(struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Error   map[string]any  `json:"error"`
+	}{JSONRPC: "2.0", ID: id, Error: map[string]any{"code": code, "message": message}})
+	if err != nil {
+		return err
+	}
+	return c.writeLine(raw)
+}
+
 func (c *pipeClient) writeLine(raw []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
@@ -407,7 +419,7 @@ func (c *pipeClient) prompt(ctx context.Context, sid, text string) (string, mow.
 // forwarded as agent_message_chunk — the host accumulates chunk text as the
 // peer reply and the tool result already carries the full answer, so
 // forwarding committed nested answers twice and corrupted host-side markdown.
-// It may surface as thought progress only.
+// It surfaces as extra sessionUpdate delegate_chunk for /peers.
 func TestAgentPromptDelegateChunkNotForwardedAsAgentText(t *testing.T) {
 	var eng *mow.Engine
 	eng, err := mow.New(mow.Options{
@@ -456,9 +468,16 @@ func TestAgentPromptDelegateChunkNotForwardedAsAgentText(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
+	sawPeer := false
 	for _, u := range updates {
 		if strings.Contains(u, "agent_message_chunk") && strings.Contains(u, "nested answer") {
 			t.Fatalf("delegate chunk forwarded as agent_message_chunk: %s", u)
 		}
+		if strings.Contains(u, "delegate_chunk") && strings.Contains(u, "nested answer") {
+			sawPeer = true
+		}
+	}
+	if !sawPeer {
+		t.Fatal("missing delegate_chunk extra for nested peer text")
 	}
 }

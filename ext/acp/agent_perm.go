@@ -37,10 +37,10 @@ func permissionOptions() []map[string]any {
 }
 
 // preTool asks the editor via session/request_permission before power tools.
-// Read tools never ask. A client that does not implement the method (JSON-RPC
-// -32601) is treated as allow so a partial editor still works. Cancelled
-// turns abort the run. Always-allow / always-reject are remembered per tool
-// for the rest of this agent process.
+// Read tools never ask. Approvals "always" skips the overlay (still gated by
+// --allow-write / --allow-shell). A client that does not implement the method
+// (JSON-RPC -32601) is denied — prompt is a gate, not fail-open. Always-allow
+// / always-reject are remembered per tool for the rest of this agent process.
 func (a *agentServer) preTool(ctx context.Context, e mow.PreToolEvent) (mow.PreToolDecision, error) {
 	if a == nil || !isAskTool(e.Name) {
 		return mow.PreToolDecision{}, nil
@@ -90,9 +90,10 @@ func (a *agentServer) preTool(ctx context.Context, e mow.PreToolEvent) (mow.PreT
 	})
 	if err != nil {
 		if errors.Is(err, errClientMethod) {
-			// Editor does not implement the method — fail-open like a headless agent
-			// default, so a partial client is not bricked.
-			return mow.PreToolDecision{}, nil
+			return mow.PreToolDecision{
+				Deny:    true,
+				Message: "client does not implement session/request_permission",
+			}, nil
 		}
 		if ctx.Err() != nil {
 			return mow.PreToolDecision{}, ctx.Err()
@@ -151,7 +152,7 @@ func parsePermissionOutcome(raw json.RawMessage) string {
 		return optAllowOnce
 	case optAllowAlways, "allow-always", "always":
 		return optAllowAlways
-	case "reject-always":
+	case optRejectAlways, "reject-always":
 		return optRejectAlways
 	default:
 		return optRejectOnce
