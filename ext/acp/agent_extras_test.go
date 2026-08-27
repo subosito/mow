@@ -384,3 +384,58 @@ func TestAgentExtrasCancelUnblocks(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentCompactDoesNotBlockPing(t *testing.T) {
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	go func() {
+		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
+		_ = cw.Close()
+	}()
+	cl := newPipeClient(cr, aw)
+	go cl.readLoop()
+
+	if err := cl.callOK(ctx, "initialize", map[string]any{"protocolVersion": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cl.sessionNew(ctx, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	type callResult struct {
+		err error
+	}
+	compactCh := make(chan callResult, 1)
+	go func() {
+		_, err := cl.call(ctx, "compact", map[string]any{})
+		compactCh <- callResult{err: err}
+	}()
+	pingCtx, pingCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer pingCancel()
+	if err := cl.callOK(pingCtx, "ping", map[string]any{}); err != nil {
+		t.Fatalf("ping while compact in flight: %v", err)
+	}
+	select {
+	case r := <-compactCh:
+		if r.err != nil {
+			t.Fatalf("compact: %v", r.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for compact")
+	}
+	cancel()
+	_ = aw.Close()
+}

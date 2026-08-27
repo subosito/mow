@@ -4,14 +4,16 @@ How the native host protocol (`mow rpc`, epoch 1) maps onto Agent Client
 Protocol v1 (stable) and v2 (draft).
 
 **Direction:** ACP is the public host protocol (editors, desktop, third-party
-clients). RPC is a first-party dialect for mowi until mowi is an ACP client.
-Do not grow new product on RPC-only. Leftovers that ACP does not specify
-(steer, compact, rewind, skills/plugins, extra-root ro/rw) belong as
-**optional methods on the same `mow acp` connection**, capability-gated —
+clients). RPC is a **frozen fallback** for mowi and existing embedders — do
+not add methods, events, or product surface to `mow rpc`. Leftovers that ACP
+does not specify (steer, compact, rewind, skills/plugins, extra-root ro/rw)
+belong as **optional methods on the same `mow acp` connection**, capability-gated —
 not a second process and not `_mow/*` as a parallel product.
 
 Mowi should see ACP + those extras on one JSON-RPC session. Generic ACP
-clients see only the standard.
+clients see only the standard. Session ask/auto is ACP **mode**
+(`session/set_mode`); tool confirmation is ACP **permission**
+(`session/request_permission`). RPC `perm.*` is frozen naming, not an ACP term.
 
 Sources: [ACP v1 overview](https://agentclientprotocol.com/protocol/v1/overview),
 [v2 overview](https://agentclientprotocol.com/protocol/v2/overview),
@@ -22,12 +24,13 @@ Sources: [ACP v1 overview](https://agentclientprotocol.com/protocol/v1/overview)
 
 | Surface | Process | Audience |
 |---|---|---|
-| `mow rpc` | first-party control plane | mowi and embedders |
-| `mow acp` | ACP agent on stdio | Zed / JetBrains / other ACP clients |
+| `mow rpc` | frozen first-party fallback (epoch 1) | mowi default TUI, existing embedders |
+| `mow acp` | ACP agent on stdio | Zed / JetBrains / other ACP clients; mowi `--protocol acp` |
 | `acp_delegate` | mow as ACP *client* | named peers (`agents[]`, `mow_agents`) |
 
-Do not put mowi on ACP as the primary wire. Custom `_mow/*` methods would
-re-invent RPC inside ACP's envelope and still pay v1→v2 churn.
+Do not grow RPC. Custom `_mow/*` methods would re-invent RPC inside ACP's
+envelope and still pay v1→v2 churn. Ask/auto is ACP **mode**; tool prompts
+are ACP **permission**. RPC `perm.*` is leftover naming.
 
 ## Coverage
 
@@ -89,22 +92,25 @@ the same `mow acp` connection (`agentCapabilities.experimental` /
 `agentCapabilities.extras`: `steer`, `compact`, `rewind`, `skill.list`,
 `skill.activate`, `plugin.list`, `transcript`, `status`, `context`,
 `proc.list`, `ping`, `slash`). Power clients feature-detect; unknown
-methods stay `-32601`. RPC still exposes them until mowi speaks ACP.
+methods stay `-32601`. RPC still exposes them as a frozen fallback until
+mowi defaults to ACP. Do not add more RPC surface.
 Theme / `extension.config` stay host-local. Ephemeral prompt stays
 RPC-only. Exclusive slash is the extra `slash` method (busy refuse),
 not `"/name"` inside `session/prompt`.
 
-## What RPC steals (epoch 1, additive)
+## Frozen RPC leftovers (epoch 1)
 
-Keep mow method names. Feature-detect from `version.methods` / `features`.
+RPC already has these. Do not grow the list. Feature-detect from
+`version.methods` / `features` on the fallback wire.
 
 1. **`update` notification** next to `event`. Typed `kind` (`token`,
-   `thought`, `tool`, `usage`, `state`, `commands`) so a new host does not
-   parse the Engine bus. `event` stays the source of truth.
-2. **Richer `perm.ask`**. Additive `title` + `subject` (`tool_call` /
-   `command`). `y` / `n` / `a` still map to `allow` / `deny` / `always`.
-3. **`config.list`**. Catalog of `model` / `effort` / `perm` (and later
-   chips) without forcing mowi to parse generic selects for safety.
-   Typed `model.set` / `effort.set` / `perm.set` remain.
+   `thought`, `tool`, `usage`, `state`, `commands`). `event` stays the
+   source of truth.
+2. **`perm.ask`** with additive `title` + `subject`. Not an ACP term:
+   ACP splits this into **mode** (`session/set_mode`) and **permission**
+   (`session/request_permission`). `y` / `n` / `a` still map to
+   `allow` / `deny` / `always` on the RPC wire.
+3. **`config.list`**. Catalog of `model` / `effort` / `perm`. Typed
+   `model.set` / `effort.set` / `perm.set` remain on RPC only.
 
 v2 stays behind `protocolVersion` negotiation on `mow acp`. Do not drop v1.

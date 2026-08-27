@@ -2,6 +2,10 @@
 
 JSON-lines control plane for embedders: one JSON object per stdin line; responses and events on stdout.
 
+**Frozen.** `mow rpc` is a compatibility fallback (epoch 1). New host
+surface belongs on `mow acp` (standard methods plus capability-gated extras).
+Do not add RPC methods, events, or product behavior here.
+
 ## Link
 
 ```go

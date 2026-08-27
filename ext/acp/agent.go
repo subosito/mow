@@ -133,12 +133,22 @@ func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 			continue
 		}
 		switch req.Method {
-		case "session/prompt", "terminal/wait_for_exit", "terminal/waitForExit":
+		case "session/prompt", "terminal/wait_for_exit", "terminal/waitForExit", "compact":
 			// Long-blocking methods run off the read loop so session/cancel
 			// (and other traffic) is still read while they are in flight.
+			// compact rewrites in-memory history and can take long enough that
+			// a blocked stdin read looks like a dead agent to the TUI.
 			wg.Add(1)
 			go func(req request) {
 				defer wg.Done()
+				defer func() {
+					if rec := recover(); rec != nil {
+						a.write(response{
+							JSONRPC: "2.0", ID: req.ID,
+							Error: &rpcError{Code: errInternal, Message: fmt.Sprintf("panic: %v", rec)},
+						})
+					}
+				}()
 				a.handleRequest(ctx, req)
 			}(req)
 		default:

@@ -32,6 +32,10 @@
 // so existing headless scripts are unaffected. See README.md for the table.
 //
 // Note: Serve uses Engine.AddOnEvent so existing host listeners keep receiving events.
+//
+// Frozen: do not add methods or events. New host surface belongs on mow acp
+// (standard ACP plus capability-gated extras). Session ask/auto on ACP is
+// session/set_mode (mode), not perm.*; perm.* stays RPC-only compatibility.
 package rpc
 
 import (
