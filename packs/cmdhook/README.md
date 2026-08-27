@@ -8,8 +8,8 @@ Claude Code-style lifecycle shell hooks: a `hooks.json` declares commands per ev
 import _ "github.com/subosito/mow/packs/cmdhook"
 ```
 
-Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
-displays its RPC-driven results.
+Stock `cmd/mow` blank-imports this package. Hooks fire in the Engine regardless
+of host (CLI, TTY, or `mow acp`).
 
 ## Commands and tools
 

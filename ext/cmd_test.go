@@ -46,14 +46,14 @@ func TestCommandLayer(t *testing.T) {
 	ext.Reset()
 	t.Cleanup(ext.Reset)
 
-	ext.RegisterCommand(ext.Command{Name: "rpc", Layer: "ext", Run: func([]string) int { return 0 }})
+	ext.RegisterCommand(ext.Command{Name: "acp", Layer: "ext", Run: func([]string) int { return 0 }})
 	ext.RegisterCommand(ext.Command{Name: "goal", Layer: "pack", Run: func([]string) int { return 0 }})
 	var layers []string
 	for _, c := range ext.Commands() {
 		layers = append(layers, c.Name+":"+c.Layer)
 	}
 	got := fmt.Sprintf("%v", layers)
-	if !containsAll(got, "rpc:ext", "goal:pack") {
+	if !containsAll(got, "acp:ext", "goal:pack") {
 		t.Fatalf("layers=%s", got)
 	}
 }
@@ -120,6 +120,21 @@ func TestHookSourceClearAndHermeticFilter(t *testing.T) {
 	ext.ClearHookSource("cmdhook")
 	if n := len(ext.PreToolHooks()); n != 1 {
 		t.Fatalf("after clear cmdhook=%d want 1 static", n)
+	}
+}
+
+func TestClearHookSourceClearsAfterTurnDecide(t *testing.T) {
+	ext.Reset()
+	t.Cleanup(ext.Reset)
+	ext.RegisterAfterTurnDecisionSource("focus", func(ctx context.Context, e ext.AfterTurnEvent) (ext.AfterTurnDecision, error) {
+		return ext.AfterTurnDecision{}, nil
+	})
+	if n := len(ext.AfterTurnDecisionHooks()); n != 1 {
+		t.Fatalf("before clear=%d want 1", n)
+	}
+	ext.ClearHookSource("focus")
+	if n := len(ext.AfterTurnDecisionHooks()); n != 0 {
+		t.Fatalf("after clear=%d want 0", n)
 	}
 }
 

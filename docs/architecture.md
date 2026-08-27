@@ -40,7 +40,7 @@ one-way: the packs module depends on the root public API, never the reverse.
 | `github.com/subosito/mow` | Thin aliases/wrappers: `Engine`, `Run`, options, events, hooks, providers |
 | `github.com/subosito/mow/ext` | Registration API: tools, lifecycle hooks, commands, `BeforeNew` |
 | `github.com/subosito/mow/ext/<name>` | Stock Engine surfaces: acp, cli, tty (privileged; may import internal/) |
-| `github.com/subosito/mow/packs/<name>` | Optional packs: media, mcp, proc, goal, review, ops, job |
+| `github.com/subosito/mow/packs/<name>` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job |
 | `github.com/subosito/mow/cliutil` | CLI flags → Engine |
 | `github.com/subosito/mow/extcfg` | Decode `extensions.<name>` |
 
@@ -86,14 +86,16 @@ a profile switch.
 - `ext/cli`: unix dispatcher (`cli.Main`) + `run`, `trust`, `doctor`, `approvals`, version, help. Uses `mow.NewHarness`.
 - `ext/tty`: optional line REPL (`mow tty`). Does not import `ext/acp`.
 - `ext/acp`: ACP agent + extras + peer delegation (`delegate`). Must not import `ext/cli`.
-- `packs/mcp`: MCP server + configured MCP client tools
-- `packs/proc`: detached process tools/command
-- `packs/cmdhook`: command hooks from host-owned Agent Plugins
 
 ### Optional packs (`packs/` module)
 
 One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.md`).
+Lean `cmd/mow` links the first four; `cmd/mowx` adds the rest.
 
+- `packs/mcp`: MCP client tools (config-gated) + `mow mcp` stdio server
+- `packs/proc`: detached process tools (`proc_start` / `status` / `stop`; no CLI)
+- `packs/cmdhook`: command hooks from host-owned Agent Plugins
+- `packs/focus`: explore-guard hooks (no CLI)
 - `packs/media`: generate/understand tools (config-gated)
 - `packs/goal`: durable outer-loop goals
 - `packs/review`: code/security review workflows

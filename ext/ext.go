@@ -174,7 +174,7 @@ type StopFunc func(ctx context.Context, e StopEvent)
 
 // Command is a CLI subcommand owned by an extension pack.
 type Command struct {
-	// Name is the subcommand token (e.g. "acp", "rpc").
+	// Name is the subcommand token (e.g. "acp", "goal").
 	Name string
 	// Summary is one-line help text.
 	Summary string
@@ -191,7 +191,7 @@ type Command struct {
 }
 
 // toolEntry tracks a registered tool and whether it came from a BeforeNew
-// generation (config-driven MCP/cmdhook/acp/lsp) vs a static init registration.
+// generation (config-driven MCP/cmdhook/acp) vs a static init registration.
 // Hermetic engines (LoadUserConfig=false) only merge static tools plus tools
 // registered during the current BeforeNew call, so a prior host setup cannot
 // leak process-global user tools into an embedder's Engine.
@@ -354,6 +354,7 @@ func ClearHookSource(source string) {
 	preCompact = filterHookSource(preCompact, source)
 	preModel = filterHookSource(preModel, source)
 	afterTurn = filterHookSource(afterTurn, source)
+	afterTurnDecide = filterHookSource(afterTurnDecide, source)
 	stop = filterHookSource(stop, source)
 	sysSegments = filterHookSource(sysSegments, source)
 }

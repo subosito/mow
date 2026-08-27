@@ -131,7 +131,7 @@ Three Go modules (`go.work` wires them for local dev). Full public/internal map:
 ```go
 import (
     "github.com/subosito/mow"
-    _ "github.com/subosito/mow/packs/mcp"       // core protocol extension
+    _ "github.com/subosito/mow/packs/mcp"     // optional MCP client + mow mcp
     _ "github.com/subosito/mow/packs/ops"     // optional domain pack
 )
 ```

@@ -49,9 +49,19 @@ func TestLeanHelpListsLeanCommands(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d\n%s", code, output)
 	}
-	for _, want := range []string{"mow acp", "mow mcp"} {
+	for _, want := range []string{"mow acp", "mow mcp", "Packs (this binary):"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("lean help missing %q:\n%s", want, output)
+		}
+	}
+	if i := strings.Index(output, "Extensions (this binary):"); i >= 0 {
+		end := strings.Index(output[i:], "Packs (this binary):")
+		extHelp := output[i:]
+		if end > 0 {
+			extHelp = output[i : i+end]
+		}
+		if strings.Contains(extHelp, "mow mcp") {
+			t.Errorf("mow mcp must list under Packs, not Extensions:\n%s", extHelp)
 		}
 	}
 	for _, notWant := range []string{"mow goal", "mow ops", "mow review", "mow job", "mow media", "mow proc"} {

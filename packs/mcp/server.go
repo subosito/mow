@@ -29,7 +29,7 @@ func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "mcp",
 		Summary: "MCP server on stdin/stdout (mow_prompt tool)",
-		Layer:   "ext",
+		Layer:   "pack",
 		Run:     serveCmd,
 	})
 }

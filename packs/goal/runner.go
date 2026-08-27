@@ -490,7 +490,7 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			continue
 		case OutcomeEscalate:
 			// Human gate: persist a durable question and stop blocked.
-			// Resume with mow goal resume --answer (milestone 4 wiring).
+			// Resume with mow goal run --id … --answer.
 			st.Status = StatusBlocked
 			if st.Question == "" {
 				st.Question = "A step escalated: " + strings.TrimSpace(st.Summary)

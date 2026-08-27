@@ -8,9 +8,8 @@ MCP in both directions: configured client servers become tools, and `mow mcp` ex
 import _ "github.com/subosito/mow/packs/mcp"
 ```
 
-Stock `cmd/mow` blank-imports this package. The Rust `mowi` sibling project
-uses its RPC server mode when it needs MCP-backed sessions. No config means no
-client process.
+Stock `cmd/mow` blank-imports this package. The TUI talks to `mow acp`, not
+this server. No config means no client process.
 
 ## Commands and tools
 

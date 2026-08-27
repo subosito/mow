@@ -153,7 +153,9 @@ func TestCLIHelp(t *testing.T) {
 				"mow goal",
 				"mow ops",
 				"mow review",
+				"mow sec",
 				"mow job",
+				"Packs (this binary):",
 			},
 		},
 		{

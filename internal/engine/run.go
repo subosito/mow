@@ -6,7 +6,8 @@
 //   - Options.HTTPClient / Options.Logger — inject transport + structured logs
 //   - mow.Tool / Options.Tools / Hooks — integration types (per-engine tools)
 //   - RunResult.Usage / Event tokens — provider-reported token accounting
-//   - ext / ext/* — optional packs (acp, rpc, mcp, lsp, …)
+//   - ext/* — stock Engine surfaces (cli, tty, acp)
+//   - packs/* — optional packs (mcp, focus, goal, …)
 //   - cliutil / extcfg — host helpers (not packs)
 //
 // Implementation lives under internal/ (agent loop, llm, tools, config, …).
@@ -37,7 +38,7 @@ type Options struct {
 	// stock CLI and mowi do: global config.yaml, MOW_* env application already
 	// happens via config load, workspace profiles, global AGENTS/skills,
 	// out-of-band trust, user sessions, and extension BeforeNew home fallbacks
-	// (MCP/cmdhook/acp/lsp). When false (the zero value — embedding default),
+	// (MCP/cmdhook/acp). When false (the zero value — embedding default),
 	// New is hermetic: defaults + explicit ConfigPaths + Options fields only.
 	// No read of $MOW_HOME config, profiles, trust, global instructions/skills,
 	// or user session storage; sessions default off. Hosts (cliutil) set true.

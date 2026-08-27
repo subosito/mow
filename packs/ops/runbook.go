@@ -17,7 +17,7 @@ import (
 // Runbooks are operator-authored prose under $PROFILE/runbooks/<name>.md.
 //
 // They are deliberately *not* an executor. mow already has two ways to run a
-// list of steps (the agent loop, and ext/goal); a third one inside ops would
+// list of steps (the agent loop, and packs/goal); a third one inside ops would
 // add failure modes without adding capability, and a fixed step list cannot
 // adapt when step 2 does not apply. A runbook here is operational knowledge
 // the model reads and then acts on with the tools it already has.

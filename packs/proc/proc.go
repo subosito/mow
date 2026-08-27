@@ -3,7 +3,7 @@
 // watcher, mock) and keep working while it runs — the start tool returns a
 // pid immediately and the process is detached. Available anywhere
 // (run/tty/acp), gated by --allow-shell since it runs shell commands.
-// Blank-import to link. Shares internal/proc with packs/goal.
+// Blank-import to link. Uses public mow.Proc* (same store as packs/goal).
 //
 // There is no `mow proc` CLI. List/stop/logs are tools (and ACP extras);
 // Engine.Close stops session-scoped procs unless keep=true.
