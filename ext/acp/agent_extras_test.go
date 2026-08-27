@@ -170,7 +170,11 @@ func TestAgentExtrasInitializeAndMethods(t *testing.T) {
 			check: func(t *testing.T, result json.RawMessage) {
 				t.Helper()
 				var out struct {
-					Busy       bool `json:"busy"`
+					Busy       bool   `json:"busy"`
+					Mode       string `json:"mode"`
+					AskMode    bool   `json:"ask_mode"`
+					Pending    int    `json:"pending_perm"`
+					PendingACP int    `json:"pending_permission"`
 					ExtraRoots []struct {
 						Path     string `json:"path"`
 						ReadOnly bool   `json:"read_only"`
@@ -179,6 +183,15 @@ func TestAgentExtrasInitializeAndMethods(t *testing.T) {
 				}
 				if err := json.Unmarshal(result, &out); err != nil {
 					t.Fatalf("status result=%s: %v", result, err)
+				}
+				if out.Mode != "code" && out.Mode != "ask" {
+					t.Fatalf("status.mode=%q want ask|code", out.Mode)
+				}
+				if out.AskMode != (out.Mode == "ask") {
+					t.Fatalf("ask_mode=%v inconsistent with mode=%s", out.AskMode, out.Mode)
+				}
+				if out.Pending != out.PendingACP {
+					t.Fatalf("pending_perm=%d pending_permission=%d", out.Pending, out.PendingACP)
 				}
 				if out.Procs == nil {
 					t.Fatalf("status procs nil: %s", result)

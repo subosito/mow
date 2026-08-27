@@ -196,11 +196,13 @@ func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 	case "status":
 		st := a.eng.Status()
 		out := map[string]any{
-			"busy":         st.Busy,
-			"allow_write":  st.AllowWrite,
-			"allow_shell":  st.AllowShell,
-			"ask_mode":     a.askMode(),
-			"pending_perm": len(a.pending),
+			"busy":               st.Busy,
+			"allow_write":        st.AllowWrite,
+			"allow_shell":        st.AllowShell,
+			"ask_mode":           a.askMode(),
+			"mode":               a.sessionMode(),
+			"pending_perm":       len(a.pending),
+			"pending_permission": len(a.pending),
 		}
 		if st.RunID != "" {
 			out["run_id"] = st.RunID
@@ -264,8 +266,12 @@ func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 }
 
 func (a *agentServer) askMode() bool {
+	return a.sessionMode() == ModeAsk
+}
+
+func (a *agentServer) sessionMode() string {
 	if a == nil {
-		return false
+		return ModeCode
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -276,10 +282,10 @@ func (a *agentServer) askMode() bool {
 			break
 		}
 	}
-	if s := a.sessions[sid]; s != nil {
-		return s.mode == ModeAsk
+	if s := a.sessions[sid]; s != nil && s.mode != "" {
+		return s.mode
 	}
-	return false
+	return ModeCode
 }
 
 func (a *agentServer) handleSlashExtra(ctx context.Context, req request) {

@@ -50,6 +50,9 @@ const (
 type promptParams struct {
 	SessionID string         `json:"sessionId"`
 	Prompt    []ContentBlock `json:"prompt"`
+	// Ephemeral is a mow extra: run against current context but do not
+	// persist the turn. Generic ACP clients omit it (false).
+	Ephemeral bool `json:"ephemeral"`
 }
 
 // sessionUpdate notification params.

@@ -599,11 +599,34 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 					status = "failed"
 				}
 				writeToolCall("tool_call_update", ev.ToolCallID, kind, title, status)
+			case mow.EventCompactStart:
+				a.emitSessionUpdate(p.SessionID, map[string]any{
+					"sessionUpdate": "compact_start",
+					"auto":          ev.Auto,
+				})
+			case mow.EventCompact:
+				a.emitSessionUpdate(p.SessionID, map[string]any{
+					"sessionUpdate":   "compact",
+					"auto":            ev.Auto,
+					"layer":           string(ev.Layer),
+					"chars_before":    ev.CharsBefore,
+					"chars_after":     ev.CharsAfter,
+					"chars_saved":     ev.CharsSaved,
+					"messages_before": ev.MessagesBefore,
+					"messages_after":  ev.MessagesAfter,
+					"over_budget":     ev.OverBudget,
+				})
+			case mow.EventGoalStart, mow.EventGoalStep, mow.EventGoalDone, mow.EventGoalFail, mow.EventGoalPartial, mow.EventGoalBlocked:
+				update := map[string]any{"sessionUpdate": "goal", "type": string(ev.Type)}
+				if ev.Goal != nil {
+					update["goal"] = ev.Goal
+				}
+				a.emitSessionUpdate(p.SessionID, update)
 			case mow.EventRunEnd:
 				a.emitUsage(p.SessionID, ev.InputTokens, ev.OutputTokens, ev.CachedInputTokens)
 			}
 		})
-		popt := mow.PromptOpts{}
+		popt := mow.PromptOpts{Ephemeral: p.Ephemeral}
 		if mode == ModeAsk {
 			popt.ReadOnly = true
 			popt.SystemAppend = "Session mode is ask (read-only): do not use write, edit, or bash. Prefer read/glob/grep and explanations."
@@ -871,6 +894,25 @@ func (a *agentServer) write(v any) {
 	defer a.encMu.Unlock()
 	enc := json.NewEncoder(a.out)
 	_ = enc.Encode(v)
+}
+
+func (a *agentServer) emitSessionUpdate(sid string, update map[string]any) {
+	if sid == "" {
+		a.mu.Lock()
+		sid = a.activeSID
+		a.mu.Unlock()
+	}
+	if sid == "" || update == nil {
+		return
+	}
+	a.write(notification{
+		JSONRPC: "2.0",
+		Method:  "session/update",
+		Params: mustJSON(map[string]any{
+			"sessionId": sid,
+			"update":    update,
+		}),
+	})
 }
 
 func (a *agentServer) jailPath(p string) (full string, err error) {

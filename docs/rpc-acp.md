@@ -38,10 +38,9 @@ Status:
 
 - **same** — both sides can do the job
 - **shape** — same job, different envelope
-- **rpc** — first-party only; keep on RPC
-- **extra** — optional method on the same `mow acp` connection; RPC still has it
+- **rpc** — first-party only; frozen on RPC, extra on ACP if listed
+- **extra** — optional method on the same `mow acp` connection
 - **acp** — editor/interop only; do not copy into RPC
-- **steal** — ACP shape is cleaner; fold into RPC additively (epoch 1)
 
 | Job | `mow rpc` | ACP v1 | ACP v2 (draft) | Status |
 |---|---|---|---|---|
@@ -55,20 +54,20 @@ Status:
 | Thoughts | `event` `loop.reasoning` | `agent_thought_chunk` | same | shape |
 | Tool chrome | `harness.tool.start` / `.end` | `tool_call` / `tool_call_update` | omit/`null`/value merge | steal |
 | Cancel | `cancel` request `{ok}` | `session/cancel` notification | same | shape |
-| Usage / ctx chip | `prompt.usage` + `context` | `usage` + `usage_update`; extra `context` | first-class `usage_update` | steal |
-| Ask / auto | `perm.set` | `session/set_mode` + `configOptions` | `configOptions` `mode` | shape |
-| Permission prompt | `perm.ask` + `perm.decide` | agent→client `session/request_permission` | same + `title` / `subject` | steal |
+| Usage / ctx chip | `prompt.usage` + `context` | `usage` + `usage_update`; extra `context` | first-class `usage_update` | extra |
+| Session mode | `perm.set` `{ask\|auto}` | `session/set_mode` `modeId` `ask\|code` | `configOptions` `mode` | shape |
+| Permission request | `perm.ask` + `perm.decide` | agent→client `session/request_permission` | same + `title` / `subject` | shape |
 | Always-allow | `decision: always` (this tool, session) | `allow_always` option | `allow_always` / `reject_always` | same |
 | Slash list | `slash.list` (name, exclusive, aliases) | `available_commands_update` | same | shape |
 | Slash run | extra `slash` (`help` without Run, `{title,body,error}`) | extra `slash` when advertised; else `"/name …"` in `session/prompt` | same | **extra** |
 | Exclusive while busy | `slash` refuses | extra `slash` refuses when busy | not specified | **extra** |
 | Steer | `steer` | — | — | **extra** |
-| Ephemeral `/btw` | `prompt.ephemeral` | — | — | **rpc** |
+| Ephemeral `/btw` | `prompt.ephemeral` | extra field on `session/prompt` | — | **extra** |
 | Compact / rewind | `compact`, `rewind` | — | — | **extra** |
-| Model / effort | `model.*`, `effort.*` | `configOptions` + `set_config_option` | same | steal |
+| Model / effort | `model.*`, `effort.*` | `configOptions` + `set_config_option` | same | shape |
 | Skills / plugins | `skill.*`, `plugin.list` | — | — | **extra** |
 | Extra roots | `status`/`session` `{path,read_only}` | spawn cwd only | `additionalDirectories` (no ro/rw) | **extra** |
-| Live status | `status` (`busy`, `ask_mode`, `pending_perm`, `procs`) | extra `status` / `proc.list` | `state_update` | **extra** |
+| Live status | `status` (`busy`, `mode`, `pending_permission`, `procs`) | extra `status` / `proc.list` | `state_update` | **extra** |
 | UI config | `extension.config` `{name:mowi}` | not an agent concern | not an agent concern | **rpc** |
 | Goal / delegate events | `graph.goal.*`, `harness.delegate.*` | `plan` / thought / `_meta` | `plan_update` | **rpc** |
 | `@path` attachments | host jail + `attached[]` | content blocks (image/resource) | same | shape |
@@ -114,3 +113,5 @@ RPC already has these. Do not grow the list. Feature-detect from
    `model.set` / `effort.set` / `perm.set` remain on RPC only.
 
 v2 stays behind `protocolVersion` negotiation on `mow acp`. Do not drop v1.
+on `mow acp`. Do not drop v1.
+1.
