@@ -42,8 +42,8 @@ func TestRunReportsUnregisteredEnable(t *testing.T) {
 	if !strings.Contains(text, "not registered") || !strings.Contains(text, "this binary") {
 		t.Fatalf("want unregistered-enable wording:\n%s", text)
 	}
-	if !strings.Contains(text, "packs/media") || !strings.Contains(text, "mow-full") {
-		t.Fatalf("want lean/mow-full hint:\n%s", text)
+	if !strings.Contains(text, "packs/media") || !strings.Contains(text, "mowx") {
+		t.Fatalf("want lean/mowx hint:\n%s", text)
 	}
 	if !strings.Contains(text, "FAIL") {
 		t.Fatalf("want tools check FAIL:\n%s", text)

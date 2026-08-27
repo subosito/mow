@@ -1,6 +1,6 @@
 // Package proc manages long-lived background processes: start detached, record
 // a pid + logfile, check status, tail logs, and stop. Shared by packs/proc (the
-// general proc_* tools + `mow proc` CLI) and packs/goal (goal-scoped process
+// general proc_* tools) and packs/goal (goal-scoped process
 // tools). Detach model: new session (Setsid) + Release so the parent never
 // waits — the process outlives the tool call and the agent loop continues.
 package proc
@@ -51,7 +51,7 @@ func SanitizeID(id string) string {
 }
 
 // StoreDir is $MOW_HOME/proc/<workspace-hash> — per-project, so processes from
-// different repos do not collide. Shared by packs/proc tools, `mow proc`, and
+// different repos do not collide. Shared by packs/proc tools and
 // RPC status so the TUI lists the same store the agent started.
 func StoreDir(home, workspace string) string {
 	ws := strings.TrimSpace(workspace)

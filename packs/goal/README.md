@@ -8,7 +8,7 @@ Durable outer loop over `Engine.Prompt`: checklist state, evidence, budgets, opt
 import _ "github.com/subosito/mow/packs/goal"
 ```
 
-`cmd/mow-full` blank-imports this package; lean `cmd/mow` does not. The Rust `mowi` sibling project
+`cmd/mowx` blank-imports this package; lean `cmd/mow` does not. The Rust `mowi` sibling project
 displays its RPC-driven results. Job depends on goal.
 
 ## Commands and tools

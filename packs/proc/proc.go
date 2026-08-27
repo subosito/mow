@@ -1,9 +1,12 @@
 // Package proc is the background-process pack: proc_start / proc_status /
-// proc_stop tools plus a `mow proc` CLI, so an agent can launch a long-lived
-// process (dev server, watcher, mock) and keep working while it runs — the
-// start tool returns a pid immediately and the process is detached. Available
-// anywhere (run/repl/host), gated by --allow-shell since it runs shell
-// commands. Blank-import to link. Shares internal/proc with ext/goal.
+// proc_stop tools so an agent can launch a long-lived process (dev server,
+// watcher, mock) and keep working while it runs — the start tool returns a
+// pid immediately and the process is detached. Available anywhere
+// (run/tty/acp), gated by --allow-shell since it runs shell commands.
+// Blank-import to link. Shares internal/proc with packs/goal.
+//
+// There is no `mow proc` CLI. List/stop/logs are tools (and ACP extras);
+// Engine.Close stops session-scoped procs unless keep=true.
 package proc
 
 import (
@@ -11,8 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
 
 	"github.com/subosito/mow"
@@ -23,12 +24,6 @@ func init() {
 	ext.RegisterTool(startTool{})
 	ext.RegisterTool(statusTool{})
 	ext.RegisterTool(stopTool{})
-	ext.RegisterCommand(ext.Command{
-		Name:    "proc",
-		Summary: "Background processes — list | stop | logs",
-		Layer:   "ext",
-		Run:     procCmd,
-	})
 	// Guidance travels with the pack: engines that don't link packs/proc get
 	// no proc advice. The spine's harness rules stay workspace/tool-agnostic.
 	ext.RegisterSystemSegmentSource("proc", func(configPaths ...string) string {
@@ -46,8 +41,7 @@ when the call returns, so a backgrounded process dies with the tool call
 and a foreground server blocks the tool until timeout.`
 
 // storeDir is $MOW_HOME/proc/<workspace-hash> — per-project, so processes from
-// different repos don't collide. The `mow proc` CLI resolves the same dir from
-// the current directory.
+// different repos don't collide.
 func storeDir(workspace string) string {
 	return mow.ProcStoreDir(mow.Home(), workspace)
 }
@@ -189,102 +183,4 @@ func procState(alive bool) string {
 		return "running"
 	}
 	return "dead"
-}
-
-// procCmd is `mow proc …` — manage the current project's background processes.
-func procCmd(args []string) int {
-	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
-		printProcUsage()
-		return 0
-	}
-	dir := storeDir("") // current directory's project
-	sub := "list"
-	if len(args) > 0 {
-		sub = args[0]
-	}
-	switch sub {
-	case "list", "ls":
-		list, _ := mow.ProcList(dir)
-		if len(list) == 0 {
-			fmt.Println("(no background processes)")
-			return 0
-		}
-		for _, p := range list {
-			fmt.Printf("%-24s pid=%-8d %s\n", p.ID, p.PID, procState(p.Alive))
-		}
-		return 0
-	case "stop":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "mow proc stop: id required")
-			fmt.Fprintln(os.Stderr, "  mow proc stop <id>")
-			return 2
-		}
-		info, err := mow.ProcStop(dir, args[1])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "mow proc:", err)
-			return 1
-		}
-		fmt.Printf("stopped %s (pid %d)\n", info.ID, info.PID)
-		return 0
-	case "stop-all":
-		list, _ := mow.ProcList(dir)
-		n := 0
-		for _, p := range list {
-			if _, err := mow.ProcStop(dir, p.ID); err == nil {
-				n++
-			}
-		}
-		fmt.Printf("stopped %d process(es)\n", n)
-		return 0
-	case "logs", "log":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "mow proc logs: id required")
-			fmt.Fprintln(os.Stderr, "  mow proc logs <id> [lines]")
-			return 2
-		}
-		n := 40
-		if len(args) >= 3 {
-			if v, err := strconv.Atoi(args[2]); err == nil && v > 0 {
-				n = v
-			}
-		}
-		out, err := mow.ProcTail(dir, args[1], n)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "mow proc:", err)
-			return 1
-		}
-		if strings.TrimSpace(out) == "" {
-			fmt.Println("(no log)")
-		} else {
-			fmt.Println(out)
-		}
-		return 0
-	default:
-		fmt.Fprintf(os.Stderr, "mow proc: unknown %q\n\n", sub)
-		printProcUsage()
-		return 2
-	}
-}
-
-func printProcUsage() {
-	fmt.Fprintf(os.Stderr, `mow proc — background processes for this workspace
-
-State: $MOW_HOME/proc/<workspace-hash>/
-Started by the agent via proc_start (requires --allow-shell).
-
-Commands:
-
-  mow proc list                 list processes (default)
-  mow proc stop <id>            stop one (SIGTERM then SIGKILL)
-  mow proc stop-all             stop every process in this workspace
-  mow proc logs <id> [n]        tail log (default 40 lines)
-
-Examples:
-
-  mow proc
-  mow proc stop dev-server
-  mow proc logs dev-server 80
-
-Tools (agent): proc_start, proc_status, proc_stop
-`)
 }

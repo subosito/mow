@@ -9,7 +9,7 @@ Requires **Go 1.26.4+** (`go.mod`). Prefer `devenv shell` (`GOTOOLCHAIN=local`).
 ```bash
 devenv shell -- just verify    # vet + go test -race + build — gate before commit
 devenv shell -- just verify-ci # same, no credentials, empty MOW_HOME
-devenv shell -- just build     # → bin/mow (lean) + bin/mow-full
+devenv shell -- just build     # → bin/mow (lean) + bin/mowx
 devenv shell -- just test      # fast inner loop (no race)
 ```
 
@@ -38,7 +38,7 @@ Source of truth: [docs/architecture.md](docs/architecture.md).
 | `packs/` | Optional module `github.com/subosito/mow/packs` |
 | `internal/` | Implementation — **not** an integrator import |
 | `cmd/mow/` | Lean host |
-| `cmd/mow-full/` | Full host |
+| `cmd/mowx/` | Full host |
 | `ext/cli/` | Unix CLI skeleton (run, trust, doctor, …) |
 | `ext/tty/` | Optional line REPL |
 
@@ -101,4 +101,4 @@ Non-trivial change: `devenv shell -- just verify` before commit. Docs/fixtures a
 | [docs/harness.md](docs/harness.md) | Loop, tools, config, sessions |
 | [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP |
 | [docs/rpc-acp.md](docs/rpc-acp.md) | `mow acp` + extras |
-| [docs/review.md](docs/review.md) | `mow-full review` / `sec`: two-pass, flags, schema, exit codes |
+| [docs/review.md](docs/review.md) | `mowx review` / `sec`: two-pass, flags, schema, exit codes |

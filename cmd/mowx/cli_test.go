@@ -17,16 +17,16 @@ var mowBinary string
 // command dispatch, exit status, and stderr output rather than calling run
 // directly.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "mow-cli-test-*")
+	dir, err := os.MkdirTemp("", "mowx-cli-test-*")
 	if err != nil {
 		panic(err)
 	}
 	defer os.RemoveAll(dir)
 
-	mowBinary = filepath.Join(dir, "mow")
+	mowBinary = filepath.Join(dir, "mowx")
 	build := exec.Command("go", "build", "-o", mowBinary, ".")
 	if output, err := build.CombinedOutput(); err != nil {
-		panic("build mow CLI: " + err.Error() + "\n" + string(output))
+		panic("build mowx CLI: " + err.Error() + "\n" + string(output))
 	}
 	os.Exit(m.Run())
 }
@@ -79,6 +79,60 @@ func TestRunEphemeralFlagDoesNotCreateSessionHistory(t *testing.T) {
 	}
 }
 
+func TestModelsListsCatalog(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/models") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{
+			"id":"gpt-5-mini",
+			"wire":"openai-responses",
+			"wires":["openai-responses","openai-chat-completions"],
+			"efforts":["none","low","medium","high"],
+			"default_effort":"medium"
+		},{"id":"deepseek-chat","wire":"openai-chat-completions"}]}`)
+	}))
+	defer server.Close()
+
+	cmd := exec.Command(mowBinary, "models", "--no-session")
+	cmd.Env = append(os.Environ(),
+		"MOW_HOME="+t.TempDir(),
+		"MOW_BASE_URL="+server.URL+"/v1",
+		"MOW_API_KEY=test",
+		"MOW_MODEL=gpt-5-mini",
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mow models: %v\n%s", err, output)
+	}
+	text := string(output)
+	for _, want := range []string{
+		"models  2",
+		"current gpt-5-mini",
+		"• gpt-5-mini",
+		"openai-responses",
+		"medium*",
+		"deepseek-chat",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+}
+
+func TestMowxVersionReportsFullBinary(t *testing.T) {
+	output, code := runMow(t, "version")
+	if code != 0 {
+		t.Fatalf("exit code = %d\n%s", code, output)
+	}
+	if !strings.Contains(output, "mow ") {
+		t.Fatalf("version missing product name:\n%s", output)
+	}
+}
+
 func TestCLIHelp(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -93,6 +147,7 @@ func TestCLIHelp(t *testing.T) {
 			want: []string{
 				"mow — agent harness (library + CLI)",
 				"mow run",
+				"mow models",
 				"mow tty",
 				"mow trust",
 				"mow goal",
@@ -100,6 +155,15 @@ func TestCLIHelp(t *testing.T) {
 				"mow review",
 				"mow job",
 			},
+		},
+		{
+			name: "models command",
+			args: []string{"help", "models"},
+			want: []string{
+				"mow models — list catalog models",
+				"--chat",
+			},
+			notWant: []string{"Core:"},
 		},
 		{
 			name: "run command",

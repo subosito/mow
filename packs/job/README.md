@@ -8,7 +8,7 @@ Interval or cron jobs that invoke a saved goal or a one-shot prompt. Job depends
 import _ "github.com/subosito/mow/packs/job"
 ```
 
-`cmd/mow-full` blank-imports this package; lean `cmd/mow` does not. Job is **CLI-only**: no tools and
+`cmd/mowx` blank-imports this package; lean `cmd/mow` does not. Job is **CLI-only**: no tools and
 no slash. The Rust `mowi` TUI does not list `/job` — operate the clock with
 `mow job` (or systemd). `mow ops run NAME` is a separate process.
 

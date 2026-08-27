@@ -20,7 +20,7 @@ vet:
     go vet ./...
     cd packs && go vet ./...
 
-build: build-mow build-mow-full
+build: build-mow build-mowx
 
 build-mow:
     #!/usr/bin/env bash
@@ -31,14 +31,14 @@ build-mow:
       -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
       -o bin/mow ./cmd/mow
 
-build-mow-full:
+build-mowx:
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p bin
     ver="$(tr -d ' \n' < VERSION)"
     go build -trimpath \
       -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
-      -o bin/mow-full ./cmd/mow-full
+      -o bin/mowx ./cmd/mowx
 
 
 # Closest local approximation of a CI run: no developer credentials and an
@@ -67,5 +67,5 @@ verify-ci:
         MOW_HOME="$tmp/.mow" HOME="$tmp" \
         bash -c 'cd packs && go vet ./... && go test -race -count=1 ./...'
     just build-mow
-    just build-mow-full
+    just build-mowx
     echo "→ verify-ci ok"

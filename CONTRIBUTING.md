@@ -17,7 +17,7 @@ integrate against; the CLI and every pack are thin shells over it. So:
   re-export it deliberately rather than leaking the internal path.
 - A frontend, protocol, or heavy optional feature → a **core extension** under
   `ext/` or an **optional pack** under `packs/` (blank-imported into
-  `cmd/mow` and/or `cmd/mow-full`),
+  `cmd/mow` and/or `cmd/mowx`),
   or an external host that imports mow. The Rust `mowi` sibling project is the
   interactive TUI and drives `mow acp`.
 
@@ -35,7 +35,7 @@ strings use `mow.Version` — do not hardcode the number.
 
 ```bash
 devenv shell -- just verify   # go test ./... + go vet — the gate before every commit
-devenv shell -- just build    # → bin/mow (lean) + bin/mow-full
+devenv shell -- just build    # → bin/mow (lean) + bin/mowx
 devenv shell -- go test -race ./...   # run when touching the loop, hooks, or sessions
 # Plain Go, no devenv/nix:
 go test ./... && go vet ./...

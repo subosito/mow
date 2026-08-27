@@ -43,18 +43,18 @@ func runMow(t *testing.T, args ...string) (string, int) {
 }
 
 // The lean binary links acp, focus, proc, cmdhook, mcp — and must not
-// show the mow-full packs in help.
+// show the mowx packs in help.
 func TestLeanHelpListsLeanCommands(t *testing.T) {
 	output, code := runMow(t, "help")
 	if code != 0 {
 		t.Fatalf("exit code = %d\n%s", code, output)
 	}
-	for _, want := range []string{"mow acp", "mow mcp", "mow proc"} {
+	for _, want := range []string{"mow acp", "mow mcp"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("lean help missing %q:\n%s", want, output)
 		}
 	}
-	for _, notWant := range []string{"mow goal", "mow ops", "mow review", "mow job", "mow media"} {
+	for _, notWant := range []string{"mow goal", "mow ops", "mow review", "mow job", "mow media", "mow proc"} {
 		if strings.Contains(output, notWant) {
 			t.Errorf("lean help unexpectedly lists %q:\n%s", notWant, output)
 		}
@@ -80,7 +80,7 @@ func TestDoctorReportsUnregisteredMediaTool(t *testing.T) {
 	if !strings.Contains(text, "not registered") || !strings.Contains(text, "this binary") {
 		t.Fatalf("want unregistered wording:\n%s", text)
 	}
-	if !strings.Contains(text, "packs/media") || !strings.Contains(text, "mow-full") {
+	if !strings.Contains(text, "packs/media") || !strings.Contains(text, "mowx") {
 		t.Fatalf("want lean hint:\n%s", text)
 	}
 }

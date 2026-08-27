@@ -66,7 +66,7 @@ func Main(args []string) int {
 
 var coreCommandNames = map[string]bool{
 	"run": true, "trust": true, "doctor": true, "approvals": true,
-	"version": true, "help": true,
+	"models": true, "version": true, "help": true,
 }
 
 func dispatch(args []string) int {
@@ -153,7 +153,7 @@ func reservedCLIToken(name string) bool {
 		return false
 	}
 	switch n {
-	case "run", "tty", "trust", "doctor", "approvals", "version", "help",
+	case "run", "tty", "trust", "doctor", "approvals", "models", "version", "help",
 		"rpc", "ops", "repl", "acp", "goal", "review", "sec", "job", "proc",
 		"mcp", "media", "focus":
 		return true
@@ -279,6 +279,7 @@ func printUsage() {
 Core:
 
   mow run  -p "…" [flags]     one-shot prompt
+  mow models [filter]         list catalog models (id, wire, efforts)
   mow trust [path]            trust workspace for project .mow config
   mow trust --list | --revoke
   mow doctor [--bundle]       inspect host/workspace (does not start MCP)
@@ -315,7 +316,7 @@ Env:
   MOW_EFFORT                       none | low | medium | high
   MOW_BASE_URL / OPENAI_BASE_URL / ANTHROPIC_BASE_URL
   MOW_WIRE                         openai-chat-completions | openai-responses | anthropic-messages
-  MOW_OPS                          ops profile name (with packs/ops; mow-full)
+  MOW_OPS                          ops profile name (with packs/ops; mowx)
   MOW_TRUST_PROJECT=1              trust project config this run
 
 Defaults: tools read, glob, grep. Power: --allow-write / --allow-shell.

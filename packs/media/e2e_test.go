@@ -24,7 +24,7 @@ func (p *specProvider) Chat(ctx context.Context, msgs []mow.Message, tools []mow
 	return mow.Message{Role: "assistant", Content: "ok"}, nil
 }
 
-// mow-full blank-imports packs/media. A configured model plus tools.enable
+// mowx blank-imports packs/media. A configured model plus tools.enable
 // must still surface the tool to the model, exactly as it did when
 // MediaTools was compiled into internal/engine.
 func TestEngineOffersConfiguredMediaTool(t *testing.T) {

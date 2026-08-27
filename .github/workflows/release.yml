@@ -67,14 +67,14 @@ jobs:
             ./cmd/mow
           go build -trimpath \
             -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
-            -o "dist/mow-full-${{ matrix.goos }}-${{ matrix.goarch }}" \
-            ./cmd/mow-full
+            -o "dist/mowx-${{ matrix.goos }}-${{ matrix.goarch }}" \
+            ./cmd/mowx
       - uses: actions/upload-artifact@v4
         with:
           name: mow-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             dist/mow-${{ matrix.goos }}-${{ matrix.goarch }}
-            dist/mow-full-${{ matrix.goos }}-${{ matrix.goarch }}
+            dist/mowx-${{ matrix.goos }}-${{ matrix.goarch }}
 
   publish:
     needs: [check-version, build]

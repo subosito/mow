@@ -1,6 +1,6 @@
 # mow sec
 
-Ships on **`mow-full`**. Invoke as `mow-full sec` (examples below keep the
+Ships on **`mowx`**. Invoke as `mowx sec` (examples below keep the
 short `mow sec` form for the subcommand itself).
 
 `mow sec` is mow's read-only, evidence-backed security review command. It reads

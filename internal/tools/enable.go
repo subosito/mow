@@ -63,7 +63,7 @@ func FormatUnregisteredEnable(names []string, mediaLinked bool) string {
 	}
 	hint := ""
 	if HasMediaEnableName(names) && !mediaLinked {
-		hint = " (lean mow has no packs/media — use mow-full, or drop it from enable)"
+		hint = " (lean mow has no packs/media — use mowx, or drop it from enable)"
 	}
 	joined := strings.Join(names, ", ")
 	if len(names) == 1 {

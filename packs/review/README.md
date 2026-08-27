@@ -8,7 +8,7 @@ Read-only two-pass code review (`review`) and adversarial security review (`sec`
 import _ "github.com/subosito/mow/packs/review"
 ```
 
-`cmd/mow-full` blank-imports this package; lean `cmd/mow` does not. The Rust `mowi` sibling project
+`cmd/mowx` blank-imports this package; lean `cmd/mow` does not. The Rust `mowi` sibling project
 displays its RPC-driven results.
 
 ## Commands

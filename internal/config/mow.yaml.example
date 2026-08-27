@@ -148,9 +148,9 @@ session:
 # extensions:
 #   mowi:                             # host $MOW_HOME only (not project .mow/)
 #     mow_bin: mow                    # lean default; TUI spawn
-#     # mow_bin: mow-full             # --mow-bin > $MOW_BIN > this > mow
+#     # mow_bin: mowx             # --mow-bin > $MOW_BIN > this > mow
 #     theme: catppuccin-mocha
-#   media:                            # mow-full (packs/media); ignored by lean mow
+#   media:                            # mowx (packs/media); ignored by lean mow
 #     understand:
 #       image: gpt-5-mini
 #     # generate:

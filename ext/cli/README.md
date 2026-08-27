@@ -23,6 +23,7 @@ Stock `cmd/mow` links `ext/cli` plus `ext/acp`, `ext/tty`, and the lean pack set
 | Surface | Name |
 |---|---|
 | CLI | `run` — one-shot prompt |
+| CLI | `models` — catalog list (id, wire, efforts) |
 | CLI | `trust` — workspace trust list |
 | CLI | `doctor` — host/workspace inspection (no MCP) |
 | CLI | `approvals` — durable tool approval rules |

@@ -10,7 +10,7 @@ Media generation and understanding: `generate_image`, `generate_speech`,
 import _ "github.com/subosito/mow/packs/media"
 ```
 
-`cmd/mow-full` blank-imports this package; lean `cmd/mow` does not. It talks
+`cmd/mowx` blank-imports this package; lean `cmd/mow` does not. It talks
 to the chat credential and workspace jail through the public `mow.Media*` /
 `mow.WriteWorkspaceFile` APIs.
 

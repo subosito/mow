@@ -1,7 +1,7 @@
 # mow review / mow sec
 
-Ships on **`mow-full`** (`cmd/mow-full`), not the lean `mow` binary. Invoke as
-`mow-full review` / `mow-full sec` (examples below keep the short `mow review`
+Ships on **`mowx`** (`cmd/mowx`), not the lean `mow` binary. Invoke as
+`mowx review` / `mowx sec` (examples below keep the short `mow review`
 form for the subcommand itself).
 
 Two AI-assisted review commands over one read-only workflow. `mow review` looks

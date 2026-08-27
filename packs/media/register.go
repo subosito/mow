@@ -16,7 +16,7 @@ import (
 // tools.enable without a configured model is a no-op, never an Engine
 // construction error.
 func init() {
-	// Advertise the pack so doctor / Engine can tell lean mow from mow-full
+	// Advertise the pack so doctor / Engine can tell lean mow from mowx
 	// without running BeforeNew (which would start MCP).
 	ext.RegisterOptionalFeature(ext.OptionalFeature{ID: "media"})
 	ext.RegisterBeforeNew(func(configPaths ...string) error {

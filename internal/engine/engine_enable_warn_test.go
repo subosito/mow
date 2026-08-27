@@ -39,8 +39,8 @@ func TestNewWarnsUnregisteredEnable(t *testing.T) {
 	if !strings.Contains(out, "understand_image") || !strings.Contains(out, "not registered") {
 		t.Fatalf("want warn for understand_image; log=%q", out)
 	}
-	if !strings.Contains(out, "packs/media") || !strings.Contains(out, "mow-full") {
-		t.Fatalf("want lean/mow-full hint; log=%q", out)
+	if !strings.Contains(out, "packs/media") || !strings.Contains(out, "mowx") {
+		t.Fatalf("want lean/mowx hint; log=%q", out)
 	}
 	for _, tl := range eng.tools {
 		if tl.Name() == "understand_image" {

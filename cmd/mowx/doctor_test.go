@@ -25,13 +25,13 @@ func TestDoctorAcceptsMediaEnableWhenPackLinked(t *testing.T) {
 	}
 	text := string(out)
 	if strings.Contains(text, "not registered") {
-		t.Fatalf("mow-full should treat understand_image as known:\n%s", text)
+		t.Fatalf("mowx should treat understand_image as known:\n%s", text)
 	}
 	if !strings.Contains(text, "understand_image") {
 		t.Fatalf("want tools check to list understand_image:\n%s", text)
 	}
-	if !strings.Contains(text, "mow-full") {
-		t.Fatalf("want binary identity mow-full:\n%s", text)
+	if !strings.Contains(text, "mowx") {
+		t.Fatalf("want binary identity mowx:\n%s", text)
 	}
 }
 

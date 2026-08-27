@@ -25,7 +25,7 @@ broker, host UI, or sibling repository is required for `mow.Engine`.
 
 | Module | Path | Role |
 |---|---|---|
-| `github.com/subosito/mow` | root | Public API, `internal/engine`, registration, core extensions, `cmd/mow`, `cmd/mow-full` |
+| `github.com/subosito/mow` | root | Public API, `internal/engine`, registration, core extensions, `cmd/mow`, `cmd/mowx` |
 | `github.com/subosito/mow/packs` | `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job |
 
 `go.work` wires the two Go modules for local development. Import direction is
@@ -109,7 +109,7 @@ One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.m
 | Binary | Source | Ships |
 |---|---|---|
 | `mow` | `cmd/mow` | Import list: `ext/cli` + `ext/tty` + `ext/acp` + focus, proc, cmdhook, mcp |
-| `mow-full` | `cmd/mow-full` | Lean set plus goal, job, ops, review, media |
+| `mowx` | `cmd/mowx` | Lean set plus goal, job, ops, review, media |
 | Rust `mowi` | sibling project/repository | Interactive TUI over `mow acp` |
 
 Composition lives in `cmd/` (blank imports + `ext/cli.Main`). Host UIs spawn

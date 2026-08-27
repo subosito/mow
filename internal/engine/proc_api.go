@@ -2,7 +2,7 @@
 // and cannot import internal/). Packs that need process management —
 // packs/goal's process tools — import mow.Proc* instead of internal/proc.
 //
-// packs/proc (the general proc_* tools + `mow proc` CLI) uses these
+// packs/proc (the general proc_* tools) uses these
 // re-exports for the same reason.
 package engine
 

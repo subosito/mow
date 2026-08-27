@@ -1,4 +1,4 @@
-// Command mow-full is the full stock binary: everything cmd/mow links
+// Command mowx is the full stock binary: everything cmd/mow links
 // (acp, tty, focus, proc, cmdhook, mcp) plus the remaining packs — goal,
 // job, ops, review, media.
 //

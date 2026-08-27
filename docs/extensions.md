@@ -37,8 +37,8 @@ tools it actually has.
 
 ## Linked binaries
 
-- `cmd/mow` and `cmd/mow-full` are import lists over `ext/cli.Main`. Lean links
-  `ext/cli` + `ext/tty` + `ext/acp` plus focus, proc, cmdhook, mcp. `cmd/mow-full`
+- `cmd/mow` and `cmd/mowx` are import lists over `ext/cli.Main`. Lean links
+  `ext/cli` + `ext/tty` + `ext/acp` plus focus, proc, cmdhook, mcp. `cmd/mowx`
   adds goal, job, ops, review, media. Drop an import and that subcommand is gone.
 - Host UIs launch `mow acp` (`ext/acp`), own terminal presentation, and receive
   registered command/tool events over ACP + extras. Spawn binary: `--mow-bin` /
@@ -55,8 +55,8 @@ Unix host skeleton. Import (not blank) and call `cli.Main`:
 
 - Dispatcher: no-args TTY → `ext.DefaultInteractiveCommand` if registered, else usage.
   Free-form args become `mow run -p …`. Other names go to `ext.LookupCommand`.
-- Commands: `run` (one-shot; `mow.NewHarness`), `trust`, `doctor`, `approvals`,
-  `version`, `help`.
+- Commands: `run` (one-shot; `mow.NewHarness`), `models` (catalog list), `trust`,
+  `doctor`, `approvals`, `version`, `help`.
 - `cliutil` stays flags → Options / `NewHarness` (not a command, not a pack).
 
 Stock binaries compose surfaces in `cmd/` by blank-importing `ext/tty`, `ext/acp`,
@@ -151,8 +151,9 @@ extensions:
 
 ### Process / command hooks / eval
 
-- `packs/proc`: `proc_start`, `proc_status`, `proc_stop` and `mow proc`. Stop
-  signals the process group; log tails are size-capped.
+- `packs/proc`: `proc_start`, `proc_status`, `proc_stop` (no CLI). Stop
+  signals the process group; log tails are size-capped. Session-scoped procs
+  die on `Engine.Close` unless `keep` is true.
 - `packs/cmdhook`: Claude-style lifecycle shell hooks (`root` or `plugins` map,
   `min_turns`). Host-owned Agent Plugins (`$MOW_HOME/plugins` and workspace
   profile `plugins/`) that ship `hooks/hooks.json` register automatically;
@@ -340,7 +341,7 @@ runs.
 The Rust `mowi` sibling project/repository is the interactive terminal host.
 It launches `mow acp` and renders sessions, streaming, model/effort pickers,
 tool approval, peer streams, and pack command results. `extensions.mowi.mow_bin`
-in host `$MOW_HOME/config.yaml` selects `mow` vs `mow-full` (CLI `--mow-bin`
+in host `$MOW_HOME/config.yaml` selects `mow` vs `mowx` (CLI `--mow-bin`
 and `$MOW_BIN` win; project `.mow/` is never read for this). See that project
 for installation and release instructions.
 
@@ -383,7 +384,7 @@ Media stays a side lane to the chat loop:
 | `understand_voice` | transcription endpoint |
 | `understand_video` | chat with video parts |
 
-Media ships as `packs/media`. `mow-full` blank-imports it; lean `mow` does not.
+Media ships as `packs/media`. `mowx` blank-imports it; lean `mow` does not.
 Each tool registers only when its model id is configured under
 `extensions.media.generate.*` / `extensions.media.understand.*`; `tools.enable`
 still gates visibility. Listing a media name in `tools.enable` on lean `mow`
@@ -394,7 +395,7 @@ yaml blobs.
 
 Both tiers register the same way (blank import + `ext.Register*`) and both
 detach the same way — delete one line from `cmd/mow/main.go` or
-`cmd/mow-full/main.go` and the feature is
+`cmd/mowx/main.go` and the feature is
 gone from the binary. That *link* boundary is what keeps core lean, and it is
 the only property a pack must have.
 

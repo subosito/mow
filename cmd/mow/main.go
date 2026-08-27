@@ -1,7 +1,7 @@
 // Command mow is the lean stock binary: core CLI (ext/cli) plus the lightweight
 // extension set — acp, tty, and the focus, proc, cmdhook, mcp packs. The
 // heavier/specialized packs (goal, job, ops, review, media) are linked by
-// cmd/mow-full instead.
+// cmd/mowx instead.
 //
 // This file's only job is the blank-import list — drop an import and that
 // subcommand disappears from this binary.
