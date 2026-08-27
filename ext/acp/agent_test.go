@@ -139,6 +139,7 @@ type pipeClient struct {
 	next      int
 	pending   map[string]chan map[string]json.RawMessage
 	mu        sync.Mutex
+	writeMu   sync.Mutex
 	onNotify  func(method string, params json.RawMessage)
 	onRequest func(id json.RawMessage, method string, params json.RawMessage)
 }
@@ -187,8 +188,7 @@ func (c *pipeClient) notify(method string, params any) error {
 	raw, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "method": method, "params": params,
 	})
-	_, err := c.out.Write(append(raw, '\n'))
-	return err
+	return c.writeLine(raw)
 }
 
 func (c *pipeClient) reply(id json.RawMessage, result any) error {
@@ -200,7 +200,13 @@ func (c *pipeClient) reply(id json.RawMessage, result any) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.out.Write(append(raw, '\n'))
+	return c.writeLine(raw)
+}
+
+func (c *pipeClient) writeLine(raw []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	_, err := c.out.Write(append(raw, '\n'))
 	return err
 }
 
@@ -210,16 +216,16 @@ func (c *pipeClient) callOK(ctx context.Context, method string, params any) erro
 }
 
 func (c *pipeClient) call(ctx context.Context, method string, params any) (map[string]json.RawMessage, error) {
-	c.next++
-	id := fmt.Sprintf("%d", c.next)
 	ch := make(chan map[string]json.RawMessage, 1)
 	c.mu.Lock()
+	c.next++
+	id := fmt.Sprintf("%d", c.next)
 	c.pending[id] = ch
 	c.mu.Unlock()
 	raw, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "id": id, "method": method, "params": params,
 	})
-	if _, err := c.out.Write(append(raw, '\n')); err != nil {
+	if err := c.writeLine(raw); err != nil {
 		return nil, err
 	}
 	select {
