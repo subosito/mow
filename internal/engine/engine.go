@@ -121,14 +121,22 @@ type lifeHooks struct {
 	onStop         []StopFunc
 }
 
-// New builds an Engine from Options (config, tools, optional session resume).
+// NewHarness constructs an Engine the way mow run / mow acp / host UIs do:
+// $MOW_HOME and project config are loaded. Embedders that want a hermetic
+// engine (Options + env only) should call New instead.
+func NewHarness(opt Options) (*Engine, error) {
+	opt.LoadUserConfig = true
+	return New(opt)
+}
+
+// New builds a hermetic Engine from Options (config, tools, optional session).
 //
-// Hermetic by default: Options.LoadUserConfig is false, so New does not read
+// LoadUserConfig is false unless the caller sets it: New does not read
 // or use $MOW_HOME user state (global config, workspace profiles, trust,
-// global AGENTS/skills, user sessions, extension home fallbacks). Stock CLI
-// and the stock CLI sets LoadUserConfig true via cliutil. Explicit ConfigPaths always
-// load when provided (defaults → paths → env → Options), without implicit
-// global config when LoadUserConfig is false.
+// global AGENTS/skills, user sessions, extension home fallbacks). Host
+// programs should call NewHarness instead (or set LoadUserConfig). Explicit
+// ConfigPaths always load when provided (defaults → paths → env → Options),
+// without implicit global config when LoadUserConfig is false.
 func New(opt Options) (*Engine, error) {
 	// --workspace / Options.Workspace is hybrid only with LoadUserConfig:
 	// first looked up as a workspace profile under $MOW_HOME/workspaces/<name>

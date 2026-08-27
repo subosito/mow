@@ -256,7 +256,7 @@ func (f *EngineFlags) NewEngine() (*mow.Engine, error) {
 	for _, name := range f.DisableExt {
 		ext.SetExtensionEnabled(name, false)
 	}
-	return mow.New(f.Options())
+	return mow.NewHarness(f.Options())
 }
 
 // splitRootSpecs parses --extra-root values through the same suffix rules as

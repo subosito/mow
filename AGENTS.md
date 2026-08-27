@@ -34,19 +34,20 @@ Source of truth: [docs/architecture.md](docs/architecture.md).
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
 | `extcfg/` | Decode `extensions.<name>` |
 | `testutil/` | Shared tests (pin `$MOW_HOME`) |
-| `ext/` | Registration + core: acp, rpc |
+| `ext/` | Registration + core extensions: acp, cli, tty |
 | `packs/` | Optional module `github.com/subosito/mow/packs` |
 | `internal/` | Implementation — **not** an integrator import |
 | `cmd/mow/` | Lean host |
 | `cmd/mow-full/` | Full host |
-| `cmd/internal/mowcli/` | Shared CLI |
+| `ext/cli/` | Unix CLI skeleton (run, trust, doctor, …) |
+| `ext/tty/` | Optional line REPL |
 
 If integrators need something in `internal/`, re-export — do not tell them to import `internal/`.
 
 ## Packs
 
-- Lean (`cmd/mow`): acp, rpc, focus, proc, cmdhook, mcp.
-- Full adds goal, job, ops, review, media. Both use `cmd/internal/mowcli`.
+- Lean (`cmd/mow`): acp, cli, tty, focus, proc, cmdhook, mcp.
+- Full adds goal, job, ops, review, media. Both call `ext/cli.Main`.
 - Core extensions in `ext/` (root module); optional packs in `packs/` (`go.work` for local dev).
 - Remove import → subcommand/tools gone. Config: `extensions.<name>` via `Engine.Extension` or `extcfg.DecodeSection`. MCP only if configured.
 

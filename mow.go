@@ -155,6 +155,11 @@ const (
 // --- Functions ---
 
 func New(opt Options) (*Engine, error) { return engine.New(opt) }
+
+// NewHarness constructs an Engine the way mow run / mow acp / host UIs do:
+// $MOW_HOME and project config are loaded. Embedders that want a hermetic
+// engine (Options + env only) should call New instead.
+func NewHarness(opt Options) (*Engine, error) { return engine.NewHarness(opt) }
 func Run(ctx context.Context, prompt string, opt Options) (RunResult, error) {
 	return engine.Run(ctx, prompt, opt)
 }

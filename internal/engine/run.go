@@ -1,7 +1,7 @@
 // Package mow is the public agentic harness library: Engine API for any UI or embedder.
 //
 // Public surface:
-//   - mow.New / Engine / Run — programmatic harness
+//   - mow.New / mow.NewHarness / Engine / Run — programmatic API
 //   - mow.Provider — swap the LLM backend (streaming + usage preserved)
 //   - Options.HTTPClient / Options.Logger — inject transport + structured logs
 //   - mow.Tool / Options.Tools / Hooks — integration types (per-engine tools)

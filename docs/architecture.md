@@ -14,7 +14,7 @@ broker, host UI, or sibling repository is required for `mow.Engine`.
 
 ## Principles
 
-1. **Library first** — public API is `github.com/subosito/mow` (`Engine` / `Run`).
+1. **Library first** — public API is `github.com/subosito/mow` (`New` / `NewHarness` / `Engine` / `Run`).
 2. **Thin public root** — `mow.go` re-exports the API; implementation and behavior tests live in `internal/engine/`.
 3. **Minimal core module** — no OpenTelemetry or UI dependencies enter a library-only embed.
 4. **Detachable features** — core extensions live in `ext/`; optional/domain packs live in `packs/`.
@@ -39,7 +39,7 @@ one-way: the packs module depends on the root public API, never the reverse.
 |---|---|
 | `github.com/subosito/mow` | Thin aliases/wrappers: `Engine`, `Run`, options, events, hooks, providers |
 | `github.com/subosito/mow/ext` | Registration API: tools, lifecycle hooks, commands, `BeforeNew` |
-| `github.com/subosito/mow/ext/<name>` | Core protocol/runtime extensions: acp, rpc |
+| `github.com/subosito/mow/ext/<name>` | Stock Engine surfaces: acp, cli, tty (privileged; may import internal/) |
 | `github.com/subosito/mow/packs/<name>` | Optional packs: media, mcp, proc, goal, review, ops, job |
 | `github.com/subosito/mow/cliutil` | CLI flags → Engine |
 | `github.com/subosito/mow/extcfg` | Decode `extensions.<name>` |
@@ -79,7 +79,13 @@ Embedder / cmd/mow / packs
 
 ### Core extensions (`ext/`, root module)
 
-- `ext/acp`: ACP agent + extras + peer delegation (`acp_delegate`)
+Stock ways to *drive* the Engine. Blank-import; unused if you do not link them.
+The Engine itself is headless (no argv). `Workspace` is the FS jail root, not
+a profile switch.
+
+- `ext/cli`: unix dispatcher (`cli.Main`) + `run`, `trust`, `doctor`, `approvals`, version, help. Uses `mow.NewHarness`.
+- `ext/tty`: optional line REPL (`mow tty`). Does not import `ext/acp`.
+- `ext/acp`: ACP agent + extras + peer delegation (`acp_delegate`). Must not import `ext/cli`.
 - `packs/mcp`: MCP server + configured MCP client tools
 - `packs/proc`: detached process tools/command
 - `packs/cmdhook`: configured command hooks
@@ -102,9 +108,12 @@ One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.m
 
 | Binary | Source | Ships |
 |---|---|---|
-| `mow` | `cmd/mow` | Lean CLI: acp, focus, proc, cmdhook, mcp |
+| `mow` | `cmd/mow` | Import list: `ext/cli` + `ext/tty` + `ext/acp` + focus, proc, cmdhook, mcp |
 | `mow-full` | `cmd/mow-full` | Lean set plus goal, job, ops, review, media |
 | Rust `mowi` | sibling project/repository | Interactive TUI over `mow acp` |
+
+Composition lives in `cmd/` (blank imports + `ext/cli.Main`). Host UIs spawn
+`mow acp`; they do not need `run` or `tty`. The Engine library requires neither.
 
 The Rust `mowi` host launches `mow acp` and owns terminal presentation; pack
 commands and tools remain registered in the mow host that is on `PATH`.

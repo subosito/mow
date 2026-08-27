@@ -1,19 +1,19 @@
 // Command mow-full is the full stock binary: everything cmd/mow links
-// (acp, focus, proc, cmdhook, mcp) plus the remaining packs — goal,
+// (acp, tty, focus, proc, cmdhook, mcp) plus the remaining packs — goal,
 // job, ops, review, media.
 //
-// The CLI itself lives in cmd/internal/mowcli; this file's only job is the
-// blank-import list — drop an import and that subcommand disappears from
-// this binary.
+// This file's only job is the blank-import list — drop an import and that
+// subcommand disappears from this binary.
 package main
 
 import (
 	"os"
 
-	"github.com/subosito/mow/cmd/internal/mowcli"
+	cli "github.com/subosito/mow/ext/cli"
 
 	// Linked extensions/packs — each registers tools/commands in init.
 	_ "github.com/subosito/mow/ext/acp"
+	_ "github.com/subosito/mow/ext/tty"
 	_ "github.com/subosito/mow/packs/cmdhook"
 	_ "github.com/subosito/mow/packs/focus"
 	_ "github.com/subosito/mow/packs/goal"
@@ -26,5 +26,5 @@ import (
 )
 
 func main() {
-	os.Exit(mowcli.Main(os.Args[1:]))
+	os.Exit(cli.Main(os.Args[1:]))
 }

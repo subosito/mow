@@ -1,9 +1,9 @@
 # mow — extensions and packs
 
 **Rule:** if a capability is not required for a read-only agent over compatible
-LLM HTTP, it is detachable. Core protocols/runtime adapters live under `ext/`;
-workflow/domain integrations live in the separate `packs/` module. The Rust
-`mowi` sibling project is the external TUI over `mow acp`.
+LLM HTTP, it is detachable. Stock Engine *surfaces* (CLI, TTY, ACP) live under
+`ext/`; workflow/domain integrations live in the separate `packs/` module. The
+Rust `mowi` sibling project is the external TUI over `mow acp`.
 
 Customization modes:
 
@@ -17,7 +17,7 @@ Customization modes:
 |---|---|---|
 | Public Engine | `github.com/subosito/mow` | `Engine`, `Run`, hooks, events, providers |
 | Registration | `github.com/subosito/mow/ext` | `RegisterTool`, `RegisterCommand`, lifecycle hooks |
-| Core extensions | `github.com/subosito/mow/ext/<name>` | acp — privileged tier (may import internal/); one-pager in each `ext/<name>/README.md` |
+| Core extensions | `github.com/subosito/mow/ext/<name>` | cli, tty, acp — privileged tier (may import internal/); one-pager in each `ext/<name>/README.md` |
 | Optional packs | `github.com/subosito/mow/packs/<name>` | focus, media, goal, review, ops, job — `packs/<name>/README.md` |
 
 ```go
@@ -37,17 +37,37 @@ tools it actually has.
 
 ## Linked binaries
 
-- `cmd/mow` is the lean pack host: core extension acp plus focus, proc,
-  cmdhook, mcp. `cmd/mow-full` links those plus goal, job, ops, review, media.
-  Both share `cmd/internal/mowcli`.
-- The Rust `mowi` sibling project launches `mow acp`, owns terminal
-  presentation, and receives registered command/tool events over ACP + extras.
-  Spawn binary: `--mow-bin` / `$MOW_BIN` / host `$MOW_HOME/config.yaml`
-  `extensions.mowi.mow_bin` (not project `.mow/`) / `mow`.
+- `cmd/mow` and `cmd/mow-full` are import lists over `ext/cli.Main`. Lean links
+  `ext/cli` + `ext/tty` + `ext/acp` plus focus, proc, cmdhook, mcp. `cmd/mow-full`
+  adds goal, job, ops, review, media. Drop an import and that subcommand is gone.
+- Host UIs launch `mow acp` (`ext/acp`), own terminal presentation, and receive
+  registered command/tool events over ACP + extras. Spawn binary: `--mow-bin` /
+  `$MOW_BIN` / host `$MOW_HOME/config.yaml` `extensions.mowi.mow_bin` (not project
+  `.mow/`) / `mow`. `ext/acp` does not import `ext/cli`.
 - `mow_agents` start the currently running executable (`os.Executable()`), so
   native ACP peers remain self-contained.
 
 ## Core extensions (`ext/`)
+
+### CLI (`ext/cli`)
+
+Unix host skeleton. Import (not blank) and call `cli.Main`:
+
+- Dispatcher: no-args TTY → `ext.DefaultInteractiveCommand` if registered, else usage.
+  Free-form args become `mow run -p …`. Other names go to `ext.LookupCommand`.
+- Commands: `run` (one-shot; `mow.NewHarness`), `trust`, `doctor`, `approvals`,
+  `version`, `help`.
+- `cliutil` stays flags → Options / `NewHarness` (not a command, not a pack).
+
+Stock binaries compose surfaces in `cmd/` by blank-importing `ext/tty`, `ext/acp`,
+and packs. See [ext/cli/README.md](../ext/cli/README.md).
+
+### TTY (`ext/tty`)
+
+Optional line REPL (`mow tty`). Blank-import; drop it and the command is gone.
+Does not import `ext/acp`. Same engine flags as `mow run`. In-session: `/model`,
+`/btw`, `/help`, `/quit`, plus pack-registered slash commands. See
+[ext/tty/README.md](../ext/tty/README.md).
 
 ### ACP (`ext/acp`)
 
@@ -473,5 +493,8 @@ framing so an extension cannot forge assistant/tool roles and break tool_call
 pairing. Multiple hooks compose by ordered concatenation.
 
 s and break tool_call
+pairing. Multiple hooks compose by ordered concatenation.
+
+ tool_call
 pairing. Multiple hooks compose by ordered concatenation.
 

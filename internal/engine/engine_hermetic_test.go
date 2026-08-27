@@ -165,6 +165,28 @@ func TestNewLoadUserConfigTrueReadsGlobal(t *testing.T) {
 	}
 }
 
+func TestNewHarnessReadsGlobal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	t.Setenv("MOW_MODEL", "")
+	t.Setenv("OPENAI_MODEL", "")
+	t.Setenv("MOW_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "k")
+	poisonHome(t, home)
+
+	eng, err := NewHarness(Options{
+		NoSession: true,
+		Chat:      hermeticChat(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	if got := eng.Model(); got != "poison-model" {
+		t.Fatalf("Model()=%q want poison-model from global config (NewHarness)", got)
+	}
+}
+
 func TestNewExplicitConfigPathsStillWorkHermetic(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("MOW_HOME", home)

@@ -41,9 +41,10 @@ mow run -p "Summarize this repo"
 ### B. Interactive / multi-step
 
 ```text
-mow tty                  # line session (core)
+mow tty                  # optional line session (ext/tty)
+mow acp                  # ACP agent for host UIs (ext/acp)
 mow-full goal run --goal "…"  # multi-step outer loop (or --id NAME)
-mow run -p "…"           # one-shot
+mow run -p "…"           # one-shot (ext/cli)
 ```
 
 ### C. Programmatic embed
@@ -83,11 +84,13 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 
 | Package | Responsibility |
 |---------|----------------|
-| `mow` | `New`, `Engine`, `Run`, options/result types, `Tool`/`Message`/`ChatFunc`, `Engine.Extension` (`mow.go` re-exports `internal/engine/`) |
+| `mow` | `New`, `NewHarness`, `Engine`, `Run`, options/result types, `Tool`/`Message`/`ChatFunc`, `Engine.Extension` (`mow.go` re-exports `internal/engine/`) |
 | `ext` | Register tools, hooks, **CLI commands**, BeforeNew (registration only) |
-| `cliutil` | Shared CLI flags / `--long` help / `NewEngine` — **not** a pack |
+| `cliutil` | Shared CLI flags / `--long` help / `NewEngine` → `NewHarness` — **not** a pack |
 | `extcfg` | Decode `extensions.<name>` — shared by extensions and packs |
-| `ext/acp` | ACP agent + extras + client + `acp_delegate` + `mow acp` |
+| `ext/cli` | Unix dispatcher (`Main`) + `run`, `trust`, `doctor`, `approvals`, version, help |
+| `ext/tty` | Optional line REPL (`mow tty`) |
+| `ext/acp` | ACP agent + extras + client + `acp_delegate` + `mow acp` (does not import `ext/cli`) |
 | `packs/mcp` | MCP servers → tools (config opt-in) |
 | `packs/proc` / `packs/cmdhook` | Background proc tools, command hooks |
 | `packs/media` | Media tool pack: `generate_*` / `understand_*` (`mow-full`, config-gated) |
@@ -96,7 +99,7 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `packs/job` | Interval / cron jobs + `mow job` |
 | `packs/review` | `mow review` / `mow sec` advisory review |
 | `packs/ops` | Ops profiles, health, runbooks |
-| `cmd/mow` | Thin shell: core commands + blank-import packs |
+| `cmd/mow` | Import list: `ext/cli.Main` + blank-import tty, acp, lean packs |
 
 ### Internal
 

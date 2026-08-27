@@ -4,8 +4,8 @@
 
 ```text
 Embedder / tests ──┐
-CLI (run/tty) ────┼──▶  mow.Engine  ──▶  LLM HTTP (any compatible endpoint)
-mow / mow-full ───┘     (lean: acp · focus · proc · mcp
+ext/cli (run) ─────┼──▶  mow.Engine  ──▶  LLM HTTP (any compatible endpoint)
+ext/tty · ext/acp ─┘     (lean: cli · tty · acp · focus · proc · mcp
                          full: + goal · review · ops · media · …)
 ```
 
@@ -71,9 +71,9 @@ export OPENAI_MODEL=gpt-5-mini
 # export OPENAI_BASE_URL=http://127.0.0.1:PORT/v1
 # export OPENAI_API_KEY=…
 
-./bin/mow run -p "Reply with exactly: hi"
-./bin/mow tty
-./bin/mow acp                                 # ext/acp — ACP agent + extras
+./bin/mow run -p "Reply with exactly: hi"         # ext/cli
+./bin/mow tty                                     # optional ext/tty
+./bin/mow acp                                     # ext/acp — ACP agent + extras
 ./bin/mow help                                # linked commands, dynamically
 
 # mow-full links the workflow packs on top of mow:
@@ -120,10 +120,10 @@ Three Go modules (`go.work` wires them for local dev). Full public/internal map:
 | Path / module | Role |
 |---|---|
 | `mow.go` + `internal/` | Public API re-export and implementation |
-| `ext/` + `cliutil/` + `extcfg/` | Core extensions, CLI helpers, extension config decode |
+| `ext/` + `cliutil/` + `extcfg/` | Stock surfaces (cli, tty, acp), CLI helpers, extension config decode |
 | `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job |
-| `cmd/mow/` | Lean pack host (acp, rpc, focus, proc, cmdhook, mcp) |
-| `cmd/mow-full/` | Full pack host (lean set + goal, job, ops, review, media) |
+| `cmd/mow/` | Lean host: `ext/cli.Main` + tty, acp, focus, proc, cmdhook, mcp |
+| `cmd/mow-full/` | Full host (lean set + goal, job, ops, review, media) |
 
 ## Pick extensions when embedding
 
@@ -157,3 +157,4 @@ Docs: [docs/extensions.md](docs/extensions.md).
 ## License
 
 MIT
+T

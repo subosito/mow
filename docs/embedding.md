@@ -20,7 +20,7 @@ Everything here is on the public `mow` package. You never import `internal/*`.
 ## 1. The smallest embed
 
 ```go
-eng, err := mow.New(mow.Options{}) // reads $MOW_HOME/config.yaml + env
+eng, err := mow.New(mow.Options{}) // Options + env only; no $MOW_HOME yaml
 if err != nil {
     log.Fatal(err)
 }
@@ -31,8 +31,18 @@ if err != nil {
 fmt.Println(res.Text)
 ```
 
-`New` returns a live `*Engine`: config loaded, tools and hooks wired, an LLM
-client built from `llm.base_url` + key + model (config or env). The engine is
+`New` returns a live `*Engine`: tools and hooks from `Options`, an LLM client
+from `Options` / env (`llm.base_url`, key, model). It does **not** load
+`$MOW_HOME/config.yaml` or workspace profiles. Host programs (`mow run` via
+`ext/cli`, `mow acp` via `ext/acp`, host UIs) call `mow.NewHarness` (or
+`cliutil`) so home and project config load. `mow run` / `mow tty` are those
+CLI surfaces, not Engine API.
+
+```go
+eng, err := mow.NewHarness(mow.Options{Workspace: dir})
+```
+
+`Workspace` is the FS jail root, not a profile switch. The engine is
 **multi-turn** — call `Prompt` again and history carries:
 
 ```go
@@ -52,8 +62,9 @@ One-shot without holding an engine:
 res, err := mow.Run(ctx, "Summarize this repo", mow.Options{})
 ```
 
-`Run` is `New` + a single `Prompt`. Use it for CI and scripts; use `New` when
-you want more than one turn, events, or model switching.
+`Run` is `New` + a single `Prompt` (embed one-shot). Use it for CI and scripts
+in-process; the CLI equivalent is `mow run` (`ext/cli`), which uses `NewHarness`.
+Use `New` when you want more than one turn, events, or model switching.
 
 ---
 

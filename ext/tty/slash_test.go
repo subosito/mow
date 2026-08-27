@@ -1,4 +1,4 @@
-package mowcli
+package tty
 
 import (
 	"context"
@@ -8,13 +8,12 @@ import (
 	"github.com/subosito/mow/slash"
 )
 
-// mow tty and the Rust mowi TUI over mow acp must offer the same commands:
+// mow tty and host UIs over mow acp must offer the same commands:
 // same names, same flags, same behavior — only the presentation differs. That
-// property comes
-// from both hosts dispatching through the registry rather than each keeping a
-// switch, so these tests assert the dispatch path, not any one pack.
+// property comes from both hosts dispatching through the registry rather than
+// each keeping a switch, so these tests assert the dispatch path, not any one pack.
 
-func TestTtySlashDispatchesRegistered(t *testing.T) {
+func TestSlashDispatchesRegistered(t *testing.T) {
 	var gotArgs []string
 	slash.Register(slash.Command{
 		Name:    "ttyprobe",
@@ -25,7 +24,7 @@ func TestTtySlashDispatchesRegistered(t *testing.T) {
 		},
 	})
 
-	handled, err := handleTtySlash(context.Background(), nil, "/ttyprobe --staged ./pkg")
+	handled, err := handleSlash(context.Background(), nil, "/ttyprobe --staged ./pkg")
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -39,10 +38,10 @@ func TestTtySlashDispatchesRegistered(t *testing.T) {
 	}
 }
 
-func TestTtySlashIgnoresUnknown(t *testing.T) {
+func TestSlashIgnoresUnknown(t *testing.T) {
 	// An unregistered token is not a command: it must fall through so the
 	// line reaches the model, because "/tmp is full" is a sentence.
-	handled, err := handleTtySlash(context.Background(), nil, "/tmp is full")
+	handled, err := handleSlash(context.Background(), nil, "/tmp is full")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -51,14 +50,14 @@ func TestTtySlashIgnoresUnknown(t *testing.T) {
 	}
 }
 
-func TestTtySlashPropagatesError(t *testing.T) {
+func TestSlashPropagatesError(t *testing.T) {
 	slash.Register(slash.Command{
 		Name: "ttyfail",
 		Run: func(context.Context, slash.Request) (slash.Result, error) {
 			return slash.Result{}, context.DeadlineExceeded
 		},
 	})
-	handled, err := handleTtySlash(context.Background(), nil, "/ttyfail")
+	handled, err := handleSlash(context.Background(), nil, "/ttyfail")
 	if !handled {
 		t.Fatal("command not handled")
 	}
@@ -69,7 +68,7 @@ func TestTtySlashPropagatesError(t *testing.T) {
 	}
 }
 
-func TestTtyHelpListsRegisteredCommands(t *testing.T) {
+func TestHelpListsRegisteredCommands(t *testing.T) {
 	slash.Register(slash.Command{
 		Name:    "ttyhelpprobe",
 		Summary: "help probe summary",
@@ -77,16 +76,16 @@ func TestTtyHelpListsRegisteredCommands(t *testing.T) {
 			return slash.Result{}, nil
 		},
 	})
-	help := ttyHelp()
+	help := helpText()
 	for _, want := range []string{"/model", "/quit", "/ttyhelpprobe", "help probe summary"} {
 		if !strings.Contains(help, want) {
-			t.Errorf("ttyHelp() missing %q:\n%s", want, help)
+			t.Errorf("helpText() missing %q:\n%s", want, help)
 		}
 	}
 }
 
-func TestTtySlashEmptyLine(t *testing.T) {
-	handled, err := handleTtySlash(context.Background(), nil, "   ")
+func TestSlashEmptyLine(t *testing.T) {
+	handled, err := handleSlash(context.Background(), nil, "   ")
 	if handled || err != nil {
 		t.Errorf("blank line: handled=%v err=%v, want false/nil", handled, err)
 	}

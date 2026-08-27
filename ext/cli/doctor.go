@@ -1,4 +1,4 @@
-package mowcli
+package cli
 
 import (
 	"context"
