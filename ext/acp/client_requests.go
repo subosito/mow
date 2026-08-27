@@ -21,7 +21,7 @@ func normalizePermissionMode(mode string) string {
 }
 
 // effectivePermissionMode returns reject unless the spec or legacy --force opts in.
-func effectivePermissionMode(spec AgentSpec) string {
+func effectivePermissionMode(spec PeerSpec) string {
 	if m := strings.TrimSpace(spec.PermissionMode); m != "" {
 		return normalizePermissionMode(m)
 	}

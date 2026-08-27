@@ -30,7 +30,7 @@ skills:
   dirs: [` + filepath.Join(home, "skills") + `]
 extensions:
   acp:
-    agents:
+    peers:
       - name: poison
         model: poison-peer
   mcp:
@@ -123,13 +123,13 @@ func TestNewHermeticByDefaultIgnoresPoisonedHome(t *testing.T) {
 		}
 	}
 	var acp struct {
-		Agents []any `yaml:"agents"`
+		Peers []any `yaml:"peers"`
 	}
 	if err := eng.Extension("acp", &acp); err != nil {
 		t.Fatal(err)
 	}
-	if len(acp.Agents) != 0 {
-		t.Fatalf("extensions.acp leaked from home: %+v", acp.Agents)
+	if len(acp.Peers) != 0 {
+		t.Fatalf("extensions.acp leaked from home: %+v", acp.Peers)
 	}
 	for _, st := range ext.ListExtensions(1) {
 		if st.Kind == "cmdhook" || strings.Contains(st.Name, "poison-hooks") {

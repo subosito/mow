@@ -43,7 +43,7 @@ See [docs/acp.md](../../docs/acp.md) for extras on the same connection.
 extensions:
   acp:
     peer_idle_sec: 900          # drop idle peers; 0 = default 900; -1 = never by idle
-    agents:
+    peers:
       - name: peer-agent        # external ACP peer
         command: [peer-agent, --acp]
         dir: ""                 # default: host workspace
@@ -61,7 +61,7 @@ extensions:
         extra_args: []
 ```
 
-`command` and `model` are exclusive. `permission_mode` applies to external (`command`) peers (`reject` or `allow`). Names in `agents[]` must not collide.
+`command` and `model` are exclusive. `permission_mode` applies to external (`command`) peers (`reject` or `allow`). Names in `peers[]` must not collide.
 
 ## Docs
 

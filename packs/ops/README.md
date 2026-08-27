@@ -32,7 +32,7 @@ mow ops run prod --every 5m
 mow ops run prod --once
 ```
 
-`ops_action` requires `--allow-shell`. `mow ops run` **always** enables `--allow-shell` for the whole Engine tick (not only `ops_action`). Actions are operator argv lists (no shell), 60s timeout. When `MOW_OPS` is set, the profile’s `acp.agents` are merged into `delegate`. `mow ops check` fails if `acp.agents` is set and `workspace` is empty (peers would not be path-jailed).
+`ops_action` requires `--allow-shell`. `mow ops run` **always** enables `--allow-shell` for the whole Engine tick (not only `ops_action`). Actions are operator argv lists (no shell), 60s timeout. When `MOW_OPS` is set, the profile’s `acp.peers` are merged into `delegate`. `mow ops check` fails if `acp.peers` is set and `workspace` is empty (peers would not be path-jailed).
 
 `mow ops run NAME` is its own daemon (job id `ops-<name>`), not a row in `mow job list`. Last tick is `$MOW_HOME/job/state/ops-<name>.json`, shown by `mow ops show` / `mow ops status`. Two consecutive overlap skips open/update an incident with signature `job-overlap:ops-<name>`.
 
@@ -48,7 +48,7 @@ extensions:
     log_max_lines: 0
 ```
 
-Profile `config.yaml` keys (not under `extensions.ops`): `services`, `log_max_bytes`, `log_max_lines`, `model`, `wire`, `base_url`, `workspace`, `every`, `prompt`, `acp.agents`. Per service: `name`, `logs`, `actions`, `health` (`url`, `timeout`, `expected_status`, `headers`, `allowed_hosts`), `patterns` (`name`, `regex`, `threshold`, `window`, `severity`), `depends_on`, `acp`, `notes`.
+Profile `config.yaml` keys (not under `extensions.ops`): `services`, `log_max_bytes`, `log_max_lines`, `model`, `wire`, `base_url`, `workspace`, `every`, `prompt`, `acp.peers`. Per service: `name`, `logs`, `actions`, `health` (`url`, `timeout`, `expected_status`, `headers`, `allowed_hosts`), `patterns` (`name`, `regex`, `threshold`, `window`, `severity`), `depends_on`, `acp`, `notes`.
 
 ## Docs
 

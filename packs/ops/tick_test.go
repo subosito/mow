@@ -16,7 +16,7 @@ func TestCmdCheckACPWithoutWorkspace(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := "services:\n  - name: api\n    logs: [/tmp/api.log]\n    actions:\n      status: [true]\nacp:\n  agents:\n    - name: coder\n      command: [echo]\n"
+	cfg := "services:\n  - name: api\n    logs: [/tmp/api.log]\n    actions:\n      status: [true]\nacp:\n  peers:\n    - name: coder\n      command: [echo]\n"
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}

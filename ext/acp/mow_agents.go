@@ -7,22 +7,22 @@ import (
 	"strings"
 )
 
-// resolveAgents validates extensions.acp.agents. Each row is either an
+// resolvePeers validates extensions.acp.peers. Each row is either an
 // external ACP command or a native mow peer (model), never both.
-func resolveAgents(c Config) ([]AgentSpec, error) {
-	if len(c.Agents) == 0 {
+func resolvePeers(c Config) ([]PeerSpec, error) {
+	if len(c.Peers) == 0 {
 		return nil, nil
 	}
 	seen := map[string]bool{}
-	out := make([]AgentSpec, 0, len(c.Agents))
-	for i, a := range c.Agents {
-		spec, err := resolveOneAgent(i, a)
+	out := make([]PeerSpec, 0, len(c.Peers))
+	for i, a := range c.Peers {
+		spec, err := resolveOnePeer(i, a)
 		if err != nil {
 			return nil, err
 		}
 		n := strings.ToLower(spec.Name)
 		if seen[n] {
-			return nil, fmt.Errorf("acp: duplicate agent name %q", spec.Name)
+			return nil, fmt.Errorf("acp: duplicate peer name %q", spec.Name)
 		}
 		seen[n] = true
 		out = append(out, spec)
@@ -30,18 +30,18 @@ func resolveAgents(c Config) ([]AgentSpec, error) {
 	return out, nil
 }
 
-func resolveOneAgent(i int, a AgentSpec) (AgentSpec, error) {
+func resolveOnePeer(i int, a PeerSpec) (PeerSpec, error) {
 	name := strings.TrimSpace(a.Name)
 	if name == "" {
-		return AgentSpec{}, fmt.Errorf("acp: agents[%d]: name is required", i)
+		return PeerSpec{}, fmt.Errorf("acp: peers[%d]: name is required", i)
 	}
 	hasCmd := len(a.Command) > 0
 	hasModel := strings.TrimSpace(a.Model) != ""
 	switch {
 	case hasCmd && hasModel:
-		return AgentSpec{}, fmt.Errorf("acp: agent %q: set command or model, not both", name)
+		return PeerSpec{}, fmt.Errorf("acp: peer %q: set command or model, not both", name)
 	case !hasCmd && !hasModel:
-		return AgentSpec{}, fmt.Errorf("acp: agent %q: command (external) or model (native mow) is required", name)
+		return PeerSpec{}, fmt.Errorf("acp: peer %q: command (external) or model (native mow) is required", name)
 	}
 	timeout := a.TimeoutSec
 	if timeout <= 0 {
@@ -61,7 +61,7 @@ func resolveOneAgent(i int, a AgentSpec) (AgentSpec, error) {
 
 // buildMowAgentCommand constructs argv for a native peer at delegate time.
 // Host posture caps permissions; credentials are never forwarded via argv.
-func buildMowAgentCommand(spec AgentSpec, host *hostPeerPolicy, peerCwd string) []string {
+func buildMowAgentCommand(spec PeerSpec, host *hostPeerPolicy, peerCwd string) []string {
 	bin := mowAgentBinary()
 	model := strings.TrimSpace(spec.Model)
 	cmd := []string{bin, "acp", "--model", model}
@@ -138,7 +138,7 @@ func extraRootFlags(host *hostPeerPolicy) []string {
 	return out
 }
 
-func effectiveReadOnly(spec *AgentSpec, host *hostPeerPolicy) bool {
+func effectiveReadOnly(spec *PeerSpec, host *hostPeerPolicy) bool {
 	if spec != nil && spec.ReadOnly != nil {
 		return *spec.ReadOnly
 	}
@@ -150,7 +150,7 @@ func effectiveReadOnly(spec *AgentSpec, host *hostPeerPolicy) bool {
 
 // peerCommand builds argv for one delegate call (native or external).
 // External argv is used as written — peer CLIs do not share one effort flag.
-func peerCommand(spec AgentSpec, host *hostPeerPolicy, peerCwd string) []string {
+func peerCommand(spec PeerSpec, host *hostPeerPolicy, peerCwd string) []string {
 	if spec.native() {
 		return buildMowAgentCommand(spec, host, peerCwd)
 	}

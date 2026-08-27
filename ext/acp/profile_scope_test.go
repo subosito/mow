@@ -183,12 +183,12 @@ func captureDelegateViaEngineConfig(t *testing.T, eng *mow.Engine) *delegateTool
 	if err := eng.Extension("acp", &c); err != nil {
 		t.Fatal(err)
 	}
-	agents, err := resolveAgents(c)
+	agents, err := resolvePeers(c)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &delegateTool{
-		agents:    indexAgents(agents),
+		agents:    indexPeers(agents),
 		workspace: eng.Workspace(),
 		peerIdle:  peerIdleDuration(c.PeerIdleSec),
 		peers:     map[string]*peerSlot{},

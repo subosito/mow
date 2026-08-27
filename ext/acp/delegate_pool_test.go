@@ -31,7 +31,7 @@ func TestDelegateCwdAllowsEngineExtraRoot(t *testing.T) {
 	defer eng.Close()
 
 	tool := &delegateTool{
-		agents:    map[string]AgentSpec{"peer": {Name: "peer", Command: []string{"missing-peer"}, TimeoutSec: 1}},
+		agents:    map[string]PeerSpec{"peer": {Name: "peer", Command: []string{"missing-peer"}, TimeoutSec: 1}},
 		workspace: workspace, peers: map[string]*peerSlot{},
 	}
 	ctx := mow.ContextWithEngine(context.Background(), eng)
@@ -153,7 +153,7 @@ func TestDelegateConcurrentSamePeer(t *testing.T) {
 	c, cleanup := fakePeerClient()
 	defer cleanup()
 	tool := &delegateTool{
-		agents: map[string]AgentSpec{
+		agents: map[string]PeerSpec{
 			"fake": {Name: "fake", Command: []string{"unused"}, TimeoutSec: 30},
 		},
 		peers: map[string]*peerSlot{

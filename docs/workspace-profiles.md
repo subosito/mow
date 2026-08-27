@@ -52,7 +52,7 @@ profile pin.
 
 ## ACP peers
 
-`config.yaml` may contain `extensions.acp.agents`. Those peers
+`config.yaml` may contain `extensions.acp.peers`. Those peers
 are scoped to the Engine that selected the profile — not visible to another
 profile or a plain workspace path, even in the same process.
 

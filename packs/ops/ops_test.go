@@ -45,7 +45,7 @@ services:
     acp: gateway-peer
     notes: example service
 acp:
-  agents:
+  peers:
     - name: gateway-peer
       command: [example-agent, --acp]
       dir: /tmp/gateway
@@ -71,7 +71,7 @@ acp:
 	if _, err := p.actionArgv("gateway", "reload"); err == nil {
 		t.Fatal("reload should fail")
 	}
-	if len(p.ACP.Agents) != 1 || p.ACP.Agents[0].Name != "gateway-peer" {
+	if len(p.ACP.Peers) != 1 || p.ACP.Peers[0].Name != "gateway-peer" {
 		t.Fatalf("acp=%+v", p.ACP)
 	}
 	sys := p.systemAppend()

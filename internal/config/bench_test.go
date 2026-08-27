@@ -34,7 +34,7 @@ skills:
   dirs: []
 extensions:
   acp:
-    agents:
+    peers:
       - name: peer-agent
         command: [peer-agent, agent, stdio]
         timeout_sec: 600

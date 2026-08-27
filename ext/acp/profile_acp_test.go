@@ -40,10 +40,10 @@ func writeNamedProfile(t *testing.T, home, name, workspace, configBody string) {
 }
 
 func nativeAgentYAML(name, model string) string {
-	return "extensions:\n  acp:\n    agents:\n      - name: " + name + "\n        model: " + model + "\n"
+	return "extensions:\n  acp:\n    peers:\n      - name: " + name + "\n        model: " + model + "\n"
 }
 
-func agentModelFromSpec(spec AgentSpec) string {
+func agentModelFromSpec(spec PeerSpec) string {
 	if spec.native() {
 		return strings.TrimSpace(spec.Model)
 	}
@@ -220,7 +220,7 @@ func TestEngineProfileCapturesAcpDelegateModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	gotModel := ""
-	for _, a := range c.Agents {
+	for _, a := range c.Peers {
 		if a.Name == "deepseek" {
 			gotModel = a.Model
 			break
@@ -316,11 +316,11 @@ func captureDelegateViaEngine(t *testing.T, profile string) *delegateTool {
 	if err := eng.Extension("acp", &c); err != nil {
 		t.Fatal(err)
 	}
-	agents, err := resolveAgents(c)
+	agents, err := resolvePeers(c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexed := indexAgents(agents)
+	indexed := indexPeers(agents)
 	tool := &delegateTool{
 		agents:    indexed,
 		workspace: eng.Workspace(),
@@ -333,7 +333,7 @@ func captureDelegateViaEngine(t *testing.T, profile string) *delegateTool {
 	return tool
 }
 
-func keysOf(m map[string]AgentSpec) []string {
+func keysOf(m map[string]PeerSpec) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

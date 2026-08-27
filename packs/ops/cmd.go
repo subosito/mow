@@ -106,7 +106,7 @@ Examples:
 
 Tools (agent): ops_services, ops_logs, ops_action, ops_incident,
   ops_health, ops_log_pattern, ops_runbook; plus delegate when the
-  profile declares acp.agents / service.acp.
+  profile declares acp.peers / service.acp.
 
 Job vs ops: mow job list is schedules.yaml only. mow ops run NAME is a
 separate daemon (job id ops-<name>) — last tick lives in $MOW_HOME/job/state.
@@ -229,13 +229,13 @@ func cmdShow(opsFlag string, args []string) int {
 		}
 		fmt.Println()
 	}
-	if len(p.ACP.Agents) > 0 {
-		fmt.Printf("acp peers: %d\n", len(p.ACP.Agents))
-		for _, a := range p.ACP.Agents {
+	if len(p.ACP.Peers) > 0 {
+		fmt.Printf("acp peers: %d\n", len(p.ACP.Peers))
+		for _, a := range p.ACP.Peers {
 			fmt.Printf("  - %s  cmd=%v\n", a.Name, a.Command)
 		}
 		if strings.TrimSpace(p.Workspace) == "" {
-			fmt.Fprintln(os.Stderr, "warn: acp.agents set but workspace is empty (peers are not path-jailed)")
+			fmt.Fprintln(os.Stderr, "warn: acp.peers set but workspace is empty (peers are not path-jailed)")
 		}
 	}
 	if st, err := job.LoadTick("ops-" + name); err == nil && job.FormatTick(st) != "-" {
@@ -278,20 +278,20 @@ func cmdCheck(opsFlag string, args []string) int {
 		}
 		if s.ACP != "" {
 			found := false
-			for _, a := range p.ACP.Agents {
+			for _, a := range p.ACP.Peers {
 				if strings.EqualFold(a.Name, s.ACP) {
 					found = true
 					break
 				}
 			}
 			if !found {
-				fmt.Fprintf(os.Stderr, "warn: service %q acp %q not in acp.agents\n", s.Name, s.ACP)
+				fmt.Fprintf(os.Stderr, "warn: service %q acp %q not in acp.peers\n", s.Name, s.ACP)
 				bad++
 			}
 		}
 	}
-	if len(p.ACP.Agents) > 0 && strings.TrimSpace(p.Workspace) == "" {
-		fmt.Fprintln(os.Stderr, "warn: acp.agents set but workspace is empty (peers are not path-jailed)")
+	if len(p.ACP.Peers) > 0 && strings.TrimSpace(p.Workspace) == "" {
+		fmt.Fprintln(os.Stderr, "warn: acp.peers set but workspace is empty (peers are not path-jailed)")
 		bad++
 	}
 	if bad > 0 {

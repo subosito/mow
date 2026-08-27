@@ -168,7 +168,7 @@ session:
 #         min_turns: 5       # optional turn activation threshold (default 0)
 #   acp:
 #     # Named peers for delegate. command = external ACP; model = native mow acp.
-#     agents:
+#     peers:
 #       - name: peer-agent
 #         command: [env, ANTHROPIC_MODEL=claude-sonnet-4, npx, -y, "@agentclientprotocol/claude-agent-acp"]
 #         # timeout_sec: 300
@@ -204,7 +204,7 @@ session:
 #     #         restart: [systemctl, restart, api.service]
 #     #       acp: api-peer
 #     #   acp:
-#     #     agents:
+#     #     peers:
 #     #       - name: api-peer
 #     #         command: [mow, acp]
 #     #         dir: /path/to/api/repo

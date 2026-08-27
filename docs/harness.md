@@ -92,7 +92,7 @@ mow loop ──tool delegate──▶ peer ACP process
 | `ext/tty` | Optional line REPL (`mow tty`) |
 | `ext/acp` | ACP agent + extras + client + `delegate` + `mow acp` (does not import `ext/cli`) |
 | `packs/mcp` | MCP servers → tools (config opt-in) |
-| `packs/proc` / `packs/cmdhook` | Background proc tools, command hooks |
+| `packs/proc` / `packs/cmdhook` / `packs/focus` | Background proc tools, command hooks, explore guards |
 | `packs/media` | Media tool pack: `generate_*` / `understand_*` (`mowx`, config-gated) |
 | `eval` | Eval/replay fixture library (`github.com/subosito/mow/eval`, root module) for `go test` hosts |
 | `packs/goal` | Outer multi-step goals + `mow goal` |
@@ -480,7 +480,7 @@ extra_roots:
 directory remains a plain workspace path. The legacy `$MOW_HOME/workspaces/<name>/`
 registry is no longer loaded. Profile `config.yaml` is operator-controlled and
 may configure normal host settings including profile-scoped `extensions.acp`
-`agents`. Profile skills take precedence over global/configured
+`peers`. Profile skills take precedence over global/configured
 and trusted project skills with the same name.
 
 Relative tool paths resolve against the primary `--workspace`. **Absolute** paths are

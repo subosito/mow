@@ -74,7 +74,7 @@ func printUsage() {
 
 Engine flags: same as mow run (--config --model --workspace --allow-write …).
 
-Optional: extensions.acp.agents → delegate tool for peer harnesses.
+Optional: extensions.acp.peers → delegate tool for peer harnesses.
 Ops profiles can declare peers under acp: (see mow ops show).
 Docs: docs/extensions.md
 

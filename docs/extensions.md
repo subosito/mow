@@ -18,7 +18,7 @@ Customization modes:
 | Public Engine | `github.com/subosito/mow` | `Engine`, `Run`, hooks, events, providers |
 | Registration | `github.com/subosito/mow/ext` | `RegisterTool`, `RegisterCommand`, lifecycle hooks |
 | Core extensions | `github.com/subosito/mow/ext/<name>` | cli, tty, acp — privileged tier (may import internal/); one-pager in each `ext/<name>/README.md` |
-| Optional packs | `github.com/subosito/mow/packs/<name>` | focus, media, goal, review, ops, job — `packs/<name>/README.md` |
+| Optional packs | `github.com/subosito/mow/packs/<name>` | focus, proc, cmdhook, mcp, media, goal, review, ops, job — `packs/<name>/README.md` |
 
 ```go
 import (
@@ -82,7 +82,7 @@ Does not import `ext/acp`. Same engine flags as `mow run`. In-session: `/model`,
 - `delegate`: send a task to a named external or native peer (ACP is the
   current peer protocol). Peer failures stay in the tool result, never as a
   parent-session abort — the run proceeds and the model decides how to react.
-- Native peers (`model` on `agents[]`) support model, effort, system prefix,
+- Native peers (`model` on `peers[]`) support model, effort, system prefix,
   cwd, permissions, and timeout. Peer processes are reused by **agent + cwd +
   effective argv + permission_mode** (a model/policy change starts a new
   process). At delegate time, nil `allow_write` / `allow_shell` inherit the
@@ -90,7 +90,7 @@ Does not import `ext/acp`. Same engine flags as `mow run`. In-session: `/model`,
   `AllowShell`); workspace and `--extra-root` jail roots flow to the peer
   argv. Credentials are not forwarded as argv. `--read-only` is never
   combined with `--allow-write` / `--allow-shell` (CLI rejects that pair).
-- External peers (`command` on `agents[]`) use the argv as written (put
+- External peers (`command` on `peers[]`) use the argv as written (put
   effort or other flags on the command — mow does not inject them). They
   use `permission_mode: reject|allow` (default **reject**)
   for agent→client `session/request_permission`. Reject returns ACP
@@ -113,7 +113,7 @@ Does not import `ext/acp`. Same engine flags as `mow run`. In-session: `/model`,
 ```yaml
 extensions:
   acp:
-    agents:
+    peers:
       - name: peer-agent
         command: [peer-agent, --acp]
         timeout_sec: 300
@@ -284,7 +284,8 @@ Stock slash set is **`/goal`**, **`/review`**, **`/sec`**. Those drive the
 
 Configured service profiles under `$MOW_HOME/ops/<name>/`: services, logs,
 health, declared log patterns, allowlisted argv actions, incidents, dependencies,
-runbooks, and peer-assisted remediation. No profile means no ops tools.
+runbooks, and peer-assisted remediation. Tools always register; they error
+until `MOW_OPS` or an explicit profile is set.
 
 - `mow ops run NAME` uses `job.Daemon` with a fresh Engine per tick (the job
   pack owns and Closes it). Sub-second `every` is raised to 1s by job.

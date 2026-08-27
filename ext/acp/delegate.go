@@ -16,12 +16,12 @@ import (
 	"github.com/subosito/mow/internal/config"
 )
 
-// AgentSpec is one named peer under extensions.acp.agents.
+// PeerSpec is one named peer under extensions.acp.peers.
 //
 // Type is the field set, not a separate key: `command` is an external ACP
 // process; `model` is a native `mow acp --model …` peer. The two are exclusive.
 // Shared: name, dir, timeout_sec.
-type AgentSpec struct {
+type PeerSpec struct {
 	// Name is the short id used in delegate args (e.g. "claude").
 	Name string `yaml:"name" json:"name"`
 	// Command is the peer argv that speaks ACP on stdio (external).
@@ -51,14 +51,14 @@ type AgentSpec struct {
 	ExtraArgs []string `yaml:"extra_args" json:"extra_args,omitempty"`
 }
 
-func (a AgentSpec) native() bool { return strings.TrimSpace(a.Model) != "" }
+func (a PeerSpec) native() bool { return strings.TrimSpace(a.Model) != "" }
 
 // Config is the extensions.acp section.
 //
 //	extensions:
 //	  acp:
 //	    peer_idle_sec: 900
-//	    agents:
+//	    peers:
 //	      - name: peer-agent
 //	        command: [env, ANTHROPIC_MODEL=…, npx, -y, "@agentclientprotocol/claude-agent-acp"]
 //	      - name: reviewer
@@ -68,8 +68,8 @@ type Config struct {
 	// PeerIdleSec drops unused peer processes after this many seconds.
 	// 0 or omitted → default 900. -1 → never idle-evict (still drop if !Alive()).
 	PeerIdleSec int `yaml:"peer_idle_sec"`
-	// Agents are named peers for the delegate tool (external command or native model).
-	Agents []AgentSpec `yaml:"agents"`
+	// Peers are named entries for the delegate tool (external command or native model).
+	Peers []PeerSpec `yaml:"peers"`
 }
 
 const (
@@ -78,7 +78,7 @@ const (
 )
 
 // sharedDelegate is the singleton delegate tool so packs (e.g. ops) can
-// merge agents without replacing each other.
+// merge peers without replacing each other.
 var (
 	sharedMu       sync.Mutex
 	sharedDelegate *delegateTool
@@ -91,7 +91,7 @@ func init() {
 }
 
 // RegisterFromConfig loads config (same path list as mow.New / BeforeNew) and
-// registers delegate when agents is non-empty.
+// registers delegate when peers is non-empty.
 // Must run *before* mow.New so the tool is in the registry.
 //
 // Each call builds a fresh tool from the effective config (replace, not merge)
@@ -111,7 +111,7 @@ func RegisterFromConfig(configPaths ...string) error {
 	if err := cfg.Extension("acp", &c); err != nil {
 		return err
 	}
-	agents, err := resolveAgents(c)
+	agents, err := resolvePeers(c)
 	if err != nil {
 		return err
 	}
@@ -130,11 +130,11 @@ func RegisterFromEngine(eng *mow.Engine) error {
 	if err := eng.Extension("acp", &c); err != nil {
 		return err
 	}
-	agents, err := resolveAgents(c)
+	agents, err := resolvePeers(c)
 	if err != nil {
 		return err
 	}
-	indexed := indexAgents(agents)
+	indexed := indexPeers(agents)
 	if len(indexed) == 0 {
 		return nil
 	}
@@ -154,8 +154,8 @@ func RegisterFromEngine(eng *mow.Engine) error {
 // replaceSharedAgents installs a new process-global delegate tool from the
 // given agent list (full replace). Used by RegisterFromConfig so each
 // BeforeNew reflects only the current effective config.
-func replaceSharedAgents(agents []AgentSpec, workspace string, peerIdleSec int) error {
-	indexed := indexAgents(agents)
+func replaceSharedAgents(agents []PeerSpec, workspace string, peerIdleSec int) error {
+	indexed := indexPeers(agents)
 	sharedMu.Lock()
 	old := sharedDelegate
 	oldGen := sharedGen
@@ -215,15 +215,15 @@ func releaseSharedPeers(gen int) {
 	}
 }
 
-// AppendAgents merges peer specs into delegate (creating the tool if needed).
+// AppendPeers merges peer specs into delegate (creating the tool if needed).
 // Used by packs (e.g. ops profiles) that add peers on top of an existing
 // registration. Empty list is a no-op. peerIdleSec: 0 = default, -1 = no idle
 // drop; only applied when the shared tool is first created.
 //
 // Prefer RegisterFromConfig / RegisterFromEngine for full config-driven
 // registration — those replace rather than accumulate.
-func AppendAgents(agents []AgentSpec, workspace string, peerIdleSec int) {
-	indexed := indexAgents(agents)
+func AppendPeers(agents []PeerSpec, workspace string, peerIdleSec int) {
+	indexed := indexPeers(agents)
 	if len(indexed) == 0 {
 		return
 	}
@@ -231,7 +231,7 @@ func AppendAgents(agents []AgentSpec, workspace string, peerIdleSec int) {
 	defer sharedMu.Unlock()
 	if sharedDelegate == nil {
 		sharedDelegate = &delegateTool{
-			agents:    map[string]AgentSpec{},
+			agents:    map[string]PeerSpec{},
 			workspace: strings.TrimSpace(workspace),
 			peerIdle:  peerIdleDuration(peerIdleSec),
 			peers:     map[string]*peerSlot{},
@@ -256,8 +256,8 @@ func peerIdleDuration(sec int) time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
-func indexAgents(list []AgentSpec) map[string]AgentSpec {
-	m := map[string]AgentSpec{}
+func indexPeers(list []PeerSpec) map[string]PeerSpec {
+	m := map[string]PeerSpec{}
 	for _, a := range list {
 		name := strings.ToLower(strings.TrimSpace(a.Name))
 		if name == "" || (len(a.Command) == 0 && !a.native()) {
@@ -293,7 +293,7 @@ type peerSlot struct {
 }
 
 type delegateTool struct {
-	agents    map[string]AgentSpec
+	agents    map[string]PeerSpec
 	workspace string
 	peerIdle  time.Duration // 0 = no idle eviction
 
@@ -310,7 +310,7 @@ func (t *delegateTool) Description() string {
 	}
 	sort.Strings(names)
 	return "Delegate a task to a named peer agent over ACP (the current peer protocol; in other harnesses often called a subagent). " +
-		"Agents are configured under extensions.acp.agents (command = external ACP peer; model = native mow acp). " +
+		"Peers are configured under extensions.acp.peers (command = external ACP peer; model = native mow acp). " +
 		"Process/session is reused across calls when possible. " +
 		"Long runs are capped by the agent's timeout_sec; cancel the host turn to abort. " +
 		"Args: agent (one of: " + strings.Join(names, ", ") + "), prompt (required), cwd (optional absolute or workspace-relative). " +
@@ -357,7 +357,7 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	}
 	spec, ok := t.agents[strings.ToLower(agentName)]
 	if !ok {
-		return "", fmt.Errorf("delegate: unknown agent %q (configure extensions.acp.agents; \"subagent\" means the same thing)", agentName)
+		return "", fmt.Errorf("delegate: unknown agent %q (configure extensions.acp.peers; \"subagent\" means the same thing)", agentName)
 	}
 	prompt := strings.TrimSpace(a.Prompt)
 	if prompt == "" {
@@ -539,7 +539,7 @@ func delegatePromptError(agent string, timeoutSec int, alive bool, err error) er
 	return errors.New(msg)
 }
 
-func (t *delegateTool) getOrStart(ctx context.Context, spec AgentSpec, dir string, host *hostPeerPolicy, cmd []string, perm, key string) (*peerSlot, error) {
+func (t *delegateTool) getOrStart(ctx context.Context, spec PeerSpec, dir string, host *hostPeerPolicy, cmd []string, perm, key string) (*peerSlot, error) {
 	if key == "" {
 		key = peerKey(spec.Name, dir, cmd, perm)
 	}

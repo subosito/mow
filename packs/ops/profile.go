@@ -63,9 +63,9 @@ type Profile struct {
 	Prompt string `yaml:"-"`
 }
 
-// ProfileACP mirrors extensions.acp.agents for a self-contained ops unit.
+// ProfileACP mirrors extensions.acp.peers for a self-contained ops unit.
 type ProfileACP struct {
-	Agents []acp.AgentSpec `yaml:"agents"`
+	Peers []acp.PeerSpec `yaml:"peers"`
 }
 
 // ServiceActions are allowlisted argv lists (no shell). Only these may run.
@@ -89,7 +89,7 @@ type Service struct {
 	// Surfaced in the tick prompt for blast radius, not as a tool — the
 	// model can reason about one line of text without a graph API.
 	DependsOn []string `yaml:"depends_on"`
-	// ACP is the peer name from profile acp.agents for code work (optional).
+	// ACP is the peer name from profile acp.peers for code work (optional).
 	ACP   string `yaml:"acp"`
 	Notes string `yaml:"notes"`
 }
@@ -369,9 +369,9 @@ func (p Profile) systemAppend() string {
 		}
 		b.WriteString(". ")
 	}
-	if len(p.ACP.Agents) > 0 {
+	if len(p.ACP.Peers) > 0 {
 		b.WriteString("ACP peers: ")
-		for i, a := range p.ACP.Agents {
+		for i, a := range p.ACP.Peers {
 			if i > 0 {
 				b.WriteString(", ")
 			}
@@ -406,16 +406,16 @@ func (p Profile) systemAppend() string {
 	return b.String()
 }
 
-// registerProfileACP merges profile acp.agents into delegate.
+// registerProfileACP merges profile acp.peers into delegate.
 func registerProfileACP(p Profile, workspace string) {
-	if len(p.ACP.Agents) == 0 {
+	if len(p.ACP.Peers) == 0 {
 		return
 	}
 	ws := strings.TrimSpace(workspace)
 	if ws == "" {
 		ws = strings.TrimSpace(p.Workspace)
 	}
-	acp.AppendAgents(p.ACP.Agents, ws, 0)
+	acp.AppendPeers(p.ACP.Peers, ws, 0)
 }
 
 // applyProfileLLMEnv sets MOW_MODEL / MOW_WIRE / MOW_BASE_URL from the profile

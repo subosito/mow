@@ -12,7 +12,7 @@ func TestResolveAgentsNativeAndExternal(t *testing.T) {
 	defer func() { mowAgentBinary = orig }()
 
 	falseV := false
-	specs, err := resolveAgents(Config{Agents: []AgentSpec{
+	specs, err := resolvePeers(Config{Peers: []PeerSpec{
 		{
 			Name:         "peer-a",
 			Model:        "gemini-2.5-flash",
@@ -61,7 +61,7 @@ func TestResolveAgentsNativeAndExternal(t *testing.T) {
 
 func TestBuildMowAgentCapsExplicitTrueByHost(t *testing.T) {
 	trueV := true
-	spec := AgentSpec{Model: "gpt-5-mini", AllowWrite: &trueV, AllowShell: &trueV}
+	spec := PeerSpec{Model: "gpt-5-mini", AllowWrite: &trueV, AllowShell: &trueV}
 	host := &hostPeerPolicy{workspace: "/ws", allowWrite: false, allowShell: false}
 	cmd := buildMowAgentCommand(spec, host, "/ws")
 	joined := strings.Join(cmd, " ")
@@ -73,7 +73,7 @@ func TestBuildMowAgentCapsExplicitTrueByHost(t *testing.T) {
 func TestBuildMowAgentNoAllowWithReadOnly(t *testing.T) {
 	trueV := true
 	// Explicit read_only wins over allow flags so peer CLI Validate does not fail.
-	spec := AgentSpec{Model: "gpt-5-mini", ReadOnly: &trueV, AllowWrite: &trueV, AllowShell: &trueV}
+	spec := PeerSpec{Model: "gpt-5-mini", ReadOnly: &trueV, AllowWrite: &trueV, AllowShell: &trueV}
 	host := &hostPeerPolicy{workspace: "/ws", allowWrite: true, allowShell: true}
 	cmd := buildMowAgentCommand(spec, host, "/ws")
 	joined := strings.Join(cmd, " ")
@@ -98,7 +98,7 @@ func TestPeerKeyIncludesCommand(t *testing.T) {
 }
 
 func TestBuildMowAgentInheritsExtraRoots(t *testing.T) {
-	spec := AgentSpec{Model: "gpt-5-mini"}
+	spec := PeerSpec{Model: "gpt-5-mini"}
 	host := &hostPeerPolicy{
 		workspace:    "/ws",
 		allowWrite:   true,
@@ -114,14 +114,14 @@ func TestBuildMowAgentInheritsExtraRoots(t *testing.T) {
 }
 
 func TestResolveAgentsRequiresCommandOrModel(t *testing.T) {
-	_, err := resolveAgents(Config{Agents: []AgentSpec{{Name: "x"}}})
+	_, err := resolvePeers(Config{Peers: []PeerSpec{{Name: "x"}}})
 	if err == nil || !strings.Contains(err.Error(), "command") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
 func TestResolveAgentsRejectsCommandAndModel(t *testing.T) {
-	_, err := resolveAgents(Config{Agents: []AgentSpec{{
+	_, err := resolvePeers(Config{Peers: []PeerSpec{{
 		Name: "x", Command: []string{"peer"}, Model: "gpt-5-mini",
 	}}})
 	if err == nil || !strings.Contains(err.Error(), "not both") {
@@ -130,7 +130,7 @@ func TestResolveAgentsRejectsCommandAndModel(t *testing.T) {
 }
 
 func TestResolveAgentsDuplicateName(t *testing.T) {
-	_, err := resolveAgents(Config{Agents: []AgentSpec{
+	_, err := resolvePeers(Config{Peers: []PeerSpec{
 		{Name: "peer-b", Command: []string{"other"}},
 		{Name: "peer-b", Model: "gpt-5-mini"},
 	}})
@@ -155,7 +155,7 @@ func TestDelegateAcceptsSubagentAlias(t *testing.T) {
 }
 
 func TestPeerCommandDoesNotInjectEffortOnExternal(t *testing.T) {
-	cmd := peerCommand(AgentSpec{
+	cmd := peerCommand(PeerSpec{
 		Name:    "peer",
 		Command: []string{"peer-agent", "--acp"},
 		Effort:  "high",
@@ -171,13 +171,13 @@ func TestPeerCommandDoesNotInjectEffortOnExternal(t *testing.T) {
 }
 
 func TestEffectivePermissionMode(t *testing.T) {
-	if got := effectivePermissionMode(AgentSpec{}); got != PermissionReject {
+	if got := effectivePermissionMode(PeerSpec{}); got != PermissionReject {
 		t.Fatalf("default=%q", got)
 	}
-	if got := effectivePermissionMode(AgentSpec{PermissionMode: "allow"}); got != PermissionAllow {
+	if got := effectivePermissionMode(PeerSpec{PermissionMode: "allow"}); got != PermissionAllow {
 		t.Fatalf("allow=%q", got)
 	}
-	if got := effectivePermissionMode(AgentSpec{Command: []string{"peer", "--force"}}); got != PermissionAllow {
+	if got := effectivePermissionMode(PeerSpec{Command: []string{"peer", "--force"}}); got != PermissionAllow {
 		t.Fatalf("--force legacy=%q", got)
 	}
 }

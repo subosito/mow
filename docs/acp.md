@@ -21,7 +21,7 @@ Sources: [ACP v1 overview](https://agentclientprotocol.com/protocol/v1/overview)
 | Surface | Process | Audience |
 |---|---|---|
 | `mow acp` | ACP agent on stdio + extras | editors, desktop, mowi |
-| `delegate` | mow as ACP *client* | named peers (`extensions.acp.agents`) |
+| `delegate` | mow as ACP *client* | named peers (`extensions.acp.peers`) |
 | `mow.Engine` | in-process library | Go embedders |
 
 ## Extras (`agentCapabilities.experimental`)

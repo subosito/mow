@@ -87,7 +87,7 @@ func TestLoadWithProfileExtensionsAcpWholeSectionReplace(t *testing.T) {
 	global := `
 extensions:
   acp:
-    agents:
+    peers:
       - name: deepseek
         model: deepseek-v4-flash
       - name: only-global
@@ -99,7 +99,7 @@ extensions:
 	profileBody := `
 extensions:
   acp:
-    agents:
+    peers:
       - name: deepseek
         model: gateway/deepseek/deepseek-chat
 `
@@ -110,17 +110,17 @@ extensions:
 		t.Fatal(err)
 	}
 	type acpSection struct {
-		Agents []struct {
+		Peers []struct {
 			Name  string `yaml:"name"`
 			Model string `yaml:"model"`
-		} `yaml:"agents"`
+		} `yaml:"peers"`
 	}
 	var sec acpSection
 	if err := f.Extension("acp", &sec); err != nil {
 		t.Fatal(err)
 	}
 	byName := map[string]string{}
-	for _, a := range sec.Agents {
+	for _, a := range sec.Peers {
 		byName[a.Name] = a.Model
 	}
 	got := byName["deepseek"]
@@ -129,7 +129,7 @@ extensions:
 		t.Fatalf("deepseek model=%q want %q", got, want)
 	}
 	if _, ok := byName["only-global"]; ok {
-		t.Fatalf("profile extensions.acp must whole-section replace global; still has only-global: %+v", sec.Agents)
+		t.Fatalf("profile extensions.acp must whole-section replace global; still has only-global: %+v", sec.Peers)
 	}
 }
 
