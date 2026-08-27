@@ -26,6 +26,17 @@ func (p *modelProv) SetModel(id string) error {
 	return nil
 }
 
+func TestModeState(t *testing.T) {
+	m := modeState(ModeAsk)
+	if m["currentModeId"] != ModeAsk {
+		t.Fatal(m)
+	}
+	modes, _ := m["availableModes"].([]map[string]any)
+	if len(modes) != 2 {
+		t.Fatal(modes)
+	}
+}
+
 func TestFilterChatModels(t *testing.T) {
 	in := []mow.ModelInfo{
 		// Plain OpenAI-compatible catalog (id only) → keep all.

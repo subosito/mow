@@ -36,3 +36,11 @@ extra `slash` method (busy refuse) plus `exclusive` on
 `available_commands_update`. Jail-safe `@path` expands on `session/prompt`.
 
 v2 stays behind `protocolVersion` negotiation. Do not drop v1.
+
+## Sessions
+
+`mow acp` is **one Engine, one active ACP session**. `session/new` binds that
+Engine JSONL id (so `--session` / `--continue` stay the ids operators already
+use). A second `session/new` while bound is `-32600`. `session/close` unbinds;
+the next `session/new` starts a **new** JSONL via `Engine.BeginSession`. Loading
+a different on-disk id requires a new process (`mow acp --session ID`).

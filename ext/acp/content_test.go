@@ -68,17 +68,6 @@ func TestMaterializePromptResourceText(t *testing.T) {
 	}
 }
 
-func TestModeState(t *testing.T) {
-	m := modeState(ModeAsk)
-	if m["currentModeId"] != ModeAsk {
-		t.Fatal(m)
-	}
-	modes, _ := m["availableModes"].([]map[string]any)
-	if len(modes) != 2 {
-		t.Fatal(modes)
-	}
-}
-
 func TestMaterializePromptRejectsMediaSymlinkEscape(t *testing.T) {
 	ws := t.TempDir()
 	outside := t.TempDir()

@@ -338,10 +338,7 @@ func (a *agentServer) sessionApprovals() string {
 	defer a.mu.Unlock()
 	sid := a.activeSID
 	if sid == "" {
-		for id := range a.sessions {
-			sid = id
-			break
-		}
+		sid = a.boundSID
 	}
 	if s := a.sessions[sid]; s != nil && s.approvals != "" {
 		return s.approvals

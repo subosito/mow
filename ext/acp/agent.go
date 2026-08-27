@@ -27,7 +27,7 @@ type AgentOptions struct {
 }
 
 // Agent serves ACP as an *agent* (editor/client → mow).
-// Core: initialize, session/new, session/prompt, session/cancel.
+// Core: initialize, one session/new (or load), session/prompt, session/cancel.
 // Completeness: session/load|list|resume|close|delete, set_mode,
 // set_config_option, available_commands_update, session/request_permission
 // (agent→client), usage_update, slash dispatch, terminals.
@@ -85,10 +85,16 @@ type agentServer struct {
 	pending      map[string]chan incomingResponse
 	alwaysAllow  map[string]bool
 	alwaysReject map[string]bool
-	activeSID    string
+	// activeSID is the in-flight prompt session (cleared when the turn ends).
+	activeSID string
+	// boundSID is the one ACP session this process owns. Empty means unbound.
+	boundSID string
+	// freshAfterClose: next session/new must BeginSession (not rebind JSONL).
+	freshAfterClose bool
+	sessionSeq      atomic.Int64
 }
 
-// acpSession is per-editor-session state (not the same as mow session JSONL id).
+// acpSession is ACP mode/approvals for the bound session.
 type acpSession struct {
 	mode      string // ModeAsk | ModeCode
 	approvals string // ApprovalPrompt | ApprovalAlways
@@ -208,87 +214,9 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			},
 		})
 	case "session/new":
-		var p struct {
-			Cwd string `json:"cwd"`
-		}
-		_ = json.Unmarshal(req.Params, &p)
-		// Prefer engine session id for continuity.
-		sid := a.eng.SessionID()
-		if sid == "" {
-			a.mu.Lock()
-			sid = "mow-" + fmt.Sprintf("%d", len(a.sessions)+1)
-			a.mu.Unlock()
-		}
-		a.mu.Lock()
-		if a.sessions[sid] == nil {
-			a.sessions[sid] = &acpSession{mode: ModeCode, approvals: ApprovalPrompt}
-		}
-		mode := a.sessions[sid].mode
-		a.mu.Unlock()
-		result := map[string]any{
-			"sessionId": sid,
-			"modes":     modeState(mode),
-		}
-		if opts := a.sessionConfigOptions(parent, mode); len(opts) > 0 {
-			result["configOptions"] = opts
-		}
-		a.write(response{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-			Result:  result,
-		})
-		a.advertiseCommands(sid)
+		a.handleSessionNew(parent, req)
 	case "session/load":
-		// Resume an existing mow session id (same Engine already holds transcript/prior when constructed with SessionID).
-		var p struct {
-			SessionID string `json:"sessionId"`
-			Cwd       string `json:"cwd"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil || strings.TrimSpace(p.SessionID) == "" {
-			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "sessionId required"}})
-			return
-		}
-		sid := strings.TrimSpace(p.SessionID)
-		a.mu.Lock()
-		if a.sessions[sid] == nil {
-			a.sessions[sid] = &acpSession{mode: ModeCode, approvals: ApprovalPrompt}
-		}
-		mode := a.sessions[sid].mode
-		a.mu.Unlock()
-		// Stream prior turns as session/update message history (best-effort).
-		for _, m := range a.eng.Transcript() {
-			kind := "user_message_chunk"
-			switch strings.ToLower(strings.TrimSpace(m.Role)) {
-			case "assistant":
-				kind = "agent_message_chunk"
-			case "system":
-				continue
-			}
-			a.write(notification{
-				JSONRPC: "2.0",
-				Method:  "session/update",
-				Params: mustJSON(map[string]any{
-					"sessionId": sid,
-					"update": map[string]any{
-						"sessionUpdate": kind,
-						"content":       map[string]any{"type": "text", "text": m.Content},
-					},
-				}),
-			})
-		}
-		loadResult := map[string]any{
-			"sessionId": sid,
-			"modes":     modeState(mode),
-		}
-		if opts := a.sessionConfigOptions(parent, mode); len(opts) > 0 {
-			loadResult["configOptions"] = opts
-		}
-		a.write(response{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-			Result:  loadResult,
-		})
-		a.advertiseCommands(sid)
+		a.handleSessionLoad(parent, req, true)
 	case "fs/read_text_file":
 		var p struct {
 			Path string `json:"path"`
@@ -460,14 +388,16 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		}
 		text = expandPromptFileRefs(a.eng, text)
 		ctx, cancel := context.WithCancel(parent)
+		if err := a.requireBound(p.SessionID); err != nil {
+			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
+			return
+		}
 		a.mu.Lock()
 		a.cancels[p.SessionID] = cancel
 		a.activeSID = p.SessionID
 		mode := ModeCode
 		if s := a.sessions[p.SessionID]; s != nil && s.mode != "" {
 			mode = s.mode
-		} else if a.sessions[p.SessionID] == nil {
-			a.sessions[p.SessionID] = &acpSession{mode: ModeCode, approvals: ApprovalPrompt}
 		}
 		a.mu.Unlock()
 		defer func() {
@@ -659,56 +589,9 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 	case "logout":
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
 	case "session/close":
-		var p struct {
-			SessionID string `json:"sessionId"`
-		}
-		_ = json.Unmarshal(req.Params, &p)
-		sid := strings.TrimSpace(p.SessionID)
-		a.mu.Lock()
-		if cancel, ok := a.cancels[sid]; ok && cancel != nil {
-			cancel()
-			delete(a.cancels, sid)
-		}
-		delete(a.sessions, sid)
-		var drop []*termSession
-		if a.terms != nil {
-			for id, t := range a.terms {
-				if t != nil && t.sessionID == sid {
-					drop = append(drop, t)
-					delete(a.terms, id)
-				}
-			}
-		}
-		a.mu.Unlock()
-		for _, t := range drop {
-			t.release()
-		}
-		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
+		a.handleSessionClose(req)
 	case "session/resume":
-		var p struct {
-			SessionID string `json:"sessionId"`
-			Cwd       string `json:"cwd"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil || strings.TrimSpace(p.SessionID) == "" {
-			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "sessionId required"}})
-			return
-		}
-		sid := strings.TrimSpace(p.SessionID)
-		a.mu.Lock()
-		if a.sessions[sid] == nil {
-			a.sessions[sid] = &acpSession{mode: ModeCode}
-		}
-		mode := a.sessions[sid].mode
-		a.mu.Unlock()
-		resumeResult := map[string]any{"sessionId": sid, "modes": modeState(mode)}
-		if opts := a.sessionConfigOptions(parent, mode); len(opts) > 0 {
-			resumeResult["configOptions"] = opts
-		}
-		a.write(response{
-			JSONRPC: "2.0", ID: req.ID,
-			Result: resumeResult,
-		})
-		a.advertiseCommands(sid)
+		a.handleSessionLoad(parent, req, false)
 	case "session/list":
 		cwd := a.eng.Workspace()
 		a.mu.Lock()
@@ -740,19 +623,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		}
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"sessions": list}})
 	case "session/delete":
-		var p struct {
-			SessionID string `json:"sessionId"`
-		}
-		_ = json.Unmarshal(req.Params, &p)
-		sid := strings.TrimSpace(p.SessionID)
-		a.mu.Lock()
-		if cancel, ok := a.cancels[sid]; ok && cancel != nil {
-			cancel()
-			delete(a.cancels, sid)
-		}
-		delete(a.sessions, sid)
-		a.mu.Unlock()
-		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
+		a.handleSessionClose(req)
 	case "session/set_mode", "session/setMode":
 		var p struct {
 			SessionID string `json:"sessionId"`
@@ -763,6 +634,10 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			return
 		}
 		sid := strings.TrimSpace(p.SessionID)
+		if err := a.requireBound(sid); err != nil {
+			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
+			return
+		}
 		if err := a.applyModeConfig(sid, p.ModeID); err != nil {
 			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
 			return
@@ -795,6 +670,10 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			return
 		}
 		sid := strings.TrimSpace(p.SessionID)
+		if err := a.requireBound(sid); err != nil {
+			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
+			return
+		}
 		switch configID {
 		case configIDModel:
 			val, _ := p.Value.(string)

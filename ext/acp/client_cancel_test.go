@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -103,15 +102,4 @@ func jsonRaw(id json.RawMessage) any {
 		return v
 	}
 	return string(id)
-}
-
-func TestClipProgressText(t *testing.T) {
-	if got := clipProgressText("  hello\nmore  "); got != "hello" {
-		t.Fatalf("got %q", got)
-	}
-	long := strings.Repeat("x", 100)
-	got := clipProgressText(long)
-	if !strings.HasSuffix(got, "…") || len([]rune(got)) > 81 {
-		t.Fatalf("clip failed: %q (runes=%d)", got, len([]rune(got)))
-	}
 }

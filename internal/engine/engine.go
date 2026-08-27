@@ -925,6 +925,60 @@ func (e *Engine) SessionID() string {
 	return e.sid
 }
 
+// BeginSession starts a fresh JSONL session on this Engine. The previous file
+// stays on disk (Sessions still lists it). Refuses while a prompt is in flight.
+//
+// NoSession engines only clear in-memory history and return "". Hosts that need
+// a different on-disk id should construct a new Engine with Options.SessionID.
+func (e *Engine) BeginSession() (string, error) {
+	if e == nil {
+		return "", fmt.Errorf("mow: nil engine")
+	}
+	e.promptMu.Lock()
+	defer e.promptMu.Unlock()
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return "", fmt.Errorf("mow: engine closed")
+	}
+	e.mu.Unlock()
+	if e.Status().Busy {
+		return "", fmt.Errorf("mow: prompt in flight")
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.prior = nil
+	e.transcript = nil
+	e.steer = nil
+	e.lastProviderTokens = 0
+	e.lastCtxEstimate = 0
+	if e.noSess {
+		e.sid = ""
+		e.sess = nil
+		return "", nil
+	}
+	sessDir := ""
+	if e.sess != nil {
+		sessDir = e.sess.Dir
+	} else if e.cfg != nil {
+		sessDir = filepath.Join(e.cfg.Session.Dir, projectHash(e.cfg.Workspace))
+	}
+	if sessDir == "" {
+		return "", fmt.Errorf("mow: session dir required")
+	}
+	sid := session.NewID()
+	if sid == e.sid {
+		sid = fmt.Sprintf("%s-%d", sid, time.Now().UnixNano()%1_000_000)
+	}
+	if err := session.ValidateID(sid); err != nil {
+		return "", err
+	}
+	e.sid = sid
+	e.sess = &session.Store{Dir: sessDir, ID: sid}
+	return sid, nil
+}
+
 // SessionInfo summarizes a stored session (listing / resume UIs).
 type SessionInfo struct {
 	ID      string

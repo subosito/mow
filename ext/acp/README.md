@@ -23,8 +23,10 @@ No slash commands registered by this package. Linked slash commands from
 other packs are advertised to the editor as `available_commands_update`
 and dispatched when `session/prompt` text starts with `/name`.
 
-`mow acp` speaks ACP v1 on stdio for an editor: initialize, session
-lifecycle, `session/prompt` + `session/update`, `session/request_permission`
+`mow acp` speaks ACP v1 on stdio for an editor: initialize, **one**
+active session (`session/new` binds the Engine JSONL; a second `new`
+is refused until `session/close`, which then starts a fresh JSONL),
+`session/prompt` + `session/update`, `session/request_permission`
 (agent→client for power tools), usage_update, config options, and
 terminals. Native `mow_agents` spawn the current executable
 (`os.Executable()`), so the full `mow` host starts `mow acp`.

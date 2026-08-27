@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -108,5 +109,16 @@ func TestOnNotificationProgressAndChunk(t *testing.T) {
 	}
 	if progress[2] != "tool:read foo.go ✓" {
 		t.Fatalf("tool end=%q", progress[2])
+	}
+}
+
+func TestClipProgressText(t *testing.T) {
+	if got := clipProgressText("  hello\nmore  "); got != "hello" {
+		t.Fatalf("got %q", got)
+	}
+	long := strings.Repeat("x", 100)
+	got := clipProgressText(long)
+	if !strings.HasSuffix(got, "…") || len([]rune(got)) > 81 {
+		t.Fatalf("clip failed: %q (runes=%d)", got, len([]rune(got)))
 	}
 }
