@@ -19,7 +19,7 @@ import (
 func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "models",
-		Summary: "list catalog models (id, wire, efforts)",
+		Summary: "list catalog models",
 		Layer:   "ext",
 		Run:     modelsCmd,
 	})
@@ -69,20 +69,9 @@ func modelsCmd(args []string) int {
 func printModelsUsage() {
 	fmt.Fprintf(os.Stderr, `mow models — list catalog models
 
-  mow models [filter] [flags]
-
-GET /v1/models from the configured endpoint. Shows id, preferred wire, and
-catalog efforts (default marked with *). Current model is marked with •.
-
-  --chat               only chat-loop models (drop image/embed/speech facets)
+  mow models [filter]
+  --chat               chat-loop models only
   --config --model --base-url --workspace
-
-Examples:
-
-  mow models
-  mow models --chat
-  mow models mini
-  mow models --base-url http://127.0.0.1:PORT/v1
 
 `)
 }

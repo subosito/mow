@@ -26,19 +26,19 @@ func init() {
 	})
 	ext.RegisterCommand(ext.Command{
 		Name:    "trust",
-		Summary: "trust workspace for project .mow config",
+		Summary: "trust this workspace",
 		Layer:   "ext",
 		Run:     func(args []string) int { return cliutil.TrustCommand("mow", args) },
 	})
 	ext.RegisterCommand(ext.Command{
 		Name:    "doctor",
-		Summary: "inspect host/workspace (does not start MCP)",
+		Summary: "inspect host/workspace",
 		Layer:   "ext",
 		Run:     doctorCmd,
 	})
 	ext.RegisterCommand(ext.Command{
 		Name:    "approvals",
-		Summary: "list | remember allow|deny <tool> | revoke <id>",
+		Summary: "durable tool approvals",
 		Layer:   "ext",
 		Run:     approvalsCmd,
 	})
@@ -236,23 +236,14 @@ func printRunUsage() {
   mow run -p "…" [flags]
   mow run "free-form prompt text" [flags]
 
-Flags:
-
   -p TEXT              prompt (or pass as args)
-  -e, --ephemeral      run against resumed context without saving this turn
-  --config --workspace --model --base-url
-  --allow-shell --allow-write --max-turns --effort --extra-root
-  --sandbox             bubblewrap jail for bash/proc (Linux only; host fs
-                        read-only, workspace rw, network on; --sandbox=none off)
+  -e, --ephemeral      do not save this turn
+  --config --workspace --model --effort --base-url --extra-root
+  --allow-shell --allow-write --sandbox (Linux) --max-turns
   --stream --verbose --session --continue --no-session
-
-Examples:
 
   mow run -p "summarize this repo"
   mow run -p "fix the tests" --allow-write --allow-shell
-  mow run -p "run the suite" --allow-shell --sandbox
-  mow run --continue -p "try again"
-  mow run --continue -e -p "thanks"
 
 `)
 }
@@ -269,21 +260,19 @@ func printCmdGroup(title string, cmds []ext.Command) {
 		}
 		fmt.Fprintf(os.Stderr, "  mow %-10s %s%s\n", c.Name, c.Summary, extra)
 	}
-	fmt.Fprintln(os.Stderr, "  (each: mow <name> help)")
 	fmt.Fprintln(os.Stderr)
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `mow — agent harness (library + CLI)
+	fmt.Fprintf(os.Stderr, `mow — agent harness
 
 Core:
 
-  mow run  -p "…" [flags]     one-shot prompt
-  mow models [filter]         list catalog models (id, wire, efforts)
-  mow trust [path]            trust workspace for project .mow config
-  mow trust --list | --revoke
-  mow doctor [--bundle]       inspect host/workspace (does not start MCP)
-  mow approvals               list | remember allow|deny <tool> | revoke <id>
+  mow run  -p "…"             one-shot prompt
+  mow models [filter]         list catalog models
+  mow trust [path]            trust this workspace
+  mow doctor [--bundle]       inspect host/workspace
+  mow approvals               durable tool approvals
   mow version | help
 
 `)
@@ -302,25 +291,20 @@ Core:
 		printCmdGroup("Extensions (this binary):", extensions)
 		printCmdGroup("Packs (this binary):", packs)
 	}
-	fmt.Fprintf(os.Stderr, `Common flags:
+	fmt.Fprintf(os.Stderr, `Flags: --config --workspace --model --effort --base-url --extra-root
+       --allow-shell --allow-write --sandbox --max-turns --stream --verbose
+       --session --continue --no-session
 
-  --config --workspace --model --effort --base-url --extra-root
-  --allow-shell --allow-write --sandbox (Linux) --max-turns --stream --verbose
-  --session --continue --no-session
+Env:   MOW_HOME  MOW_API_KEY  MOW_MODEL  MOW_BASE_URL  MOW_WIRE  MOW_EFFORT%s
 
-Env:
+`, packEnvHelp())
+}
 
-  MOW_HOME                         data root (default ~/.mow)
-  MOW_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
-  MOW_MODEL / OPENAI_MODEL / ANTHROPIC_MODEL
-  MOW_EFFORT                       none | low | medium | high
-  MOW_BASE_URL / OPENAI_BASE_URL / ANTHROPIC_BASE_URL
-  MOW_WIRE                         openai-chat-completions | openai-responses | anthropic-messages
-  MOW_OPS                          ops profile name (with packs/ops; mowx)
-  MOW_TRUST_PROJECT=1              trust project config this run
-
-Defaults: tools read, glob, grep. Power: --allow-write / --allow-shell.
-Library: import "github.com/subosito/mow" → Engine.Prompt
-
-`)
+// packEnvHelp is env that only exists when the matching pack is linked
+// (cmd/mowx, not the lean cmd/mow).
+func packEnvHelp() string {
+	if _, ok := ext.LookupCommand("ops"); ok {
+		return "  MOW_OPS"
+	}
+	return ""
 }

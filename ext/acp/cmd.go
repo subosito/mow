@@ -20,7 +20,7 @@ func init() {
 	})
 	ext.RegisterCommand(ext.Command{
 		Name:    "acp",
-		Summary: "ACP agent on stdin/stdout (editors)",
+		Summary: "ACP agent on stdin/stdout",
 		Layer:   "ext",
 		Run:     runCmd,
 	})
@@ -62,21 +62,12 @@ func runCmd(args []string) int {
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `mow acp — Agent Client Protocol on stdio
 
-  Point an ACP-capable editor (Zed, etc.) at this process as the agent:
+  mow acp [engine flags]
 
-    mow acp [engine flags]
+  Config: mode (ask|code), approvals (prompt|always), model, effort.
+  Peers:  extensions.acp.peers → delegate.
 
-  JSON-RPC on stdin → stdout. Ctrl+C / SIGTERM stops the agent.
-  Streaming is always on for session/update chunks.
-
-  Config options: mode (ask|code), approvals (prompt|always), model, effort.
-  Also session/set_mode. Effort maps to model-id tiers and/or request body fields.
-
-Engine flags: same as mow run (--config --model --workspace --allow-write …).
-
-Optional: extensions.acp.peers → delegate tool for peer harnesses.
-Ops profiles can declare peers under acp: (see mow ops show).
-Docs: docs/extensions.md
+Engine flags: same as mow run.
 
 `)
 }

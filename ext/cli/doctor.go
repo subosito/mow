@@ -58,8 +58,7 @@ func doctorCmd(args []string) int {
 		switch a {
 		case "-h", "--help", "help":
 			fmt.Fprintln(os.Stderr, "mow doctor [--bundle]")
-			fmt.Fprintln(os.Stderr, "  Inspect host and workspace. Does not start MCP, sessions, or procs.")
-			fmt.Fprintln(os.Stderr, "  --bundle  write a redacted Markdown file under $MOW_HOME/traces/")
+			fmt.Fprintln(os.Stderr, "  --bundle  write a redacted snapshot under $MOW_HOME/traces")
 			return 0
 		case "--bundle", "-b":
 			bundle = true

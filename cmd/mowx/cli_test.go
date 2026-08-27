@@ -145,7 +145,7 @@ func TestCLIHelp(t *testing.T) {
 			name: "top level",
 			args: []string{"help"},
 			want: []string{
-				"mow — agent harness (library + CLI)",
+				"mow — agent harness",
 				"mow run",
 				"mow models",
 				"mow tty",
@@ -180,7 +180,7 @@ func TestCLIHelp(t *testing.T) {
 			name: "trust command",
 			args: []string{"help", "trust"},
 			want: []string{
-				"mow trust — allow project .mow/config and skills",
+				"mow trust — allow project .mow config and skills",
 				"mow trust --list",
 			},
 			notWant: []string{"Core:"},

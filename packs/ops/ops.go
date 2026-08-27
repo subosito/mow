@@ -48,7 +48,7 @@ func init() {
 	ext.RegisterTool(incidentTool{})
 	ext.RegisterCommand(ext.Command{
 		Name:    "ops",
-		Summary: "Fleet ops — monitor, fix via peers | list | run | …",
+		Summary: "fleet ops",
 		Layer:   "pack",
 		Run:     opsCmd,
 	})

@@ -19,7 +19,7 @@ import (
 func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "job",
-		Summary: "Interval jobs — run | list | check",
+		Summary: "interval jobs",
 		Layer:   "pack",
 		Run:     runCmd,
 	})

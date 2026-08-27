@@ -28,7 +28,7 @@ const mcpProtocolVersion = "2024-11-05"
 func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "mcp",
-		Summary: "MCP server on stdin/stdout (mow_prompt tool)",
+		Summary: "MCP server on stdin/stdout",
 		Layer:   "pack",
 		Run:     serveCmd,
 	})
@@ -57,20 +57,11 @@ func serveCmd(args []string) int {
 }
 
 func printMCPUsage() {
-	fmt.Fprintf(os.Stderr, `mow mcp — serve mow as an MCP server over stdio
-
-  Point Claude Desktop / other MCP hosts at this process. Exposes one tool:
-
-    mow_prompt   run the agent on a prompt; returns the final answer
-                 args: prompt (required), read_only (optional bool)
+	fmt.Fprintf(os.Stderr, `mow mcp — MCP server on stdio (mow_prompt)
 
   mow mcp [engine flags]
 
-Engine flags: same as mow run (--config --model --workspace --allow-write …).
-Power tools for the delegated agent follow --allow-write / --allow-shell.
-
-Client side (outbound MCP servers): extensions.mcp in config — not this command.
-See docs/extensions.md.
+Engine flags: same as mow run.
 
 `)
 }

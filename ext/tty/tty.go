@@ -22,7 +22,7 @@ import (
 func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "tty",
-		Summary: "interactive line session (/model /btw /quit)",
+		Summary: "interactive line session",
 		Layer:   "ext",
 		Run:     runCmd,
 	})
@@ -341,23 +341,17 @@ func printSessionExit(eng *mow.Engine, ef cliutil.EngineFlags) {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `mow tty — interactive line session (plain terminal; not the full TUI)
+	fmt.Fprintf(os.Stderr, `mow tty — interactive line session
 
   mow tty [flags]
 
-In-session:
-
-  /model [id]     list models or switch (catalog wire when present)
-  /btw <q>        aside — answered but not kept in context
+  /model [id]     list or switch models
+  /btw <q>        aside (not kept in context)
   /quit           exit (empty line also exits)
-  Ctrl+C          cancel current turn only
+  Ctrl+C          cancel current turn
 
-Flags: same as mow run (--config --model --workspace --allow-write …).
-  --stream        token deltas on stderr
-  --continue      resume latest session
-  --session ID    resume a specific session
-
-Start an interactive session explicitly with mow tty.
+Flags: same as mow run.
+  --stream --continue --session ID
 
 `)
 }

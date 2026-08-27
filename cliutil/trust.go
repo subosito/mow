@@ -17,16 +17,11 @@ func TrustCommand(prog string, args []string) int {
 		prog = "mow"
 	}
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
-		fmt.Fprintf(os.Stderr, `%s trust — allow project .mow/config and skills
-
-Trust is stored under $MOW_HOME/trusted (not inside the repo).
+		fmt.Fprintf(os.Stderr, `%s trust — allow project .mow config and skills
 
   %s trust [path]           trust this workspace (default: .)
-  %s trust --list           list trusted workspaces
-  %s trust --revoke [path]  revoke trust
-
-  --workspace path           same as [path] (flag form)
-  MOW_TRUST_PROJECT=1        trust project config for this run only
+  %s trust --list
+  %s trust --revoke [path]
 
 `, prog, prog, prog, prog)
 		return 0

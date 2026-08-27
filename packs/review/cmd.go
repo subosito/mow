@@ -22,13 +22,13 @@ import (
 func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "review",
-		Summary: "AI-assisted code review of a diff or paths (advisory)",
+		Summary: "advisory code review",
 		Layer:   "pack",
 		Run:     func(args []string) int { return runCommand("review", args) },
 	})
 	ext.RegisterCommand(ext.Command{
 		Name:    "sec",
-		Summary: "AI-assisted security review of a diff or paths (advisory)",
+		Summary: "advisory security review",
 		Layer:   "pack",
 		Run:     func(args []string) int { return runCommand("sec", args) },
 	})
