@@ -17,6 +17,23 @@ func availableCommands() []map[string]any {
 		row := map[string]any{
 			"name":        name,
 			"description": c.Summary,
+			"exclusive":   c.Exclusive,
+		}
+		if len(c.Aliases) > 0 {
+			aliases := make([]string, 0, len(c.Aliases))
+			for _, a := range c.Aliases {
+				a = strings.TrimSpace(a)
+				if a == "" {
+					continue
+				}
+				if !strings.HasPrefix(a, "/") {
+					a = "/" + a
+				}
+				aliases = append(aliases, a)
+			}
+			if len(aliases) > 0 {
+				row["aliases"] = aliases
+			}
 		}
 		if c.Usage != "" {
 			row["input"] = map[string]any{"hint": strings.TrimSpace(firstLine(c.Usage))}

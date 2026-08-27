@@ -63,13 +63,13 @@ Status:
 | Exclusive while busy | `slash` refuses | extra `slash` refuses when busy | not specified | **extra** |
 | Steer | `steer` | — | — | **extra** |
 | Ephemeral `/btw` | `prompt.ephemeral` | extra field on `session/prompt` | — | **extra** |
-| Compact / rewind | `compact`, `rewind` | — | — | **extra** |
+| Compact / rewind | `compact`, `rewind` | extra `session/update` compact chrome | — | **extra** |
 | Model / effort | `model.*`, `effort.*` | `configOptions` + `set_config_option` | same | shape |
 | Skills / plugins | `skill.*`, `plugin.list` | — | — | **extra** |
 | Extra roots | `status`/`session` `{path,read_only}` | spawn cwd only | `additionalDirectories` (no ro/rw) | **extra** |
 | Live status | `status` (`busy`, `mode`, `pending_permission`, `procs`) | extra `status` / `proc.list` | `state_update` | **extra** |
 | UI config | `extension.config` `{name:mowi}` | not an agent concern | not an agent concern | **rpc** |
-| Goal / delegate events | `graph.goal.*`, `harness.delegate.*` | `plan` / thought / `_meta` | `plan_update` | **rpc** |
+| Goal / delegate events | `graph.goal.*`, `harness.delegate.*` | extra `session/update` `goal` / thought | `plan_update` | **extra** |
 | `@path` attachments | host jail + `attached[]` | content blocks (image/resource) | same | shape |
 | Client-owned FS / PTY | no | `fs/*`, `terminal/*` (v1) | FS removed; terminals display-only | **acp** |
 | Concurrent control | worker vs control channel | not specified | not specified | **rpc** |
@@ -91,11 +91,11 @@ the same `mow acp` connection (`agentCapabilities.experimental` /
 `agentCapabilities.extras`: `steer`, `compact`, `rewind`, `skill.list`,
 `skill.activate`, `plugin.list`, `transcript`, `status`, `context`,
 `proc.list`, `ping`, `slash`). Power clients feature-detect; unknown
-methods stay `-32601`. RPC still exposes them as a frozen fallback until
-mowi defaults to ACP. Do not add more RPC surface.
-Theme / `extension.config` stay host-local. Ephemeral prompt stays
-RPC-only. Exclusive slash is the extra `slash` method (busy refuse),
-not `"/name"` inside `session/prompt`.
+methods stay `-32601`. RPC still exposes them as a frozen fallback.
+Do not add more RPC surface. Theme / `extension.config` stay host-local.
+Ephemeral prompt is an extra field on `session/prompt`. Exclusive slash is
+the extra `slash` method (busy refuse) plus `exclusive` on
+`available_commands_update`, not `"/name"` inside `session/prompt`.
 
 ## Frozen RPC leftovers (epoch 1)
 

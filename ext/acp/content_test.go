@@ -1,11 +1,14 @@
 package acp
 
 import (
+	"context"
 	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/subosito/mow"
 )
 
 func TestMaterializePromptTextDoesNotCreateMediaDir(t *testing.T) {
@@ -93,5 +96,32 @@ func TestMaterializePromptRejectsMediaSymlinkEscape(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("outside directory modified: %v", entries)
+	}
+}
+
+func TestExpandPromptFileRefsJailSafe(t *testing.T) {
+	ws := t.TempDir()
+	inside := filepath.Join(ws, "note.txt")
+	if err := os.WriteFile(inside, []byte("hello-ref"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := mow.New(mow.Options{
+		Workspace: ws,
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	got := expandPromptFileRefs(eng, "see @note.txt please")
+	if !strings.Contains(got, "hello-ref") || !strings.Contains(got, "--- note.txt ---") {
+		t.Fatalf("got=%q", got)
+	}
+	escaped := expandPromptFileRefs(eng, "see @../secret.txt")
+	if strings.Contains(escaped, "---") {
+		t.Fatalf("escaped jail: %q", escaped)
 	}
 }

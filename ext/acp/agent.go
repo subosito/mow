@@ -133,7 +133,7 @@ func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 			continue
 		}
 		switch req.Method {
-		case "session/prompt", "terminal/wait_for_exit", "terminal/waitForExit", "compact":
+		case "session/prompt", "terminal/wait_for_exit", "terminal/waitForExit", "compact", "slash", "rewind", "skill.activate", "transcript":
 			// Long-blocking methods run off the read loop so session/cancel
 			// (and other traffic) is still read while they are in flight.
 			// compact rewrites in-memory history and can take long enough that
@@ -453,6 +453,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "empty prompt"}})
 			return
 		}
+		text = expandPromptFileRefs(a.eng, text)
 		ctx, cancel := context.WithCancel(parent)
 		a.mu.Lock()
 		a.cancels[p.SessionID] = cancel

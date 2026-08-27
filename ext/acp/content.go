@@ -3,10 +3,13 @@ package acp
 import (
 	"encoding/base64"
 	"fmt"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/subosito/mow"
 	"github.com/subosito/mow/internal/policy"
 	toolspkg "github.com/subosito/mow/internal/tools"
 )
@@ -145,6 +148,76 @@ func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (stri
 		}
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n")), nil
+}
+
+const maxPromptRefBytes = 100_000
+
+var promptFileRefRE = regexp.MustCompile(`@([A-Za-z0-9._/\-]+)`)
+
+// expandPromptFileRefs resolves jail-safe @path references the same way mow rpc
+// does. Missing, denied, and directory refs stay unexpanded.
+func expandPromptFileRefs(eng *mow.Engine, text string) string {
+	if eng == nil || !strings.Contains(text, "@") {
+		return text
+	}
+	var body strings.Builder
+	seen := map[string]bool{}
+	for _, match := range promptFileRefRE.FindAllStringSubmatch(text, -1) {
+		ref := strings.TrimRight(match[1], ".,;:)")
+		if ref == "" || seen[ref] {
+			continue
+		}
+		abs, err := eng.ResolvePath(ref)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(abs)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			continue
+		}
+		if len(data) > maxPromptRefBytes {
+			data = append(append([]byte{}, data[:maxPromptRefBytes]...), []byte("\n… (truncated)")...)
+		}
+		seen[ref] = true
+		fmt.Fprintf(&body, "\n\n--- %s ---\n```%s\n", ref, promptRefLanguage(ref))
+		body.Write(data)
+		body.WriteString("\n```")
+	}
+	if body.Len() == 0 {
+		return text
+	}
+	return text + "\n" + body.String()
+}
+
+func promptRefLanguage(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".go":
+		return "go"
+	case ".rs":
+		return "rust"
+	case ".js", ".jsx":
+		return "javascript"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".py":
+		return "python"
+	case ".sh", ".bash":
+		return "bash"
+	case ".json":
+		return "json"
+	case ".yaml", ".yml":
+		return "yaml"
+	case ".md":
+		return "markdown"
+	case ".toml":
+		return "toml"
+	default:
+		return ""
+	}
 }
 
 func decodeB64(s string) ([]byte, error) {
