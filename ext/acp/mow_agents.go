@@ -7,94 +7,61 @@ import (
 	"strings"
 )
 
-// MowAgentSpec is a native mow peer: expands to `mow acp --model …` so hosts
-// can register multi-model agents without writing full ACP command lines.
-//
-//	extensions:
-//	  acp:
-//	    mow_agents:
-//	      peer-agent:
-//	        model: gpt-5-mini
-//	        # allow_write: true   # nil = inherit host (capped by host)
-//	        # allow_shell: true   # nil = inherit host (capped by host)
-//	        # read_only: true     # nil = inherit (!host write && !host shell)
-//	        # timeout_sec: 600    # default 600
-//	        # effort: high        # optional --effort on the peer
-//	        # dir: /abs/path      # optional peer cwd
-//
-// Same runtime as agents[] (ACP subprocess + acp_delegate). "Subagent" in other
-// harnesses maps to these named agents.
-type MowAgentSpec struct {
-	// Model is required (gateway / provider model id for the peer Engine).
-	Model string `yaml:"model" json:"model"`
-	// AllowWrite enables --allow-write on the peer when true and the host allows
-	// write. Nil inherits the host at delegate time (never exceeds host).
-	AllowWrite *bool `yaml:"allow_write" json:"allow_write,omitempty"`
-	// AllowShell enables --allow-shell on the peer when true and the host allows
-	// shell. Nil inherits the host at delegate time (never exceeds host).
-	AllowShell *bool `yaml:"allow_shell" json:"allow_shell,omitempty"`
-	// ReadOnly sets --read-only on the peer. Nil inherits: true when the host
-	// denies both write and shell.
-	ReadOnly *bool `yaml:"read_only" json:"read_only,omitempty"`
-	// TimeoutSec caps one delegated prompt (default 600 for mow agents).
-	TimeoutSec int `yaml:"timeout_sec" json:"timeout_sec,omitempty"`
-	// Effort sets peer reasoning intensity via --effort (mow CLI).
-	Effort string `yaml:"effort" json:"effort,omitempty"`
-	// SystemPrefix prepends optional identity or role text to the peer prompt.
-	SystemPrefix string `yaml:"system_prefix" json:"system_prefix,omitempty"`
-	// Dir is optional peer working directory (default: host workspace).
-	Dir string `yaml:"dir" json:"dir,omitempty"`
-	// ExtraArgs are appended after the standard mow acp flags (advanced).
-	ExtraArgs []string `yaml:"extra_args" json:"extra_args,omitempty"`
-}
-
-// resolveMowAgents turns mow_agents map entries into AgentSpec rows. Command
-// argv is filled at delegate time from host posture; only metadata is fixed here.
-func resolveMowAgents(m map[string]MowAgentSpec) ([]AgentSpec, error) {
-	if len(m) == 0 {
+// resolveAgents validates extensions.acp.agents. Each row is either an
+// external ACP command or a native mow peer (model), never both.
+func resolveAgents(c Config) ([]AgentSpec, error) {
+	if len(c.Agents) == 0 {
 		return nil, nil
 	}
-	names := make([]string, 0, len(m))
-	for name := range m {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	out := make([]AgentSpec, 0, len(names))
-	for _, name := range names {
-		spec, err := resolveOneMowAgent(name, m[name])
+	seen := map[string]bool{}
+	out := make([]AgentSpec, 0, len(c.Agents))
+	for i, a := range c.Agents {
+		spec, err := resolveOneAgent(i, a)
 		if err != nil {
 			return nil, err
 		}
+		n := strings.ToLower(spec.Name)
+		if seen[n] {
+			return nil, fmt.Errorf("acp: duplicate agent name %q", spec.Name)
+		}
+		seen[n] = true
 		out = append(out, spec)
 	}
 	return out, nil
 }
 
-func resolveOneMowAgent(name string, s MowAgentSpec) (AgentSpec, error) {
-	name = strings.TrimSpace(name)
+func resolveOneAgent(i int, a AgentSpec) (AgentSpec, error) {
+	name := strings.TrimSpace(a.Name)
 	if name == "" {
-		return AgentSpec{}, fmt.Errorf("acp: mow_agents entry with empty name")
+		return AgentSpec{}, fmt.Errorf("acp: agents[%d]: name is required", i)
 	}
-	model := strings.TrimSpace(s.Model)
-	if model == "" {
-		return AgentSpec{}, fmt.Errorf("acp: mow_agents.%s: model is required", name)
+	hasCmd := len(a.Command) > 0
+	hasModel := strings.TrimSpace(a.Model) != ""
+	switch {
+	case hasCmd && hasModel:
+		return AgentSpec{}, fmt.Errorf("acp: agent %q: set command or model, not both", name)
+	case !hasCmd && !hasModel:
+		return AgentSpec{}, fmt.Errorf("acp: agent %q: command (external) or model (native mow) is required", name)
 	}
-	timeout := s.TimeoutSec
+	timeout := a.TimeoutSec
 	if timeout <= 0 {
-		timeout = 600
+		if hasModel {
+			timeout = 600
+		} else {
+			timeout = 300
+		}
 	}
-	copySpec := s
-	return AgentSpec{
-		Name:       name,
-		Dir:        strings.TrimSpace(s.Dir),
-		TimeoutSec: timeout,
-		Mow:        &copySpec,
-	}, nil
+	a.Name = name
+	a.Model = strings.TrimSpace(a.Model)
+	a.Dir = strings.TrimSpace(a.Dir)
+	a.TimeoutSec = timeout
+	a.Effort = strings.TrimSpace(a.Effort)
+	return a, nil
 }
 
 // buildMowAgentCommand constructs argv for a native peer at delegate time.
 // Host posture caps permissions; credentials are never forwarded via argv.
-func buildMowAgentCommand(spec MowAgentSpec, host *hostPeerPolicy, peerCwd string) []string {
+func buildMowAgentCommand(spec AgentSpec, host *hostPeerPolicy, peerCwd string) []string {
 	bin := mowAgentBinary()
 	model := strings.TrimSpace(spec.Model)
 	cmd := []string{bin, "acp", "--model", model}
@@ -131,10 +98,10 @@ func buildMowAgentCommand(spec MowAgentSpec, host *hostPeerPolicy, peerCwd strin
 	if prefix := strings.TrimSpace(spec.SystemPrefix); prefix != "" {
 		cmd = append(cmd, "--system-prefix", prefix)
 	}
-	for _, a := range spec.ExtraArgs {
-		a = strings.TrimSpace(a)
-		if a != "" {
-			cmd = append(cmd, a)
+	for _, arg := range spec.ExtraArgs {
+		arg = strings.TrimSpace(arg)
+		if arg != "" {
+			cmd = append(cmd, arg)
 		}
 	}
 	return cmd
@@ -171,7 +138,7 @@ func extraRootFlags(host *hostPeerPolicy) []string {
 	return out
 }
 
-func effectiveReadOnly(spec *MowAgentSpec, host *hostPeerPolicy) bool {
+func effectiveReadOnly(spec *AgentSpec, host *hostPeerPolicy) bool {
 	if spec != nil && spec.ReadOnly != nil {
 		return *spec.ReadOnly
 	}
@@ -182,25 +149,16 @@ func effectiveReadOnly(spec *MowAgentSpec, host *hostPeerPolicy) bool {
 }
 
 // peerCommand builds argv for one delegate call (native or external).
+// External argv is used as written — peer CLIs do not share one effort flag.
 func peerCommand(spec AgentSpec, host *hostPeerPolicy, peerCwd string) []string {
-	if spec.Mow != nil {
-		return buildMowAgentCommand(*spec.Mow, host, peerCwd)
+	if spec.native() {
+		return buildMowAgentCommand(spec, host, peerCwd)
 	}
-	cmd := append([]string(nil), spec.Command...)
-	effort := strings.TrimSpace(spec.Effort)
-	if effort == "" {
-		return cmd
-	}
-	for _, a := range cmd {
-		if a == "--reasoning-effort" || a == "--effort" {
-			return cmd
-		}
-	}
-	return append(cmd, "--reasoning-effort", effort)
+	return append([]string(nil), spec.Command...)
 }
 
 // mowAgentBinary returns the executable path to use for the `acp` subcommand
-// in mow_agents. It prefers os.Executable() so the host spawns itself
+// on native agents. It prefers os.Executable() so the host spawns itself
 // (mow → mow acp) and falls back to "mow" when the executable path cannot be
 // resolved (e.g. test harness or a custom binary).
 var mowAgentBinary = defaultMowAgentBinary
@@ -212,35 +170,4 @@ func defaultMowAgentBinary() string {
 		}
 	}
 	return "mow"
-}
-
-// resolveAgents merges external agents[] with expanded mow_agents.
-// Name collisions between the two lists are errors (fail closed).
-func resolveAgents(c Config) ([]AgentSpec, error) {
-	mowList, err := resolveMowAgents(c.MowAgents)
-	if err != nil {
-		return nil, err
-	}
-	if len(c.Agents) == 0 && len(mowList) == 0 {
-		return nil, nil
-	}
-	seen := map[string]string{}
-	for _, a := range c.Agents {
-		n := strings.ToLower(strings.TrimSpace(a.Name))
-		if n == "" {
-			continue
-		}
-		seen[n] = "agents"
-	}
-	for _, a := range mowList {
-		n := strings.ToLower(strings.TrimSpace(a.Name))
-		if src, ok := seen[n]; ok {
-			return nil, fmt.Errorf("acp: agent name %q appears in both %s and mow_agents", a.Name, src)
-		}
-		seen[n] = "mow_agents"
-	}
-	out := make([]AgentSpec, 0, len(c.Agents)+len(mowList))
-	out = append(out, c.Agents...)
-	out = append(out, mowList...)
-	return out, nil
 }

@@ -214,6 +214,12 @@ services:
 	if !strings.Contains(sys, "ops_runbook") {
 		t.Fatalf("ops_runbook missing from tools line: %s", sys)
 	}
+	if !strings.Contains(sys, "delegate to a service") {
+		t.Fatalf("delegate missing from system text: %s", sys)
+	}
+	if strings.Contains(sys, "acp_delegate") {
+		t.Fatalf("stale acp_delegate in system text: %s", sys)
+	}
 }
 
 func TestActionNames(t *testing.T) {

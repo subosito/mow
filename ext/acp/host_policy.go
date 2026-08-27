@@ -51,7 +51,7 @@ func hostPolicyFromContext(ctx context.Context, fallbackWorkspace string) *hostP
 	return p
 }
 
-func effectiveAllowWrite(spec *MowAgentSpec, host *hostPeerPolicy) bool {
+func effectiveAllowWrite(spec *AgentSpec, host *hostPeerPolicy) bool {
 	want := false
 	if spec != nil && spec.AllowWrite != nil {
 		want = *spec.AllowWrite
@@ -64,7 +64,7 @@ func effectiveAllowWrite(spec *MowAgentSpec, host *hostPeerPolicy) bool {
 	return want
 }
 
-func effectiveAllowShell(spec *MowAgentSpec, host *hostPeerPolicy) bool {
+func effectiveAllowShell(spec *AgentSpec, host *hostPeerPolicy) bool {
 	want := false
 	if spec != nil && spec.AllowShell != nil {
 		want = *spec.AllowShell

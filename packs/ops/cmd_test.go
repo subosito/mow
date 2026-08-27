@@ -251,4 +251,10 @@ func TestDefaultOpsRunPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "ops_incident list") {
 		t.Fatalf("prompt missing workflow: %s", prompt)
 	}
+	if !strings.Contains(prompt, "delegate to the service's peer") {
+		t.Fatalf("prompt missing delegate: %s", prompt)
+	}
+	if strings.Contains(prompt, "acp_delegate") {
+		t.Fatalf("stale acp_delegate in prompt: %s", prompt)
+	}
 }

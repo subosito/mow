@@ -20,16 +20,10 @@ func writeHooksJSON(t *testing.T, root, body string) {
 	}
 }
 
-func mustLoad(t *testing.T, c Config) *bridge {
+func mustLoad(t *testing.T, p PluginConfig) *bridge {
 	t.Helper()
-	res := c.resolved()
-	if len(res) == 0 {
-		t.Fatal("no resolved plugins in config")
-	}
-	p := res[0]
-	if p.FailClosed == nil && c.FailClosed {
-		fc := true
-		p.FailClosed = &fc
+	if strings.TrimSpace(p.Name) == "" {
+		p.Name = filepath.Base(p.Root)
 	}
 	b, err := load(p)
 	if err != nil {
@@ -61,7 +55,7 @@ func TestPreToolUseDecisions(t *testing.T) {
 		{"matcher":"Read","hooks":[{"type":"command","command":"`+ctxs+`"}]},
 		{"matcher":"Grep","hooks":[{"type":"command","command":"`+block2+`"}]}
 	]}}`)
-	b := mustLoad(t, Config{Root: root})
+	b := mustLoad(t, PluginConfig{Root: root})
 
 	// Bash matcher → deny decision.
 	out := b.run(context.Background(), "PreToolUse", "Bash",
@@ -99,7 +93,7 @@ func TestPayloadReachesStdin(t *testing.T) {
 	writeHooksJSON(t, root, `{"hooks":{"PreToolUse":[
 		{"matcher":"","hooks":[{"type":"command","command":"`+cap+`"}]}
 	]}}`)
-	b := mustLoad(t, Config{Root: root})
+	b := mustLoad(t, PluginConfig{Root: root})
 
 	args := json.RawMessage(`{"command":"ls -la"}`)
 	b.run(context.Background(), "PreToolUse", "Bash", map[string]any{
@@ -135,7 +129,7 @@ func TestClaudeToolNameMapping(t *testing.T) {
 		"read": "Read", "bash": "Bash", "grep": "Grep", "write": "Write",
 		"edit": "Edit", "glob": "Glob",
 		"mcp_srv_lookup": "mcp__srv_lookup",
-		"acp_delegate":   "acp_delegate",
+		"delegate":       "delegate",
 	} {
 		if got := claudeToolName(in); got != want {
 			t.Errorf("claudeToolName(%q)=%q want %q", in, got, want)
@@ -154,7 +148,7 @@ func TestContextModeRealHook(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not installed")
 	}
-	b := mustLoad(t, Config{Root: root, TimeoutSec: 30})
+	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 30})
 
 	// Grep guidance is deterministic; use a fresh session dir/id so context-mode's
 	// per-session dedup does not suppress a repeat run.
@@ -177,7 +171,7 @@ func TestContextModeRealHook(t *testing.T) {
 	t.Logf("context-mode additionalContext delivered (%d bytes)", len(joined))
 }
 
-func TestMergePluginHooksYAMLWinsOnName(t *testing.T) {
+func TestHostPluginHooksDiscoversInstalledPlugin(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("MOW_HOME", home)
 	dir := filepath.Join(home, "plugins", "context-mode")
@@ -194,13 +188,11 @@ func TestMergePluginHooksYAMLWinsOnName(t *testing.T) {
 	if err := os.WriteFile(userCfg, []byte("llm: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	yaml := []PluginConfig{{Name: "context-mode", Root: "/explicit"}}
-	got := mergePluginHooks(yaml, []string{userCfg}, Config{})
-	if len(got) != 1 || got[0].Root != "/explicit" {
-		t.Fatalf("yaml should win: %+v", got)
+	got := hostPluginHooks([]string{userCfg})
+	if len(got) != 1 || got[0].Name != "context-mode" || got[0].Root != dir {
+		t.Fatalf("plugin discovery: %+v", got)
 	}
-	got = mergePluginHooks(nil, []string{userCfg}, Config{})
-	if len(got) != 1 || got[0].Name != "context-mode" || got[0].HooksFile != filepath.Join("hooks", "hooks.json") {
-		t.Fatalf("plugin should fill empty yaml: %+v", got)
+	if hostPluginHooks(nil) != nil {
+		t.Fatal("hermetic path list must not load host plugins")
 	}
 }

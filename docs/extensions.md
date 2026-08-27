@@ -45,8 +45,8 @@ tools it actually has.
   `$MOW_BIN` / host `$MOW_HOME/config.yaml` `mowi.mow_bin` (not project
 
   `.mow/`) / `mow`. `ext/acp` does not import `ext/cli`.
-- `mow_agents` start the currently running executable (`os.Executable()`), so
-  native ACP peers remain self-contained.
+- Native `agents` (`model:`) start the currently running executable
+  (`os.Executable()`), so native ACP peers remain self-contained.
 
 ## Core extensions (`ext/`)
 
@@ -79,19 +79,20 @@ Does not import `ext/acp`. Same engine flags as `mow run`. In-session: `/model`,
 - `mow acp`: run the current host as an ACP agent (session lifecycle,
   `session/prompt` + `session/update`, `available_commands_update`,
   agent→client `session/request_permission` for power tools, `usage_update`).
-- `acp_delegate`: delegate to named external or native peers.
-  Peer failures are contained to the tool call: a spawn or handshake error
-  surfaces as the tool's result, never as a parent-session abort — the run
-  proceeds and the model decides how to react.
-- Native `mow_agents` support model, effort, system prefix, cwd, permissions,
-  and timeout. Peer processes are reused by **agent + cwd + effective argv +
-  permission_mode** (a model/policy change starts a new process). At delegate
-  time, nil `allow_write` / `allow_shell` inherit the host Engine and are capped
-  by it (never exceed host `AllowWrite` / `AllowShell`); workspace and
-  `--extra-root` jail roots flow to the peer argv. Credentials are not
-  forwarded as argv. `--read-only` is never combined with `--allow-write` /
-  `--allow-shell` (CLI rejects that pair).
-- External `agents[]` use `permission_mode: reject|allow` (default **reject**)
+- `delegate`: send a task to a named external or native peer (ACP is the
+  current peer protocol). Peer failures stay in the tool result, never as a
+  parent-session abort — the run proceeds and the model decides how to react.
+- Native peers (`model` on `agents[]`) support model, effort, system prefix,
+  cwd, permissions, and timeout. Peer processes are reused by **agent + cwd +
+  effective argv + permission_mode** (a model/policy change starts a new
+  process). At delegate time, nil `allow_write` / `allow_shell` inherit the
+  host Engine and are capped by it (never exceed host `AllowWrite` /
+  `AllowShell`); workspace and `--extra-root` jail roots flow to the peer
+  argv. Credentials are not forwarded as argv. `--read-only` is never
+  combined with `--allow-write` / `--allow-shell` (CLI rejects that pair).
+- External peers (`command` on `agents[]`) use the argv as written (put
+  effort or other flags on the command — mow does not inject them). They
+  use `permission_mode: reject|allow` (default **reject**)
   for agent→client `session/request_permission`. Reject returns ACP
   `{outcome:{outcome:"cancelled"}}`. Allow selects an `allow_once` /
   `allow_always` `optionId` from the request (never invents ids). Legacy peers
@@ -117,10 +118,10 @@ extensions:
         command: [peer-agent, --acp]
         timeout_sec: 300
         permission_mode: reject   # default; use allow for trusted peers
-    mow_agents:
-      reviewer:
+      - name: reviewer
         model: gpt-5-mini
         effort: high
+        timeout_sec: 600
         system_prefix: "You are a reviewer."
         allow_write: true       # capped by host; omit to inherit
         read_only: false        # omit to inherit (!host write && !host shell)
@@ -156,11 +157,11 @@ extensions:
 - `packs/proc`: `proc_start`, `proc_status`, `proc_stop` (no CLI). Stop
   signals the process group; log tails are size-capped. Session-scoped procs
   die on `Engine.Close` unless `keep` is true.
-- `packs/cmdhook`: Claude-style lifecycle shell hooks (`root` or `plugins` map,
-  `min_turns`). Host-owned Agent Plugins (`$MOW_HOME/plugins` and workspace
-  profile `plugins/`) that ship `hooks/hooks.json` register automatically;
-  YAML of the same name wins so a plugin is not hooked twice. Plugin MCP and
-  cmdhook set `CLAUDE_PLUGIN_ROOT` to the plugin folder and, when unset,
+- `packs/cmdhook`: Claude-style lifecycle shell hooks from host-owned Agent
+  Plugins (`$MOW_HOME/plugins` and workspace profile `plugins/`) that ship
+  `hooks/hooks.json`. There is no `extensions.cmdhook` section. Project
+  `.mow/plugins` is skills-only. Plugin MCP and cmdhook set
+  `CLAUDE_PLUGIN_ROOT` to the plugin folder and, when unset,
   `CLAUDE_CONFIG_DIR` to `$MOW_HOME` so Claude-shaped plugins (e.g. context-mode)
   store state under mow rather than `~/.claude`. A process or plugin-manifest
   `CLAUDE_CONFIG_DIR` still wins. Hooks re-register
@@ -168,35 +169,17 @@ extensions:
   so profiles do not leak across Engines.
   Hermetic engines only see the current generation of hooks. Hook stdout/stderr
   are capped (~64KiB); diagnostics redact common secrets. Default is **fail-open**
-  on timeout/non-2 exit (warn only); set `fail_closed: true` to block like exit 2.
-```yaml
-extensions:
-  cmdhook:
-    fail_closed: false   # default: timeout/fail does not block
-    root: /path/to/plugin
-    # or:
-    plugins:
-      policy:
-        root: /path/to/policy
-        fail_closed: true  # timeouts and exec errors deny the tool
-        min_turns: 0
-```
+  on timeout/non-2 exit (warn only).
 
 ### Extension lifecycle (`min_turns`)
 
-MCP servers and command-hook plugins support optional `min_turns` (default `0`,
-active from start). When `turn < N`, those hooks/tools stay dormant. There is
-no `mow ext` / `/ext` command — enable or disable by config (or omit the
-server / plugin).
+MCP servers support optional `min_turns` (default `0`, active from start).
+When `turn < N`, those tools stay dormant. Command-hook plugins activate as
+soon as they are installed. There is no `mow ext` / `/ext` command — enable
+or disable by config (or omit the server / plugin).
 
 ```yaml
 extensions:
-  cmdhook:
-    plugins:
-      context-mode:
-        root: /path/to/context-mode
-        hooks_file: hooks/hooks.json
-        min_turns: 5
   mcp:
     mcpServers:
       filesystem:
@@ -240,7 +223,7 @@ text/JSON/JSONL/SARIF output and validated finding scope. Also registers
 CLI ensemble: `--reviewer` (repeatable or comma-separated; `--reviewers` is an
 alias) for pass-one models, `--verifier` for the single pass-two judge.
 Slash `/review` and `/sec` run against the session engine only — they do not
-start an ensemble. ACP / `acp_delegate` is denied in the review jail.
+start an ensemble. ACP / `delegate` is denied in the review jail.
 
 ## Interactive slash commands (`slash`)
 

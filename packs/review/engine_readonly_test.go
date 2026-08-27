@@ -37,7 +37,10 @@ func TestEngineReviewerBuiltinToolsOnly(t *testing.T) {
 	turn := 0
 	eng, err := mow.New(mow.Options{
 		NoSession: true,
-		Tools:     []mow.Tool{&reviewFakeTool{name: "mcp_lookup", readOnly: true, got: &extCalled}},
+		Tools: []mow.Tool{
+			&reviewFakeTool{name: "mcp_lookup", readOnly: true, got: &extCalled},
+			&reviewFakeTool{name: "delegate", readOnly: false, got: &extCalled},
+		},
 		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
 			turn++
 			if turn == 1 {

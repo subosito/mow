@@ -32,7 +32,7 @@ mow ops run prod --every 5m
 mow ops run prod --once
 ```
 
-`ops_action` requires `--allow-shell`. `mow ops run` **always** enables `--allow-shell` for the whole Engine tick (not only `ops_action`). Actions are operator argv lists (no shell), 60s timeout. When `MOW_OPS` is set, the profile’s `acp.agents` are merged into `acp_delegate`. `mow ops check` fails if `acp.agents` is set and `workspace` is empty (peers would not be path-jailed).
+`ops_action` requires `--allow-shell`. `mow ops run` **always** enables `--allow-shell` for the whole Engine tick (not only `ops_action`). Actions are operator argv lists (no shell), 60s timeout. When `MOW_OPS` is set, the profile’s `acp.agents` are merged into `delegate`. `mow ops check` fails if `acp.agents` is set and `workspace` is empty (peers would not be path-jailed).
 
 `mow ops run NAME` is its own daemon (job id `ops-<name>`), not a row in `mow job list`. Last tick is `$MOW_HOME/job/state/ops-<name>.json`, shown by `mow ops show` / `mow ops status`. Two consecutive overlap skips open/update an incident with signature `job-overlap:ops-<name>`.
 

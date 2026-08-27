@@ -1,16 +1,12 @@
 // Package cmdhook bridges Claude Code-style command hooks into mow's hook
-// system. A hooks.json (the Claude Code plugin schema) declares commands per
+// system. Host-owned Agent Plugins ($MOW_HOME/plugins and workspace profile
+// plugins/) that ship hooks/hooks.json register automatically. There is no
+// extensions.cmdhook section: install the plugin, keep packs/cmdhook linked.
+//
+// A hooks.json (the Claude Code / Agent Plugins schema) declares commands per
 // event; cmdhook executes matching commands with the same contract those
 // plugins already speak: the event as JSON on stdin, an optional decision as
 // JSON on stdout, exit code 2 = block with stderr as the reason.
-//
-// Config (extensions.cmdhook, or $MOW_HOME/cmdhook.yaml):
-//
-//	extensions:
-//	  cmdhook:
-//	    root: /path/to/plugin        # ${CLAUDE_PLUGIN_ROOT} substitution
-//	    hooks_file: hooks/hooks.json # default, relative to root
-//	    timeout_sec: 10              # per command (default 10)
 //
 // Supported events: PreToolUse, PostToolUse, UserPromptSubmit, SessionStart,
 // Stop, PreCompact. Tool names are translated to Claude conventions for
@@ -30,43 +26,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
-
-	"gopkg.in/yaml.v3"
+	"unicode/utf8"
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/extcfg"
-	"unicode/utf8"
 )
 
-// PluginConfig defines one command hook plugin instance.
+// PluginConfig is one hooks.json plugin instance (tests and plugin discovery).
 type PluginConfig struct {
-	Name       string `yaml:"name"`
-	Root       string `yaml:"root"`
-	HooksFile  string `yaml:"hooks_file"`
-	TimeoutSec int    `yaml:"timeout_sec"`
-	MinTurns   int    `yaml:"min_turns"`
+	Name       string
+	Root       string
+	HooksFile  string
+	TimeoutSec int
+	MinTurns   int
 	// FailClosed: when true, hook timeout/failure blocks the tool/prompt
 	// (same as exit code 2). Default false = fail-open (warn only).
-	FailClosed *bool `yaml:"fail_closed"`
-}
-
-// Config is extensions.cmdhook.
-type Config struct {
-	Root       string `yaml:"root"`
-	HooksFile  string `yaml:"hooks_file"`
-	TimeoutSec int    `yaml:"timeout_sec"`
-	MinTurns   int    `yaml:"min_turns"`
-	// FailClosed is the default for plugins that omit fail_closed.
-	// false/omitted = fail-open on timeout or non-blocking failures (historical).
-	// true = treat timeout/exec failure as block (policy hooks).
-	FailClosed bool                    `yaml:"fail_closed"`
-	Plugins    map[string]PluginConfig `yaml:"plugins"`
+	FailClosed bool
 }
 
 // hookSource is the ext.ClearHookSource / Register*Source id for this pack.
@@ -76,83 +56,25 @@ const hookSource = "cmdhook"
 // Excess is discarded so a runaway plugin cannot bloat the agent context or logs.
 const maxHookIOBytes = 64 << 10
 
-func (c Config) resolved() []PluginConfig {
-	var out []PluginConfig
-	if len(c.Plugins) > 0 {
-		names := make([]string, 0, len(c.Plugins))
-		for name := range c.Plugins {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			p := c.Plugins[name]
-			if strings.TrimSpace(p.Name) == "" {
-				p.Name = name
-			}
-			out = append(out, p)
-		}
-		return out
-	}
-	if strings.TrimSpace(c.Root) != "" {
-		name := filepath.Base(c.Root)
-		if name == "" || name == "." {
-			name = "default"
-		}
-		fc := c.FailClosed
-		out = append(out, PluginConfig{
-			Name:       name,
-			Root:       c.Root,
-			HooksFile:  c.HooksFile,
-			TimeoutSec: c.TimeoutSec,
-			MinTurns:   c.MinTurns,
-			FailClosed: &fc,
-		})
-	}
-	return out
-}
-
-// mergePluginHooks appends hooks.json from host-owned Agent Plugins when YAML
-// did not already name that plugin. YAML wins so dual context-mode does not
-// run PostToolUse twice.
-func mergePluginHooks(plugins []PluginConfig, configPaths []string, c Config) []PluginConfig {
+// hostPluginHooks lists hooks.json from host-owned Agent Plugins.
+// Hermetic BeforeNew (no $MOW_HOME/config.yaml on the path list) sees none.
+func hostPluginHooks(configPaths []string) []PluginConfig {
 	if !extcfg.IncludesUserConfig(configPaths) {
-		return plugins
+		return nil
 	}
-	seen := map[string]bool{}
-	for _, p := range plugins {
-		name := strings.ToLower(strings.TrimSpace(p.Name))
-		if name != "" {
-			seen[name] = true
-		}
-		root := strings.ToLower(filepath.Clean(strings.TrimSpace(p.Root)))
-		if root != "" {
-			seen[root] = true
-		}
-	}
-	fc := c.FailClosed
+	var out []PluginConfig
 	roots := mow.HostOwnedPluginRoots(mow.Home(), configPaths)
 	for _, info := range mow.ListPlugins(roots) {
 		if strings.TrimSpace(info.HooksFile) == "" {
 			continue
 		}
-		id := strings.ToLower(strings.TrimSpace(info.ID))
-		root := strings.ToLower(filepath.Clean(info.Path))
-		if seen[id] || seen[root] {
-			continue
-		}
-		seen[id] = true
-		seen[root] = true
-		fail := fc
-		plugins = append(plugins, PluginConfig{
-			Name:       info.ID,
-			Root:       info.Path,
-			HooksFile:  info.HooksFile,
-			TimeoutSec: c.TimeoutSec,
-			MinTurns:   c.MinTurns,
-			FailClosed: &fail,
+		out = append(out, PluginConfig{
+			Name:      info.ID,
+			Root:      info.Path,
+			HooksFile: info.HooksFile,
 		})
 	}
-	return plugins
+	return out
 }
 
 type hooksFile struct {
@@ -167,7 +89,7 @@ type matcherEntry struct {
 type cmdEntry struct {
 	Type    string `json:"type"`
 	Command string `json:"command"`
-	Timeout int    `json:"timeout"` // seconds; overrides Config.TimeoutSec
+	Timeout int    `json:"timeout"` // seconds; overrides PluginConfig.TimeoutSec
 }
 
 // hookOut is the Claude Code hook stdout schema (subset).
@@ -206,42 +128,15 @@ func init() {
 	})
 }
 
-// setup re-registers cmdhook from the current BeforeNew path list every time.
+// setup re-registers cmdhook from host-owned Agent Plugins every BeforeNew.
 // Prior registrations are cleared first so profile B cannot inherit profile A
 // hooks, and hermetic engines do not keep host plugins after a later host New.
 func setup(configPaths ...string) error {
-	// Drop previous generation's hooks/instances before loading this config.
 	ext.ClearHookSource(hookSource)
 	ext.ClearExtensionKind("cmdhook")
 
-	var c Config
-	ok, err := extcfg.DecodeSection("cmdhook", configPaths, &c)
-	if err != nil {
-		return fmt.Errorf("cmdhook extensions: %w", err)
-	}
-	if !ok || (strings.TrimSpace(c.Root) == "" && len(c.Plugins) == 0) {
-		// Home-file fallback only when the host opted into user config
-		// (BeforeNew paths include $MOW_HOME/config.yaml). Hermetic embedding
-		// must not load cmdhook plugins from the operator home.
-		if extcfg.IncludesUserConfig(configPaths) {
-			raw, rerr := os.ReadFile(filepath.Join(mow.Home(), "cmdhook.yaml"))
-			if rerr == nil {
-				if err := yaml.Unmarshal(raw, &c); err != nil {
-					return fmt.Errorf("cmdhook: cmdhook.yaml: %w", err)
-				}
-			}
-		}
-	}
-	plugins := mergePluginHooks(c.resolved(), configPaths, c)
-	if len(plugins) == 0 {
-		return nil
-	}
-	rootFailClosed := c.FailClosed
+	plugins := hostPluginHooks(configPaths)
 	for _, p := range plugins {
-		if p.FailClosed == nil {
-			fc := rootFailClosed
-			p.FailClosed = &fc
-		}
 		b, err := load(p)
 		if err != nil {
 			return err
@@ -277,13 +172,9 @@ func load(p PluginConfig) (*bridge, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	fc := false
-	if p.FailClosed != nil {
-		fc = *p.FailClosed
-	}
 	b := &bridge{
 		name: p.Name, root: root, timeout: timeout, minTurns: p.MinTurns,
-		failClosed: fc, events: map[string][]compiled{},
+		failClosed: p.FailClosed, events: map[string][]compiled{},
 	}
 	n := 0
 	for event, entries := range file.Hooks {

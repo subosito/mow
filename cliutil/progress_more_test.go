@@ -73,6 +73,11 @@ func TestToolProgressStartLine(t *testing.T) {
 			want: []string{"→ bash\n"},
 		},
 		{
+			name: "delegate start names agent",
+			ev:   mow.Event{Type: mow.EventToolStart, Tool: "delegate", Args: json.RawMessage(`{"agent":"peer-agent","prompt":"hi"}`)},
+			want: []string{"→ delegate peer-agent\n"},
+		},
+		{
 			name: "unknown tool name empty",
 			ev:   mow.Event{Type: mow.EventToolStart},
 			want: []string{"→ ?\n"},

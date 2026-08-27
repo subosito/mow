@@ -73,7 +73,7 @@ Same binary; only config changes. Gateway is never required.
 
 ```text
 Editor ──stdio ACP──▶ mow acp ──▶ Engine
-mow loop ──tool acp_delegate──▶ peer ACP process
+mow loop ──tool delegate──▶ peer ACP process
 ```
 
 ---
@@ -90,7 +90,7 @@ mow loop ──tool acp_delegate──▶ peer ACP process
 | `extcfg` | Decode `extensions.<name>` — shared by extensions and packs |
 | `ext/cli` | Unix dispatcher (`Main`) + `run`, `trust`, `doctor`, `approvals`, version, help |
 | `ext/tty` | Optional line REPL (`mow tty`) |
-| `ext/acp` | ACP agent + extras + client + `acp_delegate` + `mow acp` (does not import `ext/cli`) |
+| `ext/acp` | ACP agent + extras + client + `delegate` + `mow acp` (does not import `ext/cli`) |
 | `packs/mcp` | MCP servers → tools (config opt-in) |
 | `packs/proc` / `packs/cmdhook` | Background proc tools, command hooks |
 | `packs/media` | Media tool pack: `generate_*` / `understand_*` (`mowx`, config-gated) |
@@ -265,7 +265,7 @@ Compaction is **character-estimate**, not a real tokenizer. It keeps the system 
 
 **Skills** follow the Agent Skills layout (`<dir>/<name>/SKILL.md`, https://agentskills.io/specification). Optional YAML frontmatter (`name`, `description`, `disable-model-invocation`, …) is parsed; only the markdown body is injected. Spec `name` labels the system section when valid; otherwise the folder name. `disable-model-invocation: true` skips first-prompt selection (`--skill` / `/skills <name>` still load it). Skill dir precedence (search order): global `$MOW_HOME/skills` → `skills.dirs` (host/user config) → trusted `workspace/.mow/skills`. Dedup is by lowercased **folder** name with first-directory precedence (not by resolved path), so a name present in both global and user dirs loads once — the first dir's copy wins.
 
-Agent Plugins (`plugin.json` or `.claude-plugin/plugin.json` + bundled `skills/` + optional MCP/hooks, https://agent-plugins.org/specification) install as folders with this discovery precedence: global `$MOW_HOME/plugins/<id>/` → active workspace profile `$MOW_HOME/workspaces/<name>/plugins/<id>/` → trusted project `workspace/.mow/plugins/<id>/`. The workspace-profile root applies when `--workspace <name>` selects that profile (including plugins-only profiles with no `config.yaml`); unlike the project root, it is operator-owned and needs no `mow trust`. Bundled `skills/` are searched after user/project skill dirs so those names win. `default-skills` / `always` merge into explicit skills. Host-owned plugins (global + profile) auto-start MCP (`mcpServers`) and cmdhook (`hooks/hooks.json`); YAML of the same name wins. Project `.mow/plugins` is skills-only — MCP/hooks do not auto-spawn from the workspace. Plugin MCP/cmdhook set `CLAUDE_PLUGIN_ROOT` and, when unset, `CLAUDE_CONFIG_DIR=$MOW_HOME`. `/plugins` lists installs; there is no `plugin install` — drop or clone a folder in.
+Agent Plugins (`plugin.json` or `.claude-plugin/plugin.json` + bundled `skills/` + optional MCP/hooks, https://agent-plugins.org/specification) install as folders with this discovery precedence: global `$MOW_HOME/plugins/<id>/` → active workspace profile `$MOW_HOME/workspaces/<name>/plugins/<id>/` → trusted project `workspace/.mow/plugins/<id>/`. The workspace-profile root applies when `--workspace <name>` selects that profile (including plugins-only profiles with no `config.yaml`); unlike the project root, it is operator-owned and needs no `mow trust`. Bundled `skills/` are searched after user/project skill dirs so those names win. `default-skills` / `always` merge into explicit skills. Host-owned plugins (global + profile) auto-start MCP (`mcpServers`) and cmdhook (`hooks/hooks.json`). Plugin MCP YAML of the same server name wins. Project `.mow/plugins` is skills-only — MCP/hooks do not auto-spawn from the workspace. Plugin MCP/cmdhook set `CLAUDE_PLUGIN_ROOT` and, when unset, `CLAUDE_CONFIG_DIR=$MOW_HOME`. `/plugins` lists installs; there is no `plugin install` — drop or clone a folder in.
 
 Selection: `skills.selector` (default on) loads only skills whose folder name appears (case-insensitive substring) in the first user prompt. `skills.selector: false` loads all. `skills.explicit` / `--skill <name>` (repeatable) loads named skills unconditionally regardless of the selector — they load at startup, before the first prompt. CLI `--skill` and config `skills.explicit` are merged; unknown names are silently ignored. Name precedence: CLI wins over config (both deduped, first-seen order). `skills.explicit` is host/user-only — a project config may not force-load skills from global/user dirs it does not own.
 
@@ -480,7 +480,7 @@ extra_roots:
 directory remains a plain workspace path. The legacy `$MOW_HOME/workspaces/<name>/`
 registry is no longer loaded. Profile `config.yaml` is operator-controlled and
 may configure normal host settings including profile-scoped `extensions.acp`
-`agents` and `mow_agents`. Profile skills take precedence over global/configured
+`agents`. Profile skills take precedence over global/configured
 and trusted project skills with the same name.
 
 Relative tool paths resolve against the primary `--workspace`. **Absolute** paths are
@@ -603,7 +603,7 @@ dialects) are normalized by the loop: committed history, session files, and
 
 ## Untrusted output framing
 
-External tool bodies (`bash`, `acp_delegate`, MCP server tools that opt in) are
+External tool bodies (`bash`, `delegate`, MCP server tools that opt in) are
 wrapped before they enter model history:
 
 ```text
@@ -636,5 +636,5 @@ the engine), and mow's own `Engine.Sessions()` listing covers resume.
 
 MCP tool results are external server text. The MCP pack marks every `mcp_*`
 tool with `Untrusted() bool` so the agent loop frames results in
-`<untrusted-output>` the same way as `bash` and `acp_delegate`.
+`<untrusted-output>` the same way as `bash` and `delegate`.
 

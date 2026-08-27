@@ -225,7 +225,7 @@ func TestRunDecisionVariants(t *testing.T) {
 			root := t.TempDir()
 			cmd := scriptAt(t, root, "h.sh", tc.script)
 			writeHooksJSON(t, root, oneEntry("", cmd))
-			b := mustLoad(t, Config{Root: root})
+			b := mustLoad(t, PluginConfig{Root: root})
 			out := b.run(ctx, "PreToolUse", "Bash", payload)
 			if out.blocked != tc.blocked {
 				t.Fatalf("blocked=%v want %v (%+v)", out.blocked, tc.blocked, out)
@@ -256,7 +256,7 @@ func TestRunCompositionAndOrdering(t *testing.T) {
 			{"type":"command","command":"`+second+`"}
 		]}
 	]}}`)
-	b := mustLoad(t, Config{Root: root})
+	b := mustLoad(t, PluginConfig{Root: root})
 	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
 	if !out.blocked || out.reason != "first reason" {
 		t.Fatalf("composition: %+v", out)
@@ -274,7 +274,7 @@ func TestRunCompositionAndOrdering(t *testing.T) {
 		{"matcher":"Bash","hooks":[{"type":"command","command":"`+third+`"}]},
 		{"matcher":"B.*","hooks":[{"type":"command","command":"`+c+`"}]}
 	]}}`)
-	b = mustLoad(t, Config{Root: root})
+	b = mustLoad(t, PluginConfig{Root: root})
 	out = b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
 	if !out.blocked || out.reason != "reason-A" {
 		t.Fatalf("ordering: %+v", out)
@@ -289,7 +289,7 @@ func TestRunUpdatedInput(t *testing.T) {
 	cmd := scriptAt(t, root, "rewrite.sh",
 		`echo '{"hookSpecificOutput":{"updatedInput":{"command":"safe -la","path":"/tmp"}}}'`)
 	writeHooksJSON(t, root, oneEntry("Bash", cmd))
-	b := mustLoad(t, Config{Root: root})
+	b := mustLoad(t, PluginConfig{Root: root})
 	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
 	if out.blocked {
 		t.Fatalf("unexpected block: %+v", out)
@@ -305,7 +305,7 @@ func TestRunMatcherSemantics(t *testing.T) {
 
 	// Regex matcher only fires on matching tool names.
 	writeHooksJSON(t, root, oneEntry("^(Bash|Edit)$", hit))
-	b := mustLoad(t, Config{Root: root})
+	b := mustLoad(t, PluginConfig{Root: root})
 	if out := b.run(context.Background(), "PreToolUse", "Read", map[string]any{}); out.blocked {
 		t.Fatalf("Read should not match: %+v", out)
 	}
@@ -318,7 +318,7 @@ func TestRunMatcherSemantics(t *testing.T) {
 	writeHooksJSON(t, root, `{"hooks":{"UserPromptSubmit":[
 		{"matcher":"Bash","hooks":[{"type":"command","command":"`+hit+`"}]}
 	]}}`)
-	b = mustLoad(t, Config{Root: root})
+	b = mustLoad(t, PluginConfig{Root: root})
 	if out := b.run(context.Background(), "UserPromptSubmit", "", map[string]any{}); !out.blocked {
 		t.Fatalf("non-tool event with matcher should run: %+v", out)
 	}
@@ -333,7 +333,7 @@ func TestTimeouts(t *testing.T) {
 	writeHooksJSON(t, root, `{"hooks":{"PreToolUse":[{"matcher":"","hooks":[
 		{"type":"command","command":"`+slow+`","timeout":1}
 	]}]}}`)
-	b := mustLoad(t, Config{Root: root, TimeoutSec: 30})
+	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 30})
 	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
 	if out.blocked || len(out.contexts) != 0 {
 		t.Fatalf("timed-out hook must be non-blocking: %+v", out)
@@ -341,7 +341,7 @@ func TestTimeouts(t *testing.T) {
 
 	// Global timeout applies when the command has none.
 	writeHooksJSON(t, root, oneEntry("", slow))
-	b = mustLoad(t, Config{Root: root, TimeoutSec: 1})
+	b = mustLoad(t, PluginConfig{Root: root, TimeoutSec: 1})
 	out = b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
 	if out.blocked {
 		t.Fatalf("global timeout should be non-blocking: %+v", out)
@@ -361,7 +361,7 @@ func TestClaudePluginRootAndEnv(t *testing.T) {
 	sh := scriptAt(t, root, "env.sh", `printf '%s|%s|%s|%s' "${CLAUDE_PLUGIN_ROOT}" "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PROJECT_DIR" "$CLAUDE_CONFIG_DIR"`)
 	writeHooksJSON(t, root, oneEntry("", sh+" "+`'`+`dummy`+`'`)) // silence unused
 	writeHooksJSON(t, root, oneEntry("", sh))
-	b := mustLoad(t, Config{Root: root})
+	b := mustLoad(t, PluginConfig{Root: root})
 	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{"cwd": root})
 	if len(out.contexts) != 1 {
 		t.Fatalf("contexts: %+v", out)
@@ -375,7 +375,7 @@ func TestClaudePluginRootAndEnv(t *testing.T) {
 	marker := filepath.Join(root, "marker")
 	cwdScript := scriptAt(t, root, "cwd.sh", `pwd > marker`)
 	writeHooksJSON(t, root, oneEntry("", cwdScript))
-	b = mustLoad(t, Config{Root: root})
+	b = mustLoad(t, PluginConfig{Root: root})
 	b.run(context.Background(), "PreToolUse", "Bash", map[string]any{"cwd": root})
 	raw, err := os.ReadFile(marker)
 	if err != nil {
@@ -446,7 +446,7 @@ func TestBasePayload(t *testing.T) {
 	root := t.TempDir()
 	scriptAt(t, root, "ok.sh", "true")
 	writeHooksJSON(t, root, oneEntry("", filepath.Join(root, "ok.sh")))
-	b := mustLoad(t, Config{Root: root})
+	b := mustLoad(t, PluginConfig{Root: root})
 
 	// Without an engine: hook_event_name + cwd fallback from os.Getwd.
 	p := b.basePayload(context.Background(), "Stop")
@@ -613,7 +613,7 @@ func TestRegisterAllEvents(t *testing.T) {
 		]
 	}}`)
 
-	b := mustLoad(t, Config{Root: root})
+	b := mustLoad(t, PluginConfig{Root: root})
 	b.register()
 	driveAllEvents(t, root)
 }
@@ -626,7 +626,7 @@ func TestRegisterUserPromptAllow(t *testing.T) {
 	writeHooksJSON(t, root, `{"hooks":{"UserPromptSubmit":[
 		{"matcher":"","hooks":[{"type":"command","command":"`+allowSh+`"}]}
 	]}}`)
-	b := mustLoad(t, Config{Root: root})
+	b := mustLoad(t, PluginConfig{Root: root})
 	b.register()
 	if len(ext.UserPromptHooks()) != 1 {
 		t.Fatalf("hooks = %d", len(ext.UserPromptHooks()))
@@ -655,24 +655,43 @@ func setupReset(t *testing.T) {
 	t.Cleanup(ext.Reset)
 }
 
-func TestSetupFromConfigPaths(t *testing.T) {
-	setupReset(t)
-	t.Setenv("MOW_HOME", t.TempDir()) // keep extcfg's config.yaml fallback isolated
-	root := t.TempDir()
-	ok := scriptAt(t, root, "ok.sh", "true")
-	writeHooksJSON(t, root, oneEntry("", ok))
-
-	cfg := filepath.Join(t.TempDir(), "mow.yaml")
-	if err := os.WriteFile(cfg, []byte("extensions:\n  cmdhook:\n    root: "+root+"\n"), 0o644); err != nil {
+func installHostPlugin(t *testing.T, home, id, hooksJSON string) string {
+	t.Helper()
+	dir := filepath.Join(home, "plugins", id)
+	if err := os.MkdirAll(filepath.Join(dir, "hooks"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"`+id+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hooks", "hooks.json"), []byte(hooksJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func hostConfigPath(t *testing.T, home string) string {
+	t.Helper()
+	cfg := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("llm: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestSetupFromConfigPaths(t *testing.T) {
+	setupReset(t)
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	ok := scriptAt(t, home, "ok.sh", "true")
+	installHostPlugin(t, home, "policy", oneEntry("", ok))
+	cfg := hostConfigPath(t, home)
 	if err := setup(cfg); err != nil {
 		t.Fatal(err)
 	}
 	if len(ext.PreToolHooks()) != 1 {
 		t.Fatalf("PreTool hooks = %d want 1", len(ext.PreToolHooks()))
 	}
-	// Second call replaces (idempotent), does not accumulate.
 	if err := setup(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -681,77 +700,47 @@ func TestSetupFromConfigPaths(t *testing.T) {
 	}
 }
 
-func TestSetupFallbackFile(t *testing.T) {
+func TestSetupHermeticSkipsHostPlugins(t *testing.T) {
 	setupReset(t)
-	root := t.TempDir()
-	ok := scriptAt(t, root, "ok.sh", "true")
-	writeHooksJSON(t, root, oneEntry("", ok))
-	t.Setenv("MOW_HOME", t.TempDir())
-	if err := os.WriteFile(filepath.Join(mow.Home(), "cmdhook.yaml"), []byte("root: "+root+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Home fallbacks only when the host path list includes $MOW_HOME/config.yaml
-	// (LoadUserConfig). Empty path lists are hermetic and skip home files.
-	if err := setup(filepath.Join(mow.Home(), "config.yaml")); err != nil {
-		t.Fatal(err)
-	}
-	if len(ext.PreToolHooks()) != 1 {
-		t.Fatal("fallback cmdhook.yaml should register")
-	}
-}
-
-func TestSetupNoConfig(t *testing.T) {
-	setupReset(t)
-	t.Setenv("MOW_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	ok := scriptAt(t, home, "ok.sh", "true")
+	installHostPlugin(t, home, "policy", oneEntry("", ok))
 	if err := setup(); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(ext.PreToolHooks()); n != 0 {
-		t.Fatalf("no config should not register hooks, got %d", n)
+		t.Fatalf("hermetic setup must not load $MOW_HOME/plugins, got %d", n)
 	}
 }
 
 func TestSetupEmptyBridge(t *testing.T) {
 	setupReset(t)
-	t.Setenv("MOW_HOME", t.TempDir())
-	// Root configured, hooks file present but empty → load returns nil,
-	// setup stays inactive without error.
-	root := t.TempDir()
-	writeHooksJSON(t, root, `{"hooks":{}}`)
-	cfg := filepath.Join(t.TempDir(), "mow.yaml")
-	if err := os.WriteFile(cfg, []byte("extensions:\n  cmdhook:\n    root: "+root+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := setup(cfg); err != nil {
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	installHostPlugin(t, home, "empty", `{"hooks":{}}`)
+	if err := setup(hostConfigPath(t, home)); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(ext.PreToolHooks()); n != 0 {
-		t.Fatalf("empty bridge should not register hooks, got %d", n)
+		t.Fatalf("empty hooks.json should not register, got %d", n)
 	}
 }
 
-func TestSetupReplacesAcrossConfigs(t *testing.T) {
+func TestSetupReplacesAcrossHomes(t *testing.T) {
 	setupReset(t)
-	t.Setenv("MOW_HOME", t.TempDir())
-	rootA := t.TempDir()
-	rootB := t.TempDir()
-	writeHooksJSON(t, rootA, oneEntry("", scriptAt(t, rootA, "a.sh", "true")))
-	writeHooksJSON(t, rootB, oneEntry("", scriptAt(t, rootB, "b.sh", "true")))
-	cfgA := filepath.Join(t.TempDir(), "a.yaml")
-	cfgB := filepath.Join(t.TempDir(), "b.yaml")
-	if err := os.WriteFile(cfgA, []byte("extensions:\n  cmdhook:\n    root: "+rootA+"\n"), 0o644); err != nil {
+	homeA := t.TempDir()
+	homeB := t.TempDir()
+	installHostPlugin(t, homeA, "a", oneEntry("", scriptAt(t, homeA, "a.sh", "true")))
+	installHostPlugin(t, homeB, "b", oneEntry("", scriptAt(t, homeB, "b.sh", "true")))
+	t.Setenv("MOW_HOME", homeA)
+	if err := setup(hostConfigPath(t, homeA)); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfgB, []byte("extensions:\n  cmdhook:\n    root: "+rootB+"\n"), 0o644); err != nil {
+	t.Setenv("MOW_HOME", homeB)
+	if err := setup(hostConfigPath(t, homeB)); err != nil {
 		t.Fatal(err)
 	}
-	if err := setup(cfgA); err != nil {
-		t.Fatal(err)
-	}
-	if err := setup(cfgB); err != nil {
-		t.Fatal(err)
-	}
-	// Only one generation of hooks remains (B replaced A).
 	if n := len(ext.PreToolHooks()); n != 1 {
 		t.Fatalf("hooks after replace = %d want 1", n)
 	}
@@ -761,7 +750,7 @@ func TestFailClosedTimeoutBlocks(t *testing.T) {
 	root := t.TempDir()
 	slow := scriptAt(t, root, "slow.sh", `sleep 5`)
 	writeHooksJSON(t, root, oneEntry("", slow))
-	b := mustLoad(t, Config{Root: root, TimeoutSec: 1, FailClosed: true})
+	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 1, FailClosed: true})
 	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
 	if !out.blocked {
 		t.Fatalf("fail_closed timeout must block: %+v", out)
@@ -776,48 +765,44 @@ func TestSanitizeHookDiag(t *testing.T) {
 	}
 }
 
-func TestSetupBadConfigSection(t *testing.T) {
+func TestSetupIgnoresLegacyCmdhookConfig(t *testing.T) {
 	setupReset(t)
-	t.Setenv("MOW_HOME", t.TempDir())
-	// A cmdhook section that cannot decode into Config is a setup error.
-	cfg := filepath.Join(t.TempDir(), "mow.yaml")
-	if err := os.WriteFile(cfg, []byte("extensions:\n  cmdhook:\n    timeout_sec: [not-an-int]\n"), 0o644); err != nil {
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	ok := scriptAt(t, home, "legacy.sh", "true")
+	root := t.TempDir()
+	writeHooksJSON(t, root, oneEntry("", ok))
+	cfg := filepath.Join(home, "config.yaml")
+	body := "extensions:\n  cmdhook:\n    root: " + root + "\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := setup(cfg); err == nil {
-		t.Fatal("expected decode error")
-	}
-}
-
-func TestSetupErrors(t *testing.T) {
-	setupReset(t)
-	t.Setenv("MOW_HOME", t.TempDir())
-	hostPaths := []string{filepath.Join(mow.Home(), "config.yaml")}
-
-	// Malformed cmdhook.yaml.
-	if err := os.WriteFile(filepath.Join(mow.Home(), "cmdhook.yaml"), []byte("root: [unclosed"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "cmdhook.yaml"), []byte("root: "+root+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := setup(hostPaths...); err == nil {
-		t.Fatal("expected yaml error")
-	}
-
-	// Root configured but hooks file missing.
-	if err := os.WriteFile(filepath.Join(mow.Home(), "cmdhook.yaml"), []byte("root: "+t.TempDir()+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := setup(hostPaths...); err == nil {
-		t.Fatal("expected missing hooks file error")
-	}
-
-	// Empty root in fallback file → silently inactive.
-	if err := os.WriteFile(filepath.Join(mow.Home(), "cmdhook.yaml"), []byte("root: \n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := setup(hostPaths...); err != nil {
+	if err := setup(cfg); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(ext.PreToolHooks()); n != 0 {
-		t.Fatalf("empty root should not register, hooks=%d", n)
+		t.Fatalf("legacy extensions.cmdhook / cmdhook.yaml must not register, got %d", n)
+	}
+}
+
+func TestSetupIgnoresPluginWithoutHooks(t *testing.T) {
+	setupReset(t)
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	dir := filepath.Join(home, "plugins", "skills-only")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"skills-only"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := setup(hostConfigPath(t, home)); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(ext.PreToolHooks()); n != 0 {
+		t.Fatalf("skills-only plugin should not register hooks, got %d", n)
 	}
 }

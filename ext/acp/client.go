@@ -20,7 +20,7 @@ import (
 )
 
 // Client talks to a peer ACP agent (subprocess) as a *client*.
-// Used by the acp_delegate tool to run another harness.
+// Used by the delegate tool to run another harness.
 type Client struct {
 	// Command is the peer agent argv (e.g. ["other-agent", "--acp"]).
 	Command []string

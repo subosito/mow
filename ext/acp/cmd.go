@@ -45,7 +45,7 @@ func runCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "mow acp: %v\n", err)
 		return 1
 	}
-	defer eng.Close() // drop acp_delegate peers
+	defer eng.Close() // drop delegate peers
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := Agent(ctx, AgentOptions{Engine: eng, In: os.Stdin, Out: os.Stdout}); err != nil {
@@ -74,7 +74,7 @@ func printUsage() {
 
 Engine flags: same as mow run (--config --model --workspace --allow-write …).
 
-Optional: extensions.acp.agents → acp_delegate tool for peer harnesses.
+Optional: extensions.acp.agents → delegate tool for peer harnesses.
 Ops profiles can declare peers under acp: (see mow ops show).
 Docs: docs/extensions.md
 

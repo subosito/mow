@@ -87,10 +87,10 @@ func TestLoadWithProfileExtensionsAcpWholeSectionReplace(t *testing.T) {
 	global := `
 extensions:
   acp:
-    mow_agents:
-      deepseek:
+    agents:
+      - name: deepseek
         model: deepseek-v4-flash
-      only-global:
+      - name: only-global
         model: global-only-model
 `
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(global), 0o600); err != nil {
@@ -99,8 +99,8 @@ extensions:
 	profileBody := `
 extensions:
   acp:
-    mow_agents:
-      deepseek:
+    agents:
+      - name: deepseek
         model: gateway/deepseek/deepseek-chat
 `
 	writeProfileConfig(t, home, "gateway-profile", workspace, profileBody)
@@ -110,21 +110,26 @@ extensions:
 		t.Fatal(err)
 	}
 	type acpSection struct {
-		MowAgents map[string]struct {
+		Agents []struct {
+			Name  string `yaml:"name"`
 			Model string `yaml:"model"`
-		} `yaml:"mow_agents"`
+		} `yaml:"agents"`
 	}
 	var sec acpSection
 	if err := f.Extension("acp", &sec); err != nil {
 		t.Fatal(err)
 	}
-	got := sec.MowAgents["deepseek"].Model
+	byName := map[string]string{}
+	for _, a := range sec.Agents {
+		byName[a.Name] = a.Model
+	}
+	got := byName["deepseek"]
 	want := "gateway/deepseek/deepseek-chat"
 	if got != want {
 		t.Fatalf("deepseek model=%q want %q", got, want)
 	}
-	if _, ok := sec.MowAgents["only-global"]; ok {
-		t.Fatalf("profile extensions.acp must whole-section replace global; still has only-global: %+v", sec.MowAgents)
+	if _, ok := byName["only-global"]; ok {
+		t.Fatalf("profile extensions.acp must whole-section replace global; still has only-global: %+v", sec.Agents)
 	}
 }
 

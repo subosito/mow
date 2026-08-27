@@ -26,7 +26,7 @@ func TestIsReadOnlyTool(t *testing.T) {
 		{"generate_image", false},
 		{"mcp_srv_lookup", true},   // declared readOnlyHint
 		{"mcp_srv_execute", false}, // undeclared ext tool
-		{"acp_delegate", false},
+		{"delegate", false},
 	}
 	for _, c := range cases {
 		if got := isReadOnlyTool(c.name, extRO); got != c.want {

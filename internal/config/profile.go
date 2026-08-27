@@ -30,7 +30,7 @@ type WorkspaceSet struct {
 //
 // Profiles replace the single flat $MOW_HOME/workspaces.yaml registry: each
 // profile is self-contained, and per-profile config is what makes ACP
-// agents/mow_agents profile-scoped without touching ext/acp (the overlay is
+// agents profile-scoped without touching ext/acp (the overlay is
 // applied before extensions decode extensions.acp).
 type Profile struct {
 	// Name is the profile name (the directory under WorkspacesDir).

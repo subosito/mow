@@ -415,7 +415,7 @@ func (c *pipeClient) prompt(ctx context.Context, sid, text string) (string, mow.
 	return res.StopReason, u, nil
 }
 
-// Regression: a nested acp_delegate answer (EventDelegateChunk) must NOT be
+// Regression: a nested delegate answer (EventDelegateChunk) must NOT be
 // forwarded as agent_message_chunk — the host accumulates chunk text as the
 // peer reply and the tool result already carries the full answer, so
 // forwarding committed nested answers twice and corrupted host-side markdown.

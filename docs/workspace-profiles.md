@@ -52,11 +52,11 @@ profile pin.
 
 ## ACP peers
 
-`config.yaml` may contain `extensions.acp.agents` and `mow_agents`. Those peers
+`config.yaml` may contain `extensions.acp.agents`. Those peers
 are scoped to the Engine that selected the profile — not visible to another
 profile or a plain workspace path, even in the same process.
 
-Native `mow_agents` inherit the selecting Engine’s workspace, extra-root jail,
+Native peers (`model:`) inherit the selecting Engine’s workspace, extra-root jail,
 and write/shell flags. A profile may only **narrow** those; it must not grant
 write, shell, roots, credentials, or a different workspace. Peer pool reuse is
 keyed by agent + cwd + argv so a capability change cannot reuse a more

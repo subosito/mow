@@ -30,22 +30,24 @@ skills:
   dirs: [` + filepath.Join(home, "skills") + `]
 extensions:
   acp:
-    mow_agents:
-      poison:
+    agents:
+      - name: poison
         model: poison-peer
   mcp:
     servers: []
   cmdhook:
     root: ` + filepath.Join(home, "cmdhook-root") + `
 `,
-		filepath.Join(home, "AGENTS.md"):                            "POISON_GLOBAL_AGENTS_DO_NOT_LOAD",
-		filepath.Join(home, "skills", "evil", "SKILL.md"):           "POISON_GLOBAL_SKILL_DO_NOT_LOAD",
-		filepath.Join(home, "mcp.json"):                             `{"mcpServers":{}}`,
-		filepath.Join(home, "cmdhook.yaml"):                         "root: " + filepath.Join(home, "cmdhook-root") + "\n",
-		filepath.Join(home, "cmdhook-root", "hooks.json"):           `{"hooks":{}}`,
-		filepath.Join(home, "workspaces", "evil", "workspace.yaml"): "root: " + home + "\n",
-		filepath.Join(home, "workspaces", "evil", "config.yaml"):    "llm:\n  model: poison-profile-model\n",
-		filepath.Join(home, "workspaces", "evil", "AGENTS.md"):      "POISON_PROFILE_AGENTS",
+		filepath.Join(home, "AGENTS.md"):                                      "POISON_GLOBAL_AGENTS_DO_NOT_LOAD",
+		filepath.Join(home, "skills", "evil", "SKILL.md"):                     "POISON_GLOBAL_SKILL_DO_NOT_LOAD",
+		filepath.Join(home, "mcp.json"):                                       `{"mcpServers":{}}`,
+		filepath.Join(home, "cmdhook.yaml"):                                   "root: " + filepath.Join(home, "cmdhook-root") + "\n",
+		filepath.Join(home, "cmdhook-root", "hooks.json"):                     `{"hooks":{}}`,
+		filepath.Join(home, "plugins", "poison-hooks", "plugin.json"):         `{"name":"poison-hooks"}`,
+		filepath.Join(home, "plugins", "poison-hooks", "hooks", "hooks.json"): `{"hooks":{"PreToolUse":[{"matcher":"","hooks":[{"type":"command","command":"true"}]}]}}`,
+		filepath.Join(home, "workspaces", "evil", "workspace.yaml"):           "root: " + home + "\n",
+		filepath.Join(home, "workspaces", "evil", "config.yaml"):              "llm:\n  model: poison-profile-model\n",
+		filepath.Join(home, "workspaces", "evil", "AGENTS.md"):                "POISON_PROFILE_AGENTS",
 	}
 	for path, body := range files {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -116,18 +118,23 @@ func TestNewHermeticByDefaultIgnoresPoisonedHome(t *testing.T) {
 	}
 	for _, tool := range eng.tools {
 		name := strings.ToLower(tool.Name())
-		if name == "acp_delegate" || strings.HasPrefix(name, "mcp_") || strings.Contains(name, "cmdhook") {
+		if name == "delegate" || strings.HasPrefix(name, "mcp_") || strings.Contains(name, "cmdhook") {
 			t.Fatalf("user-setup extension tool %q leaked into hermetic engine", name)
 		}
 	}
 	var acp struct {
-		MowAgents map[string]any `yaml:"mow_agents"`
+		Agents []any `yaml:"agents"`
 	}
 	if err := eng.Extension("acp", &acp); err != nil {
 		t.Fatal(err)
 	}
-	if len(acp.MowAgents) != 0 {
-		t.Fatalf("extensions.acp leaked from home: %+v", acp.MowAgents)
+	if len(acp.Agents) != 0 {
+		t.Fatalf("extensions.acp leaked from home: %+v", acp.Agents)
+	}
+	for _, st := range ext.ListExtensions(1) {
+		if st.Kind == "cmdhook" || strings.Contains(st.Name, "poison-hooks") {
+			t.Fatalf("host plugin cmdhook leaked into hermetic engine: %+v", st)
+		}
 	}
 
 	// Profile name must not resolve under hermetic mode.

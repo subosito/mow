@@ -207,7 +207,7 @@ func (e *Engine) Status() Status {
 }
 
 // Emit publishes an event to all OnEvent listeners. Hosts may call for pack-level
-// events (e.g. acp_delegate chunks) using the current run id when busy.
+// events (e.g. delegate chunks) using the current run id when busy.
 func (e *Engine) Emit(ev Event) {
 	if e == nil {
 		return

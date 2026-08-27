@@ -4,7 +4,7 @@
 // DecodeSection never falls back to $MOW_HOME on its own. Hosts that want
 // user/global config must pass that path explicitly (engine.New does so when
 // Options.LoadUserConfig is true). Hermetic embedding therefore cannot pick
-// up MCP/cmdhook/acp/lsp sections from the operator's home by accident.
+// up MCP/acp/lsp sections from the operator's home by accident.
 package extcfg
 
 import (
@@ -69,7 +69,7 @@ func DecodeSection(section string, configPaths []string, dst any) (bool, error) 
 
 // IncludesUserConfig reports whether configPaths already contains the global
 // $MOW_HOME/config.yaml path. Extension packs use this to gate home-file
-// fallbacks (mcp.json, cmdhook.yaml, lsp.yaml) so hermetic BeforeNew calls
+// fallbacks (mcp.json, lsp.yaml) so hermetic BeforeNew calls
 // with only explicit paths never touch the operator home.
 func IncludesUserConfig(configPaths []string) bool {
 	want := filepath.Clean(filepath.Join(mow.Home(), "config.yaml"))

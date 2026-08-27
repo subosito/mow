@@ -350,7 +350,7 @@ engine. By default the first listed reviewer also runs pass two; `--verifier` ov
 Programmatic callers may likewise use `NewEnsembleReviewer` with named,
 read-only `Reviewer` values, or pass `Request.Verifier` for a dedicated pass-two
 model. `ValidateRequest` rejects `Verifier` together with `SkipVerification`.
-ACP peers are not used: read-only review denies `acp_delegate` and this policy
+ACP peers are not used: read-only review denies `delegate` and this policy
 remains unchanged.
 
 

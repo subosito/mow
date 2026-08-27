@@ -38,7 +38,7 @@ func TestProfileMowAgentCommandRespectsHostCaps(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"), []byte("root: "+workspace+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	body := "extensions:\n  acp:\n    mow_agents:\n      coder:\n        model: gpt-5-mini\n        allow_write: true\n        allow_shell: true\n"
+	body := nativeAgentYAML("coder", "gpt-5-mini") + "        allow_write: true\n        allow_shell: true\n"
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestProfileMowAgentCommandRespectsHostCaps(t *testing.T) {
 
 	tool := captureDelegateViaEngineConfig(t, eng)
 	spec := tool.agents["coder"]
-	if spec.Mow == nil {
+	if !spec.native() {
 		t.Fatal("expected native mow agent")
 	}
 	host := hostPolicyFromContext(mow.ContextWithEngine(context.Background(), eng), workspace)
@@ -98,7 +98,7 @@ func TestProfileAgentsAreScopedPerEngineWithoutCapabilityEscalation(t *testing.T
 		if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"), []byte("root: "+workspace+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		config := "extensions:\n  acp:\n    mow_agents:\n      " + agent + ":\n        model: gpt-5-mini\n        allow_write: "
+		config := nativeAgentYAML(agent, "gpt-5-mini") + "        allow_write: "
 		if allowWrite {
 			config += "true\n"
 		} else {
@@ -172,8 +172,8 @@ func TestProfileAgentsAreScopedPerEngineWithoutCapabilityEscalation(t *testing.T
 	if !strings.Contains(joined, "--allow-write") || !strings.Contains(joined, "--allow-shell") {
 		t.Fatalf("profile two with powered host should allow caps: %v", cmdTwo)
 	}
-	if !hasTool(firstTools, "acp_delegate") {
-		t.Fatal("first profile missing acp_delegate in tool list")
+	if !hasTool(firstTools, "delegate") {
+		t.Fatal("first profile missing delegate in tool list")
 	}
 }
 

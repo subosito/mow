@@ -85,10 +85,10 @@ a profile switch.
 
 - `ext/cli`: unix dispatcher (`cli.Main`) + `run`, `trust`, `doctor`, `approvals`, version, help. Uses `mow.NewHarness`.
 - `ext/tty`: optional line REPL (`mow tty`). Does not import `ext/acp`.
-- `ext/acp`: ACP agent + extras + peer delegation (`acp_delegate`). Must not import `ext/cli`.
+- `ext/acp`: ACP agent + extras + peer delegation (`delegate`). Must not import `ext/cli`.
 - `packs/mcp`: MCP server + configured MCP client tools
 - `packs/proc`: detached process tools/command
-- `packs/cmdhook`: configured command hooks
+- `packs/cmdhook`: command hooks from host-owned Agent Plugins
 
 ### Optional packs (`packs/` module)
 

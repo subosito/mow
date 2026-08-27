@@ -31,16 +31,9 @@ func TestMultiPluginConfigAndMinTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := Config{
-		Plugins: map[string]PluginConfig{
-			"p1": {Root: dir1, MinTurns: 0},
-			"p2": {Root: dir2, MinTurns: 3},
-		},
-	}
-
-	plugins := cfg.resolved()
-	if len(plugins) != 2 {
-		t.Fatalf("expected 2 plugins, got %d", len(plugins))
+	plugins := []PluginConfig{
+		{Name: "p1", Root: dir1, MinTurns: 0},
+		{Name: "p2", Root: dir2, MinTurns: 3},
 	}
 
 	ext.Reset()

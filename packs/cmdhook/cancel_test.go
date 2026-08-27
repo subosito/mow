@@ -30,7 +30,7 @@ func TestCancelIsSilent(t *testing.T) {
 	root := t.TempDir()
 	slow := scriptAt(t, root, "slow.sh", `sleep 5`)
 	writeHooksJSON(t, root, oneEntry("", slow))
-	b := mustLoad(t, Config{Root: root, TimeoutSec: 30})
+	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 30})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var out outcome
@@ -71,7 +71,7 @@ func TestAlreadyCancelledSkipsExec(t *testing.T) {
 	marker := root + "/ran.txt"
 	sh := scriptAt(t, root, "mark.sh", `echo ran > `+marker)
 	writeHooksJSON(t, root, oneEntry("", sh))
-	b := mustLoad(t, Config{Root: root, TimeoutSec: 30})
+	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 30})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -95,7 +95,7 @@ func TestTimeoutIsStillReported(t *testing.T) {
 	root := t.TempDir()
 	slow := scriptAt(t, root, "slow.sh", `sleep 5`)
 	writeHooksJSON(t, root, oneEntry("", slow))
-	b := mustLoad(t, Config{Root: root, TimeoutSec: 1})
+	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 1})
 
 	logs := captureLogs(t, func() {
 		if out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{}); out.blocked {
@@ -112,7 +112,7 @@ func TestOrdinaryFailureStillWarns(t *testing.T) {
 	root := t.TempDir()
 	bad := scriptAt(t, root, "bad.sh", `echo boom >&2; exit 1`)
 	writeHooksJSON(t, root, oneEntry("", bad))
-	b := mustLoad(t, Config{Root: root, TimeoutSec: 30})
+	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 30})
 
 	logs := captureLogs(t, func() {
 		b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})

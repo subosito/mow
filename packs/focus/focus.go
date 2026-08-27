@@ -105,7 +105,7 @@ func isExploreToolName(name string, args json.RawMessage) bool {
 	case "bash":
 		return isExploreBash(toolArgString(args, "command"))
 	default:
-		// Custom tools (media, acp_delegate, …) count as productive action.
+		// Custom tools (media, delegate, …) count as productive action.
 		return false
 	}
 }

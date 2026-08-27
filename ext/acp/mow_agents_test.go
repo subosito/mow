@@ -6,15 +6,15 @@ import (
 	"testing"
 )
 
-func TestResolveMowAgents(t *testing.T) {
+func TestResolveAgentsNativeAndExternal(t *testing.T) {
 	orig := mowAgentBinary
 	mowAgentBinary = func() string { return "mow" }
 	defer func() { mowAgentBinary = orig }()
 
 	falseV := false
-	specs, err := resolveMowAgents(map[string]MowAgentSpec{
-		"peer-b": {Model: "gpt-5-mini"},
-		"peer-a": {
+	specs, err := resolveAgents(Config{Agents: []AgentSpec{
+		{
+			Name:         "peer-a",
 			Model:        "gemini-2.5-flash",
 			AllowWrite:   &falseV,
 			AllowShell:   &falseV,
@@ -23,32 +23,34 @@ func TestResolveMowAgents(t *testing.T) {
 			SystemPrefix: "You are a reviewer.",
 			ExtraArgs:    []string{"--stream"},
 		},
-	})
+		{Name: "peer-b", Model: "gpt-5-mini"},
+		{Name: "peer-agent", Command: []string{"env", "npx"}},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(specs) != 2 {
+	if len(specs) != 3 {
 		t.Fatalf("len=%d", len(specs))
 	}
-	if specs[0].Name != "peer-a" || specs[1].Name != "peer-b" {
-		t.Fatalf("order/names: %+v %+v", specs[0], specs[1])
+	if specs[0].Name != "peer-a" || specs[0].Model != "gemini-2.5-flash" || specs[0].TimeoutSec != 120 {
+		t.Fatalf("peer-a=%+v", specs[0])
 	}
-	if specs[0].Mow == nil || specs[0].Mow.Model != "gemini-2.5-flash" {
-		t.Fatalf("peer-a mow spec=%v", specs[0].Mow)
+	if specs[1].TimeoutSec != 600 {
+		t.Fatalf("native default timeout=%d", specs[1].TimeoutSec)
 	}
-	if specs[0].TimeoutSec != 120 {
-		t.Fatalf("timeout=%d", specs[0].TimeoutSec)
+	if specs[2].TimeoutSec != 300 || specs[2].native() {
+		t.Fatalf("external=%+v", specs[2])
 	}
 
 	hostRW := &hostPeerPolicy{workspace: "/ws", allowWrite: true, allowShell: true}
-	cmdA := buildMowAgentCommand(*specs[0].Mow, hostRW, "/ws")
+	cmdA := buildMowAgentCommand(specs[0], hostRW, "/ws")
 	wantA := []string{"mow", "acp", "--model", "gemini-2.5-flash", "--workspace", "/ws", "--effort", "high", "--system-prefix", "You are a reviewer.", "--stream"}
 	if got := cmdA; !slices.Equal(got, wantA) {
 		t.Fatalf("peer-a command=%v want %v", got, wantA)
 	}
 
 	hostDeny := &hostPeerPolicy{workspace: "/ws", allowWrite: false, allowShell: false}
-	cmdB := buildMowAgentCommand(*specs[1].Mow, hostDeny, "/ws")
+	cmdB := buildMowAgentCommand(specs[1], hostDeny, "/ws")
 	if strings.Contains(strings.Join(cmdB, " "), "--allow-write") || strings.Contains(strings.Join(cmdB, " "), "--allow-shell") {
 		t.Fatalf("denied host should not get power flags: %v", cmdB)
 	}
@@ -59,7 +61,7 @@ func TestResolveMowAgents(t *testing.T) {
 
 func TestBuildMowAgentCapsExplicitTrueByHost(t *testing.T) {
 	trueV := true
-	spec := MowAgentSpec{Model: "gpt-5-mini", AllowWrite: &trueV, AllowShell: &trueV}
+	spec := AgentSpec{Model: "gpt-5-mini", AllowWrite: &trueV, AllowShell: &trueV}
 	host := &hostPeerPolicy{workspace: "/ws", allowWrite: false, allowShell: false}
 	cmd := buildMowAgentCommand(spec, host, "/ws")
 	joined := strings.Join(cmd, " ")
@@ -71,7 +73,7 @@ func TestBuildMowAgentCapsExplicitTrueByHost(t *testing.T) {
 func TestBuildMowAgentNoAllowWithReadOnly(t *testing.T) {
 	trueV := true
 	// Explicit read_only wins over allow flags so peer CLI Validate does not fail.
-	spec := MowAgentSpec{Model: "gpt-5-mini", ReadOnly: &trueV, AllowWrite: &trueV, AllowShell: &trueV}
+	spec := AgentSpec{Model: "gpt-5-mini", ReadOnly: &trueV, AllowWrite: &trueV, AllowShell: &trueV}
 	host := &hostPeerPolicy{workspace: "/ws", allowWrite: true, allowShell: true}
 	cmd := buildMowAgentCommand(spec, host, "/ws")
 	joined := strings.Join(cmd, " ")
@@ -96,7 +98,7 @@ func TestPeerKeyIncludesCommand(t *testing.T) {
 }
 
 func TestBuildMowAgentInheritsExtraRoots(t *testing.T) {
-	spec := MowAgentSpec{Model: "gpt-5-mini"}
+	spec := AgentSpec{Model: "gpt-5-mini"}
 	host := &hostPeerPolicy{
 		workspace:    "/ws",
 		allowWrite:   true,
@@ -111,40 +113,29 @@ func TestBuildMowAgentInheritsExtraRoots(t *testing.T) {
 	}
 }
 
-func TestResolveMowAgentsRequiresModel(t *testing.T) {
-	_, err := resolveMowAgents(map[string]MowAgentSpec{"x": {}})
-	if err == nil || !strings.Contains(err.Error(), "model") {
+func TestResolveAgentsRequiresCommandOrModel(t *testing.T) {
+	_, err := resolveAgents(Config{Agents: []AgentSpec{{Name: "x"}}})
+	if err == nil || !strings.Contains(err.Error(), "command") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
-func TestResolveAgentsCollision(t *testing.T) {
-	_, err := resolveAgents(Config{
-		Agents:    []AgentSpec{{Name: "peer-b", Command: []string{"other"}}},
-		MowAgents: map[string]MowAgentSpec{"peer-b": {Model: "gpt-5-mini"}},
-	})
-	if err == nil || !strings.Contains(err.Error(), "both") {
+func TestResolveAgentsRejectsCommandAndModel(t *testing.T) {
+	_, err := resolveAgents(Config{Agents: []AgentSpec{{
+		Name: "x", Command: []string{"peer"}, Model: "gpt-5-mini",
+	}}})
+	if err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
-func TestResolveAgentsMerge(t *testing.T) {
-	list, err := resolveAgents(Config{
-		Agents:    []AgentSpec{{Name: "peer-agent", Command: []string{"env", "npx"}}},
-		MowAgents: map[string]MowAgentSpec{"peer-b": {Model: "gpt-5-mini"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 2 {
-		t.Fatalf("len=%d", len(list))
-	}
-	names := map[string]bool{}
-	for _, a := range list {
-		names[strings.ToLower(a.Name)] = true
-	}
-	if !names["peer-agent"] || !names["peer-b"] {
-		t.Fatalf("names=%v", names)
+func TestResolveAgentsDuplicateName(t *testing.T) {
+	_, err := resolveAgents(Config{Agents: []AgentSpec{
+		{Name: "peer-b", Command: []string{"other"}},
+		{Name: "peer-b", Model: "gpt-5-mini"},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -160,6 +151,22 @@ func TestDelegateAcceptsSubagentAlias(t *testing.T) {
 	}
 	if strings.ToLower(name) != "peer-b" {
 		t.Fatalf("got %q", name)
+	}
+}
+
+func TestPeerCommandDoesNotInjectEffortOnExternal(t *testing.T) {
+	cmd := peerCommand(AgentSpec{
+		Name:    "peer",
+		Command: []string{"peer-agent", "--acp"},
+		Effort:  "high",
+	}, nil, "")
+	for _, a := range cmd {
+		if a == "--reasoning-effort" || a == "--effort" {
+			t.Fatalf("external command must not get an injected effort flag: %v", cmd)
+		}
+	}
+	if !slices.Equal(cmd, []string{"peer-agent", "--acp"}) {
+		t.Fatalf("argv rewritten: %v", cmd)
 	}
 }
 

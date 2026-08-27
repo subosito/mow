@@ -159,3 +159,55 @@ func TestPromptAllowedToolsPermitsBuiltinRead(t *testing.T) {
 		t.Fatal("read tool was not executed")
 	}
 }
+
+func TestPromptAllowedToolsDeniesDelegate(t *testing.T) {
+	var delegateCalled string
+	turn := 0
+	var lastTool string
+	eng, err := New(Options{
+		NoSession: true,
+		Tools:     []Tool{&fakeTool{name: "delegate", got: &delegateCalled}},
+		Chat: func(ctx context.Context, messages []Message, tools []ToolSpec) (Message, error) {
+			turn++
+			for _, ts := range tools {
+				if ts.Function.Name == "delegate" {
+					t.Fatalf("delegate in specs: %v", tools)
+				}
+			}
+			if turn == 1 {
+				return Message{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "1", Type: "function",
+						Function: FunctionCall{Name: "delegate", Arguments: `{"prompt":"x","agent":"peer"}`},
+					}},
+				}, nil
+			}
+			for _, m := range messages {
+				if m.Role == "tool" {
+					lastTool = m.Content
+				}
+			}
+			return Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	_, err = eng.PromptWith(t.Context(), "review", PromptOpts{
+		ReadOnly:     true,
+		Ephemeral:    true,
+		AllowedTools: BuiltinReadInspectTools(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegateCalled != "" {
+		t.Fatalf("delegate executed despite allowlist: %q", delegateCalled)
+	}
+	if !strings.Contains(lastTool, "not in allowed tool set") {
+		t.Fatalf("delegate call should be denied: %q", lastTool)
+	}
+}

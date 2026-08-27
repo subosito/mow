@@ -39,9 +39,13 @@ func writeNamedProfile(t *testing.T, home, name, workspace, configBody string) {
 	}
 }
 
+func nativeAgentYAML(name, model string) string {
+	return "extensions:\n  acp:\n    agents:\n      - name: " + name + "\n        model: " + model + "\n"
+}
+
 func agentModelFromSpec(spec AgentSpec) string {
-	if spec.Mow != nil {
-		return strings.TrimSpace(spec.Mow.Model)
+	if spec.native() {
+		return strings.TrimSpace(spec.Model)
 	}
 	return agentModelFlag(spec.Command)
 }
@@ -75,11 +79,11 @@ func TestRegisterFromConfigProfileOverridesGlobalPeerModel(t *testing.T) {
 
 	globalModel := "deepseek-v4-flash"
 	profileModel := "gateway/deepseek/deepseek-chat"
-	global := "extensions:\n  acp:\n    mow_agents:\n      deepseek:\n        model: " + globalModel + "\n"
+	global := nativeAgentYAML("deepseek", globalModel)
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(global), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	profileBody := "extensions:\n  acp:\n    mow_agents:\n      deepseek:\n        model: " + profileModel + "\n"
+	profileBody := nativeAgentYAML("deepseek", profileModel)
 	writeNamedProfile(t, home, "gateway-profile", workspace, profileBody)
 
 	p, found, err := config.LoadProfile("gateway-profile")
@@ -96,7 +100,7 @@ func TestRegisterFromConfigProfileOverridesGlobalPeerModel(t *testing.T) {
 	sharedMu.Lock()
 	defer sharedMu.Unlock()
 	if sharedDelegate == nil {
-		t.Fatal("expected acp_delegate registration")
+		t.Fatal("expected delegate registration")
 	}
 	spec, ok := sharedDelegate.agents["deepseek"]
 	if !ok {
@@ -129,8 +133,8 @@ func TestRegisterFromConfigReplaceDoesNotAccumulatePeers(t *testing.T) {
 	mowAgentBinary = func() string { return "mow" }
 	t.Cleanup(func() { mowAgentBinary = orig })
 
-	writeNamedProfile(t, home, "one", wsA, "extensions:\n  acp:\n    mow_agents:\n      peer-one:\n        model: model-one\n")
-	writeNamedProfile(t, home, "two", wsB, "extensions:\n  acp:\n    mow_agents:\n      peer-two:\n        model: model-two\n")
+	writeNamedProfile(t, home, "one", wsA, nativeAgentYAML("peer-one", "model-one"))
+	writeNamedProfile(t, home, "two", wsB, nativeAgentYAML("peer-two", "model-two"))
 
 	p1, _, _ := config.LoadProfile("one")
 	if err := RegisterFromConfig(p1.OverlayConfigPaths(nil)...); err != nil {
@@ -166,7 +170,7 @@ func TestRegisterFromConfigReplaceDoesNotAccumulatePeers(t *testing.T) {
 }
 
 // TestEngineProfileCapturesAcpDelegateModel runs the full New → BeforeNew path
-// and checks both Extension("acp") and the registered acp_delegate command
+// and checks both Extension("acp") and the registered delegate command
 // without any network.
 func TestEngineProfileCapturesAcpDelegateModel(t *testing.T) {
 	resetSharedDelegate(t)
@@ -185,12 +189,12 @@ func TestEngineProfileCapturesAcpDelegateModel(t *testing.T) {
 	globalModel := "deepseek-v4-flash"
 	profileModel := "gateway/deepseek/deepseek-chat"
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(
-		"llm:\n  model: global-host\nextensions:\n  acp:\n    mow_agents:\n      deepseek:\n        model: "+globalModel+"\n",
+		"llm:\n  model: global-host\n"+nativeAgentYAML("deepseek", globalModel),
 	), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeNamedProfile(t, home, "gateway-profile", workspace,
-		"llm:\n  model: profile-host\nextensions:\n  acp:\n    mow_agents:\n      deepseek:\n        model: "+profileModel+"\n",
+		"llm:\n  model: profile-host\n"+nativeAgentYAML("deepseek", profileModel),
 	)
 
 	var tools []mow.ToolSpec
@@ -215,18 +219,25 @@ func TestEngineProfileCapturesAcpDelegateModel(t *testing.T) {
 	if err := eng.Extension("acp", &c); err != nil {
 		t.Fatal(err)
 	}
-	if c.MowAgents["deepseek"].Model != profileModel {
-		t.Fatalf("Extension acp deepseek model=%q want %q", c.MowAgents["deepseek"].Model, profileModel)
+	gotModel := ""
+	for _, a := range c.Agents {
+		if a.Name == "deepseek" {
+			gotModel = a.Model
+			break
+		}
+	}
+	if gotModel != profileModel {
+		t.Fatalf("Extension acp deepseek model=%q want %q", gotModel, profileModel)
 	}
 
 	// BeforeNew → RegisterFromConfig must have registered the profile peer.
 	sharedMu.Lock()
 	if sharedDelegate == nil {
 		sharedMu.Unlock()
-		t.Fatal("shared acp_delegate not registered via BeforeNew")
+		t.Fatal("shared delegate not registered via BeforeNew")
 	}
 	spec, ok := sharedDelegate.agents["deepseek"]
-	gotModel := agentModelFromSpec(spec)
+	gotModel = agentModelFromSpec(spec)
 	sharedMu.Unlock()
 	if !ok || gotModel != profileModel {
 		t.Fatalf("registered deepseek --model=%q want %q ok=%v", gotModel, profileModel, ok)
@@ -235,8 +246,8 @@ func TestEngineProfileCapturesAcpDelegateModel(t *testing.T) {
 	if _, err := eng.Prompt(context.Background(), "inspect"); err != nil {
 		t.Fatal(err)
 	}
-	if !hasTool(tools, "acp_delegate") {
-		t.Fatal("engine tool list missing acp_delegate")
+	if !hasTool(tools, "delegate") {
+		t.Fatal("engine tool list missing delegate")
 	}
 }
 
@@ -253,8 +264,8 @@ func TestEngineScopedDelegateIsolatesPeers(t *testing.T) {
 	mowAgentBinary = func() string { return "mow" }
 	t.Cleanup(func() { mowAgentBinary = orig })
 
-	writeNamedProfile(t, home, "one", wsA, "extensions:\n  acp:\n    mow_agents:\n      peer-one:\n        model: model-one\n        allow_write: false\n        allow_shell: false\n")
-	writeNamedProfile(t, home, "two", wsB, "extensions:\n  acp:\n    mow_agents:\n      peer-two:\n        model: model-two\n")
+	writeNamedProfile(t, home, "one", wsA, nativeAgentYAML("peer-one", "model-one")+"        allow_write: false\n        allow_shell: false\n")
+	writeNamedProfile(t, home, "two", wsB, nativeAgentYAML("peer-two", "model-two"))
 
 	toolA := captureDelegateViaEngine(t, "one")
 	toolB := captureDelegateViaEngine(t, "two")

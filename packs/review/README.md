@@ -45,7 +45,7 @@ They parse the same review flags as the CLI, but they run against **the session 
 
 ### Review jail
 
-Write and shell are forced off. Each pass is `ReadOnly` + `Ephemeral` with `AllowedTools` limited to `read`, `glob`, and `grep`. Candidate/verifier engines use `SkipExtensionSetup` and `DisableExtensionHooks`. **ACP / `acp_delegate` is denied** (omitted from specs and denied at exec), along with MCP and other extension tools.
+Write and shell are forced off. Each pass is `ReadOnly` + `Ephemeral` with `AllowedTools` limited to `read`, `glob`, and `grep`. Candidate/verifier engines use `SkipExtensionSetup` and `DisableExtensionHooks`. **ACP / `delegate` is denied** (omitted from specs and denied at exec), along with MCP and other extension tools.
 
 ## Config (`extensions.review`)
 

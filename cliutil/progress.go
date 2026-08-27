@@ -88,7 +88,7 @@ func (f *EngineFlags) NewEngineCLI() (*mow.Engine, error) {
 }
 
 // ToolProgressOnEvent prints short tool lines on stderr (not full slog dumps).
-// Includes a one-line target hint (path / pattern / command) and acp_delegate
+// Includes a one-line target hint (path / pattern / command) and delegate
 // peer progress (delegate.progress / answer chunks when --stream).
 func ToolProgressOnEvent(stream bool) mow.EventFunc {
 	return func(ev mow.Event) {
@@ -111,7 +111,7 @@ func ToolProgressOnEvent(stream bool) mow.EventFunc {
 				fmt.Fprintf(os.Stderr, "✓ %s (%0.1fs)\n", FormatToolProgress(ev.Tool, ev.Args), float64(ev.DurationMs)/1000)
 			}
 		case mow.EventDelegateProgress:
-			// Peer tool/thought while acp_delegate is in flight.
+			// Peer tool/thought while delegate is in flight.
 			agent := strings.TrimSpace(ev.Agent)
 			if agent == "" {
 				agent = "peer"
@@ -181,6 +181,11 @@ func toolProgressDetail(tool string, args json.RawMessage) string {
 		return pat
 	case "bash":
 		return clipRunes(str("command"), 64)
+	case "delegate":
+		if a := str("agent"); a != "" {
+			return clipRunes(a, 40)
+		}
+		return clipRunes(str("subagent"), 40)
 	default:
 		for _, k := range []string{"path", "pattern", "command", "query", "name", "file", "url"} {
 			if v := str(k); v != "" {

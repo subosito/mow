@@ -387,11 +387,11 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			return
 		}
 		text = expandPromptFileRefs(a.eng, text)
-		ctx, cancel := context.WithCancel(parent)
 		if err := a.requireBound(p.SessionID); err != nil {
 			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
 			return
 		}
+		ctx, cancel := context.WithCancel(parent)
 		a.mu.Lock()
 		a.cancels[p.SessionID] = cancel
 		a.activeSID = p.SessionID
@@ -438,7 +438,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			return
 		}
 
-		// Stream main-model tokens + acp_delegate peer activity to the client.
+		// Stream main-model tokens + delegate peer activity to the client.
 		var streamed atomic.Bool
 		writeAgentText := func(text string) {
 			if text == "" {

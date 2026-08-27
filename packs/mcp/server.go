@@ -5,7 +5,7 @@ package mcp
 // and editors (Claude Desktop, etc.) can call mow as a delegated sub-agent. It
 // mirrors the client side (rest of this package), which connects out to other
 // MCP servers and registers their tools. One package, both directions — like
-// ext/acp (serve `mow acp` + `acp_delegate` client tool).
+// ext/acp (serve `mow acp` + `delegate` client tool).
 
 import (
 	"bufio"

@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -28,5 +30,26 @@ func TestFramingFactsMentionsNonce(t *testing.T) {
 	s := FramingFacts("deadbeef")
 	if !strings.Contains(s, "deadbeef") || !strings.Contains(s, UntrustedTag) {
 		t.Fatalf("facts: %q", s)
+	}
+	if !strings.Contains(s, "delegate") {
+		t.Fatalf("facts should name delegate: %q", s)
+	}
+}
+
+type stubTool struct{ name string }
+
+func (t stubTool) Name() string        { return t.name }
+func (t stubTool) Description() string { return t.name }
+func (t stubTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{}`)
+}
+func (t stubTool) Exec(context.Context, json.RawMessage) (string, error) {
+	return "ok", nil
+}
+
+func TestFrameUntrustedResultDelegate(t *testing.T) {
+	out := frameUntrustedResult(stubTool{name: "delegate"}, "delegate", "peer text", "nonce")
+	if !strings.Contains(out, `source="delegate"`) || !strings.Contains(out, "peer text") {
+		t.Fatalf("delegate framing: %q", out)
 	}
 }

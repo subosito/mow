@@ -171,7 +171,7 @@ func frameUntrustedResult(tool Tool, name, out, nonce string) string {
 		return WrapUntrusted(nonce, name, out)
 	}
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "bash", "acp_delegate":
+	case "bash", "delegate":
 		return WrapUntrusted(nonce, name, out)
 	}
 	return out

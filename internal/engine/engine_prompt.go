@@ -135,7 +135,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	e.mu.Unlock()
 	ctx, runID := e.beginRun(ctx)
 	defer e.endRun()
-	// Tools (e.g. acp_delegate) can Emit via EngineFromContext without a stored pointer.
+	// Tools (e.g. delegate) can Emit via EngineFromContext without a stored pointer.
 	ctx = ContextWithEngine(ctx, e)
 
 	// Per-call system append (packs: goal protocol, etc.).

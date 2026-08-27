@@ -16,54 +16,68 @@ import (
 	"github.com/subosito/mow/internal/config"
 )
 
-// AgentSpec is one peer harness reachable via ACP (extensions.acp.agents).
+// AgentSpec is one named peer under extensions.acp.agents.
+//
+// Type is the field set, not a separate key: `command` is an external ACP
+// process; `model` is a native `mow acp --model …` peer. The two are exclusive.
+// Shared: name, dir, timeout_sec.
 type AgentSpec struct {
-	// Name is the short id used in acp_delegate args (e.g. "claude").
+	// Name is the short id used in delegate args (e.g. "claude").
 	Name string `yaml:"name" json:"name"`
-	// Command is the peer argv that speaks ACP on stdio.
-	Command []string `yaml:"command" json:"command"`
+	// Command is the peer argv that speaks ACP on stdio (external).
+	Command []string `yaml:"command" json:"command,omitempty"`
+	// Model selects a native mow peer (`mow acp --model`). Exclusive with Command.
+	Model string `yaml:"model" json:"model,omitempty"`
 	// Dir optional working directory (default: mow workspace).
-	Dir string `yaml:"dir" json:"dir"`
-	// TimeoutSec caps one delegated prompt (default 300). On timeout the peer
-	// gets session/cancel then the process tree is dropped.
-	TimeoutSec int `yaml:"timeout_sec" json:"timeout_sec"`
-	// Effort optional peer reasoning intensity. When set and command does not
-	// already pass --reasoning-effort/--effort, mow appends
-	// --reasoning-effort <value> (peer CLIs that accept it).
-	Effort string `yaml:"effort" json:"effort"`
-	// PermissionMode controls agent→client session/request_permission handling.
-	// reject (default): deny peer permission prompts (non-interactive delegate).
-	// allow: auto-approve. Legacy: argv containing --force implies allow when
-	// permission_mode is omitted.
-	PermissionMode string `yaml:"permission_mode" json:"permission_mode"`
-	// Mow holds native mow_agents config when set; Command is built at delegate
-	// time from host posture (not stored in yaml for agents[] rows).
-	Mow *MowAgentSpec `yaml:"-" json:"-"`
+	Dir string `yaml:"dir" json:"dir,omitempty"`
+	// TimeoutSec caps one delegated prompt. 0 → 300 (external) or 600 (native).
+	// On timeout the peer gets session/cancel then the process tree is dropped.
+	TimeoutSec int `yaml:"timeout_sec" json:"timeout_sec,omitempty"`
+	// Effort is native-only (--effort on mow acp). External peers put their
+	// own flag in command; mow does not rewrite argv.
+	Effort string `yaml:"effort" json:"effort,omitempty"`
+	// PermissionMode controls agent→client session/request_permission handling
+	// (external peers). reject (default) | allow. Legacy: argv containing
+	// --force implies allow when permission_mode is omitted.
+	PermissionMode string `yaml:"permission_mode" json:"permission_mode,omitempty"`
+	// Native-only. Nil inherits the host at delegate time (never exceeds host).
+	AllowWrite *bool `yaml:"allow_write" json:"allow_write,omitempty"`
+	AllowShell *bool `yaml:"allow_shell" json:"allow_shell,omitempty"`
+	// Native-only. Nil inherits: true when the host denies both write and shell.
+	ReadOnly *bool `yaml:"read_only" json:"read_only,omitempty"`
+	// Native-only identity/role text prepended via --system-prefix.
+	SystemPrefix string `yaml:"system_prefix" json:"system_prefix,omitempty"`
+	// Native-only extra argv after the standard mow acp flags.
+	ExtraArgs []string `yaml:"extra_args" json:"extra_args,omitempty"`
 }
+
+func (a AgentSpec) native() bool { return strings.TrimSpace(a.Model) != "" }
 
 // Config is the extensions.acp section.
 //
 //	extensions:
 //	  acp:
-//	    peer_idle_sec: 900   # drop idle peers (default 900; -1 = never by idle)
-//	    agents:              # external ACP peers (any command)
+//	    peer_idle_sec: 900
+//	    agents:
 //	      - name: peer-agent
 //	        command: [env, ANTHROPIC_MODEL=…, npx, -y, "@agentclientprotocol/claude-agent-acp"]
-//	    mow_agents:          # native mow peers (same product, other model)
-//	      peer-agent:
+//	      - name: reviewer
 //	        model: gpt-5-mini
+//	        effort: high
 type Config struct {
 	// PeerIdleSec drops unused peer processes after this many seconds.
 	// 0 or omitted → default 900. -1 → never idle-evict (still drop if !Alive()).
 	PeerIdleSec int `yaml:"peer_idle_sec"`
-	// Agents are external peer harnesses (full command that speaks ACP on stdio).
+	// Agents are named peers for the delegate tool (external command or native model).
 	Agents []AgentSpec `yaml:"agents"`
-	// MowAgents are native multi-model peers: each expands to `mow acp --model …`.
-	// Same acp_delegate tool as Agents. Names must not collide with agents[].
-	MowAgents map[string]MowAgentSpec `yaml:"mow_agents"`
 }
 
-// sharedDelegate is the singleton acp_delegate tool so packs (e.g. ops) can
+const (
+	// ToolName is the model-facing tool. ACP is the current peer protocol.
+	ToolName = "delegate"
+)
+
+// sharedDelegate is the singleton delegate tool so packs (e.g. ops) can
 // merge agents without replacing each other.
 var (
 	sharedMu       sync.Mutex
@@ -77,7 +91,7 @@ func init() {
 }
 
 // RegisterFromConfig loads config (same path list as mow.New / BeforeNew) and
-// registers acp_delegate when agents and/or mow_agents are non-empty.
+// registers delegate when agents is non-empty.
 // Must run *before* mow.New so the tool is in the registry.
 //
 // Each call builds a fresh tool from the effective config (replace, not merge)
@@ -137,7 +151,7 @@ func RegisterFromEngine(eng *mow.Engine) error {
 	return nil
 }
 
-// replaceSharedAgents installs a new process-global acp_delegate from the
+// replaceSharedAgents installs a new process-global delegate tool from the
 // given agent list (full replace). Used by RegisterFromConfig so each
 // BeforeNew reflects only the current effective config.
 func replaceSharedAgents(agents []AgentSpec, workspace string, peerIdleSec int) error {
@@ -178,7 +192,7 @@ func retireShared(t *delegateTool, gen int) {
 	t.closeAll()
 }
 
-// releaseSharedPeers kills leftover acp_delegate subprocesses when the last
+// releaseSharedPeers kills leftover delegate subprocesses when the last
 // Engine for a BeforeNew generation closes (mow acp/run exit). Idle
 // eviction only runs on the next tool call, so without this a peer can
 // reparent to PID 1 and live for hours.
@@ -201,7 +215,7 @@ func releaseSharedPeers(gen int) {
 	}
 }
 
-// AppendAgents merges peer specs into acp_delegate (creating the tool if needed).
+// AppendAgents merges peer specs into delegate (creating the tool if needed).
 // Used by packs (e.g. ops profiles) that add peers on top of an existing
 // registration. Empty list is a no-op. peerIdleSec: 0 = default, -1 = no idle
 // drop; only applied when the shared tool is first created.
@@ -246,12 +260,12 @@ func indexAgents(list []AgentSpec) map[string]AgentSpec {
 	m := map[string]AgentSpec{}
 	for _, a := range list {
 		name := strings.ToLower(strings.TrimSpace(a.Name))
-		if name == "" || (len(a.Command) == 0 && a.Mow == nil) {
+		if name == "" || (len(a.Command) == 0 && !a.native()) {
 			continue
 		}
 		if a.TimeoutSec <= 0 {
-			if a.Mow != nil && a.Mow.TimeoutSec > 0 {
-				a.TimeoutSec = a.Mow.TimeoutSec
+			if a.native() {
+				a.TimeoutSec = 600
 			} else {
 				a.TimeoutSec = 300
 			}
@@ -287,7 +301,7 @@ type delegateTool struct {
 	peers   map[string]*peerSlot // key: agent\x00dir
 }
 
-func (t *delegateTool) Name() string    { return "acp_delegate" }
+func (t *delegateTool) Name() string    { return ToolName }
 func (t *delegateTool) Untrusted() bool { return true }
 func (t *delegateTool) Description() string {
 	names := make([]string, 0, len(t.agents))
@@ -295,8 +309,8 @@ func (t *delegateTool) Description() string {
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	return "Delegate a task to a named agent (in other harnesses often called a subagent). " +
-		"Agents are configured under extensions.acp (agents = external tools; mow_agents = other mow models). " +
+	return "Delegate a task to a named peer agent over ACP (the current peer protocol; in other harnesses often called a subagent). " +
+		"Agents are configured under extensions.acp.agents (command = external ACP peer; model = native mow acp). " +
 		"Process/session is reused across calls when possible. " +
 		"Long runs are capped by the agent's timeout_sec; cancel the host turn to abort. " +
 		"Args: agent (one of: " + strings.Join(names, ", ") + "), prompt (required), cwd (optional absolute or workspace-relative). " +
@@ -339,15 +353,15 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 		agentName = strings.TrimSpace(a.Subagent)
 	}
 	if agentName == "" {
-		return "", fmt.Errorf("acp_delegate: agent (or subagent) is required")
+		return "", fmt.Errorf("delegate: agent (or subagent) is required")
 	}
 	spec, ok := t.agents[strings.ToLower(agentName)]
 	if !ok {
-		return "", fmt.Errorf("acp_delegate: unknown agent %q (configure extensions.acp.agents or mow_agents; \"subagent\" means the same thing)", agentName)
+		return "", fmt.Errorf("delegate: unknown agent %q (configure extensions.acp.agents; \"subagent\" means the same thing)", agentName)
 	}
 	prompt := strings.TrimSpace(a.Prompt)
 	if prompt == "" {
-		return "", fmt.Errorf("acp_delegate: empty prompt")
+		return "", fmt.Errorf("delegate: empty prompt")
 	}
 	dir := strings.TrimSpace(a.Cwd)
 	if dir == "" {
@@ -366,13 +380,13 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	if eng := mow.EngineFromContext(ctx); eng != nil {
 		resolved, err := eng.ResolvePath(dir)
 		if err != nil {
-			return "", fmt.Errorf("acp_delegate: cwd %q escapes path jail: %w", dir, err)
+			return "", fmt.Errorf("delegate: cwd %q escapes path jail: %w", dir, err)
 		}
 		dir = resolved
 	} else if t.workspace != "" {
 		resolved, err := resolveInWorkspace(t.workspace, dir)
 		if err != nil {
-			return "", fmt.Errorf("acp_delegate: cwd %q escapes workspace", dir)
+			return "", fmt.Errorf("delegate: cwd %q escapes workspace", dir)
 		}
 		dir = resolved
 	}
@@ -454,7 +468,7 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 			return "", delegatePromptError(spec.Name, spec.TimeoutSec, alive, err)
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(pctx.Err(), context.Canceled) {
-			return "", fmt.Errorf("acp_delegate: agent %q cancelled (host turn aborted; session/cancel sent)", spec.Name)
+			return "", fmt.Errorf("delegate: agent %q cancelled (host turn aborted; session/cancel sent)", spec.Name)
 		}
 		return "", err
 	}
@@ -518,7 +532,7 @@ func extractPeerSummary(reply string) string {
 }
 
 func delegatePromptError(agent string, timeoutSec int, alive bool, err error) error {
-	msg := fmt.Sprintf("acp_delegate: agent %q timed out after %ds (session/cancel sent; peer alive=%v)", agent, timeoutSec, alive)
+	msg := fmt.Sprintf("delegate: agent %q timed out after %ds (session/cancel sent; peer alive=%v)", agent, timeoutSec, alive)
 	if err != nil && err.Error() != "" {
 		msg += ": " + err.Error()
 	}

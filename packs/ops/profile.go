@@ -49,7 +49,7 @@ type Profile struct {
 	Model   string `yaml:"model"`
 	Wire    string `yaml:"wire"`
 	BaseURL string `yaml:"base_url"`
-	// Workspace optional default for acp_delegate path jail (parent of peer dirs).
+	// Workspace optional default for delegate path jail (parent of peer dirs).
 	// Empty = no workspace jail on peers registered from this profile alone.
 	Workspace string `yaml:"workspace"`
 	// Every is the default interval for `mow ops run` (e.g. "5m"). CLI --every wins.
@@ -57,7 +57,7 @@ type Profile struct {
 	// RunPrompt is the default user prompt for `mow ops run`. CLI --prompt wins.
 	// If empty, a built-in observer prompt is used (prompt.md is still system).
 	RunPrompt string `yaml:"prompt"`
-	// ACP peers for acp_delegate — self-contained in this profile.
+	// ACP peers for delegate — self-contained in this profile.
 	ACP ProfileACP `yaml:"acp"`
 	// Prompt is prompt.md contents (not from yaml).
 	Prompt string `yaml:"-"`
@@ -390,7 +390,7 @@ func (p Profile) systemAppend() string {
 	}
 	b.WriteString("Prefer ops_logs for evidence; ops_action only for allowlisted argv in the profile; ")
 	b.WriteString("ops_incident for durable work items (open/update/close with stable signatures); ")
-	b.WriteString("acp_delegate to a service's acp peer when code or config in that repo can fix the issue. ")
+	b.WriteString("delegate to a service's ACP peer when code or config in that repo can fix the issue. ")
 	b.WriteString("Open incidents only for problems that need attention; close when fixed or stale.")
 	// Dependencies only pay off if they change behavior, so say what to do
 	// with them: correlate rather than ticket each downstream symptom.
@@ -406,7 +406,7 @@ func (p Profile) systemAppend() string {
 	return b.String()
 }
 
-// registerProfileACP merges profile acp.agents into acp_delegate.
+// registerProfileACP merges profile acp.agents into delegate.
 func registerProfileACP(p Profile, workspace string) {
 	if len(p.ACP.Agents) == 0 {
 		return

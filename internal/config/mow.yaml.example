@@ -166,26 +166,18 @@ session:
 #         command: node
 #         args: ["/path/to/start.mjs"]
 #         min_turns: 5       # optional turn activation threshold (default 0)
-#   cmdhook:
-#     plugins:
-#       context-mode:
-#         root: /path/to/plugin
-#         hooks_file: hooks/hooks.json
-#         min_turns: 5
 #   acp:
-#     # External peers (any ACP command). "Subagent" in other harnesses = named agent here.
+#     # Named peers for delegate. command = external ACP; model = native mow acp.
 #     agents:
 #       - name: peer-agent
 #         command: [env, ANTHROPIC_MODEL=claude-sonnet-4, npx, -y, "@agentclientprotocol/claude-agent-acp"]
+#         # timeout_sec: 300
+#       - name: reviewer
+#         model: gpt-5-mini
 #         # timeout_sec: 600
-#     # Native mow multi-model peers → mow acp --model … (same acp_delegate tool)
-#     mow_agents:
-#       peer-agent:
-#         model: gpt-5-mini      # required
-#         # allow_write: true       # default true
-#         # allow_shell: true       # default true
-#         # timeout_sec: 600        # default 600
-#         # effort: high            # optional --effort on the peer
+#         # effort: high
+#         # allow_write: true       # omit to inherit host (capped by host)
+#         # allow_shell: true
 #         # dir: /abs/path
 #         # extra_args: [--stream]
 #   job:
@@ -219,6 +211,6 @@ session:
 #     # Then: mow ops run api-stack --once
 
 
-# Claude Code plugin hooks: extensions.cmdhook above (packs/cmdhook). Same
-# trust bar as shell. The single-plugin shape (root + hooks_file) still works
-# when you only have one plugin.
+# Agent Plugin hooks: drop a folder under $MOW_HOME/plugins/<id> with
+# plugin.json and optional hooks/hooks.json. packs/cmdhook loads those
+# automatically (no extensions.cmdhook). Same trust bar as shell.

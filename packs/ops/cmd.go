@@ -70,7 +70,7 @@ Profiles: $MOW_HOME/ops/<name>/
   incidents/    durable work items (open → fix → close)
 
 Each mow ops run tick: scan logs/status → ticket real issues → restart and/or
-acp_delegate peers to fix code → update/close incidents. Not log-classify only.
+delegate peers to fix code → update/close incidents. Not log-classify only.
 
 Profile name is always explicit (first arg after the verb, or -p/--ops, or MOW_OPS).
 
@@ -105,7 +105,7 @@ Examples:
   MOW_OPS=fleet mow ops run fleet   # same; name still required on run
 
 Tools (agent): ops_services, ops_logs, ops_action, ops_incident,
-  ops_health, ops_log_pattern, ops_runbook; plus acp_delegate when the
+  ops_health, ops_log_pattern, ops_runbook; plus delegate when the
   profile declares acp.agents / service.acp.
 
 Job vs ops: mow job list is schedules.yaml only. mow ops run NAME is a
@@ -533,11 +533,11 @@ func runOnce(ef cliutil.EngineFlags, name, prompt string) int {
 
 func defaultOpsRunPrompt(name string) string {
 	// Each ops run tick is an autonomous SRE turn: detect → ticket → remediate
-	// (restart and/or acp_delegate peers) → close. Not a log classifier.
+	// (restart and/or delegate peers) → close. Not a log classifier.
 	return fmt.Sprintf(
 		"You are the continuous fleet ops agent for profile %q (ops=%s / MOW_OPS). "+
 			"Mission: keep services healthy — monitor logs and status, open incidents only for issues that need attention, "+
-			"then fix them (ops_action restart when stuck; acp_delegate to the service's peer for code/config fixes). "+
+			"then fix them (ops_action restart when stuck; delegate to the service's peer for code/config fixes). "+
 			"Workflow each tick: (1) ops_incident list (2) ops_action status per service (3) ops_logs with greps for ERROR/WARN/panic/5xx/timeout "+
 			"(4) for each real problem: open/update incident with a stable signature, take a remediation step, note it on the incident "+
 			"(5) close or mark mitigated when fixed or clearly stale. "+

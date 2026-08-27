@@ -145,7 +145,7 @@ func New(opt Options) (*Engine, error) {
 	// lookup entirely — Workspace must be an existing directory when set.
 	//
 	// Resolve the profile before pre-New extension setup so its config.yaml
-	// participates in config-driven registration (e.g. acp_delegate peers).
+	// participates in config-driven registration (e.g. delegate peers).
 	// Path-only BeforeNew hooks receive the profile via OverlayConfigPaths
 	// (the overlay path is passed even when config.yaml is absent, so
 	// plugin MCP/hooks still discover $MOW_HOME/workspaces/<name>/plugins/).
