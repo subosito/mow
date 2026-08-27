@@ -225,6 +225,12 @@ alias) for pass-one models, `--verifier` for the single pass-two judge.
 Slash `/review` and `/sec` run against the session engine only — they do not
 start an ensemble. ACP / `delegate` is denied in the review jail.
 
+### Plugin install
+
+Install is **asp** (sibling tool), not a mow pack. Discovery stays in the
+Engine: drop a folder into `$MOW_HOME/plugins` (or a workspace profile /
+trusted `.mow/plugins`) and mow loads it. `/plugins` is ACP `plugin.list`.
+
 ## Interactive slash commands (`slash`)
 
 A pack can own a command a user types into an interactive session. Registering

@@ -9,10 +9,21 @@ import (
 	"strings"
 )
 
+// PluginManifestRelPaths are the only manifests we accept, in preference
+// order: portable Agent Plugins, agentsstandard .plugin/, Claude Code.
+// Vendor trees like .codex-plugin / .kimi-plugin are ignored.
+func PluginManifestRelPaths() []string {
+	return []string{
+		"plugin.json",
+		filepath.Join(".plugin", "plugin.json"),
+		filepath.Join(".claude-plugin", "plugin.json"),
+	}
+}
+
 // PluginInfo is one Agent Plugin (https://agent-plugins.org/specification):
-// a folder with plugin.json (or .claude-plugin/plugin.json) that may ship
-// skills/, hooks/, and mcpServers. Skills load here; MCP and cmdhook consume
-// MCPServers / HooksFile from host-owned roots only.
+// a folder with plugin.json, .plugin/plugin.json, or .claude-plugin/plugin.json
+// that may ship skills/, hooks/, and mcpServers. Skills load here; MCP and
+// cmdhook consume MCPServers / HooksFile from host-owned roots only.
 type PluginInfo struct {
 	// ID is the on-disk directory name (stable key).
 	ID string
@@ -214,10 +225,7 @@ func readPlugin(dir, id string) (PluginInfo, bool) {
 }
 
 func readPluginManifest(dir string) ([]byte, error) {
-	for _, rel := range []string{
-		"plugin.json",
-		filepath.Join(".claude-plugin", "plugin.json"),
-	} {
+	for _, rel := range PluginManifestRelPaths() {
 		raw, err := os.ReadFile(filepath.Join(dir, rel))
 		if err == nil {
 			return raw, nil
@@ -292,25 +300,28 @@ func resolveHooksFile(dir string) string {
 	return ""
 }
 
-// HostOwnedPluginRoots is $MOW_HOME/plugins plus workspace-profile plugins/
-// directories derived from overlay config paths. A profile overlay is
-// recognized from $MOW_HOME/workspaces/<name>/config.yaml even when that
-// file does not exist (plugins-only profiles). Project .mow/plugins is not
-// included — skills may load from there; MCP and hooks must not auto-spawn
-// from the workspace.
+// HostOwnedPluginRoots is $MOW_HOME/plugins, workspace-profile plugins/,
+// then ~/.agents/plugins and ~/.claude/plugins (asp install targets).
+// Project .mow/plugins is not included — skills may load from there; MCP and
+// hooks must not auto-spawn from the workspace.
 func HostOwnedPluginRoots(home string, configPaths []string) []string {
 	home = strings.TrimSpace(home)
 	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		p = filepath.Clean(strings.TrimSpace(p))
+		if p == "" || p == "." || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
 	if home != "" {
-		out = append(out, filepath.Join(home, "plugins"))
+		add(filepath.Join(home, "plugins"))
 	}
 	ws := ""
 	if home != "" {
 		ws = filepath.Join(filepath.Clean(home), "workspaces")
-	}
-	seen := map[string]bool{}
-	for _, p := range out {
-		seen[p] = true
 	}
 	for _, p := range configPaths {
 		p = strings.TrimSpace(p)
@@ -325,12 +336,11 @@ func HostOwnedPluginRoots(home string, configPaths []string) []string {
 		if ws == "" || filepath.Dir(dir) != ws {
 			continue
 		}
-		plug := filepath.Join(dir, "plugins")
-		if seen[plug] {
-			continue
-		}
-		seen[plug] = true
-		out = append(out, plug)
+		add(filepath.Join(dir, "plugins"))
+	}
+	if h, err := os.UserHomeDir(); err == nil && strings.TrimSpace(h) != "" {
+		add(filepath.Join(h, ".agents", "plugins"))
+		add(filepath.Join(h, ".claude", "plugins"))
 	}
 	return out
 }

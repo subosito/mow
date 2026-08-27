@@ -208,3 +208,63 @@ func TestExplicitSkillsSelectorOffNoDouble(t *testing.T) {
 		t.Errorf("skill 'docker' appears %d times when selector off + explicit, want 1", c)
 	}
 }
+
+func TestAgentsStandardSkillsAreFallback(t *testing.T) {
+	user := t.TempDir()
+	t.Setenv("HOME", user)
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("skills:\n  selector: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdSkills := filepath.Join(user, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Join(stdSkills, "shared"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stdSkills, "shared", "SKILL.md"), []byte("STD_SHARED"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(stdSkills, "mine"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stdSkills, "mine", "SKILL.md"), []byte("STD_MINE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mowSkills := filepath.Join(home, "skills", "mine")
+	if err := os.MkdirAll(mowSkills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mowSkills, "SKILL.md"), []byte("MOW_MINE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var sawSys string
+	eng, err := mow.New(mow.Options{
+		LoadUserConfig: true,
+		NoSession:      true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			for _, m := range messages {
+				if m.Role == "system" {
+					sawSys = m.Content
+				}
+			}
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Prompt(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sawSys, "STD_SHARED") {
+		t.Fatalf("missing shared standard skill:\n%s", sawSys)
+	}
+	if !strings.Contains(sawSys, "MOW_MINE") {
+		t.Fatalf("mow skill should win:\n%s", sawSys)
+	}
+	if strings.Contains(sawSys, "STD_MINE") {
+		t.Fatalf("standard skill shadowed mow:\n%s", sawSys)
+	}
+}

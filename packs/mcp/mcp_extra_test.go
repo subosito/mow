@@ -686,6 +686,39 @@ func TestConfigResolvedAndFallbackFiles(t *testing.T) {
 	}
 }
 
+func TestLoadHomeMCPFilesOverlay(t *testing.T) {
+	user := t.TempDir()
+	t.Setenv("HOME", user)
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	if err := os.MkdirAll(filepath.Join(user, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	std := `{"mcpServers":{"shared":{"command":"from-std"},"both":{"command":"std-both"}}}`
+	if err := os.WriteFile(filepath.Join(user, ".agents", "mcp-settings.json"), []byte(std), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mowFile := `{"mcpServers":{"both":{"command":"mow-both"}}}`
+	if err := os.WriteFile(filepath.Join(home, "mcp.json"), []byte(mowFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadHomeMCPFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := got.resolved()
+	byName := map[string]string{}
+	for _, s := range res {
+		byName[s.Name] = s.Command
+	}
+	if byName["shared"] != "from-std" {
+		t.Fatalf("shared=%q", byName["shared"])
+	}
+	if byName["both"] != "mow-both" {
+		t.Fatalf("both=%q want mow overlay", byName["both"])
+	}
+}
+
 func TestWorkspaceRootFromConfigPaths(t *testing.T) {
 	ws := "/tmp/repo"
 	got := workspaceRootFromConfigPaths([]string{

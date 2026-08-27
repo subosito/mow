@@ -61,3 +61,14 @@ func PluginsDir() string {
 func AgentsPath() string {
 	return filepath.Join(Home(), "AGENTS.md")
 }
+
+// AgentsStandardDir is ~/.agents — shared agent home (AGENTS.md, skills/,
+// mcp-settings.json). Distinct from Home() ($MOW_HOME). Empty if the user
+// home cannot be resolved. Hermetic engines must not read this directory.
+func AgentsStandardDir() string {
+	h, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(h) == "" {
+		return ""
+	}
+	return filepath.Join(h, ".agents")
+}

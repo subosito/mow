@@ -33,6 +33,20 @@ func TestHomeMOW_HOME(t *testing.T) {
 	}
 }
 
+func TestAgentsStandardDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(config.EnvHome, filepath.Join(home, ".mow"))
+	got := config.AgentsStandardDir()
+	want := filepath.Join(home, ".agents")
+	if got != want {
+		t.Fatalf("AgentsStandardDir()=%q want %q", got, want)
+	}
+	if got == config.Home() {
+		t.Fatal("AgentsStandardDir must not equal Home()")
+	}
+}
+
 func TestHomeTildeExpand(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {

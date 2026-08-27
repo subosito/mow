@@ -155,7 +155,7 @@ func reservedCLIToken(name string) bool {
 	switch n {
 	case "run", "tty", "trust", "doctor", "approvals", "models", "version", "help",
 		"rpc", "ops", "repl", "acp", "goal", "review", "sec", "job", "proc",
-		"mcp", "media", "focus":
+		"mcp", "media", "focus", "plugin":
 		return true
 	}
 	if _, ok := ext.LookupCommand(n); ok {
@@ -289,7 +289,7 @@ Core:
 			}
 		}
 		printCmdGroup("Extensions (this binary):", extensions)
-		printCmdGroup("Packs (this binary):", packs)
+		printCmdGroup("Packs (this binary):", preferFirst(packs, "mcp"))
 	}
 	fmt.Fprintf(os.Stderr, `Flags: --config --workspace --model --effort --base-url --extra-root
        --allow-shell --allow-write --sandbox --max-turns --stream --verbose
@@ -298,6 +298,19 @@ Core:
 Env:   MOW_HOME  MOW_API_KEY  MOW_MODEL  MOW_BASE_URL  MOW_WIRE  MOW_EFFORT%s
 
 `, packEnvHelp())
+}
+
+// preferFirst puts the named command first and keeps the rest in order.
+func preferFirst(cmds []ext.Command, name string) []ext.Command {
+	var first, rest []ext.Command
+	for _, c := range cmds {
+		if c.Name == name {
+			first = append(first, c)
+		} else {
+			rest = append(rest, c)
+		}
+	}
+	return append(first, rest...)
 }
 
 // packEnvHelp is env that only exists when the matching pack is linked

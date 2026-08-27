@@ -65,6 +65,21 @@ func TestPluginAlwaysSkillsBecomeDefaults(t *testing.T) {
 	}
 }
 
+func TestListPluginsReadsDotPluginManifest(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "std")
+	if err := os.MkdirAll(filepath.Join(dir, ".plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".plugin", "plugin.json"), []byte(`{"name":"std"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := ListPlugins([]string{root})
+	if len(got) != 1 || got[0].ID != "std" || got[0].Name != "std" {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestListPluginsSkipsFolderWithoutManifest(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "not-a-plugin", "skills"), 0o755); err != nil {
@@ -124,9 +139,15 @@ func TestHostOwnedPluginRootsSkipsProjectDotMow(t *testing.T) {
 	}
 	project := filepath.Join(t.TempDir(), ".mow", "config.yaml")
 	got := HostOwnedPluginRoots(home, []string{profile, project})
+	uh, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{
 		filepath.Join(home, "plugins"),
 		filepath.Join(home, "workspaces", "mow", "plugins"),
+		filepath.Join(uh, ".agents", "plugins"),
+		filepath.Join(uh, ".claude", "plugins"),
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %v want %v", got, want)
@@ -137,9 +158,15 @@ func TestHostOwnedPluginRootsIncludesProfileWithoutConfigFile(t *testing.T) {
 	home := t.TempDir()
 	overlay := filepath.Join(home, "workspaces", "mow", "config.yaml")
 	got := HostOwnedPluginRoots(home, []string{overlay})
+	uh, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{
 		filepath.Join(home, "plugins"),
 		filepath.Join(home, "workspaces", "mow", "plugins"),
+		filepath.Join(uh, ".agents", "plugins"),
+		filepath.Join(uh, ".claude", "plugins"),
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %v want %v", got, want)

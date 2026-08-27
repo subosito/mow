@@ -409,6 +409,7 @@ func New(opt Options) (*Engine, error) {
 	if opt.LoadUserConfig {
 		if contextload.ProjectTrusted(cfg.Workspace) {
 			skillDirs = append(skillDirs, filepath.Join(cfg.Workspace, ".mow", "skills"))
+			skillDirs = append(skillDirs, filepath.Join(cfg.Workspace, ".agents", "skills"))
 		} else if _, serr := os.Stat(filepath.Join(cfg.Workspace, ".mow")); serr == nil {
 			// The trust cue is a user-facing hint, not log noise: emit it as a
 			// plain stderr line unless the host configured its own logger.
@@ -427,6 +428,13 @@ func New(opt Options) (*Engine, error) {
 			if activeProfile.HasPlugins() {
 				pluginRoots = append(pluginRoots, workspacePluginRoot)
 			}
+		}
+		if std := config.AgentsStandardDir(); std != "" {
+			pluginRoots = append(pluginRoots, filepath.Join(std, "plugins"))
+			skillDirs = append(skillDirs, filepath.Join(std, "skills"))
+		}
+		if h, err := os.UserHomeDir(); err == nil && strings.TrimSpace(h) != "" {
+			pluginRoots = append(pluginRoots, filepath.Join(h, ".claude", "plugins"))
 		}
 		if contextload.ProjectTrusted(cfg.Workspace) {
 			projectPluginRoot = filepath.Join(cfg.Workspace, ".mow", "plugins")

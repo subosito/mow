@@ -9,23 +9,24 @@ import (
 	"github.com/subosito/mow/internal/config"
 )
 
-// Load walks from workspace up to root collecting AGENTS.md and CLAUDE.md,
-// then prepends optional global $MOW_HOME/AGENTS.md (default ~/.mow/AGENTS.md).
+// Load walks from workspace up to root collecting instruction files, then
+// prepends optional global layers when includeGlobal is true:
+// ~/.agents/AGENTS.md (shared base) then $MOW_HOME/AGENTS.md (mow overlay).
 func Load(workspace string) (string, error) {
 	return LoadWithExtras(workspace)
 }
 
-// LoadHermetic is Load without the global $MOW_HOME/AGENTS.md layer. Used by
-// hermetic Engine construction (Options.LoadUserConfig=false) so embedding
-// never pulls operator-home instructions. Workspace-chain AGENTS/CLAUDE files
-// still load (they are project files, not user-home state).
+// LoadHermetic is Load without global home files (~/.agents/AGENTS.md and
+// $MOW_HOME/AGENTS.md). Used by hermetic Engine construction
+// (Options.LoadUserConfig=false) so embedding never pulls operator-home
+// instructions. Workspace-chain files still load (project files).
 func LoadHermetic(workspace string) (string, error) {
 	return loadAgents(workspace, false)
 }
 
 // LoadWithExtras is Load with extra AGENTS-style files inserted between the
-// global $MOW_HOME/AGENTS.md and the workspace chain (e.g. a workspace
-// profile's AGENTS.md: more specific than global, less than the workspace).
+// global home files and the workspace chain (e.g. a workspace profile's
+// AGENTS.md: more specific than global, less than the workspace).
 func LoadWithExtras(workspace string, extraPaths ...string) (string, error) {
 	return loadAgents(workspace, true, extraPaths...)
 }
@@ -33,18 +34,17 @@ func LoadWithExtras(workspace string, extraPaths ...string) (string, error) {
 func loadAgents(workspace string, includeGlobal bool, extraPaths ...string) (string, error) {
 	var parts []string
 	if includeGlobal {
-		if b, err := os.ReadFile(config.AgentsPath()); err == nil {
-			if s := strings.TrimSpace(string(b)); s != "" {
+		if std := config.AgentsStandardDir(); std != "" {
+			if s := readTrimmed(filepath.Join(std, "AGENTS.md")); s != "" {
 				parts = append(parts, s)
 			}
 		}
+		if s := readTrimmed(config.AgentsPath()); s != "" {
+			parts = append(parts, s)
+		}
 	}
 	for _, p := range extraPaths {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		if s := strings.TrimSpace(string(b)); s != "" {
+		if s := readTrimmed(p); s != "" {
 			parts = append(parts, s)
 		}
 	}
@@ -52,17 +52,20 @@ func loadAgents(workspace string, includeGlobal bool, extraPaths ...string) (str
 	if err != nil {
 		return "", err
 	}
-	var chain []string
+	var layers [][]string
 	for {
-		for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
-			p := filepath.Join(dir, name)
-			b, err := os.ReadFile(p)
-			if err != nil {
-				continue
+		var layer []string
+		for _, rel := range []string{
+			filepath.Join(".agents", "AGENTS.md"),
+			"AGENTS.md",
+			"CLAUDE.md",
+		} {
+			if s := readTrimmed(filepath.Join(dir, rel)); s != "" {
+				layer = append(layer, s)
 			}
-			if s := strings.TrimSpace(string(b)); s != "" {
-				chain = append(chain, s)
-			}
+		}
+		if len(layer) > 0 {
+			layers = append(layers, layer)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -70,11 +73,19 @@ func loadAgents(workspace string, includeGlobal bool, extraPaths ...string) (str
 		}
 		dir = parent
 	}
-	// root-first then deeper: reverse chain so closer files win later in prompt
-	for i := len(chain) - 1; i >= 0; i-- {
-		parts = append(parts, chain[i])
+	// root-first then deeper so closer files sit later in the prompt
+	for i := len(layers) - 1; i >= 0; i-- {
+		parts = append(parts, layers[i]...)
 	}
 	return strings.Join(parts, "\n\n"), nil
+}
+
+func readTrimmed(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // ProjectTrusted reports whether the workspace has opted into project-local

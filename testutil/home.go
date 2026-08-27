@@ -5,12 +5,13 @@ import (
 	"testing"
 )
 
-// Run pins MOW_HOME to a temp dir, runs m, then exits.
+// Run pins HOME and MOW_HOME to a temp dir, runs m, then exits.
 func Run(m *testing.M) {
 	dir, err := os.MkdirTemp("", "mow-home-*")
 	if err != nil {
 		panic(err)
 	}
+	_ = os.Setenv("HOME", dir)
 	_ = os.Setenv("MOW_HOME", dir)
 	code := m.Run()
 	_ = os.RemoveAll(dir)
@@ -23,6 +24,7 @@ func RunWithProvider(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	_ = os.Setenv("HOME", dir)
 	_ = os.Setenv("MOW_HOME", dir)
 	_ = os.Setenv("MOW_API_KEY", "test-key")
 	_ = os.Setenv("MOW_MODEL", "gpt-5-mini")

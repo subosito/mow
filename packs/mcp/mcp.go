@@ -2,7 +2,7 @@
 //
 // Config (first match wins):
 //  1. extensions.mcp in -config / $MOW_HOME/config.yaml / trusted .mow/config.yaml
-//  2. $MOW_HOME/mcp.json, then $MOW_HOME/mcp.yaml (user home; not project .mow)
+//  2. $MOW_HOME/mcp.json, then $MOW_HOME/mcp.yaml, overlaying ~/.agents/mcp-settings.json
 //  3. trusted workspace-root mcp.json (the ecosystem file next to the repo)
 //
 // Both the standard mcpServers map and a servers list are accepted.
@@ -123,18 +123,11 @@ func registerAll(configPaths ...string) error {
 		// (BeforeNew paths include $MOW_HOME/config.yaml). Hermetic embedding
 		// must not start MCP servers from the operator home.
 		if extcfg.IncludesUserConfig(configPaths) {
-			// Fallback files: $MOW_HOME/mcp.json (standard filename) then mcp.yaml.
-			// yaml.v3 parses JSON, so one decoder handles both.
-			for _, name := range []string{"mcp.json", "mcp.yaml"} {
-				raw, rerr := os.ReadFile(filepath.Join(mow.Home(), name))
-				if rerr != nil {
-					continue
-				}
-				if err := yaml.Unmarshal(raw, &c); err != nil {
-					return fmt.Errorf("mcp: %s: %w", name, err)
-				}
-				break
+			home, herr := loadHomeMCPFiles()
+			if herr != nil {
+				return herr
 			}
+			c = home
 		}
 	}
 	if len(c.Servers) == 0 && len(c.MCPServers) == 0 {
@@ -143,6 +136,71 @@ func registerAll(configPaths ...string) error {
 		}
 	}
 	return RegisterServers(mergePluginMCPServers(c.resolved(), configPaths))
+}
+
+// loadHomeMCPFiles reads ~/.agents/mcp-settings.json then overlays
+// $MOW_HOME/mcp.json (or mcp.yaml). Mow names replace shared ones.
+func loadHomeMCPFiles() (Config, error) {
+	var base Config
+	if std := agentsStandardMCPPath(); std != "" {
+		if raw, err := os.ReadFile(std); err == nil {
+			if err := yaml.Unmarshal(raw, &base); err != nil {
+				return Config{}, fmt.Errorf("mcp: %s: %w", std, err)
+			}
+		}
+	}
+	var over Config
+	for _, name := range []string{"mcp.json", "mcp.yaml"} {
+		path := filepath.Join(mow.Home(), name)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if err := yaml.Unmarshal(raw, &over); err != nil {
+			return Config{}, fmt.Errorf("mcp: %s: %w", name, err)
+		}
+		return overlayMCP(base, over), nil
+	}
+	return base, nil
+}
+
+func agentsStandardMCPPath() string {
+	h, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(h) == "" {
+		return ""
+	}
+	return filepath.Join(h, ".agents", "mcp-settings.json")
+}
+
+func overlayMCP(base, over Config) Config {
+	out := map[string]ServerConfig{}
+	order := make([]string, 0)
+	for _, s := range base.resolved() {
+		k := strings.ToLower(strings.TrimSpace(s.Name))
+		if k == "" {
+			continue
+		}
+		if _, ok := out[k]; !ok {
+			order = append(order, k)
+		}
+		out[k] = s
+	}
+	for _, s := range over.resolved() {
+		k := strings.ToLower(strings.TrimSpace(s.Name))
+		if k == "" {
+			continue
+		}
+		if _, ok := out[k]; !ok {
+			order = append(order, k)
+		}
+		out[k] = s
+	}
+	servers := make(map[string]ServerConfig, len(out))
+	for _, k := range order {
+		s := out[k]
+		servers[s.Name] = s
+	}
+	return Config{MCPServers: servers}
 }
 
 // loadWorkspaceMCPJSON reads <workspace>/mcp.json when the project is trusted.
@@ -162,9 +220,11 @@ func loadWorkspaceMCPJSON(configPaths []string, c *Config) error {
 	if err != nil {
 		return nil
 	}
-	if err := yaml.Unmarshal(raw, c); err != nil {
+	var wsCfg Config
+	if err := yaml.Unmarshal(raw, &wsCfg); err != nil {
 		return fmt.Errorf("mcp: %s: %w", path, err)
 	}
+	*c = overlayMCP(*c, wsCfg)
 	return nil
 }
 

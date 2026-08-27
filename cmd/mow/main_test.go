@@ -64,7 +64,7 @@ func TestLeanHelpListsLeanCommands(t *testing.T) {
 			t.Errorf("mow mcp must list under Packs, not Extensions:\n%s", extHelp)
 		}
 	}
-	for _, notWant := range []string{"mow goal", "mow ops", "mow review", "mow job", "mow media", "mow proc"} {
+	for _, notWant := range []string{"mow goal", "mow ops", "mow review", "mow job", "mow media", "mow proc", "mow plugin"} {
 		if strings.Contains(output, notWant) {
 			t.Errorf("lean help unexpectedly lists %q:\n%s", notWant, output)
 		}

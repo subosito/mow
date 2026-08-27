@@ -47,6 +47,64 @@ func TestLoadHierarchy(t *testing.T) {
 	}
 }
 
+func TestLoadAgentsStandardThenMow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MOW_HOME", filepath.Join(home, ".mow"))
+	if err := os.MkdirAll(filepath.Join(home, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".mow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".agents", "AGENTS.md"), []byte("STD_BASE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".mow", "AGENTS.md"), []byte("MOW_GLOBAL"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".agents", "AGENTS.md"), []byte("PROJ_BASE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "AGENTS.md"), []byte("PROJ_ACTIVE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := []int{
+		strings.Index(got, "STD_BASE"),
+		strings.Index(got, "MOW_GLOBAL"),
+		strings.Index(got, "PROJ_BASE"),
+		strings.Index(got, "PROJ_ACTIVE"),
+	}
+	for i, v := range idx {
+		if v < 0 {
+			t.Fatalf("missing part %d in:\n%s", i, got)
+		}
+		if i > 0 && idx[i] < idx[i-1] {
+			t.Fatalf("order %d before %d in:\n%s", i, i-1, got)
+		}
+	}
+
+	hermetic, err := LoadHermetic(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(hermetic, "STD_BASE") || strings.Contains(hermetic, "MOW_GLOBAL") {
+		t.Fatalf("hermetic leaked home files:\n%s", hermetic)
+	}
+	if !strings.Contains(hermetic, "PROJ_BASE") || !strings.Contains(hermetic, "PROJ_ACTIVE") {
+		t.Fatalf("hermetic missing project files:\n%s", hermetic)
+	}
+}
+
 func TestLoadEmptyOrMissingWorkspace(t *testing.T) {
 	t.Setenv("MOW_HOME", t.TempDir())
 
