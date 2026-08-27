@@ -1,11 +1,16 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/subosito/mow"
+	"github.com/subosito/mow/slash"
 )
+
+const maxTranscriptRunes = 32 << 10
 
 // extraCapabilities is advertised under agentCapabilities.experimental so a
 // power client (mowi) can feature-detect without a second protocol. Generic
@@ -21,6 +26,8 @@ func extraCapabilities() map[string]any {
 		"status":     true,
 		"context":    true,
 		"proc":       true,
+		"ping":       true,
+		"slash":      true,
 	}
 }
 
@@ -29,12 +36,13 @@ func extraMethodNames() []string {
 		"steer", "compact", "rewind",
 		"skill.list", "skill.activate", "plugin.list",
 		"transcript", "status", "context", "proc.list",
+		"ping", "slash",
 	}
 }
 
 // handleExtra serves optional unprefixed methods on the same ACP connection.
 // Returns false when req.Method is not an extra (caller emits -32601).
-func (a *agentServer) handleExtra(req request) bool {
+func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 	switch req.Method {
 	case "steer":
 		var p struct {
@@ -170,10 +178,15 @@ func (a *agentServer) handleExtra(req request) bool {
 			if role != "user" && role != "assistant" {
 				continue
 			}
-			msgs = append(msgs, map[string]any{
-				"role":    role,
-				"content": m.Content,
-			})
+			content := m.Content
+			if utf8.RuneCountInString(content) > maxTranscriptRunes {
+				content = string([]rune(content)[:maxTranscriptRunes])
+			}
+			row := map[string]any{"role": role, "content": content}
+			if !m.Timestamp.IsZero() {
+				row["ts"] = m.Timestamp.UTC().Format("2006-01-02T15:04:05Z")
+			}
+			msgs = append(msgs, row)
 		}
 		a.write(response{
 			JSONRPC: "2.0", ID: req.ID,
@@ -183,9 +196,11 @@ func (a *agentServer) handleExtra(req request) bool {
 	case "status":
 		st := a.eng.Status()
 		out := map[string]any{
-			"busy":        st.Busy,
-			"allow_write": st.AllowWrite,
-			"allow_shell": st.AllowShell,
+			"busy":         st.Busy,
+			"allow_write":  st.AllowWrite,
+			"allow_shell":  st.AllowShell,
+			"ask_mode":     a.askMode(),
+			"pending_perm": len(a.pending),
 		}
 		if st.RunID != "" {
 			out["run_id"] = st.RunID
@@ -203,6 +218,8 @@ func (a *agentServer) handleExtra(req request) bool {
 			out["wire"] = st.Wire
 		}
 		out["extra_roots"] = extraRootRows(a.eng)
+		out["extra_roots_rw"] = len(a.eng.ExtraRoots())
+		out["extra_roots_ro"] = len(a.eng.ExtraRootsReadOnly())
 		out["procs"] = procRows(a.eng)
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: out})
 		return true
@@ -221,6 +238,12 @@ func (a *agentServer) handleExtra(req request) bool {
 			out["remaining"] = max(lim.ContextWindow-used, 0)
 			out["percent"] = float64(used) / float64(lim.ContextWindow) * 100
 		}
+		if lim.InputPrice > 0 {
+			out["input_price"] = lim.InputPrice
+		}
+		if lim.OutputPrice > 0 {
+			out["output_price"] = lim.OutputPrice
+		}
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: out})
 		return true
 	case "proc.list":
@@ -229,9 +252,89 @@ func (a *agentServer) handleExtra(req request) bool {
 			Result: map[string]any{"items": procRows(a.eng)},
 		})
 		return true
+	case "ping":
+		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: "pong"})
+		return true
+	case "slash":
+		a.handleSlashExtra(parent, req)
+		return true
 	default:
 		return false
 	}
+}
+
+func (a *agentServer) askMode() bool {
+	if a == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	sid := a.activeSID
+	if sid == "" {
+		for id := range a.sessions {
+			sid = id
+			break
+		}
+	}
+	if s := a.sessions[sid]; s != nil {
+		return s.mode == ModeAsk
+	}
+	return false
+}
+
+func (a *agentServer) handleSlashExtra(ctx context.Context, req request) {
+	var p struct {
+		Name  string   `json:"name"`
+		Args  []string `json:"args"`
+		Color bool     `json:"color"`
+	}
+	_ = json.Unmarshal(req.Params, &p)
+	token := strings.TrimSpace(p.Name)
+	if token == "" {
+		a.write(response{
+			JSONRPC: "2.0", ID: req.ID,
+			Error: &rpcError{Code: errInvalid, Message: "slash requires params.name"},
+		})
+		return
+	}
+	cmd, ok := slash.Lookup(token)
+	if !ok {
+		a.write(response{
+			JSONRPC: "2.0", ID: req.ID,
+			Error: &rpcError{Code: errMethod, Message: "unknown slash command " + token},
+		})
+		return
+	}
+	if slash.IsHelpArgs(p.Args) {
+		a.write(response{
+			JSONRPC: "2.0", ID: req.ID,
+			Result: map[string]any{"title": "/" + cmd.Name, "body": cmd.Usage},
+		})
+		return
+	}
+	if cmd.Exclusive && a.eng.Status().Busy {
+		a.write(response{
+			JSONRPC: "2.0", ID: req.ID,
+			Error: &rpcError{Code: errInvalid, Message: "exclusive slash command cannot run while a turn is in flight"},
+		})
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	res, err := cmd.Run(ctx, slash.Request{
+		Name:      cmd.Name,
+		Invoked:   strings.TrimPrefix(token, "/"),
+		Args:      p.Args,
+		Engine:    a.eng,
+		Workspace: a.eng.Workspace(),
+		Color:     p.Color,
+	})
+	out := map[string]any{"title": res.Title, "body": res.Body}
+	if err != nil {
+		out["error"] = err.Error()
+	}
+	a.write(response{JSONRPC: "2.0", ID: req.ID, Result: out})
 }
 
 func extraRootRows(eng *mow.Engine) []map[string]any {
@@ -239,21 +342,11 @@ func extraRootRows(eng *mow.Engine) []map[string]any {
 	if eng == nil {
 		return rows
 	}
-	ro := map[string]bool{}
-	for _, p := range eng.ExtraRootsReadOnly() {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		ro[p] = true
-		rows = append(rows, map[string]any{"path": p, "read_only": true})
+	for _, path := range eng.ExtraRoots() {
+		rows = append(rows, map[string]any{"path": path, "read_only": false})
 	}
-	for _, p := range eng.ExtraRoots() {
-		p = strings.TrimSpace(p)
-		if p == "" || ro[p] {
-			continue
-		}
-		rows = append(rows, map[string]any{"path": p, "read_only": false})
+	for _, path := range eng.ExtraRootsReadOnly() {
+		rows = append(rows, map[string]any{"path": path, "read_only": true})
 	}
 	return rows
 }

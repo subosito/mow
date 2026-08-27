@@ -843,7 +843,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		t.kill()
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
 	default:
-		if a.handleExtra(req) {
+		if a.handleExtra(parent, req) {
 			return
 		}
 		a.write(response{

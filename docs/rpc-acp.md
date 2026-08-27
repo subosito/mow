@@ -57,8 +57,8 @@ Status:
 | Permission prompt | `perm.ask` + `perm.decide` | agent→client `session/request_permission` | same + `title` / `subject` | steal |
 | Always-allow | `decision: always` (this tool, session) | `allow_always` option | `allow_always` / `reject_always` | same |
 | Slash list | `slash.list` (name, exclusive, aliases) | `available_commands_update` | same | shape |
-| Slash run | `slash` method (`help` without Run, `{title,body,error}`) | `"/name …"` inside `session/prompt` | same | **rpc** |
-| Exclusive while busy | `slash` refuses | not specified | not specified | **rpc** |
+| Slash run | extra `slash` (`help` without Run, `{title,body,error}`) | extra `slash` when advertised; else `"/name …"` in `session/prompt` | same | **extra** |
+| Exclusive while busy | `slash` refuses | extra `slash` refuses when busy | not specified | **extra** |
 | Steer | `steer` | — | — | **extra** |
 | Ephemeral `/btw` | `prompt.ephemeral` | — | — | **rpc** |
 | Compact / rewind | `compact`, `rewind` | — | — | **extra** |
@@ -88,9 +88,11 @@ or `extension.config` of a generic ACP client. Those are optional methods on
 the same `mow acp` connection (`agentCapabilities.experimental` /
 `agentCapabilities.extras`: `steer`, `compact`, `rewind`, `skill.list`,
 `skill.activate`, `plugin.list`, `transcript`, `status`, `context`,
-`proc.list`). Power clients feature-detect; unknown methods stay `-32601`.
-RPC still exposes them until mowi speaks ACP. Theme / `extension.config`
-stay host-local. Exclusive slash and ephemeral prompt stay RPC-only.
+`proc.list`, `ping`, `slash`). Power clients feature-detect; unknown
+methods stay `-32601`. RPC still exposes them until mowi speaks ACP.
+Theme / `extension.config` stay host-local. Ephemeral prompt stays
+RPC-only. Exclusive slash is the extra `slash` method (busy refuse),
+not `"/name"` inside `session/prompt`.
 
 ## What RPC steals (epoch 1, additive)
 

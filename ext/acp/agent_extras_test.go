@@ -67,12 +67,12 @@ func TestAgentExtrasInitializeAndMethods(t *testing.T) {
 	if err := json.Unmarshal(msg["result"], &init); err != nil {
 		t.Fatalf("decode initialize: %v", err)
 	}
-	for _, name := range []string{"steer", "compact", "rewind", "skill", "plugin", "transcript", "status", "context", "proc"} {
+	for _, name := range []string{"steer", "compact", "rewind", "skill", "plugin", "transcript", "status", "context", "proc", "ping", "slash"} {
 		if v, ok := init.AgentCapabilities.Experimental[name]; !ok || v != true {
 			t.Fatalf("experimental.%s=%v want true", name, v)
 		}
 	}
-	for _, name := range []string{"steer", "compact", "rewind", "skill.list", "skill.activate", "plugin.list", "transcript", "status", "context", "proc.list"} {
+	for _, name := range []string{"steer", "compact", "rewind", "skill.list", "skill.activate", "plugin.list", "transcript", "status", "context", "proc.list", "ping", "slash"} {
 		found := false
 		for _, extra := range init.AgentCapabilities.Extras {
 			if extra == name {
@@ -262,12 +262,26 @@ func TestAgentExtrasInitializeAndMethods(t *testing.T) {
 				}
 			},
 		},
+		{
+			method: "ping",
+			params: map[string]any{},
+			check: func(t *testing.T, result json.RawMessage) {
+				t.Helper()
+				var pong string
+				if err := json.Unmarshal(result, &pong); err != nil || pong != "pong" {
+					t.Fatalf("ping result=%s err=%v", result, err)
+				}
+			},
+		},
 	} {
 		got, err := cl.call(ctx, tc.method, tc.params)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.method, err)
 		}
 		tc.check(t, got["result"])
+	}
+	if err := cl.callOK(ctx, "slash", map[string]any{"name": "nosuch"}); err == nil {
+		t.Fatal("unknown slash should fail")
 	}
 
 	stop, usage, err := cl.prompt(ctx, sid, "hi")
