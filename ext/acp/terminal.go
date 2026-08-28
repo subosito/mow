@@ -34,12 +34,6 @@ func (a *agentServer) createTerminal(sessionID, command string, args []string, c
 	if !a.eng.AllowShell() {
 		return nil, fmt.Errorf("shell not enabled (allow_shell / --allow-shell)")
 	}
-	a.mu.Lock()
-	if s := a.sessions[sessionID]; s != nil && s.mode == ModeAsk {
-		a.mu.Unlock()
-		return nil, fmt.Errorf("terminal denied: session mode is ask (read-only)")
-	}
-	a.mu.Unlock()
 	ws := a.eng.Workspace()
 	if command == "" {
 		command = "bash"

@@ -26,6 +26,26 @@ func TestFormatPeerToolProgress(t *testing.T) {
 	}
 }
 
+func TestToolCallAttachesResult(t *testing.T) {
+	cases := []struct {
+		kind string
+		want bool
+	}{
+		{"read", false},
+		{"Glob", false},
+		{" grep ", false},
+		{"write", true},
+		{"edit", true},
+		{"bash", true},
+		{"delegate", true},
+	}
+	for _, c := range cases {
+		if got := toolCallAttachesResult(c.kind); got != c.want {
+			t.Fatalf("toolCallAttachesResult(%q)=%v want %v", c.kind, got, c.want)
+		}
+	}
+}
+
 func TestToolCallKindTitle(t *testing.T) {
 	cases := []struct {
 		tool, args string

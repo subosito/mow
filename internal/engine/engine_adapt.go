@@ -388,6 +388,19 @@ func isReadOnlyTool(name string, extRO map[string]bool) bool {
 	return extRO[n]
 }
 
+func filterReadOnlyAgentTools(tools []agent.Tool, extRO map[string]bool) []agent.Tool {
+	if len(tools) == 0 {
+		return tools
+	}
+	keep := make([]agent.Tool, 0, len(tools))
+	for _, t := range tools {
+		if t != nil && isReadOnlyTool(t.Name(), extRO) {
+			keep = append(keep, t)
+		}
+	}
+	return keep
+}
+
 // BuiltinReadInspectTools are the standard read-only inspection builtins.
 // Strict review prompts should pass these as PromptOpts.AllowedTools together
 // with ReadOnly so extension/MCP tools never appear in specs or execute.

@@ -125,6 +125,11 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	if len(allowed) > 0 {
 		tools = filterAgentToolsByAllowed(tools, allowed)
 	}
+	// Ask / PromptOpts.ReadOnly: do not advertise write/edit/bash (or other
+	// mutating tools) to the model. AllowTool remains the exec backstop.
+	if opt.ReadOnly {
+		tools = filterReadOnlyAgentTools(tools, readOnlyExt)
+	}
 
 	// Cancellable run context + stable id for hosts/orchestrators.
 	// Clear stale guidance BEFORE the run is observable: once beginRun marks

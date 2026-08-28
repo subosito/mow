@@ -225,10 +225,10 @@ type PromptOpts struct {
 	// SystemAppend is merged into the system prompt for this call only
 	// (after config/skills/SessionStart appends).
 	SystemAppend string
-	// ReadOnly allows only side-effect-free tools for this call (ACP "ask"
-	// mode): builtin read/glob/grep, understand_*, and ext tools that declare
-	// ReadOnly() true (e.g. MCP tools with readOnlyHint). Everything else —
-	// including pack and MCP tools without the marker — is denied.
+	// ReadOnly allows only side-effect-free tools for this call (engine
+	// --read-only / PromptOpts.ReadOnly): builtin read/glob/grep, understand_*,
+	// and ext tools that declare ReadOnly() true (e.g. MCP readOnlyHint).
+	// Everything else — pack and MCP tools without the marker — is denied.
 	ReadOnly bool
 	// ExtraTools are available only for this Prompt (appended after engine tools).
 	// Used by packs like goal for goal_report so the tool is not always visible

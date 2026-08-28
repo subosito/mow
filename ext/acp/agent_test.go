@@ -64,6 +64,116 @@ func TestAgentRoundTrip(t *testing.T) {
 	_ = aw.Close()
 }
 
+func TestAgentToolCallUpdateOmitsReadBodyKeepsEdit(t *testing.T) {
+	readBody := strings.Repeat("package foo\n", 80)
+	editBody := "--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n"
+	var eng *mow.Engine
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			eng.Emit(mow.Event{
+				Type: mow.EventToolEnd, Tool: "read", ToolCallID: "r1",
+				Args: json.RawMessage(`{"path":"foo.go"}`), Result: readBody, DurationMs: 12,
+			})
+			eng.Emit(mow.Event{
+				Type: mow.EventToolEnd, Tool: "glob", ToolCallID: "g1",
+				Args: json.RawMessage(`{"pattern":"**/*.go"}`), Result: "a.go\nb.go", DurationMs: 40,
+			})
+			eng.Emit(mow.Event{
+				Type: mow.EventToolEnd, Tool: "grep", ToolCallID: "s1",
+				Args: json.RawMessage(`{"pattern":"TODO"}`), Result: "foo.go:1:TODO", DurationMs: 8,
+			})
+			eng.Emit(mow.Event{
+				Type: mow.EventToolEnd, Tool: "edit", ToolCallID: "e1",
+				Args: json.RawMessage(`{"path":"foo.go"}`), Result: editBody, DurationMs: 5,
+			})
+			return mow.Message{Role: "assistant", Content: "done"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	go func() {
+		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
+		_ = cw.Close()
+	}()
+	cl := newPipeClient(cr, aw)
+	var mu sync.Mutex
+	var updates []map[string]any
+	cl.onNotify = func(method string, params json.RawMessage) {
+		if method != "session/update" {
+			return
+		}
+		var p map[string]any
+		if json.Unmarshal(params, &p) != nil {
+			return
+		}
+		mu.Lock()
+		updates = append(updates, p)
+		mu.Unlock()
+	}
+	go cl.readLoop()
+
+	if err := cl.callOK(ctx, "initialize", map[string]any{"protocolVersion": 1}); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	sid, err := cl.sessionNew(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("session/new: %v", err)
+	}
+	if _, _, err := cl.prompt(ctx, sid, "hi"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+
+	ends := map[string]map[string]any{}
+	mu.Lock()
+	for _, p := range updates {
+		u, _ := p["update"].(map[string]any)
+		if u == nil {
+			continue
+		}
+		if fmt.Sprint(u["sessionUpdate"]) != "tool_call_update" {
+			continue
+		}
+		kind := fmt.Sprint(u["kind"])
+		ends[kind] = u
+	}
+	mu.Unlock()
+
+	for _, kind := range []string{"read", "glob", "grep"} {
+		u := ends[kind]
+		if u == nil {
+			t.Fatalf("missing tool_call_update for %s: %v", kind, ends)
+		}
+		if _, ok := u["rawOutput"]; ok {
+			t.Fatalf("%s rawOutput present: %v", kind, u)
+		}
+		if _, ok := u["content"]; ok {
+			t.Fatalf("%s content present: %v", kind, u)
+		}
+		if _, ok := u["duration_ms"]; !ok {
+			t.Fatalf("%s missing duration_ms: %v", kind, u)
+		}
+	}
+	edit := ends["edit"]
+	if edit == nil {
+		t.Fatalf("missing edit update: %v", ends)
+	}
+	if fmt.Sprint(edit["rawOutput"]) != editBody {
+		t.Fatalf("edit rawOutput=%v", edit["rawOutput"])
+	}
+	if _, ok := edit["duration_ms"]; !ok {
+		t.Fatalf("edit missing duration_ms: %v", edit)
+	}
+	cancel()
+	_ = aw.Close()
+}
+
 func TestSessionCancelDuringPrompt(t *testing.T) {
 	eng, err := mow.New(mow.Options{
 		NoSession: true,

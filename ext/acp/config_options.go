@@ -153,7 +153,7 @@ func modeConfigOption(current string) map[string]any {
 	return map[string]any{
 		"id":           configIDMode,
 		"name":         "Mode",
-		"description":  "Ask = read-only tools; Code = full tools allowed by process policy",
+		"description":  "Ask = confirm power tools; Code = use them if the process has them",
 		"category":     "mode",
 		"type":         "select",
 		"currentValue": current,
@@ -161,12 +161,12 @@ func modeConfigOption(current string) map[string]any {
 			{
 				"value":       ModeAsk,
 				"name":        "Ask",
-				"description": "Read-only: no write/edit/bash for this session",
+				"description": "Confirm before write/edit/bash (does not disable tools)",
 			},
 			{
 				"value":       ModeCode,
 				"name":        "Code",
-				"description": "Full tool access allowed by the mow process policy",
+				"description": "Use write/shell if the engine has them",
 			},
 		},
 	}

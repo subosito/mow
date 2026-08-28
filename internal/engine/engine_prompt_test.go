@@ -66,3 +66,43 @@ func TestPromptReadOnlyDeniesWrite(t *testing.T) {
 		t.Fatal("expected write denied in tool result")
 	}
 }
+
+func TestPromptReadOnlyOmitsPowerToolsFromSpecs(t *testing.T) {
+	var specs []string
+	eng, err := mow.New(mow.Options{
+		NoSession:  true,
+		AllowWrite: true,
+		AllowShell: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			specs = specs[:0]
+			for _, ts := range tools {
+				specs = append(specs, ts.Function.Name)
+			}
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.PromptWith(context.Background(), "inspect", mow.PromptOpts{ReadOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(specs, ",")
+	for _, name := range []string{"write", "edit", "bash"} {
+		for _, got := range specs {
+			if got == name {
+				t.Fatalf("read-only prompt still advertised %s: %s", name, joined)
+			}
+		}
+	}
+	hasRead := false
+	for _, got := range specs {
+		if got == "read" {
+			hasRead = true
+			break
+		}
+	}
+	if !hasRead {
+		t.Fatalf("read-only prompt dropped read: %s", joined)
+	}
+}

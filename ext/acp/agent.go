@@ -459,7 +459,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		}
 		// writeToolCall emits ACP tool_call / tool_call_update so hosts can show
 		// "read engine.go" / "grep foo in pkg/" instead of bare "→ read".
-		writeToolCall := func(updateKind, callID, kind, title, status string, args json.RawMessage, result string) {
+		writeToolCall := func(updateKind, callID, kind, title, status string, args json.RawMessage, result string, durationMs int64) {
 			if kind == "" && title == "" {
 				return
 			}
@@ -473,7 +473,10 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			if len(args) > 0 && string(args) != "null" {
 				update["rawInput"] = json.RawMessage(args)
 			}
-			if result != "" {
+			if durationMs > 0 {
+				update["duration_ms"] = durationMs
+			}
+			if result != "" && toolCallAttachesResult(kind) {
 				update["rawOutput"] = result
 				update["content"] = []map[string]any{
 					{"type": "content", "content": map[string]any{"type": "text", "text": result}},
@@ -511,14 +514,14 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				})
 			case mow.EventToolStart:
 				kind, title := toolCallKindTitle(ev.Tool, ev.Args)
-				writeToolCall("tool_call", ev.ToolCallID, kind, title, "in_progress", ev.Args, "")
+				writeToolCall("tool_call", ev.ToolCallID, kind, title, "in_progress", ev.Args, "", 0)
 			case mow.EventToolEnd:
 				kind, title := toolCallKindTitle(ev.Tool, ev.Args)
 				status := "completed"
 				if ev.Denied || strings.TrimSpace(ev.Error) != "" {
 					status = "failed"
 				}
-				writeToolCall("tool_call_update", ev.ToolCallID, kind, title, status, ev.Args, ev.Result)
+				writeToolCall("tool_call_update", ev.ToolCallID, kind, title, status, ev.Args, ev.Result, ev.DurationMs)
 			case mow.EventCompactStart:
 				a.emitSessionUpdate(p.SessionID, map[string]any{
 					"sessionUpdate": "compact_start",
@@ -548,8 +551,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		})
 		popt := mow.PromptOpts{Ephemeral: p.Ephemeral}
 		if mode == ModeAsk {
-			popt.ReadOnly = true
-			popt.SystemAppend = "Session mode is ask (read-only): do not use write, edit, or bash. Prefer read/glob/grep and explanations."
+			popt.SystemAppend = "Session mode is ask: confirm with the operator before write, edit, or bash."
 		}
 		res, err := a.eng.PromptWith(ctx, text, popt)
 		unsub()
@@ -771,6 +773,17 @@ func (a *agentServer) write(v any) {
 	defer a.encMu.Unlock()
 	enc := json.NewEncoder(a.out)
 	_ = enc.Encode(v)
+}
+
+// toolCallAttachesResult is false for read/glob/grep: those bodies are
+// session history only. write/edit (and bash) still go on the wire for cards.
+func toolCallAttachesResult(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "read", "glob", "grep":
+		return false
+	default:
+		return true
+	}
 }
 
 func (a *agentServer) emitSessionUpdate(sid string, update map[string]any) {

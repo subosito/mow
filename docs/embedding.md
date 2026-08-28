@@ -180,7 +180,7 @@ Rules that keep you out of trouble:
 - Colliding with a **builtin** name (`read`/`glob`/`grep`/`write`/`edit`/`bash`)
   is an error — the jailed builtins can't be replaced.
 - Implement `ReadOnly() bool` returning `true` if the tool has no side effects,
-  so it stays available in read-only prompts (ACP "ask" mode, `PromptOpts.ReadOnly`).
+  so it stays available in read-only prompts (`PromptOpts.ReadOnly` / engine `--read-only`).
 
 `Exec` returns the string the model sees. Return an `error` for a *hard*
 failure that should abort the run; return a normal string describing the

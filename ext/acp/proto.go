@@ -165,7 +165,7 @@ func (u *sessionUpdate) UnmarshalJSON(data []byte) error {
 // Session modes advertised to the client (Zed mode switcher).
 const (
 	ModeCode = "code" // full tools per engine policy
-	ModeAsk  = "ask"  // read-only tools for this session's prompts
+	ModeAsk  = "ask"  // confirm before write/edit/bash; tools stay if registered
 
 	// ApprovalPrompt asks the editor before each power tool (default).
 	// ApprovalAlways skips session/request_permission; still gated
@@ -178,11 +178,11 @@ func availableModes() []map[string]any {
 	return []map[string]any{
 		{
 			"id": ModeAsk, "name": "Ask",
-			"description": "Read-only: no write/edit/bash for this session",
+			"description": "Confirm before write/edit/bash (tools stay if the engine has them)",
 		},
 		{
 			"id": ModeCode, "name": "Code",
-			"description": "Full tool access allowed by the mow process policy",
+			"description": "Use write/shell if the engine has them",
 		},
 	}
 }
