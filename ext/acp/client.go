@@ -236,18 +236,18 @@ func (c *Client) Close() error {
 	if cmd != nil && cmd.Process != nil {
 		killPeerTree(cmd)
 		if exited != nil {
-			// The reaper goroutine owns cmd.Wait; wait for it to finish.
+			// cursor-agent ignores SIGTERM; do not park Prompt-end for 3s.
 			select {
 			case <-exited:
-			case <-time.After(3 * time.Second):
+			case <-time.After(200 * time.Millisecond):
 				killPeerTreeHard(cmd)
 				select {
 				case <-exited:
 				case <-time.After(2 * time.Second):
-					// Reaper stuck — do not block dropPeer forever.
 				}
 			}
 		} else {
+			killPeerTreeHard(cmd)
 			_, _ = cmd.Process.Wait()
 		}
 	}

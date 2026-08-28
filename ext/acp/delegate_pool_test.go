@@ -75,6 +75,30 @@ func TestEvictIdlePeers(t *testing.T) {
 	}
 }
 
+func TestIdleReaperDropsUnusedPeer(t *testing.T) {
+	c, cleanup := fakePeerClient()
+	defer cleanup()
+	tool := &delegateTool{
+		peerIdle: 20 * time.Millisecond,
+		peers: map[string]*peerSlot{
+			"k": {client: c, sessionID: "s1", lastUsed: time.Now().Add(-time.Second)},
+		},
+	}
+	tool.ensureReaper()
+	defer tool.closeAll()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		tool.peersMu.Lock()
+		n := len(tool.peers)
+		tool.peersMu.Unlock()
+		if n == 0 && !c.Alive() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("idle reaper did not close unused peer")
+}
+
 func TestCloseAllDropsPooledClient(t *testing.T) {
 	c, cleanup := fakePeerClient()
 	defer cleanup()

@@ -6,7 +6,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -33,6 +35,51 @@ func TestCloseAllKillsProcessGroup(t *testing.T) {
 	}
 	assertProcessGone(t, parent, "pooled peer")
 	assertProcessGone(t, child, "peer child")
+}
+
+func TestDropPeersKillsProcessGroup(t *testing.T) {
+	parent, child, c := startSleepingTree(t)
+	tool := &delegateTool{
+		peers: map[string]*peerSlot{
+			"k": {client: c, sessionID: "s1", lastUsed: time.Now()},
+		},
+	}
+	tool.dropPeers()
+	if len(tool.peers) != 0 {
+		t.Fatalf("peers after dropPeers: %v", tool.peers)
+	}
+	assertProcessGone(t, parent, "dropped peer")
+	assertProcessGone(t, child, "dropped peer child")
+}
+
+func TestPromptEndDropsEnginePeer(t *testing.T) {
+	eng, err := mow.New(mow.Options{
+		Workspace: t.TempDir(),
+		NoSession: true,
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "done"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	parent, child, c := startSleepingTree(t)
+	tool := &delegateTool{
+		peers: map[string]*peerSlot{
+			"k": {client: c, sessionID: "s1", lastUsed: time.Now()},
+		},
+	}
+	eng.AddOnEvent(func(ev mow.Event) {
+		if ev.Type == mow.EventRunEnd {
+			tool.dropPeers()
+		}
+	})
+	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	assertProcessGone(t, parent, "peer after Prompt")
+	assertProcessGone(t, child, "peer child after Prompt")
 }
 
 // TestEngineCloseKillsPooledPeer is the RegisterFromEngine path: cleanup
@@ -86,6 +133,54 @@ func TestReleaseSharedPeersKillsPooledClient(t *testing.T) {
 	releaseSharedPeers(42)
 	assertProcessGone(t, parent, "shared peer")
 	assertProcessGone(t, child, "shared peer child")
+}
+
+func TestPeerDiesWhenParentProcessExits(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Pdeathsig is Linux-only")
+	}
+	if os.Getenv("MOW_ACP_SPAWN_PEER") == "1" {
+		c := &Client{Command: []string{"sleep", "60"}}
+		if err := c.startProcess(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		path := os.Getenv("MOW_ACP_SPAWN_PEER_PID")
+		if path == "" || os.WriteFile(path, []byte(strconv.Itoa(c.cmd.Process.Pid)), 0o600) != nil {
+			os.Exit(1)
+		}
+		os.Exit(0) // skip Close: parent death must reap the peer
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(t.TempDir(), "peer.pid")
+	cmd := exec.Command(exe, "-test.run=^TestPeerDiesWhenParentProcessExits$")
+	cmd.Env = append(os.Environ(), "MOW_ACP_SPAWN_PEER=1", "MOW_ACP_SPAWN_PEER_PID="+pidFile)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("spawner: %v\n%s", err, out)
+	}
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("peer pid file: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 {
+		t.Fatalf("peer pid from spawner: %q (%v)", raw, err)
+	}
+	t.Cleanup(func() {
+		if processAlive(pid) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	deadline := time.Now().Add(3 * time.Second)
+	for processAlive(pid) {
+		if time.Now().After(deadline) {
+			t.Fatalf("peer pid %d survived parent exit (Pdeathsig not delivered)", pid)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func startSleepingTree(t *testing.T) (parent, child int, c *Client) {

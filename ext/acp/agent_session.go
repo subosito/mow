@@ -149,6 +149,8 @@ func (a *agentServer) handleSessionClose(req request) {
 	for _, t := range drop {
 		t.release()
 	}
+	// Do not block the RPC on peer SIGKILL (cursor-agent ignores TERM).
+	go dropSharedPeers()
 	a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
 }
 

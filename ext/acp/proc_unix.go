@@ -14,6 +14,7 @@ func setPeerProcAttr(cmd *exec.Cmd) {
 		return
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setPeerDeathSig(cmd)
 }
 
 func signalPeerTree(cmd *exec.Cmd, sig syscall.Signal) {

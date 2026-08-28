@@ -88,6 +88,11 @@ var (
 
 func init() {
 	ext.RegisterGenerationRelease(releaseSharedPeers)
+	// Drop pooled peers when the host Prompt finishes so cursor-agent does
+	// not sit on the tty until quit or the 15m idle timer.
+	ext.RegisterStopSource("acp", func(context.Context, ext.StopEvent) {
+		dropSharedPeers()
+	})
 }
 
 // RegisterFromConfig loads config (same path list as mow.New / BeforeNew) and
@@ -138,17 +143,26 @@ func RegisterFromEngine(eng *mow.Engine) error {
 	if len(indexed) == 0 {
 		return nil
 	}
-	tool := &delegateTool{
-		agents:    indexed,
-		workspace: eng.Workspace(),
-		peerIdle:  peerIdleDuration(c.PeerIdleSec),
-		peers:     map[string]*peerSlot{},
-	}
+	tool := newDelegateTool(indexed, eng.Workspace(), peerIdleDuration(c.PeerIdleSec))
 	if err := eng.AddTool(tool); err != nil {
 		return err
 	}
+	eng.AddOnEvent(func(ev mow.Event) {
+		if ev.Type == mow.EventRunEnd {
+			tool.dropPeers()
+		}
+	})
 	eng.RegisterCleanup(func() { tool.closeAll() })
 	return nil
+}
+
+func dropSharedPeers() {
+	sharedMu.Lock()
+	t := sharedDelegate
+	sharedMu.Unlock()
+	if t != nil {
+		t.dropPeers()
+	}
 }
 
 // replaceSharedAgents installs a new process-global delegate tool from the
@@ -166,12 +180,7 @@ func replaceSharedAgents(agents []PeerSpec, workspace string, peerIdleSec int) e
 		retireShared(old, oldGen)
 		return nil
 	}
-	sharedDelegate = &delegateTool{
-		agents:    indexed,
-		workspace: strings.TrimSpace(workspace),
-		peerIdle:  peerIdleDuration(peerIdleSec),
-		peers:     map[string]*peerSlot{},
-	}
+	sharedDelegate = newDelegateTool(indexed, strings.TrimSpace(workspace), peerIdleDuration(peerIdleSec))
 	sharedGen = ext.BeforeNewGeneration()
 	sharedMu.Unlock()
 	retireShared(old, oldGen)
@@ -230,12 +239,7 @@ func AppendPeers(agents []PeerSpec, workspace string, peerIdleSec int) {
 	sharedMu.Lock()
 	defer sharedMu.Unlock()
 	if sharedDelegate == nil {
-		sharedDelegate = &delegateTool{
-			agents:    map[string]PeerSpec{},
-			workspace: strings.TrimSpace(workspace),
-			peerIdle:  peerIdleDuration(peerIdleSec),
-			peers:     map[string]*peerSlot{},
-		}
+		sharedDelegate = newDelegateTool(map[string]PeerSpec{}, strings.TrimSpace(workspace), peerIdleDuration(peerIdleSec))
 		sharedGen = ext.BeforeNewGeneration()
 	} else if sharedDelegate.workspace == "" && strings.TrimSpace(workspace) != "" {
 		sharedDelegate.workspace = strings.TrimSpace(workspace)
@@ -299,6 +303,75 @@ type delegateTool struct {
 
 	peersMu sync.Mutex
 	peers   map[string]*peerSlot // key: agent\x00dir
+
+	reaperMu   sync.Mutex
+	reaperStop chan struct{}
+	reaperOn   bool
+	closed     bool
+}
+
+func newDelegateTool(agents map[string]PeerSpec, workspace string, peerIdle time.Duration) *delegateTool {
+	if agents == nil {
+		agents = map[string]PeerSpec{}
+	}
+	t := &delegateTool{
+		agents:    agents,
+		workspace: workspace,
+		peerIdle:  peerIdle,
+		peers:     map[string]*peerSlot{},
+	}
+	t.ensureReaper()
+	return t
+}
+
+// ensureReaper ticks idle eviction even when no further delegate call
+// arrives. Without it, a peer lives until Engine.Close (or the next
+// getOrStart), which is how cursor-agent stays up after one task.
+func (t *delegateTool) ensureReaper() {
+	if t == nil || t.peerIdle <= 0 {
+		return
+	}
+	t.reaperMu.Lock()
+	defer t.reaperMu.Unlock()
+	if t.closed || t.reaperOn {
+		return
+	}
+	t.reaperStop = make(chan struct{})
+	t.reaperOn = true
+	stop := t.reaperStop
+	idle := t.peerIdle
+	go func() {
+		d := idle
+		if d > 15*time.Second {
+			d = 15 * time.Second
+		}
+		tick := time.NewTicker(d)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case now := <-tick.C:
+				t.peersMu.Lock()
+				t.evictIdleLocked(now)
+				t.peersMu.Unlock()
+			}
+		}
+	}()
+}
+
+func (t *delegateTool) stopReaper() {
+	if t == nil {
+		return
+	}
+	t.reaperMu.Lock()
+	defer t.reaperMu.Unlock()
+	t.closed = true
+	if t.reaperOn && t.reaperStop != nil {
+		close(t.reaperStop)
+		t.reaperOn = false
+		t.reaperStop = nil
+	}
 }
 
 func (t *delegateTool) Name() string    { return ToolName }
@@ -540,6 +613,7 @@ func delegatePromptError(agent string, timeoutSec int, alive bool, err error) er
 }
 
 func (t *delegateTool) getOrStart(ctx context.Context, spec PeerSpec, dir string, host *hostPeerPolicy, cmd []string, perm, key string) (*peerSlot, error) {
+	t.ensureReaper()
 	if key == "" {
 		key = peerKey(spec.Name, dir, cmd, perm)
 	}
@@ -651,9 +725,9 @@ func (t *delegateTool) dropPeer(key string, slot *peerSlot) {
 	}
 }
 
-// closeAll drops every pooled peer. Does not wait for slot.mu — shutdown
-// must not stall on an in-flight Prompt.
-func (t *delegateTool) closeAll() {
+// dropPeers kills every pooled peer but keeps the tool (next Prompt can
+// spawn again). Does not wait for slot.mu — Prompt-end must not stall.
+func (t *delegateTool) dropPeers() {
 	if t == nil {
 		return
 	}
@@ -670,4 +744,13 @@ func (t *delegateTool) closeAll() {
 		}
 		_ = slot.client.Close()
 	}
+}
+
+// closeAll drops every pooled peer and stops the idle reaper (Engine.Close).
+func (t *delegateTool) closeAll() {
+	if t == nil {
+		return
+	}
+	t.stopReaper()
+	t.dropPeers()
 }

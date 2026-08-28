@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/ext"
@@ -46,7 +45,7 @@ func runCmd(args []string) int {
 		return 1
 	}
 	defer eng.Close() // drop delegate peers
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), acpStopSignals()...)
 	defer stop()
 	if err := Agent(ctx, AgentOptions{Engine: eng, In: os.Stdin, Out: os.Stdout}); err != nil {
 		// Clean EOF/cancel is normal when the editor disconnects.
