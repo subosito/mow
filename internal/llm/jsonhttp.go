@@ -84,14 +84,14 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 			if serverRestarting(err) {
 				refused++
 				if refused > maxConnRefusedAttempts {
-					return 0, nil, err
+					return 0, nil, hostSafeTransport(err)
 				}
 				wait = retryDelayRefused(refused)
 				notifyRetry(c.OnRetry, RetryInfo{Attempt: refused, Delay: wait, Kind: RetryKindUnavailable})
 				continue
 			}
 			if attempt == maxHTTPAttempts {
-				return 0, nil, err
+				return 0, nil, hostSafeTransport(err)
 			}
 			wait = retryDelay(attempt, nil)
 			notifyRetry(c.OnRetry, RetryInfo{Attempt: attempt, Delay: wait, Kind: RetryKindNetwork})
@@ -120,7 +120,7 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 		return lastStatus, lastBody, nil
 	}
 	if lastErr != nil {
-		return 0, nil, lastErr
+		return 0, nil, hostSafeTransport(lastErr)
 	}
 	return 0, nil, fmt.Errorf("llm: request failed after %d attempts", maxHTTPAttempts)
 }

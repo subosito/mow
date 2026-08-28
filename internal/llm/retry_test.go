@@ -221,6 +221,12 @@ func TestDoWithRetrySurvivesConnectionRefused(t *testing.T) {
 	if !errors.Is(err, syscall.ECONNREFUSED) {
 		t.Fatalf("expected ECONNREFUSED, got %v", err)
 	}
+	if strings.Contains(err.Error(), "://") || strings.Contains(err.Error(), "dial tcp") {
+		t.Fatalf("exhausted refused error leaked URL: %v", err)
+	}
+	if !strings.Contains(err.Error(), "provider unavailable") {
+		t.Fatalf("exhausted refused error = %v, want provider unavailable", err)
+	}
 	// The refused budget extends past the generic burst (3) — a pure-refused
 	// stream burns the refused budget + 1 final failing attempt.
 	if got := rt.n; got != maxConnRefusedAttempts+1 || got <= maxHTTPAttempts {
@@ -239,6 +245,9 @@ func TestDoJSONSurvivesConnectionRefused(t *testing.T) {
 	}
 	if !errors.Is(err, syscall.ECONNREFUSED) {
 		t.Fatalf("expected ECONNREFUSED, got %v", err)
+	}
+	if strings.Contains(err.Error(), "://") || strings.Contains(err.Error(), "dial tcp") {
+		t.Fatalf("doJSON exhausted refused error leaked URL: %v", err)
 	}
 	if got := rt.n; got != maxConnRefusedAttempts+1 || got <= maxHTTPAttempts {
 		t.Fatalf("doJSON refused retry window = %d attempts, want %d", got, maxConnRefusedAttempts+1)

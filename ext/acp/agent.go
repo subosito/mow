@@ -537,6 +537,12 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 					"messages_after":  ev.MessagesAfter,
 					"over_budget":     ev.OverBudget,
 				})
+			case mow.EventModelWait:
+				a.emitSessionUpdate(p.SessionID, modelStatusUpdate("model_wait", ev))
+			case mow.EventModelRetry:
+				a.emitSessionUpdate(p.SessionID, modelStatusUpdate("model_retry", ev))
+			case mow.EventModelActive:
+				a.emitSessionUpdate(p.SessionID, modelStatusUpdate("model_active", ev))
 			case mow.EventGoalStart, mow.EventGoalStep, mow.EventGoalDone, mow.EventGoalFail, mow.EventGoalPartial, mow.EventGoalBlocked:
 				update := map[string]any{"sessionUpdate": "goal", "type": string(ev.Type)}
 				if ev.Goal != nil {
@@ -564,7 +570,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			}
 			a.write(response{
 				JSONRPC: "2.0", ID: req.ID,
-				Error: &rpcError{Code: errInternal, Message: err.Error()},
+				Error: &rpcError{Code: errInternal, Message: promptErrorMessage(err)},
 			})
 			return
 		}
@@ -780,6 +786,17 @@ func toolCallAttachesResult(kind string) bool {
 	default:
 		return true
 	}
+}
+
+func modelStatusUpdate(kind string, ev mow.Event) map[string]any {
+	u := map[string]any{"sessionUpdate": kind}
+	if ev.Delta != "" {
+		u["delta"] = ev.Delta
+	}
+	if ev.Model != "" {
+		u["model"] = ev.Model
+	}
+	return u
 }
 
 func (a *agentServer) emitSessionUpdate(sid string, update map[string]any) {

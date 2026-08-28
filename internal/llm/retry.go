@@ -233,14 +233,14 @@ func doWithRetry(hc *http.Client, req *http.Request, attempts int, onRetry func(
 			if serverRestarting(err) {
 				refused++
 				if refused > maxConnRefusedAttempts {
-					return nil, err
+					return nil, hostSafeTransport(err)
 				}
 				wait = retryDelayRefused(refused)
 				notifyRetry(onRetry, RetryInfo{Attempt: refused, Delay: wait, Kind: RetryKindUnavailable})
 				continue
 			}
 			if i == attempts-1 {
-				return nil, err
+				return nil, hostSafeTransport(err)
 			}
 			wait = retryDelay(i+1, nil)
 			notifyRetry(onRetry, RetryInfo{Attempt: i + 1, Delay: wait, Kind: RetryKindNetwork})
@@ -318,6 +318,42 @@ func retryableStatus(code int) bool {
 	return code == http.StatusTooManyRequests || code == http.StatusRequestTimeout ||
 		code == http.StatusBadGateway || code == http.StatusServiceUnavailable ||
 		code == http.StatusGatewayTimeout || code >= 500
+}
+
+// hostSafeError is a transport failure whose Error() never includes URLs,
+// headers, or credentials. Unwrap still yields the original net error so
+// errors.Is(ECONNREFUSED) keeps working.
+type hostSafeError struct {
+	msg   string
+	cause error
+}
+
+func (e *hostSafeError) Error() string { return e.msg }
+func (e *hostSafeError) Unwrap() error { return e.cause }
+
+// hostSafeTransport rewrites a connect/transport error for hosts. Retry
+// copy already stays URL-free; the exhausted error used to dump
+// `Post "http://…": dial tcp …`.
+func hostSafeTransport(err error) error {
+	if err == nil {
+		return nil
+	}
+	var already *hostSafeError
+	if errors.As(err, &already) {
+		return err
+	}
+	if responseHeaderTimedOut(err) || isHeaderTimeout(err) {
+		return err
+	}
+	s := err.Error()
+	if strings.HasPrefix(s, "llm:") {
+		return err
+	}
+	msg := "llm: network error"
+	if serverRestarting(err) {
+		msg = "llm: provider unavailable (connection refused)"
+	}
+	return &hostSafeError{msg: msg, cause: err}
 }
 
 func retryableNetErr(err error) bool {

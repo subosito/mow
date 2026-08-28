@@ -591,3 +591,76 @@ func TestAgentPromptDelegateChunkNotForwardedAsAgentText(t *testing.T) {
 		t.Fatal("missing delegate_chunk extra for nested peer text")
 	}
 }
+
+func TestAgentPromptForwardsModelRetryAndScrubsRefused(t *testing.T) {
+	var eng *mow.Engine
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			eng.Emit(mow.Event{
+				Type:  mow.EventModelRetry,
+				Model: "gpt-5-mini",
+				Delta: "provider unavailable · reconnecting in 1s",
+			})
+			return mow.Message{}, fmt.Errorf(`Post "http://127.0.0.1:9420/v1/responses": dial tcp 127.0.0.1:9420: connect: connection refused`)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	go func() {
+		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
+		_ = cw.Close()
+	}()
+	cl := newPipeClient(cr, aw)
+	var mu sync.Mutex
+	var updates []string
+	cl.onNotify = func(method string, params json.RawMessage) {
+		if method == "session/update" {
+			mu.Lock()
+			updates = append(updates, string(params))
+			mu.Unlock()
+		}
+	}
+	go cl.readLoop()
+
+	if err := cl.callOK(ctx, "initialize", map[string]any{"protocolVersion": 1}); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	sid, err := cl.sessionNew(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("session/new: %v", err)
+	}
+	_, _, err = cl.prompt(ctx, sid, "hi")
+	if err == nil {
+		t.Fatal("expected prompt error")
+	}
+	if !strings.Contains(err.Error(), "provider unavailable (connection refused)") {
+		t.Fatalf("prompt error = %v", err)
+	}
+	if strings.Contains(err.Error(), "://") || strings.Contains(err.Error(), "9420") {
+		t.Fatalf("prompt error leaked endpoint: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	sawRetry := false
+	for _, u := range updates {
+		if strings.Contains(u, `"sessionUpdate":"model_retry"`) || strings.Contains(u, `"sessionUpdate": "model_retry"`) {
+			if !strings.Contains(u, "provider unavailable") {
+				t.Fatalf("model_retry missing copy: %s", u)
+			}
+			sawRetry = true
+		}
+	}
+	if !sawRetry {
+		t.Fatalf("missing model_retry session/update: %v", updates)
+	}
+	cancel()
+	_ = aw.Close()
+}
