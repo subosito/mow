@@ -1,9 +1,15 @@
 package tools
 
 import (
+	"bufio"
+	"context"
+	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -25,16 +31,26 @@ import (
 // anyway. Stopping early keeps a stray `**/*` from stalling the turn.
 const globWalkLimit = 200_000
 
-// skipDirNames are never descended into for a recursive pattern. These hold
-// build output and dependency trees: thousands of files that bury the handful
-// the model actually wants, and on this repo .devenv alone dwarfs the source.
-// A non-recursive pattern is unaffected, so an explicit `.git/*` still works.
+// skipDirNames are never descended into for a recursive glob/grep walk.
+// These are dependency and build trees: thousands of files that bury source
+// and burn the walk/result budget. A non-recursive pattern is unaffected,
+// so an explicit `target/*` or `.git/*` still works.
 var skipDirNames = map[string]bool{
 	".git":         true,
 	"node_modules": true,
 	".devenv":      true,
 	".direnv":      true,
 	"vendor":       true,
+	"target":       true, // rust/java build output
+	"dist":         true,
+	"__pycache__":  true,
+	".venv":        true,
+	"venv":         true,
+	".next":        true,
+	".nuxt":        true,
+	".turbo":       true,
+	".cache":       true,
+	"coverage":     true,
 }
 
 // hasDoublestar reports whether pat contains a ** path segment.
@@ -47,9 +63,97 @@ func hasDoublestar(pat string) bool {
 	return false
 }
 
+// lookupFd is exec.LookPath("fd"); tests may stub it.
+var lookupFd = func() string {
+	for _, name := range []string{"fd", "fdfind"} {
+		p, err := exec.LookPath(name)
+		if err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func globRelToBase(base, pat string) string {
+	b := filepath.ToSlash(base)
+	p := filepath.ToSlash(pat)
+	if p == b || b == "" {
+		return "**"
+	}
+	prefix := b + "/"
+	if strings.HasPrefix(p, prefix) {
+		rel := p[len(prefix):]
+		if rel == "" {
+			return "**"
+		}
+		return rel
+	}
+	return p
+}
+
+func globFd(ctx context.Context, bin, root, pat string) ([]string, bool) {
+	base := walkBase(root, pat)
+	rel := globRelToBase(base, pat)
+	args := []string{
+		"--glob", "--hidden", "--no-ignore", "--absolute-path",
+		"--type", "f",
+		"--max-results", strconv.Itoa(globMaxMatches + 1),
+	}
+	for name := range skipDirNames {
+		args = append(args, "--exclude", name)
+	}
+	args = append(args, "--", rel, base)
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = base
+	cmd.Stderr = io.Discard
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, false
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, false
+	}
+	var out []string
+	sc := bufio.NewScanner(stdout)
+	sc.Buffer(make([]byte, 64*1024), 1<<20)
+	for sc.Scan() {
+		p := strings.TrimSpace(sc.Text())
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+		if len(out) > globMaxMatches {
+			break
+		}
+	}
+	if len(out) > globMaxMatches && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	waitErr := cmd.Wait()
+	if len(out) > 0 || ctx.Err() != nil {
+		sort.Strings(out)
+		if len(out) > globMaxMatches {
+			out = out[:globMaxMatches]
+		}
+		return out, true
+	}
+	if waitErr == nil {
+		return out, true
+	}
+	var ee *exec.ExitError
+	if errors.As(waitErr, &ee) && ee.ExitCode() == 1 {
+		return out, true // fd: no matches
+	}
+	return nil, false
+}
+
 // globRecursive walks root and returns paths matching pat (an absolute
 // pattern). Results are sorted for stable output.
 func globRecursive(root, pat string) ([]string, error) {
+	return globWalk(root, pat)
+}
+
+func globWalk(root, pat string) ([]string, error) {
 	pat = filepath.ToSlash(pat)
 	// Anchor the walk at the deepest literal prefix so `internal/**/x.go`
 	// does not walk the whole workspace.
@@ -74,6 +178,9 @@ func globRecursive(root, pat string) ([]string, error) {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		if !d.Type().IsRegular() && d.Type()&os.ModeSymlink == 0 {
+			return nil // skip sockets/fifos/devices
 		}
 		if matchSegments(segs, strings.Split(filepath.ToSlash(path), "/")) {
 			out = append(out, path)

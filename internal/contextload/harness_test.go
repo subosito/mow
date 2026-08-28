@@ -10,7 +10,7 @@ import (
 func TestDefaultHarnessRules_core(t *testing.T) {
 	s := contextload.DefaultHarnessRules
 	for _, want := range []string{
-		"Prefer read",
+		"Prefer grep",
 		"do not paste",
 		"Never discard uncommitted work",
 		"Continue",

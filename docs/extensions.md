@@ -428,7 +428,7 @@ The soft anti-thrash heuristics are a linked pack, not core loop behavior.
 Blank-importing `packs/focus` (the stock `mow` binary does) installs:
 
 1. view caps — the same `read` window (path+offset+limit), or `bash cat/sed/head/tail`; the call still runs
-2. inventory caps — repeated `git status`/`ls`/`find` degrade, then refuse; `git log`/`show`/`diff` and `rg`/`grep` key on args
+2. inventory caps — repeated `git status`/`ls`/`find` degrade, then refuse; `git log`/`show`/`diff` key on args. Repeated grep/glob tool calls use the same ladder (distinct patterns do not collide)
 3. a soft block on destructive `git`/`rm` that would discard uncommitted work
 4. productive bash (`go test`, `go build`, `git commit`, …) resets the streak
 5. a nag after N consecutive explore-only turns
@@ -445,6 +445,7 @@ extensions:
   focus:
     explore_warn_every: 6      # nag after N explore-only turns
     reread_limit: 1            # repeats of the same view before results degrade
+    survey_read_limit: 12      # unique files read this prompt before further reads cap
     inventory_limit: 2         # inventory calls before results degrade
     hard_inventory_limit: 4    # inventory calls before refusal
     degraded_result_limit: 2000 # cap (chars) on a degraded result body

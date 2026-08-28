@@ -3,6 +3,7 @@ package focus
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -13,18 +14,22 @@ import (
 // model finish, ctx cancel, or MaxTurns. These:
 //  1. degrade repeated views (read + bash cat/sed/head/tail of the same window)
 //  2. degrade then refuse repeated inventory (git status/ls/find; git log/show/diff
-//     and rg/grep keyed by args so distinct subjects do not collide)
+//     keyed by args) and repeated grep/glob (distinct patterns do not collide)
 //  3. soft-block destructive git/rm that discards WIP
 //  4. treat test/build/commit bash as productive (resets explore streak)
 //  5. warn every turn after exploreWarnEvery consecutive explore turns
 //  6. after a successful edit/write, allow one re-read of that path
+//  7. cap unique-file reads this prompt (glob-then-read-every-hit)
 //
 // Defaults preserve the pre-move core behavior exactly. Each is overridable
 // via extensions.focus in config.
 const (
 	defaultExploreWarnEvery = 6
 	defaultRereadLimit      = 1 // second access to the same view degrades (runs, capped)
-	defaultInventoryLimit   = 2 // third identical inventory class degrades
+	// defaultSurveyReadLimit: unique files read this prompt before further
+	// reads are capped. Stops glob-then-read-every-hit from filling history.
+	defaultSurveyReadLimit = 12
+	defaultInventoryLimit  = 2 // third identical inventory class degrades
 	// defaultHardInventoryLimit is where degrading stops and refusal starts:
 	// the model has already been told twice and repeated the listing anyway.
 	defaultHardInventoryLimit = 4
@@ -38,6 +43,7 @@ const (
 type Config struct {
 	ExploreWarnEvery    int `yaml:"explore_warn_every"`
 	RereadLimit         int `yaml:"reread_limit"`
+	SurveyReadLimit     int `yaml:"survey_read_limit"`
 	InventoryLimit      int `yaml:"inventory_limit"`
 	HardInventoryLimit  int `yaml:"hard_inventory_limit"`
 	DegradedResultLimit int `yaml:"degraded_result_limit"`
@@ -49,6 +55,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.RereadLimit <= 0 {
 		c.RereadLimit = defaultRereadLimit
+	}
+	if c.SurveyReadLimit <= 0 {
+		c.SurveyReadLimit = defaultSurveyReadLimit
 	}
 	if c.InventoryLimit <= 0 {
 		c.InventoryLimit = defaultInventoryLimit
@@ -69,8 +78,14 @@ type focusState struct {
 	workspace string // absolute; used to unify abs vs relative paths
 	// view key → times accessed this Prompt (read tool windows + bash file views)
 	reads map[string]int
-	// inventory class key → times (git-status, ls, find, …)
+	// unique file paths read this Prompt (paging the same file does not add)
+	unique map[string]struct{}
+	// inventory class key → times (git-status, ls, find, grep/glob, …)
 	inv map[string]int
+	// lookup key → path it was scoped to (empty = workspace-wide grep/glob)
+	lookupPaths map[string]string
+	// pathKey → size+mtime of the last read/grep of that file
+	stamps map[string]fileStamp
 	// exact tool name+normalized args → times
 	calls map[string]int
 	// consecutive turns whose tools were all explore-only
@@ -85,12 +100,22 @@ type focusState struct {
 func newFocusState(workspace string, cfg Config) *focusState {
 	ws, _ := filepath.Abs(strings.TrimSpace(workspace))
 	return &focusState{
-		workspace: ws,
-		cfg:       cfg.withDefaults(),
-		reads:     make(map[string]int),
-		inv:       make(map[string]int),
-		calls:     make(map[string]int),
+		workspace:   ws,
+		cfg:         cfg.withDefaults(),
+		reads:       make(map[string]int),
+		unique:      make(map[string]struct{}),
+		inv:         make(map[string]int),
+		lookupPaths: make(map[string]string),
+		stamps:      make(map[string]fileStamp),
+		calls:       make(map[string]int),
 	}
+}
+
+// fileStamp is a cheap identity for "has this file changed?". Size+mtime,
+// not a content hash — hashing every re-read would cost more than the guard.
+type fileStamp struct {
+	size  int64
+	mtime int64
 }
 
 // isExploreToolName classifies one tool call as exploration (surveying) or
@@ -183,18 +208,39 @@ func (s *focusState) guardRead(args json.RawMessage) string {
 	if key == "" {
 		return ""
 	}
+	base := s.pathKey(path)
+	cur, stamped := s.stamp(base)
 	s.mu.Lock()
+	if stamped && s.stamps[base] != (fileStamp{}) && s.stamps[base] != cur {
+		// On-disk contents changed since the last view — not a re-read.
+		s.reads[key] = 0
+	}
+	if stamped {
+		s.stamps[base] = cur
+	}
 	n := s.reads[key]
 	s.reads[key] = n + 1
-	s.mu.Unlock()
-	if n < s.cfg.RereadLimit {
-		return ""
+	_, seen := s.unique[base]
+	if !seen && base != "" {
+		s.unique[base] = struct{}{}
 	}
-	return fmt.Sprintf(
-		"(already read %q this prompt — content unchanged; do not re-read. "+
-			"Use the earlier result, then act (edit/write) or finish.)",
-		key,
-	)
+	uniq := len(s.unique)
+	s.mu.Unlock()
+	if n >= s.cfg.RereadLimit {
+		return fmt.Sprintf(
+			"(already read %q this prompt — content unchanged; do not re-read. "+
+				"Use the earlier result, then act (edit/write) or finish.)",
+			key,
+		)
+	}
+	if !seen && s.cfg.SurveyReadLimit > 0 && uniq > s.cfg.SurveyReadLimit {
+		return fmt.Sprintf(
+			"(surveyed %d files this prompt — stop reading the tree. "+
+				"grep for a symbol, or edit/write. Further reads are capped.)",
+			uniq,
+		)
+	}
+	return ""
 }
 
 // readViewKey groups one read-tool window. Omitted offset/limit are 0 so an
@@ -246,6 +292,10 @@ func (s *focusState) guardBash(args json.RawMessage) bashGuard {
 		return bashGuard{Block: "(blocked by harness: discarding uncommitted work is not allowed " +
 			"(git checkout/restore/reset --hard, git clean, rm -rf of project trees). " +
 			"Fix compile/test errors in place with edit/write; do not wipe WIP for green.)"}
+	}
+	if isDiscoverBash(cmd) {
+		return bashGuard{Block: "(use the grep tool for content search, glob for file names. " +
+			"Do not bash rg/grep/find/fd/ls — those dumps re-enter history unbounded.)"}
 	}
 	if key := inventoryKey(cmd); key != "" {
 		s.mu.Lock()
@@ -303,6 +353,81 @@ func (s *focusState) guardBash(args json.RawMessage) bashGuard {
 	)}
 }
 
+// guardLookup is the grep/glob inventory ladder. Distinct patterns (and grep
+// paths) do not share a ledger. Same args degrade then refuse like git-status.
+func (s *focusState) guardLookup(name string, args json.RawMessage) bashGuard {
+	if s == nil {
+		return bashGuard{}
+	}
+	key := lookupKey(s, name, args)
+	if key == "" {
+		return bashGuard{}
+	}
+	scope := ""
+	if name == "grep" {
+		if p := toolArgString(args, "path"); p != "" && p != "." {
+			scope = s.pathKey(p)
+		}
+	}
+	cur, stamped := s.stamp(scope)
+	s.mu.Lock()
+	s.lookupPaths[key] = scope
+	if stamped && s.stamps[scope] != (fileStamp{}) && s.stamps[scope] != cur {
+		delete(s.inv, key)
+	}
+	if stamped && scope != "" {
+		s.stamps[scope] = cur
+	}
+	n := s.inv[key]
+	s.inv[key] = n + 1
+	s.mu.Unlock()
+	kind := "searched"
+	if name == "glob" {
+		kind = "listed"
+	}
+	switch {
+	case n >= s.cfg.HardInventoryLimit:
+		return bashGuard{Block: fmt.Sprintf(
+			"(already %s %q this prompt and was already warned — refusing. "+
+				"Act with edit/write, or finish with a concrete blocker.)",
+			kind, key,
+		)}
+	case n >= s.cfg.InventoryLimit:
+		return bashGuard{Notice: fmt.Sprintf(
+			"(note: already %s %q this prompt — output capped. "+
+				"Change the pattern, or act with edit/write.)",
+			kind, key,
+		)}
+	}
+	return bashGuard{}
+}
+
+// lookupKey groups a grep/glob tool call. Distinct patterns (and grep paths)
+// do not collide. Empty pattern is not a lookup.
+func lookupKey(s *focusState, name string, args json.RawMessage) string {
+	pat := toolArgString(args, "pattern")
+	if pat == "" {
+		return ""
+	}
+	switch name {
+	case "grep":
+		path := toolArgString(args, "path")
+		if path == "" || path == "." {
+			return "grep " + pat
+		}
+		if s != nil {
+			if k := s.pathKey(path); k != "" {
+				path = k
+			}
+		}
+		return "grep " + pat + " " + path
+	case "glob":
+		return "glob " + pat
+	default:
+		return ""
+	}
+}
+
 // degradeToolResult caps a body that only earned a Notice, then prefixes the
 // nudge. Capping is what makes "run it anyway" affordable: the model still
 // gets the head of the real answer without paying full context for a repeat.
@@ -317,8 +442,9 @@ func (s *focusState) degradeToolResult(notice, out string) string {
 	return notice + "\n\n" + out
 }
 
-// forgetPath clears every view of this path so the next read/cat is allowed.
-// Call after a successful edit/write — the on-disk contents changed.
+// forgetPath clears every view of this path so the next read/cat is allowed,
+// and drops grep/glob lookups that covered it (or the whole tree). Call after
+// a successful edit/write — the on-disk contents changed.
 func (s *focusState) forgetPath(path string) {
 	if s == nil {
 		return
@@ -330,12 +456,37 @@ func (s *focusState) forgetPath(path string) {
 	prefix := key + "@"
 	s.mu.Lock()
 	delete(s.reads, key)
+	delete(s.unique, key)
+	delete(s.stamps, key)
 	for k := range s.reads {
 		if strings.HasPrefix(k, prefix) {
 			delete(s.reads, k)
 		}
 	}
+	for k, p := range s.lookupPaths {
+		if p == "" || p == key {
+			delete(s.inv, k)
+			delete(s.lookupPaths, k)
+		}
+	}
 	s.mu.Unlock()
+}
+
+// stamp is size+mtime of a workspace file. Directories and missing paths
+// return ok=false — we cannot cheaply know whether a tree search is stale.
+func (s *focusState) stamp(rel string) (fileStamp, bool) {
+	if s == nil || rel == "" {
+		return fileStamp{}, false
+	}
+	p := rel
+	if s.workspace != "" && !filepath.IsAbs(rel) {
+		p = filepath.Join(s.workspace, rel)
+	}
+	fi, err := os.Stat(p)
+	if err != nil || fi.IsDir() {
+		return fileStamp{}, false
+	}
+	return fileStamp{size: fi.Size(), mtime: fi.ModTime().UnixNano()}, true
 }
 
 func (s *focusState) pathKey(p string) string {
@@ -464,6 +615,17 @@ func looksLikeFind(low string) bool {
 
 func looksLikeSearch(low string) bool {
 	return hasCmdToken(low, "rg") || hasCmdToken(low, "grep") || hasCmdToken(low, "egrep") || hasCmdToken(low, "fgrep")
+}
+
+// isDiscoverBash is a first-call refuse: grep/glob are jailed and capped.
+// Pipelines already classified productive (go test | rg FAIL) pass.
+func isDiscoverBash(cmd string) bool {
+	if isProductiveBash(cmd) {
+		return false
+	}
+	low := strings.ToLower(normalizeBashCmd(cmd))
+	return looksLikeSearch(low) || looksLikeFind(low) || looksLikeLS(low) ||
+		hasCmdToken(low, "fd") || strings.Contains(low, "tree ") || strings.TrimSpace(low) == "tree"
 }
 
 func looksLikePythonListing(low string) bool {
@@ -668,7 +830,8 @@ func (s *focusState) annotateRepeat(name string, args json.RawMessage, out strin
 		if !isExploreBash(cmd) {
 			return out
 		}
-	} else if name != "glob" && name != "grep" {
+	} else {
+		// grep/glob repeats are the lookup ladder (guardLookup), not this note.
 		return out
 	}
 	fp := name + "=" + normalizeArgsFP(name, args)

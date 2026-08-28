@@ -7,7 +7,7 @@ in
   # with the locked toolchain (same posture as sibling Go repos).
   languages.go.enable = true;
 
-  packages = [ pkgs.just pkgs.openssl ];
+  packages = [ pkgs.just pkgs.openssl pkgs.ripgrep pkgs.fd ];
 
   # just build → bin/mow stamped from VERSION; put it first so `mow` resolves.
   enterShell = ''

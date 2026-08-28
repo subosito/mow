@@ -10,15 +10,15 @@
 // Behaviors (all soft — a run is never hard-killed by this pack):
 //  1. degrade repeated views (read tool + bash cat/sed/head/tail of the same window)
 //  2. degrade then refuse repeated inventory (git status/ls/find; git log/show/diff
-//     and rg/grep keyed by args)
+//     keyed by args) and repeated grep/glob (distinct patterns do not collide)
 //  3. block destructive git/rm that discards uncommitted work
 //  4. treat test/build/commit bash as productive (resets the explore streak)
 //  5. nag every turn after N consecutive explore-only turns
 //  6. after a successful edit/write, allow one re-read of that path
+//  7. cap unique-file reads this prompt (survey, not paging)
 //
-// Config: extensions.focus (explore_warn_every, reread_limit, inventory_limit,
-// hard_inventory_limit, degraded_result_limit). Defaults reproduce the exact
-// pre-move core behavior.
+// Config: extensions.focus (explore_warn_every, reread_limit, survey_read_limit,
+// inventory_limit, hard_inventory_limit, degraded_result_limit).
 package focus
 
 import (
@@ -185,7 +185,7 @@ func truncate(s string, maxChars int) string {
 
 var _ = json.RawMessage(nil)
 
-// preTool is the PreTool body: read/bash view notices + bash guard.
+// preTool is the PreTool body: read/grep/glob notices + bash guard.
 func preTool(st *focusState, ctx context.Context, name string, args json.RawMessage, callID string) (ext.PreToolDecision, error) {
 	n := strings.ToLower(strings.TrimSpace(name))
 	// Every call feeds the explore streak, including ones denied below:
@@ -197,6 +197,14 @@ func preTool(st *focusState, ctx context.Context, name string, args json.RawMess
 		// post-tool hook caps the body and prepends the notice.
 		if notice := st.guardRead(args); notice != "" {
 			st.stashNotice(callID, notice)
+		}
+	case "grep", "glob":
+		guard := st.guardLookup(n, args)
+		if guard.blocked() {
+			return ext.PreToolDecision{Deny: true, Message: guard.Block}, nil
+		}
+		if guard.Notice != "" {
+			st.stashNotice(callID, guard.Notice)
 		}
 	case "bash":
 		guard := st.guardBash(args)

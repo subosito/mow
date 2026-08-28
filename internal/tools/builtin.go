@@ -85,12 +85,11 @@ func (t *readTool) Name() string { return "read" }
 func (t *readTool) Description() string {
 	jail := pathJailHint(t.p)
 	paging := " Args: path, optional offset (1-based first line) and limit (max lines) to page through a large file."
+	hint := " Not a tree survey: grep (or a narrow glob) first, then read the file you will change. Prefer this over bash cat/head/tail/sed."
 	if t.p != nil && t.p.Hashline {
-		return "Read a UTF-8 text file " + jail + ". Lines are numbered with short hashes (N:hash|text) for hashline edit." + paging +
-			" Prefer this over bash cat/head/tail/sed for reading source."
+		return "Read a UTF-8 text file " + jail + ". Lines are numbered with short hashes (N:hash|text) for hashline edit." + paging + hint
 	}
-	return "Read a UTF-8 text file " + jail + " (relative → workspace; absolute → must be in jail)." + paging +
-		" Prefer this over bash cat/head/tail/sed for reading source."
+	return "Read a UTF-8 text file " + jail + " (relative → workspace; absolute → must be in jail)." + paging + hint
 }
 func (t *readTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"1-based first line to return (default 1)"},"limit":{"type":"integer","description":"max lines to return (default 2000)"}},"required":["path"]}`)
@@ -329,14 +328,27 @@ func renderReadFrom(r io.Reader, offset, limit int, hashline bool, byteLim int, 
 	return body, nil
 }
 
-type globTool struct{ p *policy.Policy }
+type globTool struct {
+	p *policy.Policy
+	// noFd forces the WalkDir fallback (tests).
+	noFd bool
+	// fdBin, when set, is used instead of PATH lookup (tests: missing/broken fd).
+	fdBin string
+}
 
 // globMaxMatches bounds one glob result.
 const globMaxMatches = 500
 
+// globIndexHint: above this many hits, remind the model glob is an index.
+const globIndexHint = 40
+
 func (t *globTool) Name() string { return "glob" }
 func (t *globTool) Description() string {
-	return "List files matching a glob " + pathJailHint(t.p) + ". Supports ** (recursive, matches zero or more directories). Args: pattern (e.g. **/*.go; absolute under jail OK). Prefer this over bash find/ls: results are bounded and jail-checked."
+	return "List files matching a glob " + pathJailHint(t.p) +
+		". Supports ** (recursive). Args: pattern (e.g. internal/**/*.go; absolute under jail OK). " +
+		"Uses fd when installed (same jail and caps); otherwise a bounded walk. " +
+		"Results are an index (capped) — do not read every path; grep for a symbol, then read 1–3 files you will edit. " +
+		"Prefer a directory-prefixed pattern over **/* . Do not bash find/fd/ls."
 }
 func (t *globTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}`)
@@ -362,7 +374,7 @@ func (t *globTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	var matches []string
 	var err error
 	if hasDoublestar(full) {
-		matches, err = globRecursive(root, full)
+		matches, err = t.globRecursive(ctx, root, full)
 	} else {
 		matches, err = filepath.Glob(full)
 	}
@@ -391,188 +403,33 @@ func (t *globTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 			lines = append(lines, rel)
 		}
 		if len(lines) >= globMaxMatches {
-			lines = append(lines, fmt.Sprintf("…(%d-match limit reached; use a narrower pattern to see the rest)", globMaxMatches))
+			lines = append(lines, fmt.Sprintf("…(%d-match limit; this is an index — grep or read a few files, do not read every path; narrower pattern to see the rest)", globMaxMatches))
 			break
 		}
 	}
 	if len(lines) == 0 {
 		return "(no matches)" + emptyResultHint(t.p, a.Pattern), nil
 	}
-	return strings.Join(lines, "\n"), nil
+	body := strings.Join(lines, "\n")
+	if len(lines) >= globIndexHint && len(lines) < globMaxMatches {
+		body += fmt.Sprintf("\n…(%d files; this is an index — grep or read a few files you will edit, do not read every path)", len(lines))
+	}
+	return body, nil
 }
 
-type grepTool struct{ p *policy.Policy }
-
-const (
-	// grepMaxMatches bounds how many hits we collect while walking.
-	grepMaxMatches = 48
-	// grepMaxFiles bounds how many files appear in one result.
-	grepMaxFiles = 8
-	// grepMaxPerFile bounds hits printed under one file.
-	grepMaxPerFile = 3
-	// grepMaxLineChars bounds ONE hit. Without it a single match inside a
-	// minified bundle, a base64 blob, or a one-line JSON fixture can consume
-	// most of the tool-result budget by itself — the match is what matters,
-	// not the 40 KB of noise around it.
-	grepMaxLineChars = 240
-)
-
-type grepHit struct {
-	Path string
-	Line int
-	Text string
-}
-
-// formatGrepHits groups matches by file so a broad pattern is a file index,
-// not a 100-line dump. Per-file and per-result caps keep the wall of text down.
-func formatGrepHits(hits []grepHit, truncatedWalk bool) string {
-	if len(hits) == 0 {
-		return "(no matches)"
-	}
-	type fileHits struct {
-		path string
-		hits []grepHit
-	}
-	files := make([]fileHits, 0)
-	idx := make(map[string]int, 16)
-	for _, h := range hits {
-		if i, ok := idx[h.Path]; ok {
-			files[i].hits = append(files[i].hits, h)
-			continue
+func (t *globTool) globRecursive(ctx context.Context, root, pat string) ([]string, error) {
+	if !t.noFd {
+		bin := t.fdBin
+		if bin == "" {
+			bin = lookupFd()
 		}
-		idx[h.Path] = len(files)
-		files = append(files, fileHits{path: h.Path, hits: []grepHit{h}})
-	}
-	var b strings.Builder
-	shownFiles := 0
-	for _, f := range files {
-		if shownFiles >= grepMaxFiles {
-			break
-		}
-		shownFiles++
-		fmt.Fprintf(&b, "%s (%d)\n", f.path, len(f.hits))
-		show := len(f.hits)
-		if show > grepMaxPerFile {
-			show = grepMaxPerFile
-		}
-		for i := 0; i < show; i++ {
-			fmt.Fprintf(&b, "  %d:%s\n", f.hits[i].Line, clampGrepLine(f.hits[i].Text))
-		}
-		if extra := len(f.hits) - show; extra > 0 {
-			fmt.Fprintf(&b, "  …(+%d more in this file)\n", extra)
-		}
-	}
-	hiddenFiles := len(files) - shownFiles
-	if hiddenFiles > 0 || truncatedWalk || len(hits) >= grepMaxMatches {
-		note := "narrow the pattern or pass a path"
-		if truncatedWalk {
-			note = "walk stopped at match cap; " + note
-		}
-		fmt.Fprintf(&b, "…(%d files shown, %d files with hits, %d matches; %s)\n",
-			shownFiles, len(files), len(hits), note)
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-// clampGrepLine keeps a matched line readable without letting it dominate the
-// result. Cuts on a rune boundary so the output stays valid UTF-8.
-func clampGrepLine(s string) string {
-	if len(s) <= grepMaxLineChars {
-		return s
-	}
-	cut := grepMaxLineChars
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "…(line clipped)"
-}
-
-func (t *grepTool) Name() string { return "grep" }
-func (t *grepTool) Description() string {
-	return "Search for a fixed string in files " + pathJailHint(t.p) +
-		". Args: pattern, path (optional dir/file, default .; absolute under jail OK). " +
-		"Results are grouped by file and capped; do not reprint the dump — cite paths and edit. " +
-		"Prefer this over bash grep/rg: hits are bounded, grouped, and jail-checked."
-}
-func (t *grepTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"]}`)
-}
-func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
-	var a struct {
-		Pattern string `json:"pattern"`
-		Path    string `json:"path"`
-	}
-	if err := json.Unmarshal(args, &a); err != nil {
-		return "", err
-	}
-	if a.Pattern == "" {
-		return "", fmt.Errorf("pattern required")
-	}
-	rel := a.Path
-	if rel == "" {
-		rel = "."
-	}
-	root, err := t.p.ResolvePath(rel)
-	if err != nil {
-		return "", err
-	}
-	var hits []grepHit
-	truncated := false
-	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if path != root && skipDirNames[info.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if info.Size() > int64(t.p.MaxReadBytes) && t.p.MaxReadBytes > 0 {
-			return nil
-		}
-		// Open under the jail with post-open fd verification so a symlink
-		// swap between Walk's lstat and read cannot leak outside bytes.
-		f, _, oerr := openJailed(t.p, path, os.O_RDONLY, 0)
-		if oerr != nil {
-			return nil
-		}
-		lim := t.p.MaxReadBytes
-		if lim <= 0 {
-			lim = 2 << 20
-		}
-		data, rerr := io.ReadAll(io.LimitReader(f, int64(lim+1)))
-		_ = f.Close()
-		if rerr != nil {
-			return nil
-		}
-		if len(data) > lim {
-			data = data[:lim]
-		}
-		// skip binary-ish
-		if bytes.IndexByte(data, 0) >= 0 {
-			return nil
-		}
-		lines := strings.Split(string(data), "\n")
-		relp, _ := filepath.Rel(t.p.Workspace, path)
-		for i, line := range lines {
-			if strings.Contains(line, a.Pattern) {
-				hits = append(hits, grepHit{Path: relp, Line: i + 1, Text: line})
-				if len(hits) >= grepMaxMatches {
-					truncated = true
-					return filepath.SkipAll
-				}
+		if bin != "" {
+			if out, ok := globFd(ctx, bin, root, pat); ok {
+				return out, nil
 			}
 		}
-		return nil
-	})
-	if err != nil && err != filepath.SkipAll {
-		return "", err
 	}
-	if len(hits) == 0 {
-		return formatGrepHits(hits, truncated) + emptyResultHint(t.p, a.Path), nil
-	}
-	return formatGrepHits(hits, truncated), nil
+	return globWalk(root, pat)
 }
 
 type writeTool struct{ p *policy.Policy }
@@ -796,9 +653,9 @@ func (t *bashTool) Description() string {
 	}
 	return "Run a shell command with cwd=workspace (default timeout 300s). " +
 		"Requires --allow-shell. " + jail + "Args: command, optional timeout_sec for slow " +
-		"builds/test suites. For repo search prefer the grep tool (bounded hits). " +
-		"Output is kept as-is (byte-budgeted only) — keep commands scoped: pipe " +
-		"through grep/head/tail yourself rather than dumping. Do NOT start " +
+		"builds/test suites. Do not rg/grep/find/fd/ls — use grep or glob " +
+		"(those bash forms are refused). " +
+		"Output is kept as-is (byte-budgeted only) — keep commands scoped. Do NOT start " +
 		"long-lived servers in the foreground, and do NOT nest another full " +
 		"`mow run/goal` inside bash (it will block the tool until timeout). For a " +
 		"smoke server: use proc_start (not bash &); then proc_status / curl / proc_stop."

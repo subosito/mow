@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -89,9 +90,10 @@ func TestGlobToolRecursive(t *testing.T) {
 	mk("docs/readme.md", "# docs")
 	// Must be skipped by a recursive walk or it drowns real results.
 	mk("node_modules/dep/index.go", "package dep")
+	mk("target/debug/built.go", "package built")
 
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
-	tool := &globTool{p: p}
+	tool := &globTool{p: p, noFd: true}
 	run := func(pattern string) string {
 		t.Helper()
 		out, err := tool.Exec(context.Background(),
@@ -127,6 +129,9 @@ func TestGlobToolRecursive(t *testing.T) {
 		if strings.Contains(out, "node_modules") {
 			t.Errorf("node_modules must not be walked recursively:\n%s", out)
 		}
+		if strings.Contains(out, "target/") {
+			t.Errorf("target/ must not be walked recursively:\n%s", out)
+		}
 	})
 
 	t.Run("anchors at a literal prefix", func(t *testing.T) {
@@ -155,6 +160,81 @@ func TestGlobToolRecursive(t *testing.T) {
 			t.Errorf("want (no matches), got %q", out)
 		}
 	})
+}
+
+func TestGlobFdAndWalkAgree(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	mk := func(rel, body string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("main.go", "package main")
+	mk("internal/a.go", "package a")
+	mk("node_modules/x.go", "package x")
+	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
+	walk := &globTool{p: p, noFd: true}
+	walkOut, err := walk.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.go"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(walkOut, "main.go") || strings.Contains(walkOut, "node_modules") {
+		t.Fatalf("walk: %q", walkOut)
+	}
+	if lookupFd() == "" {
+		t.Skip("fd not on PATH")
+	}
+	fd := &globTool{p: p}
+	fdOut, err := fd.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.go"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fdOut, "main.go") || !strings.Contains(fdOut, "internal/a.go") {
+		t.Fatalf("fd missed source: %q", fdOut)
+	}
+	if strings.Contains(fdOut, "node_modules") {
+		t.Fatalf("fd searched junk: %q", fdOut)
+	}
+}
+
+func TestGlobMissingFdFallsBackToWalk(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
+	gt := &globTool{p: p, fdBin: filepath.Join(root, "fd-not-installed")}
+	out, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.go"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "a.go") {
+		t.Fatalf("missing fd must still glob: %q", out)
+	}
+}
+
+func TestGlobToolIndexHint(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for i := 0; i < globIndexHint+5; i++ {
+		name := filepath.Join(root, "f"+strconv.Itoa(i)+".txt")
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
+	out, err := (&globTool{p: p}).Exec(context.Background(), json.RawMessage(`{"pattern":"*.txt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "this is an index") {
+		t.Fatalf("want index hint on a wide glob, got %q", out)
+	}
 }
 
 // The recursive walk must not escape the workspace, whatever the pattern says.

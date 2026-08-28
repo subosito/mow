@@ -2,9 +2,11 @@ package focus
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsProductiveBash(t *testing.T) {
@@ -145,6 +147,105 @@ func TestGuardBash_inventoryHardLimitBlocks(t *testing.T) {
 	}
 }
 
+func TestGuardLookup_grepDegradesThenBlocks(t *testing.T) {
+	s := newFocusState("/ws", Config{})
+	same, _ := json.Marshal(map[string]string{"pattern": "inventoryKey"})
+	other, _ := json.Marshal(map[string]string{"pattern": "guardRead"})
+	for i := 0; i < defaultInventoryLimit; i++ {
+		if g := s.guardLookup("grep", same); g.blocked() || g.Notice != "" {
+			t.Fatalf("grep %d should run clean: %+v", i+1, g)
+		}
+	}
+	if g := s.guardLookup("grep", other); g.blocked() || g.Notice != "" {
+		t.Fatalf("distinct pattern must not share the ledger: %+v", g)
+	}
+	g := s.guardLookup("grep", same)
+	if g.blocked() {
+		t.Fatalf("third same grep must degrade, not refuse: %q", g.Block)
+	}
+	if !strings.Contains(g.Notice, "searched") {
+		t.Fatalf("want searched notice: %q", g.Notice)
+	}
+	for i := 0; i < defaultHardInventoryLimit-defaultInventoryLimit-1; i++ {
+		if g := s.guardLookup("grep", same); g.blocked() {
+			t.Fatalf("still under hard limit: %q", g.Block)
+		}
+	}
+	g = s.guardLookup("grep", same)
+	if !g.blocked() || !strings.Contains(g.Block, "refusing") {
+		t.Fatalf("want hard block: %+v", g)
+	}
+}
+
+func TestGuardLookup_globDistinctFromGrep(t *testing.T) {
+	s := newFocusState("", Config{})
+	grepArgs, _ := json.Marshal(map[string]string{"pattern": "**/*.go"})
+	globArgs, _ := json.Marshal(map[string]string{"pattern": "**/*.go"})
+	if g := s.guardLookup("grep", grepArgs); g.blocked() || g.Notice != "" {
+		t.Fatalf("first grep: %+v", g)
+	}
+	if g := s.guardLookup("glob", globArgs); g.blocked() || g.Notice != "" {
+		t.Fatalf("glob must not collide with grep of the same pattern: %+v", g)
+	}
+}
+
+func TestLookupKey_grepPathNormalized(t *testing.T) {
+	s := newFocusState("/ws", Config{})
+	a, _ := json.Marshal(map[string]string{"pattern": "foo", "path": "/ws/src"})
+	b, _ := json.Marshal(map[string]string{"pattern": "foo", "path": "src"})
+	if lookupKey(s, "grep", a) != lookupKey(s, "grep", b) {
+		t.Fatalf("abs vs rel path: %q vs %q", lookupKey(s, "grep", a), lookupKey(s, "grep", b))
+	}
+	dot, _ := json.Marshal(map[string]string{"pattern": "foo", "path": "."})
+	bare, _ := json.Marshal(map[string]string{"pattern": "foo"})
+	if lookupKey(s, "grep", dot) != lookupKey(s, "grep", bare) {
+		t.Fatalf("dot vs omitted path: %q vs %q", lookupKey(s, "grep", dot), lookupKey(s, "grep", bare))
+	}
+}
+
+func TestGuardRead_stampChangeAllowsReread(t *testing.T) {
+	ws := t.TempDir()
+	path := filepath.Join(ws, "a.go")
+	if err := os.WriteFile(path, []byte("one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := newFocusState(ws, Config{})
+	args, _ := json.Marshal(map[string]string{"path": "a.go"})
+	if n := s.guardRead(args); n != "" {
+		t.Fatalf("first read: %q", n)
+	}
+	if n := s.guardRead(args); n == "" || !strings.Contains(n, "already read") {
+		t.Fatalf("same bytes should degrade: %q", n)
+	}
+	if err := os.WriteFile(path, []byte("changed-contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if n := s.guardRead(args); n != "" {
+		t.Fatalf("updated file must not be a re-read: %q", n)
+	}
+}
+
+func TestGuardLookup_forgetPathAfterEdit(t *testing.T) {
+	s := newFocusState("/ws", Config{})
+	args, _ := json.Marshal(map[string]string{"pattern": "foo", "path": "src/a.go"})
+	for i := 0; i < defaultInventoryLimit; i++ {
+		if g := s.guardLookup("grep", args); g.blocked() || g.Notice != "" {
+			t.Fatalf("grep %d: %+v", i+1, g)
+		}
+	}
+	if g := s.guardLookup("grep", args); g.Notice == "" {
+		t.Fatalf("want degrade before forget: %+v", g)
+	}
+	s.forgetPath("src/a.go")
+	if g := s.guardLookup("grep", args); g.blocked() || g.Notice != "" {
+		t.Fatalf("after edit, same grep must run clean: %+v", g)
+	}
+}
+
 func TestGuardBash_destructive(t *testing.T) {
 	s := newFocusState("", Config{})
 	args, _ := json.Marshal(map[string]string{"command": "git checkout -- foo.go && rm -rf internal/analytics"})
@@ -257,21 +358,21 @@ func TestInventoryKey_rgAndPythonListing(t *testing.T) {
 	}
 }
 
-func TestGuardBash_rgInventory(t *testing.T) {
+func TestGuardBash_blocksDiscover(t *testing.T) {
 	s := newFocusState("", Config{})
-	for i := 0; i < defaultInventoryLimit; i++ {
-		args, _ := json.Marshal(map[string]string{"command": "rg leftover"})
-		if g := s.guardBash(args); g.blocked() || g.Notice != "" {
-			t.Fatalf("rg %d should run clean: %+v", i+1, g)
+	for _, cmd := range []string{
+		"rg leftover", "grep -n foo", "find . -name '*.go'", "fd '*.rs'",
+		"ls -la", "ls internal", "tree",
+	} {
+		args, _ := json.Marshal(map[string]string{"command": cmd})
+		g := s.guardBash(args)
+		if !g.blocked() || !strings.Contains(g.Block, "grep tool") {
+			t.Fatalf("%q should redirect to grep/glob: %+v", cmd, g)
 		}
 	}
-	args, _ := json.Marshal(map[string]string{"command": "rg leftover"})
-	g := s.guardBash(args)
-	if g.blocked() {
-		t.Fatalf("third rg must degrade, not refuse: %q", g.Block)
-	}
-	if !strings.Contains(g.Notice, "inventory") {
-		t.Fatalf("third rg should carry an inventory notice: %q", g.Notice)
+	prod, _ := json.Marshal(map[string]string{"command": "go test ./... | rg FAIL"})
+	if g := s.guardBash(prod); g.blocked() {
+		t.Fatalf("productive pipeline must run: %+v", g)
 	}
 }
 
@@ -324,5 +425,24 @@ func TestGuardRead_pagingIsANewView(t *testing.T) {
 	again, _ := json.Marshal(map[string]any{"path": "foo.go"})
 	if n := s.guardRead(again); n == "" || !strings.Contains(n, "already read") {
 		t.Fatalf("same first page should degrade: %q", n)
+	}
+}
+
+func TestGuardRead_surveyCapsUniqueFiles(t *testing.T) {
+	s := newFocusState("", Config{SurveyReadLimit: 2})
+	for i, path := range []string{"a.go", "b.go"} {
+		raw, _ := json.Marshal(map[string]any{"path": path})
+		if n := s.guardRead(raw); n != "" {
+			t.Fatalf("file %d (%s) should run clean: %q", i+1, path, n)
+		}
+	}
+	third, _ := json.Marshal(map[string]any{"path": "c.go"})
+	n := s.guardRead(third)
+	if n == "" || !strings.Contains(n, "surveyed") {
+		t.Fatalf("third unique file should survey-cap: %q", n)
+	}
+	page, _ := json.Marshal(map[string]any{"path": "a.go", "offset": 80.0, "limit": 10.0})
+	if n := s.guardRead(page); n != "" {
+		t.Fatalf("paging an already-counted file is not a new survey: %q", n)
 	}
 }
