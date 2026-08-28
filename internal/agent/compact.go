@@ -14,17 +14,15 @@ import (
 // Default tool-result size when Options.MaxToolResultChars is unset.
 const DefaultMaxToolResultChars = 24_000
 
-// DefaultMaxContextChars is the config default (~25–30k tokens). When the
-// gateway publishes a larger context_window, Engine scales the soft budget up
-// from this floor instead of compacting early on 1M-token models.
+// DefaultMaxContextChars is the unknown-window floor (~25–30k tokens). Used
+// only when auto-compact is on but the gateway did not publish context_window.
 const DefaultMaxContextChars = 100_000
 
 // DefaultCompactRatio is the fraction of gateway context_window used as the
-// soft history budget when auto-scaling (1M window → ~750k tokens of history
-// at ~4 chars/token before the hard cap). 0.75: first compact around three
-// quarters of the window, then resume toward 70% of that budget. Still
-// below a typical ~85% auto-compact trip. See MaxContextCharsHardCap.
-const DefaultCompactRatio = 0.75
+// soft history budget (128k → ~64k tok-eq; 1M is hard-capped — see
+// MaxContextCharsHardCap). Compact then aims at CompactResumeRatio of that
+// budget so the next tool batch has headroom.
+const DefaultCompactRatio = 0.5
 
 // MaxContextCharsHardCap is the absolute ceiling on the soft history budget
 // (in chars, ~400k tokens at ~4 chars/token), enforced in applyCompact

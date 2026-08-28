@@ -84,24 +84,13 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	maxCtx := 0
 	maxToolRes := 0
 	maxPar := 0
-	compactRatio := agent.DefaultCompactRatio
 	if e.cfg != nil {
 		maxTurns = e.cfg.Policy.MaxTurns
-		maxCtx = e.cfg.Policy.MaxContextChars
 		maxToolRes = e.cfg.Policy.MaxToolResultChars
 		maxPar = e.cfg.Policy.MaxParallelTools
-		if e.cfg.Policy.CompactRatio > 0 {
-			compactRatio = e.cfg.Policy.CompactRatio
-		}
 	}
-	if e.opt.MaxContextChars > 0 {
-		maxCtx = e.opt.MaxContextChars
-	} else {
-		// Scale soft compaction budget from gateway context_window × ratio when
-		// still on the default floor — otherwise 1M models compact absurdly early.
-		// Use limitsLocked: e.mu is held; Limits() would re-lock and deadlock.
-		maxCtx = resolveMaxContextChars(maxCtx, e.limitsLocked().ContextWindow, compactRatio)
-	}
+	// Use limitsLocked: e.mu is held; Limits() would re-lock and deadlock.
+	maxCtx = resolveMaxContextChars(e.opt.MaxContextChars, e.limitsLocked().ContextWindow)
 	if e.opt.MaxToolResultChars > 0 {
 		maxToolRes = e.opt.MaxToolResultChars
 	}
@@ -589,27 +578,24 @@ func stopReasonFrom(err error) string {
 }
 
 // resolveMaxContextChars picks the soft history budget.
-//   - cfgMax 0 → compaction off
-//   - cfgMax == default (100k) and window known → scale from window × ratio
-//     (default ratio 0.5 → 1M tokens ≈ 2M chars ≈ 500k tok-eq history, hard-capped at agent.MaxContextCharsHardCap)
-//   - cfgMax explicit other value → respect absolute config
-//   - no window → keep cfgMax
-func resolveMaxContextChars(cfgMax, windowTokens int, ratio float64) int {
-	if cfgMax <= 0 {
+//
+//	optMax < 0  → off (Go Options only)
+//	optMax > 0  → absolute char budget (capped)
+//	optMax == 0 → auto: window × 4 × DefaultCompactRatio
+func resolveMaxContextChars(optMax, windowTokens int) int {
+	if optMax < 0 {
 		return 0
 	}
+	if optMax > 0 {
+		if optMax > agent.MaxContextCharsHardCap {
+			return agent.MaxContextCharsHardCap
+		}
+		return optMax
+	}
 	if windowTokens <= 0 {
-		return cfgMax
+		return agent.DefaultMaxContextChars
 	}
-	// Only auto-raise when still on the built-in default; explicit yaml wins.
-	if cfgMax != agent.DefaultMaxContextChars {
-		return cfgMax
-	}
-	scaled := agent.ContextCharsBudget(windowTokens, ratio)
-	if scaled > cfgMax {
-		return scaled
-	}
-	return cfgMax
+	return agent.ContextCharsBudget(windowTokens, agent.DefaultCompactRatio)
 }
 
 func errString(err error) string {

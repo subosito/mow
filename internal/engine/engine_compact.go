@@ -39,20 +39,12 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	// wrong one made /compact a visual no-op on the wire — compact prior.
 	e.mu.Lock()
 	prior := append([]llm.Message(nil), e.prior...)
-	configured := 0
-	compactRatio := agent.DefaultCompactRatio
+	configured := e.opt.MaxContextChars
 	toolLim := agent.DefaultMaxToolResultChars
 	if e.cfg != nil {
-		configured = e.cfg.Policy.MaxContextChars
-		if e.cfg.Policy.CompactRatio > 0 {
-			compactRatio = e.cfg.Policy.CompactRatio
-		}
 		if e.cfg.Policy.MaxToolResultChars > 0 {
 			toolLim = e.cfg.Policy.MaxToolResultChars
 		}
-	}
-	if e.opt.MaxContextChars > 0 {
-		configured = e.opt.MaxContextChars
 	}
 	if e.opt.MaxToolResultChars > 0 {
 		toolLim = e.opt.MaxToolResultChars
@@ -92,10 +84,9 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 
 	auto := maxChars <= 0
 	if auto {
-		maxChars = resolveMaxContextChars(configured, window, compactRatio)
+		maxChars = resolveMaxContextChars(configured, window)
 		if maxChars <= 0 {
-			// Manual compaction is an explicit request even when automatic
-			// compaction was disabled with max_context_chars: -1.
+			// Manual /compact still runs when auto-compact is off.
 			maxChars = agent.DefaultMaxContextChars
 		}
 	}

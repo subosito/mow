@@ -222,8 +222,7 @@ reasoning**. Hosts must not render the wait state as "thinking".
 | Knob | Default | Effect |
 |------|---------|--------|
 | `policy.max_turns` | *(unlimited)* | Optional budget: LLM round-trips per Prompt (a turn may batch up to 8 tools). **Unset by default** — a run ends when it is done, stuck, cancelled, or over an explicit spend budget, never merely because it was long. Set a positive value to opt in to a ceiling; yaml `-1` / CLI `--max-turns 0` also mean unlimited. Only enforced when > 0 |
-| `policy.max_context_chars` | `100000` | Soft history budget (chars). When still on this default, auto-scales from `GET /v1/models` `context_window` × `compact_ratio`. Explicit positive value = absolute budget. Set `-1` to disable. Compaction pins user task anchors + tools used so the goal is not lost |
-| `policy.compact_ratio` | `0.75` | Fraction of gateway `context_window` used as history budget when auto-scaling (1M → ~750k tok-eq before the **hard cap at `MaxContextCharsHardCap` ≈ 400k tok-eq / 1.6M chars**). Clamped to 0.3–0.95. Ignored when `max_context_chars` is an explicit non-default absolute |
+| Auto-compact | always on | History budget is `context_window` × 0.5 (char estimate, ~4 chars/token), floored at 80k chars and hard-capped at `MaxContextCharsHardCap` ≈ 400k tok-eq. Compaction pins user task anchors + tools used. Not a yaml knob — Go `Options.MaxContextChars` can override or disable |
 | `llm.context_window` / `input_price` / `output_price` | (optional) | Override metering; otherwise `Engine.Limits()` uses `GET /v1/models` fields (`context_window`, `pricing.input_per_mtok` / `output_per_mtok`) — no client-side price table |
 | `policy.max_tool_result_chars` | `24000` | Cap each tool result stored for the model (~6k tokens) |
 | `policy.max_read_bytes` | `512KiB` | Cap `read` tool raw file size |

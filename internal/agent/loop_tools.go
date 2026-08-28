@@ -194,8 +194,8 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 		return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
 	}
 	// Absolute ceiling: never let the soft budget exceed the hard cap. This
-	// applies even to an explicit max_context_chars above the cap — a huge
-	// window/config must not grow history past ~400k tokens.
+	// applies even to an explicit Options.MaxContextChars above the cap — a
+	// huge window must not grow history past ~400k tokens.
 	budget := opt.MaxContextChars
 	if budget > MaxContextCharsHardCap {
 		budget = MaxContextCharsHardCap

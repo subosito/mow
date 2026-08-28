@@ -42,24 +42,23 @@ func TestPromptNoDeadlockOnLimits(t *testing.T) {
 }
 
 func TestResolveMaxContextChars(t *testing.T) {
-	if got := resolveMaxContextChars(0, 1_000_000, 0.8); got != 0 {
+	if got := resolveMaxContextChars(-1, 1_000_000); got != 0 {
 		t.Fatalf("disabled → %d", got)
 	}
-	got := resolveMaxContextChars(agent.DefaultMaxContextChars, 1_000_000, 0.8)
-	// 1M × 4 × 0.8 = 3.2M raw, but hard-capped at MaxContextCharsHardCap (~400k tok).
+	got := resolveMaxContextChars(0, 1_000_000)
+	// 1M × 4 × 0.5 = 2M raw, hard-capped at MaxContextCharsHardCap (~400k tok).
 	if got != agent.MaxContextCharsHardCap {
-		t.Fatalf("1M @0.8 → %d want hard cap %d", got, agent.MaxContextCharsHardCap)
+		t.Fatalf("auto 1M → %d want hard cap %d", got, agent.MaxContextCharsHardCap)
 	}
-	// 200k window × 4 × 0.5 = 400k — below hard cap, above floor.
-	gotMid := resolveMaxContextChars(agent.DefaultMaxContextChars, 200_000, 0.5)
+	gotMid := resolveMaxContextChars(0, 200_000)
 	if gotMid != 400_000 {
-		t.Fatalf("200k @0.5 → %d want 400000", gotMid)
+		t.Fatalf("auto 200k @0.5 → %d want 400000", gotMid)
 	}
-	if got := resolveMaxContextChars(200_000, 1_000_000, 0.8); got != 200_000 {
-		t.Fatalf("explicit cfg → %d", got)
+	if got := resolveMaxContextChars(200_000, 1_000_000); got != 200_000 {
+		t.Fatalf("explicit opt → %d", got)
 	}
-	if got := resolveMaxContextChars(agent.DefaultMaxContextChars, 0, 0.8); got != agent.DefaultMaxContextChars {
-		t.Fatalf("no window → %d", got)
+	if got := resolveMaxContextChars(0, 0); got != agent.DefaultMaxContextChars {
+		t.Fatalf("auto, no window → %d", got)
 	}
 }
 

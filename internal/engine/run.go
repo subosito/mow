@@ -174,8 +174,8 @@ type Options struct {
 	OnEvent EventFunc
 	// Hooks optional lifecycle callbacks (merged with ext global hooks).
 	Hooks Hooks
-	// MaxContextChars overrides config soft history compaction (0 = use config).
-	// Config default is ~100k chars; set policy max_context_chars: -1 to disable.
+	// MaxContextChars overrides auto history compaction (0 = window × 0.5,
+	// hard-capped). Positive = absolute char budget. Negative = off.
 	MaxContextChars int
 
 	// CompactSummary replaces the deterministic compaction stub with a

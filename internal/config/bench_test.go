@@ -24,8 +24,6 @@ policy:
   bash_timeout_sec: 300
   max_bash_timeout_sec: 900
   max_read_bytes: 524288
-  max_context_chars: 100000
-  compact_ratio: 0.5
   max_tool_result_chars: 24000
   max_parallel_tools: 8
 session:

@@ -17,5 +17,6 @@ ACP v1 is the host protocol (`mow acp` plus optional extras). `mow rpc` is gone.
 - grep uses ripgrep when `rg` is on PATH (fixed-string, jailed, same caps); WalkDir if rg is missing, too old, or errors.
 - glob uses `fd` when installed, with the same WalkDir fallback.
 - bash `rg`/`grep`/`find`/`fd`/`ls`/`tree` for discovery is refused — grep tool for search, glob for listing.
+- Dropped `policy.max_context_chars` and `policy.compact_ratio`. Auto-compact is always `context_window` × 0.5 (hard-capped). Go `Options.MaxContextChars` remains for tests.
 - Focus pack: repeated grep/glob tool calls degrade then refuse like inventory (distinct patterns stay distinct).
 EOF
