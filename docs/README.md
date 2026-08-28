@@ -12,6 +12,7 @@
 
 | Doc | Audience | Contents |
 |-----|----------|----------|
+| [../CHANGELOG.md](../CHANGELOG.md) | Operators | rc.1 highlights |
 | [../AGENTS.md](../AGENTS.md) | AI coding agents | Build/test, spine, layout, security, gotchas |
 | [architecture.md](architecture.md) | Everyone | Public vs `internal/`, LLM endpoint model |
 | [embedding.md](embedding.md) | Go integrators | Options, events, custom tools/providers, hooks, sessions — with code |

@@ -17,7 +17,7 @@ and never enters a library-only embed.
 
 > Version is the single line in [`VERSION`](VERSION) (currently `1.0.0-rc.1`).
 > Tag `v$(cat VERSION)` after bumping that file. Nix and GitHub Releases read
-> the same file.
+> the same file. Highlights: [CHANGELOG.md](CHANGELOG.md).
 
 ## Library
 

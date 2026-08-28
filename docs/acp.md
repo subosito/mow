@@ -7,10 +7,12 @@ connection**, capability-gated — not a second process and not `_mow/*`.
 
 Generic ACP clients see only the standard. Mowi speaks ACP plus extras the
 agent advertised on `initialize`. Session **mode** is ACP
-`session/set_mode` (`modeId` ask|code). Tool confirmation is ACP
-**permission** (`session/request_permission`). Session **approvals**
-(prompt|always) skip that overlay; still gated by `--allow-write` /
-`--allow-shell`. Distinct from mode.
+`session/set_mode` (`modeId` ask|code) — confirm vs run, not read-only.
+Tool confirmation is ACP **permission** (`session/request_permission`).
+Session **approvals** (prompt|always) skip that overlay; still gated by
+`--allow-write` / `--allow-shell` / `--read-only`. Distinct from mode.
+`initialize` does not advertise `auth.logout`; credentials live in host
+config, not an ACP login flow.
 
 Sources: [ACP v1 overview](https://agentclientprotocol.com/protocol/v1/overview),
 [v2 overview](https://agentclientprotocol.com/protocol/v2/overview),

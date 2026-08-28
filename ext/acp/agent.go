@@ -200,9 +200,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 						"close":  map[string]any{},
 						"resume": map[string]any{},
 					},
-					"auth": map[string]any{
-						"logout": map[string]any{},
-					},
+					"auth": map[string]any{},
 					// Optional mow extras (same connection). Generic clients ignore.
 					"experimental": extraCapabilities(),
 					"extras":       extraMethodNames(),
@@ -587,8 +585,6 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			},
 		})
 	case "authenticate":
-		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
-	case "logout":
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
 	case "session/close":
 		a.handleSessionClose(req)

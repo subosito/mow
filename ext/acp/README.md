@@ -17,7 +17,7 @@ Drop the import and `mow acp` / `delegate` disappear.
 | Surface | Name |
 |---|---|
 | CLI | `acp` (`mow acp`) — ACP agent on stdin/stdout |
-| Tool | `delegate` — registered only when `agents` is non-empty |
+| Tool | `delegate` — registered only when `peers` is non-empty |
 
 No slash commands registered by this package. Linked slash commands from
 other packs are advertised to the editor as `available_commands_update`

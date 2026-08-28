@@ -23,7 +23,7 @@ const DefaultMaxContextChars = 100_000
 // soft history budget when auto-scaling (1M window → ~750k tokens of history
 // at ~4 chars/token before the hard cap). 0.75: first compact around three
 // quarters of the window, then resume toward 70% of that budget. Still
-// below grok-build’s ~85% trip. See MaxContextCharsHardCap.
+// below a typical ~85% auto-compact trip. See MaxContextCharsHardCap.
 const DefaultCompactRatio = 0.75
 
 // MaxContextCharsHardCap is the absolute ceiling on the soft history budget

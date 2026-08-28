@@ -84,6 +84,9 @@ func TestAgentExtrasInitializeAndMethods(t *testing.T) {
 			t.Fatalf("extras missing %q: %v", name, init.AgentCapabilities.Extras)
 		}
 	}
+	if strings.Contains(string(msg["result"]), `"logout"`) {
+		t.Fatalf("initialize advertised stub auth.logout: %s", msg["result"])
+	}
 
 	unknown, err := cl.call(ctx, "foo/bar", map[string]any{})
 	if err == nil {
