@@ -22,6 +22,16 @@ llm:
   # api_key_env: OPENAI_API_KEY
   # model: gpt-5-mini                 # chat agent loop (tools + reasoning)
   # model: deepseek-chat              # or any OpenAI-compatible id
+  # provider: gateway                 # optional llm.providers name (CLI --provider / MOW_PROVIDER wins)
+  # providers:
+  #   gateway:
+  #     base_url: http://127.0.0.1:PORT/v1
+  #     api_key_env: MOW_API_KEY
+  #     model: gpt-5-mini
+  #   direct:
+  #     base_url: https://api.deepseek.com/v1
+  #     api_key_env: DEEPSEEK_API_KEY
+  #     model: deepseek-chat
   # effort: medium                    # none|low|medium|high (optional; not part of model id)
   # first_byte_timeout_sec: 300     # streaming: max wait for response headers/first byte
   #                                 # (default 300; a full timeout is hard, not retried).

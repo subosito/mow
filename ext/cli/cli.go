@@ -238,7 +238,7 @@ func printRunUsage() {
 
   -p TEXT              prompt (or pass as args)
   -e, --ephemeral      do not save this turn
-  --config --workspace --model --effort --base-url --extra-root
+  --config --workspace --model --provider --effort --base-url --extra-root
   --allow-shell --allow-write --sandbox (Linux) --max-turns
   --stream --verbose --session --continue --no-session
 
@@ -291,11 +291,11 @@ Core:
 		printCmdGroup("Extensions (this binary):", extensions)
 		printCmdGroup("Packs (this binary):", preferFirst(packs, "mcp"))
 	}
-	fmt.Fprintf(os.Stderr, `Flags: --config --workspace --model --effort --base-url --extra-root
+	fmt.Fprintf(os.Stderr, `Flags: --config --workspace --model --provider --effort --base-url --extra-root
        --allow-shell --allow-write --sandbox --max-turns --stream --verbose
        --session --continue --no-session
 
-Env:   MOW_HOME  MOW_API_KEY  MOW_MODEL  MOW_BASE_URL  MOW_WIRE  MOW_EFFORT%s
+Env:   MOW_HOME  MOW_API_KEY  MOW_MODEL  MOW_BASE_URL  MOW_WIRE  MOW_EFFORT  MOW_PROVIDER%s
 
 `, packEnvHelp())
 }

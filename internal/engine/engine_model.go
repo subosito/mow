@@ -10,6 +10,20 @@ import (
 	"github.com/subosito/mow/internal/session"
 )
 
+// LLMProvider is the selected llm.providers name after overlay, or empty
+// when the live llm.* block was used as-is.
+func (e *Engine) LLMProvider() string {
+	if e == nil {
+		return ""
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(e.cfg.LLM.Provider)
+}
+
 // Model returns the active chat model id.
 func (e *Engine) Model() string {
 	if e == nil {

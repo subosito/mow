@@ -17,12 +17,14 @@ type hostPeerPolicy struct {
 	readOnly      bool
 	allowWrite    bool
 	allowShell    bool
+	provider      string
 }
 
 // peerHost is the mow.Engine surface used when building native peer argv.
 type peerHost interface {
 	AllowWrite() bool
 	AllowShell() bool
+	LLMProvider() string
 	Workspace() string
 	ExtraRoots() []string
 	ExtraRootsReadOnly() []string
@@ -44,6 +46,7 @@ func hostPolicyFromContext(ctx context.Context, fallbackWorkspace string) *hostP
 		readOnly:      h.ReadOnlyWorkspace(),
 		allowWrite:    h.AllowWrite(),
 		allowShell:    h.AllowShell(),
+		provider:      strings.TrimSpace(h.LLMProvider()),
 	}
 	if p.workspace == "" {
 		p.workspace = strings.TrimSpace(fallbackWorkspace)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,35 @@ func TestOptionsOverrideModelWorkspace(t *testing.T) {
 	}
 	if eng.Model() != "override-model" {
 		t.Fatalf("model=%q", eng.Model())
+	}
+}
+
+func TestNewAppliesLLMProviderThenModel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "c.yaml")
+	body := "llm:\n  model: gpt-5-mini\n  providers:\n    direct:\n      base_url: https://api.deepseek.com/v1\n      model: deepseek-chat\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := mow.New(mow.Options{
+		NoSession:     true,
+		Workspace:     dir,
+		ConfigPaths:   []string{cfg},
+		LLMProvider:   "direct",
+		Model:         "other-id",
+		ExplicitModel: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eng.LLMProvider() != "direct" {
+		t.Fatalf("provider=%q", eng.LLMProvider())
+	}
+	if eng.Model() != "other-id" {
+		t.Fatalf("model=%q want CLI override", eng.Model())
 	}
 }
 

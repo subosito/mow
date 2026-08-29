@@ -284,7 +284,7 @@ func TestNewFlagSetUsageAndErrors(t *testing.T) {
 			t.Fatalf("missing usage header:\n%s", out)
 		}
 		for _, want := range []string{
-			"--config", "--workspace", "--extra-root", "--model", "--effort",
+			"--config", "--workspace", "--extra-root", "--model", "--provider", "--effort",
 			"--base-url", "--system-prefix", "--allow-shell", "--allow-write",
 			"--sandbox",
 			"--max-turns", "--no-session", "--session", "--continue",

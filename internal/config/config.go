@@ -98,6 +98,14 @@ type LLMConfig struct {
 	InputPrice    float64 `yaml:"input_price"`
 	OutputPrice   float64 `yaml:"output_price"`
 
+	// Provider is the selected llm.providers name. Empty uses the live llm.*
+	// fields as written. CLI --provider / MOW_PROVIDER overlay the named row
+	// onto llm.* at load. Host/user config only.
+	Provider string `yaml:"provider"`
+	// Providers is the named endpoint catalog. Each row overlays base_url,
+	// credentials, wire, headers, and default model onto live llm.*.
+	Providers map[string]LLMProviderProfile `yaml:"providers"`
+
 	// Media model ids moved to extensions.media (owned by packs/media).
 	// The media tools still share llm.base_url / api_key / headers — only the
 	// per-modality model ids are pack config.
@@ -282,6 +290,12 @@ func loadConfig(loadUserConfig bool, profile string, paths ...string) (*File, er
 			return nil, err
 		}
 	}
+	if v := strings.TrimSpace(os.Getenv("MOW_PROVIDER")); v != "" {
+		f.LLM.Provider = v
+	}
+	if err := f.ApplyNamedProvider(f.LLM.Provider); err != nil {
+		return nil, err
+	}
 	applyEnv(f)
 	if err := f.normalize(); err != nil {
 		return nil, err
@@ -293,6 +307,12 @@ func loadConfig(loadUserConfig bool, profile string, paths ...string) (*File, er
 	if loadUserConfig && ProjectConfigAllowed(f.Workspace) {
 		_ = mergeProjectFile(f, filepath.Join(f.Workspace, ".mow", "config.yaml"))
 		// re-apply env so env still wins
+		if v := strings.TrimSpace(os.Getenv("MOW_PROVIDER")); v != "" {
+			f.LLM.Provider = v
+		}
+		if err := f.ApplyNamedProvider(f.LLM.Provider); err != nil {
+			return nil, err
+		}
 		applyEnv(f)
 		_ = f.normalize()
 	}
@@ -382,6 +402,8 @@ func mergeProjectFile(dst *File, path string) error {
 	overlay.LLM.APIKey = ""
 	overlay.LLM.APIKeyEnv = ""
 	overlay.LLM.Headers = nil
+	overlay.LLM.Provider = ""
+	overlay.LLM.Providers = nil
 	// Wire selects protocol and credential env precedence — host/user only.
 	overlay.LLM.Wire = ""
 	// System prefix is user/host config only (not project-controlled).
@@ -722,6 +744,7 @@ func mergeLLM(dst *LLMConfig, o LLMConfig) {
 	if o.OutputPrice > 0 {
 		dst.OutputPrice = o.OutputPrice
 	}
+	mergeLLMProviders(dst, o)
 }
 
 // applyEnv applies only home-adjacent and LLM credential/model envs.

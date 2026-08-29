@@ -42,9 +42,9 @@ func TestResolveAgentsNativeAndExternal(t *testing.T) {
 		t.Fatalf("external=%+v", specs[2])
 	}
 
-	hostRW := &hostPeerPolicy{workspace: "/ws", allowWrite: true, allowShell: true}
+	hostRW := &hostPeerPolicy{workspace: "/ws", allowWrite: true, allowShell: true, provider: "gateway"}
 	cmdA := buildMowAgentCommand(specs[0], hostRW, "/ws")
-	wantA := []string{"mow", "acp", "--model", "gemini-2.5-flash", "--workspace", "/ws", "--effort", "high", "--system-prefix", "You are a reviewer.", "--stream"}
+	wantA := []string{"mow", "acp", "--model", "gemini-2.5-flash", "--provider", "gateway", "--workspace", "/ws", "--effort", "high", "--system-prefix", "You are a reviewer.", "--stream"}
 	if got := cmdA; !slices.Equal(got, wantA) {
 		t.Fatalf("peer-a command=%v want %v", got, wantA)
 	}
@@ -67,6 +67,19 @@ func TestBuildMowAgentCapsExplicitTrueByHost(t *testing.T) {
 	joined := strings.Join(cmd, " ")
 	if strings.Contains(joined, "--allow-write") || strings.Contains(joined, "--allow-shell") {
 		t.Fatalf("explicit true must still be capped by host: %v", cmd)
+	}
+}
+
+func TestBuildMowAgentPeerProviderWinsOverHost(t *testing.T) {
+	spec := PeerSpec{Model: "deepseek-chat", Provider: "direct"}
+	host := &hostPeerPolicy{workspace: "/ws", provider: "gateway"}
+	cmd := buildMowAgentCommand(spec, host, "/ws")
+	joined := strings.Join(cmd, " ")
+	if !strings.Contains(joined, "--provider direct") {
+		t.Fatalf("want peer provider: %v", cmd)
+	}
+	if strings.Contains(joined, "--provider gateway") {
+		t.Fatalf("peer provider must win: %v", cmd)
 	}
 }
 

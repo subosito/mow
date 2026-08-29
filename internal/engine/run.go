@@ -111,6 +111,9 @@ type Options struct {
 	ExplicitEffort bool
 	// BaseURL overrides config/env LLM base URL when non-empty.
 	BaseURL string
+	// LLMProvider selects llm.providers[name] and overlays it onto live llm.*
+	// before Model/BaseURL. Empty uses yaml llm.provider or the flat llm.* block.
+	LLMProvider string
 	// SystemPrefix prepends optional identity text before the compiled system
 	// prompt. Each entry is a separate system segment.
 	SystemPrefix []string

@@ -138,6 +138,23 @@ func TestOptionsExplicitModel(t *testing.T) {
 	}
 }
 
+func TestOptionsProvider(t *testing.T) {
+	t.Parallel()
+	var ef cliutil.EngineFlags
+	fs := cliutil.NewFlagSet("run")
+	ef.Bind(fs)
+	if err := fs.Parse([]string{"--provider", "gateway", "--model", "gpt-5-mini"}); err != nil {
+		t.Fatal(err)
+	}
+	opt := ef.Options()
+	if opt.LLMProvider != "gateway" {
+		t.Fatalf("LLMProvider=%q", opt.LLMProvider)
+	}
+	if opt.Model != "gpt-5-mini" || !opt.ExplicitModel {
+		t.Fatalf("model=%q explicit=%v", opt.Model, opt.ExplicitModel)
+	}
+}
+
 func TestOptionsExtraRootModes(t *testing.T) {
 	t.Parallel()
 	var ef cliutil.EngineFlags

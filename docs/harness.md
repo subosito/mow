@@ -244,6 +244,7 @@ Compaction **trips on tokens vs `context_window`**. There is no client tokenizer
 | Config | Meaning |
 |--------|---------|
 | `llm.base_url` | Provider or gateway `/v1` |
+| `llm.providers` / `llm.provider` | Named endpoint overlays (`base_url`, key, wire, default model). `--provider` / `MOW_PROVIDER` select one; live `llm.*` is the default. Host/user only |
 | `llm.api_key` / `api_key_env` | Provider key **or** gateway key |
 | `llm.model` | Model id |
 | `llm.effort` | Reasoning intensity: `none` \| `low` \| `medium` \| `high` (optional body fields; never part of model id). An effort set here (or via `MOW_EFFORT`, `-effort`, `/effort`) is **pinned**: it survives model switches where the catalog allows it, and is always sent as-is. When effort instead comes from the catalog `default_effort` and that tier is `high`/`max`/`xhigh`, mow sends short mechanical prompts (≤120 runes, no complexity keyword like `debug`/`refactor`/`why does`) at `medium` — wire-only, so `Effort()`, the status line, and the session record still report the selected tier. Catalog lookup matches a single provider prefix either way (`gateway/gemini-x` ↔ `gemini-x`) so `default_effort` is adopted onto the client and sent as `reasoning_effort` |
@@ -432,6 +433,7 @@ Project trust: `mow trust` (stored out-of-band in `$MOW_HOME/trusted`) or env `M
 | `MOW_HOME` | User data root |
 | `MOW_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | LLM auth |
 | `MOW_MODEL` / `OPENAI_MODEL` / `ANTHROPIC_MODEL` | Chat model |
+| `MOW_PROVIDER` | `llm.providers` name (overlays url/key/wire/model) |
 | `MOW_BASE_URL` / `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` | LLM endpoint |
 | `MOW_WIRE` | Wire id (optional) |
 | `MOW_TRUST_PROJECT` | Trust project `.mow/*` for this invocation (persistent: `mow trust`) |

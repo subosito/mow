@@ -250,6 +250,11 @@ func New(opt Options) (*Engine, error) {
 	if len(opt.ExtraRootsReadOnly) > 0 {
 		cfg.Policy.ExtraRootsReadOnly = append(append([]string(nil), cfg.Policy.ExtraRootsReadOnly...), opt.ExtraRootsReadOnly...)
 	}
+	if name := strings.TrimSpace(opt.LLMProvider); name != "" {
+		if err := cfg.ApplyNamedProvider(name); err != nil {
+			return nil, err
+		}
+	}
 	if m := strings.TrimSpace(opt.Model); m != "" {
 		cfg.LLM.Model = m
 	}

@@ -51,6 +51,9 @@ type PeerSpec struct {
 	SystemPrefix string `yaml:"system_prefix" json:"system_prefix,omitempty"`
 	// Native-only extra argv after the standard mow acp flags.
 	ExtraArgs []string `yaml:"extra_args" json:"extra_args,omitempty"`
+	// Provider is a native-only llm.providers name. Empty inherits the host's
+	// live endpoint (including the host --provider overlay).
+	Provider string `yaml:"provider" json:"provider,omitempty"`
 }
 
 func (a PeerSpec) native() bool { return strings.TrimSpace(a.Model) != "" }

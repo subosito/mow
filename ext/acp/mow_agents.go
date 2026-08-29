@@ -53,6 +53,7 @@ func resolveOnePeer(i int, a PeerSpec) (PeerSpec, error) {
 	}
 	a.Name = name
 	a.Model = strings.TrimSpace(a.Model)
+	a.Provider = strings.TrimSpace(a.Provider)
 	a.Dir = strings.TrimSpace(a.Dir)
 	a.TimeoutSec = timeout
 	a.Effort = strings.TrimSpace(a.Effort)
@@ -65,6 +66,13 @@ func buildMowAgentCommand(spec PeerSpec, host *hostPeerPolicy, peerCwd string) [
 	bin := mowAgentBinary()
 	model := strings.TrimSpace(spec.Model)
 	cmd := []string{bin, "acp", "--model", model}
+	prov := strings.TrimSpace(spec.Provider)
+	if prov == "" && host != nil {
+		prov = strings.TrimSpace(host.provider)
+	}
+	if prov != "" {
+		cmd = append(cmd, "--provider", prov)
+	}
 
 	ws := strings.TrimSpace(peerCwd)
 	if host != nil && strings.TrimSpace(host.workspace) != "" {

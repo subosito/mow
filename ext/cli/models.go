@@ -71,7 +71,7 @@ func printModelsUsage() {
 
   mow models [filter]
   --chat               chat-loop models only
-  --config --model --base-url --workspace
+  --config --model --provider --base-url --workspace
 
 `)
 }

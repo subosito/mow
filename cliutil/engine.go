@@ -19,6 +19,7 @@ type EngineFlags struct {
 	Workspace     string
 	ExtraRoots    []string // repeatable --extra-root
 	Model         string
+	Provider      string
 	Effort        string
 	BaseURL       string
 	SystemPrefix  []string // repeatable --system-prefix
@@ -49,6 +50,7 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.Workspace, "workspace", "", "workspace root: a profile name from $MOW_HOME/workspaces/<name> or a directory path")
 	fs.Var((*stringList)(&f.ExtraRoots), "extra-root", "extra FS root for path jail (repeatable; PATH, PATH:ro, or explicit PATH:rw)")
 	fs.StringVar(&f.Model, "model", "", "model id")
+	fs.StringVar(&f.Provider, "provider", "", "llm.providers name (overlays url/key/wire/model; --model still wins)")
 	fs.StringVar(&f.Effort, "effort", "", "reasoning effort (catalog efforts when listed; else none|low|medium|high)")
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
 	fs.Var((*stringList)(&f.SystemPrefix), "system-prefix", "system prompt prefix (repeatable)")
@@ -180,6 +182,7 @@ func (f *EngineFlags) Options() mow.Options {
 		ReadOnly:           readOnlyMode,
 		Model:              f.Model,
 		ExplicitModel:      strings.TrimSpace(f.Model) != "",
+		LLMProvider:        strings.TrimSpace(f.Provider),
 		Effort:             f.Effort,
 		ExplicitEffort:     strings.TrimSpace(f.Effort) != "",
 		BaseURL:            f.BaseURL,

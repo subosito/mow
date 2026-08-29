@@ -85,7 +85,8 @@ Does not import `ext/acp`. Same engine flags as `mow run`. In-session: `/model`,
   current peer protocol). Peer failures stay in the tool result, never as a
   parent-session abort — the run proceeds and the model decides how to react.
 - Native peers (`model` on `peers[]`) support model, effort, system prefix,
-  cwd, permissions, and timeout. Peer processes are reused by **agent + cwd +
+  cwd, permissions, timeout, and optional `provider` (`llm.providers` name;
+  omit inherits the host endpoint). Peer processes are reused by **agent + cwd +
   effective argv + permission_mode** (a model/policy change starts a new
   process). At delegate time, nil `allow_write` / `allow_shell` inherit the
   host Engine and are capped by it (never exceed host `AllowWrite` /
@@ -129,6 +130,7 @@ extensions:
         system_prefix: "You are a reviewer."
         allow_write: true       # capped by host; omit to inherit
         read_only: false        # omit to inherit (!host write && !host shell)
+        # provider: gateway     # native-only llm.providers name; omit inherits the host endpoint
 ```
 
 ### MCP (`packs/mcp`)
