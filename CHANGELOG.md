@@ -20,4 +20,5 @@ ACP v1 is the host protocol (`mow acp` plus optional extras). `mow rpc` is gone.
 - Dropped `policy.max_context_chars` and `policy.compact_ratio`. Auto-compact is always `context_window` × 0.5 (hard-capped). Go `Options.MaxContextChars` remains for tests.
 - Focus pack: repeated grep/glob tool calls degrade then refuse like inventory (distinct patterns stay distinct).
 - Review/sec path and whole-tree scopes use git ls-files (honour gitignore) so `.devenv` and similar trees do not burn the budget.
+- TUI spawn docs: `mowi.acp_command` is an exact ACP argv, mutually exclusive with `mow_bin`.
 EOF

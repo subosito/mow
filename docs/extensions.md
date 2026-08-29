@@ -41,10 +41,12 @@ tools it actually has.
   `ext/cli` + `ext/tty` + `ext/acp` plus focus, proc, cmdhook, mcp. `cmd/mowx`
   adds goal, job, ops, review, media. Drop an import and that subcommand is gone.
 - Host UIs launch `mow acp` (`ext/acp`), own terminal presentation, and receive
-  registered command/tool events over ACP + extras. Spawn binary: `--mow-bin` /
+  registered command/tool events over ACP + extras. Spawn: `--mow-bin` /
   `$MOW_BIN` / host `$MOW_HOME/config.yaml` `mowi.mow_bin` (not project
 
-  `.mow/`) / `mow`. `ext/acp` does not import `ext/cli`.
+  `.mow/`) / `mow`, or exact argv `--acp-command` / `$ACP_COMMAND` /
+  `mowi.acp_command` (mutually exclusive with `mow_bin`). `ext/acp` does not
+  import `ext/cli`.
 - Native `agents` (`model:`) start the currently running executable
   (`os.Executable()`), so native ACP peers remain self-contained.
 
@@ -334,8 +336,9 @@ The Rust `mowi` sibling project/repository is the interactive terminal host.
 It launches `mow acp` and renders sessions, streaming, model/effort pickers,
 tool approval, peer streams, and pack command results. `mowi.mow_bin`
 in host `$MOW_HOME/config.yaml` selects `mow` vs `mowx` (CLI `--mow-bin`
-and `$MOW_BIN` win; project `.mow/` is never read for this). See that project
-for installation and release instructions.
+and `$MOW_BIN` win). `mowi.acp_command` is an exact ACP argv instead
+(mutually exclusive with `mow_bin`). Project `.mow/` is never read for
+either. See that project for installation and release instructions.
 
 ## Configuration
 

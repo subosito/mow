@@ -386,6 +386,7 @@ tools:
     # - generate_image
 mowi:
   # mow_bin: mowx                # host yaml only; TUI spawn (not project .mow/)
+  # acp_command: [some-agent, --stdio]  # instead of mow_bin; exact argv
   theme: catppuccin-mocha
   mode: code                     # ask | code
   approvals: prompt              # prompt | always (skip overlay)
