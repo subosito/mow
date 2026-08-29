@@ -77,7 +77,8 @@ bytes, and turns. When the workspace is a git repo, path and whole-tree scopes l
 index files** (`ls-files --cached --others --exclude-standard`): tracked plus
 untracked that are not gitignored. `.devenv`, `.direnv`, and other ignored
 trees are not walked. Non-git workspaces still walk the disk and SkipDir
-default-exclude trees (`node_modules`, `vendor`, `.devenv`, …) unless
+default-exclude trees (`node_modules`, `vendor`, `.devenv`, `target`,
+`.next`, … — the same junk glob/grep skip) unless
 `--include-all`. Walks stop after 4096 remaining files so a vendored tree
 cannot hide source. A truncated scope is flagged in every format so a partial
 review cannot look like a complete clean scan.

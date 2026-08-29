@@ -53,6 +53,8 @@ func TestDefaultExcludesCoverUsualSuspects(t *testing.T) {
 		"package-lock.json", "api/v1/svc.pb.go", "assets/logo.png",
 		".git/config", "web/bundle.min.js",
 		".devenv/bin/mow", "nix/.devenv/state.txt", ".direnv/flake-profile",
+		"crate/target/debug/foo", "__pycache__/a.pyc", "web/.next/cache",
+		"coverage/lcov.info", "pkg/.cache/x",
 	} {
 		if _, ok := MatchAny(ex, rel); !ok {
 			t.Errorf("default excludes miss %q", rel)
@@ -124,6 +126,10 @@ func TestDefaultExcludesMatchNestedVendorTrees(t *testing.T) {
 		"web/dist/bundle.js",
 		".devenv/state.json",
 		"pkg/.devenv/bin/x",
+		"app/target/release/app",
+		"src/__pycache__/mod.pyc",
+		"web/.next/static/chunk.js",
+		"frontend/coverage/lcov.info",
 	}
 	for _, p := range shouldSkip {
 		if _, ok := MatchAny(ex, p); !ok {
@@ -136,6 +142,8 @@ func TestDefaultExcludesMatchNestedVendorTrees(t *testing.T) {
 		"internal/vendoring/policy.go",
 		"pkg/builder/build.go",
 		"cmd/distribute/main.go",
+		"coverage.go",
+		"internal/targeting/plan.go",
 	}
 	for _, p := range shouldKeep {
 		if pat, ok := MatchAny(ex, p); ok {

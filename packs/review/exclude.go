@@ -7,7 +7,8 @@ import (
 
 // DefaultExcludes are skipped unless the caller passes IncludeAll. These are
 // paths where an AI reviewer reliably wastes budget: vendored or generated
-// code, lockfiles, binaries, and build output.
+// code, lockfiles, binaries, and build output. Directory names match the
+// glob/grep skip list so a review does not re-read trees those tools skip.
 func DefaultExcludes() []string {
 	return []string{
 		".git/**",
@@ -22,8 +23,15 @@ func DefaultExcludes() []string {
 		"third_party/**", "**/third_party/**",
 		"dist/**", "**/dist/**",
 		"build/**", "**/build/**",
-		"target/**",
+		"target/**", "**/target/**",
 		".venv/**", "**/.venv/**",
+		"venv/**", "**/venv/**",
+		"__pycache__/**", "**/__pycache__/**",
+		".next/**", "**/.next/**",
+		".nuxt/**", "**/.nuxt/**",
+		".turbo/**", "**/.turbo/**",
+		".cache/**", "**/.cache/**",
+		"coverage/**", "**/coverage/**",
 		"**/*.pb.go",
 		"**/*_generated.go",
 		"**/*.generated.*",
