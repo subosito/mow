@@ -174,6 +174,12 @@ func TestEffectivePermissionMode(t *testing.T) {
 	if got := effectivePermissionMode(PeerSpec{}); got != PermissionReject {
 		t.Fatalf("default=%q", got)
 	}
+	if got := effectivePermissionMode(PeerSpec{Model: "gemini-2.5-flash"}); got != PermissionAllow {
+		t.Fatalf("native omitted=%q want allow", got)
+	}
+	if got := effectivePermissionMode(PeerSpec{Model: "gemini-2.5-flash", PermissionMode: "reject"}); got != PermissionReject {
+		t.Fatalf("native explicit reject=%q", got)
+	}
 	if got := effectivePermissionMode(PeerSpec{PermissionMode: "allow"}); got != PermissionAllow {
 		t.Fatalf("allow=%q", got)
 	}

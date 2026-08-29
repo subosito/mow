@@ -95,7 +95,9 @@ Does not import `ext/acp`. Same engine flags as `mow run`. In-session: `/model`,
 - External peers (`command` on `peers[]`) use the argv as written (put
   effort or other flags on the command — mow does not inject them). They
   use `permission_mode: reject|allow` (default **reject**)
-  for agent→client `session/request_permission`. Reject returns ACP
+  for agent→client `session/request_permission`. Native `model:` peers
+  default **allow** — write/shell already inherited from the host, and
+  the overlay cannot reach the TUI. Explicit yaml always wins. Reject returns ACP
   `{outcome:{outcome:"cancelled"}}`. Allow selects an `allow_once` /
   `allow_always` `optionId` from the request (never invents ids). Legacy peers
   whose argv already contains `--force` still auto-allow when

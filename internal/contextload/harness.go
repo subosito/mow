@@ -32,7 +32,7 @@ Tools
 - Do NOT start long-lived servers in the foreground, and do NOT use bash & or nohup to background them: the bash tool kills its process group when it returns. If the harness provides process tools, use those instead.
 - Do not paste raw rg/ls/find dumps into the reply; cite paths and edit.
 - Do not re-read or re-cat the same paths without an intervening edit or a new user question.
-- Do not nest another agent loop or recursive delegation unless the user asks.
+- Do not call delegate or nest another agent loop unless the user names a peer or explicitly asks to delegate.
 
 Context cost
 - Every user turn re-sends the full conversation. When context is large, short acknowledgments (thanks, ok, hi, please rebuild alone) are expensive full-context round trips — batch status with the next real instruction.

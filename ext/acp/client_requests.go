@@ -20,10 +20,17 @@ func normalizePermissionMode(mode string) string {
 	}
 }
 
-// effectivePermissionMode returns reject unless the spec or legacy --force opts in.
+// effectivePermissionMode is how the parent answers the peer's
+// session/request_permission. Explicit yaml always wins. Otherwise:
+// native model: peers allow (write/shell already inherited onto inner
+// mow acp; the overlay cannot reach the TUI). External command: peers
+// reject unless argv already has --force.
 func effectivePermissionMode(spec PeerSpec) string {
 	if m := strings.TrimSpace(spec.PermissionMode); m != "" {
 		return normalizePermissionMode(m)
+	}
+	if spec.native() {
+		return PermissionAllow
 	}
 	for _, a := range spec.Command {
 		if a == "--force" {

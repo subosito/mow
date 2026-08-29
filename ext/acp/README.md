@@ -61,7 +61,7 @@ extensions:
         extra_args: []
 ```
 
-`command` and `model` are exclusive. `permission_mode` applies to external (`command`) peers (`reject` or `allow`). Names in `peers[]` must not collide.
+`command` and `model` are exclusive. `permission_mode` (`reject` | `allow`) is how the parent answers the peer's `session/request_permission`. Omitted: native `model:` peers allow; external `command:` peers reject. Names in `peers[]` must not collide.
 
 ## Docs
 

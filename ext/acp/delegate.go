@@ -36,9 +36,11 @@ type PeerSpec struct {
 	// Effort is native-only (--effort on mow acp). External peers put their
 	// own flag in command; mow does not rewrite argv.
 	Effort string `yaml:"effort" json:"effort,omitempty"`
-	// PermissionMode controls agent→client session/request_permission handling
-	// (external peers). reject (default) | allow. Legacy: argv containing
-	// --force implies allow when permission_mode is omitted.
+	// PermissionMode is how the parent answers the peer's
+	// session/request_permission: reject | allow. Omitted: native model:
+	// peers allow (host already capped write/shell); external command:
+	// peers reject. Legacy: argv containing --force implies allow when
+	// this field is omitted.
 	PermissionMode string `yaml:"permission_mode" json:"permission_mode,omitempty"`
 	// Native-only. Nil inherits the host at delegate time (never exceeds host).
 	AllowWrite *bool `yaml:"allow_write" json:"allow_write,omitempty"`
@@ -382,7 +384,8 @@ func (t *delegateTool) Description() string {
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	return "Delegate a task to a named peer agent over ACP (the current peer protocol; in other harnesses often called a subagent). " +
+	return "Delegate a task to a named peer agent over ACP (in other harnesses often called a subagent). " +
+		"Only call this when the user names a peer or explicitly asks to delegate — not because a task list looks parallelizable. " +
 		"Peers are configured under extensions.acp.peers (command = external ACP peer; model = native mow acp). " +
 		"Process/session is reused across calls when possible. " +
 		"Long runs are capped by the agent's timeout_sec; cancel the host turn to abort. " +

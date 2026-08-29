@@ -13,6 +13,8 @@ ACP v1 is the host protocol (`mow acp` plus optional extras). `mow rpc` is gone.
 - `initialize` does not advertise stub `auth.logout`.
 - Unreachable provider: LLM retries with backoff (~40s refused window); ACP forwards `model_retry` and returns `-32603` without the dial URL.
 - Delegate peers: drop the process tree when the host Prompt ends (and on session/close); SIGKILL after 200ms if SIGTERM is ignored. Linux parent-death SIGKILL + idle reaper remain as backups.
+- Native `model:` delegate peers default `permission_mode: allow` (host already capped write/shell; overlay cannot reach the TUI). External `command:` peers still default reject. Explicit yaml wins.
+- `delegate` is only for when the user names a peer or asks to delegate (tool description + harness rule).
 - Exploration: grep-then-glob-then-read; glob is an index (junk trees skipped); unique-file reads cap at 12 this prompt.
 - grep uses ripgrep when `rg` is on PATH (fixed-string, jailed, same caps); WalkDir if rg is missing, too old, or errors.
 - glob uses `fd` when installed, with the same WalkDir fallback.
