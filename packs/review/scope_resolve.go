@@ -100,6 +100,13 @@ func selectCandidates(ctx context.Context, sc *Scope, req ScopeRequest, git gitR
 	case len(req.Paths) > 0:
 		sc.Mode = "paths"
 		sc.Selector = strings.Join(req.Paths, " ")
+		if sc.Git.Available {
+			rels, err := gitPathArgs(sc.Workspace, req.Paths)
+			if err != nil {
+				return nil, err
+			}
+			return gitIndexFiles(ctx, sc.Workspace, git, rels)
+		}
 		files, skipped, truncated, err := expandPaths(sc.Workspace, req.Paths, walkExcludes(req))
 		recordSkippedDirs(sc, skipped)
 		if truncated {
@@ -123,6 +130,9 @@ func selectCandidates(ctx context.Context, sc *Scope, req ScopeRequest, git gitR
 
 	default:
 		sc.Mode, sc.Selector = "paths", "."
+		if sc.Git.Available {
+			return gitIndexFiles(ctx, sc.Workspace, git, nil)
+		}
 		files, skipped, truncated, err := expandPaths(sc.Workspace, []string{"."}, walkExcludes(req))
 		recordSkippedDirs(sc, skipped)
 		if truncated {
@@ -130,6 +140,36 @@ func selectCandidates(ctx context.Context, sc *Scope, req ScopeRequest, git gitR
 		}
 		return files, err
 	}
+}
+
+// gitPathArgs turns user path args into workspace-relative git pathspecs.
+// "." means the whole tree (no pathspecs). Escaping paths error.
+func gitPathArgs(workspace string, paths []string) ([]string, error) {
+	var rels []string
+	whole := false
+	for _, p := range paths {
+		rel, err := NormalizePath(p, workspace)
+		if err != nil {
+			if strings.TrimSpace(p) == "." || strings.TrimSpace(p) == "./" {
+				whole = true
+				continue
+			}
+			return nil, fmt.Errorf("review: %w", err)
+		}
+		if rel == "." {
+			whole = true
+			continue
+		}
+		full := filepath.Join(workspace, filepath.FromSlash(rel))
+		if _, err := os.Lstat(full); err != nil {
+			return nil, fmt.Errorf("review: %s: %w", rel, err)
+		}
+		rels = append(rels, rel)
+	}
+	if whole {
+		return nil, nil
+	}
+	return rels, nil
 }
 
 func walkExcludes(req ScopeRequest) []string {

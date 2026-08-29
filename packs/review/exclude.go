@@ -11,6 +11,8 @@ import (
 func DefaultExcludes() []string {
 	return []string{
 		".git/**",
+		".devenv/**", "**/.devenv/**",
+		".direnv/**", "**/.direnv/**",
 		// Both anchored and nested forms: a monorepo keeps vendored trees at
 		// pkg/vendor or web/node_modules, and those were previously only
 		// skipped by the directory walk — so diff- and worktree-scoped runs

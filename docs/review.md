@@ -73,10 +73,14 @@ always discloses what was actually selected.
 Every skipped file carries a **reason** (excluded glob, vendored, generated,
 binary, too large, budget exhausted); `--verbose` prints them. The skip list is
 capped at 256 entries. `--budget small|medium|large` caps files, bytes, per-file
-bytes, and turns. Path walks SkipDir default-exclude trees (`node_modules`,
-`vendor`, …) unless `--include-all`. Walks stop after 4096 remaining files so a
-vendored tree cannot hide source. A truncated scope is flagged in every format
-so a partial review cannot look like a complete clean scan.
+bytes, and turns. When the workspace is a git repo, path and whole-tree scopes list **git
+index files** (`ls-files --cached --others --exclude-standard`): tracked plus
+untracked that are not gitignored. `.devenv`, `.direnv`, and other ignored
+trees are not walked. Non-git workspaces still walk the disk and SkipDir
+default-exclude trees (`node_modules`, `vendor`, `.devenv`, …) unless
+`--include-all`. Walks stop after 4096 remaining files so a vendored tree
+cannot hide source. A truncated scope is flagged in every format so a partial
+review cannot look like a complete clean scan.
 
 ## Command defaults
 

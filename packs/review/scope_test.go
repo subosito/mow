@@ -12,6 +12,7 @@ type fakeGit struct {
 	repo      bool
 	dirty     bool
 	changed   []string
+	tracked   []string
 	untracked []string
 	// noDiffFor makes `git diff -- <path>` return empty, as happens for
 	// untracked files and no-op changes.
@@ -45,6 +46,11 @@ func (g *fakeGit) run(ctx context.Context, ws string, args ...string) (string, e
 		return strings.Join(g.changed, "\n"), nil
 	case strings.HasPrefix(key, "ls-files --others"):
 		return strings.Join(g.untracked, "\n"), nil
+	case strings.HasPrefix(key, "ls-files --cached"):
+		var files []string
+		files = append(files, g.tracked...)
+		files = append(files, g.untracked...)
+		return strings.Join(files, "\n"), nil
 	case strings.HasPrefix(key, "diff --no-color"):
 		for p := range g.noDiffFor {
 			if strings.HasSuffix(key, " "+p) {

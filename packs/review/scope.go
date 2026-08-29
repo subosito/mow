@@ -80,6 +80,7 @@ type ScopeRequest struct {
 	// Excludes are extra globs on top of DefaultExcludes.
 	Excludes []string
 	// IncludeAll disables the default exclude list (vendor, generated, …).
+	// Gitignored files stay out when the workspace is a git repo.
 	IncludeAll bool
 	// Budget names the size cap; empty means "medium".
 	Budget string

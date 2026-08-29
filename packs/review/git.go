@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -82,6 +83,36 @@ func changedFiles(ctx context.Context, workspace string, git gitRunner, args ...
 		return nil, err
 	}
 	return splitLines(out), nil
+}
+
+// gitIndexFiles lists tracked files plus untracked files that are not
+// gitignored (`ls-files --cached --others --exclude-standard`). That is the
+// reviewable set: source git knows about, not .devenv / node_modules dumps.
+// paths, when non-empty, limit the listing (workspace-relative).
+func gitIndexFiles(ctx context.Context, workspace string, git gitRunner, paths []string) ([]string, error) {
+	args := []string{"ls-files", "--cached", "--others", "--exclude-standard", "--"}
+	for _, p := range paths {
+		p = strings.TrimSpace(filepath.ToSlash(p))
+		if p == "" || p == "." {
+			continue
+		}
+		args = append(args, p)
+	}
+	out, err := git(ctx, workspace, args...)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var files []string
+	for _, f := range splitLines(out) {
+		f = filepath.ToSlash(f)
+		if f == "" || seen[f] {
+			continue
+		}
+		seen[f] = true
+		files = append(files, f)
+	}
+	return files, nil
 }
 
 // diffText returns a unified diff with limited context for the given selector.

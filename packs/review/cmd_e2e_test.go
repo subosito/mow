@@ -584,6 +584,35 @@ func TestResolveScopeExpandsDirectories(t *testing.T) {
 	}
 }
 
+// Gitignored trees (devenv, direnv) must not enter path/whole-tree scope.
+func TestResolveScopeHonoursGitignore(t *testing.T) {
+	ws := gitRepo(t)
+	if err := os.WriteFile(filepath.Join(ws, ".gitignore"), []byte(".devenv/\n.direnv/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hidden := filepath.Join(ws, ".devenv", "bin")
+	if err := os.MkdirAll(hidden, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hidden, "mow"), []byte("not source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sc, err := ResolveScope(context.Background(), ScopeRequest{
+		Workspace: ws, Paths: []string{"."}, Budget: "large",
+	})
+	if err != nil {
+		t.Fatalf("ResolveScope: %v", err)
+	}
+	for _, p := range sc.Paths() {
+		if strings.Contains(p, ".devenv") {
+			t.Fatalf("gitignored .devenv leaked into scope: %v", sc.Paths())
+		}
+	}
+	if !strings.Contains(strings.Join(sc.Paths(), " "), "app.go") {
+		t.Fatalf("tracked source missing: %v", sc.Paths())
+	}
+}
+
 // A missing path must fail loudly: silently reviewing nothing would report
 // "no findings" for a typo.
 func TestResolveScopeMissingPathErrors(t *testing.T) {

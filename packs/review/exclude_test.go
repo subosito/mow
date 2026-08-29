@@ -52,6 +52,7 @@ func TestDefaultExcludesCoverUsualSuspects(t *testing.T) {
 		"vendor/github.com/x/y.go", "node_modules/pkg/index.js", "go.sum",
 		"package-lock.json", "api/v1/svc.pb.go", "assets/logo.png",
 		".git/config", "web/bundle.min.js",
+		".devenv/bin/mow", "nix/.devenv/state.txt", ".direnv/flake-profile",
 	} {
 		if _, ok := MatchAny(ex, rel); !ok {
 			t.Errorf("default excludes miss %q", rel)
@@ -121,6 +122,8 @@ func TestDefaultExcludesMatchNestedVendorTrees(t *testing.T) {
 		"web/node_modules/left-pad/index.js",
 		"internal/third_party/lib.go",
 		"web/dist/bundle.js",
+		".devenv/state.json",
+		"pkg/.devenv/bin/x",
 	}
 	for _, p := range shouldSkip {
 		if _, ok := MatchAny(ex, p); !ok {
