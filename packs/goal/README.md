@@ -9,18 +9,18 @@ import _ "github.com/subosito/mow/packs/goal"
 ```
 
 `cmd/mowx` blank-imports this package; lean `cmd/mow` does not. The Rust `mowi` sibling project
-displays its RPC-driven results. Job depends on goal.
+shows slash `/goal` over `mow acp` when this pack is linked. Job depends on goal.
 
 ## Commands and tools
 
 | Surface | Name |
 |---|---|
 | CLI | `goal` (`mow goal`) |
-| Interactive / RPC | `/goal` (also listed by `slash.list`) |
+| Slash | `/goal` (also listed by `slash.list`) |
 
 Subcommands: `list`, `new`, `run`, `status`, `reset`, `delete`. The interactive
 form runs against the current session Engine; `run` and one-shot goals emit
-`graph.goal.*` notifications through the generic RPC event stream.
+`graph.goal.*` notifications on the ACP session/update stream.
 
 Goal-step tools are **not** globally registered. They are injected via `PromptOpts.ExtraTools` for the in-flight step only:
 

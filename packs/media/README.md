@@ -25,7 +25,7 @@ No CLI, no slash commands. Registration is per-tool and conditional: a tool
 appears only when its model id is set (`extensions.media.generate.image`,
 `extensions.media.understand.voice`, …) and an API key is resolvable. No media config
 means no tools, never an Engine construction error. The Rust `mowi` sibling
-project exposes these tools through the RPC surface.
+project paints these as ordinary tool rows over `mow acp`.
 
 ## Config (`extensions.media`)
 

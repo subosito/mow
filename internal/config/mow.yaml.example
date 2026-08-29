@@ -145,7 +145,7 @@ session:
 # mowi:
 #   mow_bin: mow                    # lean default; TUI spawn
 #   # mow_bin: mowx             # --mow-bin > $MOW_BIN > this > mow
-#   theme: catppuccin-mocha
+#   theme: default                  # alias: catppuccin-mocha
 #   mode: code                      # ask | code
 #   approvals: prompt               # prompt | always (skip overlay)
 

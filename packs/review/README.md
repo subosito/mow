@@ -9,7 +9,7 @@ import _ "github.com/subosito/mow/packs/review"
 ```
 
 `cmd/mowx` blank-imports this package; lean `cmd/mow` does not. The Rust `mowi` sibling project
-displays its RPC-driven results.
+shows slash `/review` / `/sec` over `mow acp` when this pack is linked.
 
 ## Commands
 
