@@ -90,7 +90,16 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		maxPar = e.cfg.Policy.MaxParallelTools
 	}
 	// Use limitsLocked: e.mu is held; Limits() would re-lock and deadlock.
-	maxCtx = resolveMaxContextChars(e.opt.MaxContextChars, e.limitsLocked().ContextWindow)
+	window := e.limitsLocked().ContextWindow
+	maxCtx = resolveMaxContextChars(e.opt.MaxContextChars, window)
+	if e.opt.MaxContextChars < 0 {
+		window = 0 // compact disabled — do not take the token tripwire
+	}
+	lastIn := e.lastProviderTokens
+	if e.calib == nil {
+		e.calib = agent.NewRatioCalibrator()
+	}
+	calib := e.calib
 	if e.opt.MaxToolResultChars > 0 {
 		maxToolRes = e.opt.MaxToolResultChars
 	}
@@ -270,6 +279,9 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		Hooks:              hooks,
 		OnToken:            onTok,
 		MaxContextChars:    maxCtx,
+		ContextWindow:      window,
+		LastInputTokens:    lastIn,
+		Calib:              calib,
 		MaxToolResultChars: maxToolRes,
 		MaxOutputTokens:    e.maxOutputTokens(),
 		OnPrefixDrift:      e.prefixDriftReporter(),
@@ -577,11 +589,13 @@ func stopReasonFrom(err error) string {
 	return StopError
 }
 
-// resolveMaxContextChars picks the soft history budget.
+// resolveMaxContextChars picks the explicit char budget passed as
+// MaxContextChars. Auto-compact (optMax == 0) with a known window returns 0
+// so applyCompact uses the token tripwire (80% of context_window).
 //
 //	optMax < 0  → off (Go Options only)
 //	optMax > 0  → absolute char budget (capped)
-//	optMax == 0 → auto: window × 4 × DefaultCompactRatio
+//	optMax == 0 → auto: 0 when window is known (token path); else DefaultMaxContextChars
 func resolveMaxContextChars(optMax, windowTokens int) int {
 	if optMax < 0 {
 		return 0
@@ -595,7 +609,7 @@ func resolveMaxContextChars(optMax, windowTokens int) int {
 	if windowTokens <= 0 {
 		return agent.DefaultMaxContextChars
 	}
-	return agent.ContextCharsBudget(windowTokens, agent.DefaultCompactRatio)
+	return 0
 }
 
 func errString(err error) string {

@@ -45,14 +45,12 @@ func TestResolveMaxContextChars(t *testing.T) {
 	if got := resolveMaxContextChars(-1, 1_000_000); got != 0 {
 		t.Fatalf("disabled → %d", got)
 	}
-	got := resolveMaxContextChars(0, 1_000_000)
-	// 1M × 4 × 0.5 = 2M raw, hard-capped at MaxContextCharsHardCap (~400k tok).
-	if got != agent.MaxContextCharsHardCap {
-		t.Fatalf("auto 1M → %d want hard cap %d", got, agent.MaxContextCharsHardCap)
+	// Auto + known window: char budget stays 0 so applyCompact uses tokens.
+	if got := resolveMaxContextChars(0, 1_000_000); got != 0 {
+		t.Fatalf("auto 1M → %d want 0 (token path)", got)
 	}
-	gotMid := resolveMaxContextChars(0, 200_000)
-	if gotMid != 400_000 {
-		t.Fatalf("auto 200k @0.5 → %d want 400000", gotMid)
+	if got := resolveMaxContextChars(0, 200_000); got != 0 {
+		t.Fatalf("auto 200k → %d want 0 (token path)", got)
 	}
 	if got := resolveMaxContextChars(200_000, 1_000_000); got != 200_000 {
 		t.Fatalf("explicit opt → %d", got)

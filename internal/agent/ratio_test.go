@@ -215,3 +215,113 @@ func TestApplyCompactHookSeesRatio(t *testing.T) {
 		t.Fatalf("hook max=%d want 1000", gotMax)
 	}
 }
+
+func TestCompactTokenBudget(t *testing.T) {
+	if got := CompactTokenBudget(0); got != 0 {
+		t.Fatalf("unknown window → %d", got)
+	}
+	if got := CompactTokenBudget(500_000); got != 400_000 {
+		t.Fatalf("500k @80%% → %d want 400000", got)
+	}
+	if got := CompactTokenBudget(1); got != 1 {
+		t.Fatalf("tiny window → %d", got)
+	}
+}
+
+func TestEstimateUsedTokensPrefersBilled(t *testing.T) {
+	// 8_000 chars at 4 c/t → 2_000 tokens; billed 9_000 wins.
+	if got := estimateUsedTokens(8_000, 9_000, defaultCharsPerToken); got != 9_000 {
+		t.Fatalf("billed floor → %d", got)
+	}
+	if got := estimateUsedTokens(8_000, 0, defaultCharsPerToken); got != 2_000 {
+		t.Fatalf("estimate → %d", got)
+	}
+	if got := estimateUsedTokens(8_000, 1_000, defaultCharsPerToken); got != 2_000 {
+		t.Fatalf("estimate above billed → %d", got)
+	}
+}
+
+// Auto-compact trips at 80% of context_window in tokens — not at 50% via a
+// char budget — so the ctx chip and the tripwire share units.
+func TestApplyCompactTokenThreshold(t *testing.T) {
+	pad := func(n int) []llm.Message {
+		msgs := []llm.Message{
+			{Role: "system", Content: "sys"},
+			{Role: "user", Content: "implement the refund API with idempotency keys"},
+		}
+		for i := 0; i < n; i++ {
+			msgs = append(msgs,
+				llm.Message{Role: "assistant", Content: strings.Repeat("a", 800)},
+				llm.Message{Role: "tool", Name: "read", Content: strings.Repeat("x", 800)},
+			)
+		}
+		return msgs
+	}
+	const window = 10_000 // trip at 8_000 tokens
+	c := newRatioCalibrator()
+
+	// ~3.2k chars → ~800 tokens at 4 c/t: under 80%, must not fire.
+	small := pad(2)
+	if used := estimateUsedTokens(EstChars(small), 0, c.Ratio()); used >= CompactTokenBudget(window) {
+		t.Fatalf("fixture too big: %d tok", used)
+	}
+	_, compacted, err := applyCompact(t.Context(), small, Options{ContextWindow: window}, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compacted {
+		t.Fatal("under 80% of window must not compact")
+	}
+
+	// Same small history, but last bill is 90% of the window.
+	out, compacted, err := applyCompact(t.Context(), small, Options{
+		ContextWindow:   window,
+		LastInputTokens: 9_000,
+	}, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !compacted {
+		t.Fatal("9000/10000 billed must trip the 80% token threshold")
+	}
+
+	// After compact the loop zeros LastInputTokens. Shrunk history must not
+	// re-trip on the char estimate alone.
+	_, compacted, err = applyCompact(t.Context(), out, Options{ContextWindow: window}, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compacted {
+		t.Fatal("compacted history without a stale bill must sit under the threshold")
+	}
+
+	// 60% of the window (old char-budget tripwire) must not fire.
+	mid := pad(18) // ~18*1600 ≈ 29k chars ≈ 7.2k tok < 8k
+	used := estimateUsedTokens(EstChars(mid), 0, c.Ratio())
+	if used >= CompactTokenBudget(window) {
+		t.Fatalf("mid fixture %d tok should be under 8000", used)
+	}
+	if used < int(float64(window)*0.5) {
+		t.Fatalf("mid fixture %d tok should be over 50%% so this asserts the new threshold", used)
+	}
+	_, compacted, err = applyCompact(t.Context(), mid, Options{ContextWindow: window}, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compacted {
+		t.Fatalf("60%%-ish occupancy (%d/10000) must not compact at 80%%", used)
+	}
+
+	// Over 80% on the char estimate (no billed tokens) still fires.
+	big := pad(40) // ~64k chars ≈ 16k tok
+	if estimateUsedTokens(EstChars(big), 0, c.Ratio()) < CompactTokenBudget(window) {
+		t.Fatal("big fixture under threshold")
+	}
+	_, compacted, err = applyCompact(t.Context(), big, Options{ContextWindow: window}, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !compacted {
+		t.Fatal("char/calib estimate over 80% must compact")
+	}
+}

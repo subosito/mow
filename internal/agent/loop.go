@@ -80,8 +80,24 @@ type Options struct {
 	Hooks Hooks
 	// OnToken is content deltas when the ChatFn streams (optional).
 	OnToken func(delta string)
-	// MaxContextChars soft-limits history via Compact before each LLM call (0 = off).
+	// MaxContextChars soft-limits history via Compact before each LLM call.
+	// >0 is an absolute char budget (tests). <0 disables compact. 0 is auto:
+	// trip at CompactTokenThreshold of ContextWindow (tokens) when the
+	// window is known; otherwise off.
 	MaxContextChars int
+	// ContextWindow is the model context_window in tokens. Auto-compact
+	// (MaxContextChars == 0) trips at CompactTokenThreshold of this.
+	ContextWindow int
+	// LastInputTokens is the last provider-billed input for this session.
+	// 0 estimates occupancy from history chars / calibrator. The loop zeros
+	// this after a compact so a stale bill cannot re-trip.
+	LastInputTokens int
+	// ToolSchemaChars is the serialized tool-definition size billed with
+	// every call (counted in the token occupancy estimate).
+	ToolSchemaChars int
+	// Calib, when set, is reused across Prompts so chars/token density
+	// survives turn boundaries. Nil seeds a fresh 4.0 calibrator for this Run.
+	Calib *RatioCalibrator
 	// MaxToolResultChars caps each tool result in history (0 = DefaultMaxToolResultChars).
 	MaxToolResultChars int
 	// OnPrefixDrift, when set, is called whenever an already-sent message
@@ -208,7 +224,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	var (
 		lastToolFP string
 		sameToolFP int
-		calib      = newRatioCalibrator()
+		calib      = opt.Calib
 		evidence   = newEvidenceSet()
 		barrenRuns int
 		// truncatedBatches counts consecutive turns where the provider cut
@@ -217,6 +233,9 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		drift            prefixTracker
 		driftSum         driftSummary
 	)
+	if calib == nil {
+		calib = newRatioCalibrator()
+	}
 	// Stable per-call overhead outside message history: the serialized tool
 	// definitions ride along on every request and the provider bills them in
 	// InputTokens, so the chars/token calibrator must count them too —
@@ -228,6 +247,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	for _, ts := range toolSpecs {
 		toolChars += len(ts.Function.Name) + len(ts.Function.Description) + len(ts.Function.Parameters) + 16
 	}
+	opt.ToolSchemaChars = toolChars
 	for turn := 0; maxTurns <= 0 || turn < maxTurns; turn++ {
 		ctx = context.WithValue(ctx, "mow.turn", turn+1)
 		if err := ctx.Err(); err != nil {
@@ -249,6 +269,9 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		// from the full pre-compact span.
 		if compacted {
 			messages = send
+			// History no longer matches the last bill; occupancy must come
+			// from the shrunk projection, not the pre-compact InputTokens.
+			opt.LastInputTokens = 0
 		}
 		// Compare this request's prefix against the previous one. A change to
 		// an already-sent message means the provider must re-cache from that
@@ -362,6 +385,9 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		// request we just sent (history + tool definitions), so the next
 		// pre-call budget check is empirical.
 		calib.Observe(sentChars, msg.Usage.InputTokens)
+		if msg.Usage.InputTokens > 0 {
+			opt.LastInputTokens = msg.Usage.InputTokens
+		}
 		// Inline CoT normalization: models that wrap thinking in <think>-style
 		// tags (instead of the reasoning channel) must never leak it into
 		// committed history, sessions, or Result.Text. Stripping here also

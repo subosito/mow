@@ -18,19 +18,19 @@ const DefaultMaxToolResultChars = 24_000
 // only when auto-compact is on but the gateway did not publish context_window.
 const DefaultMaxContextChars = 100_000
 
-// DefaultCompactRatio is the fraction of gateway context_window used as the
-// soft history budget (128k → ~64k tok-eq; 1M is hard-capped — see
-// MaxContextCharsHardCap). Compact then aims at CompactResumeRatio of that
-// budget so the next tool batch has headroom.
+// DefaultCompactRatio is the fraction used by ContextCharsBudget (explicit
+// char-budget path / tests). Auto-compact trips on tokens — see
+// CompactTokenThreshold.
 const DefaultCompactRatio = 0.5
 
-// MaxContextCharsHardCap is the absolute ceiling on the soft history budget
-// (in chars, ~400k tokens at ~4 chars/token), enforced in applyCompact
-// regardless of gateway context_window or configured ratio. A huge window
-// must not let history grow past ~40% of a 1M-token model before compacting —
-// oversized histories are the dominant token-waste failure mode in long
-// coding sessions (contexts of 500K+ tokens cost tens of millions of input
-// tokens before the first compaction).
+// CompactTokenThreshold is the auto-compact tripwire as a fraction of
+// context_window (tokens). Same units as the host ctx chip: fire at 80% of
+// the advertised window.
+const CompactTokenThreshold = 0.80
+
+// MaxContextCharsHardCap is the absolute ceiling on an explicit char budget
+// (in chars, ~400k tokens at ~4 chars/token). Auto-compact (token path) is
+// not capped here — it follows CompactTokenThreshold of the real window.
 const MaxContextCharsHardCap = 1_600_000
 
 // ClampCompactRatio bounds ratio for auto budget. Non-positive → default.
@@ -68,6 +68,34 @@ func ContextCharsBudget(windowTokens int, ratio float64) int {
 	return b
 }
 
+// CompactTokenBudget is the auto-compact tripwire in tokens: 80% of the
+// gateway context_window. Returns 0 when the window is unknown.
+func CompactTokenBudget(windowTokens int) int {
+	if windowTokens <= 0 {
+		return 0
+	}
+	t := int(float64(windowTokens) * CompactTokenThreshold)
+	if t < 1 {
+		return 1
+	}
+	return t
+}
+
+// estimateUsedTokens is the pre-call occupancy guess. Prefer the last billed
+// input when it exceeds the char/calib estimate (dense code, uncalibrated
+// seed). Callers must zero lastInput after a compact so a stale bill cannot
+// re-trip on the already-shrunk history.
+func estimateUsedTokens(rawChars, lastInput int, ratio float64) int {
+	if ratio <= 0 {
+		ratio = defaultCharsPerToken
+	}
+	est := int(float64(rawChars)/clampRatio(ratio) + 0.5)
+	if lastInput > est {
+		return lastInput
+	}
+	return est
+}
+
 // Chars-per-token calibration. MaxContextChars is a char budget authored
 // against the classic ~4 chars/token heuristic. Real ratios vary a lot: dense
 // code / JSON tool output tokenizes near ~2.5 chars/token, English prose near
@@ -92,6 +120,13 @@ type ratioCalibrator struct {
 func newRatioCalibrator() *ratioCalibrator {
 	return &ratioCalibrator{ratio: defaultCharsPerToken}
 }
+
+// RatioCalibrator is the chars/token smoother. Engine holds one across
+// Prompts so density does not reset to 4.0 every turn.
+type RatioCalibrator = ratioCalibrator
+
+// NewRatioCalibrator returns a calibrator seeded at DefaultCharsPerToken.
+func NewRatioCalibrator() *RatioCalibrator { return newRatioCalibrator() }
 
 // Ratio returns the current smoothed chars/token estimate, always in
 // [minCharsPerToken, maxCharsPerToken]; seeded at defaultCharsPerToken.

@@ -222,7 +222,7 @@ reasoning**. Hosts must not render the wait state as "thinking".
 | Knob | Default | Effect |
 |------|---------|--------|
 | `policy.max_turns` | *(unlimited)* | Optional budget: LLM round-trips per Prompt (a turn may batch up to 8 tools). **Unset by default** — a run ends when it is done, stuck, cancelled, or over an explicit spend budget, never merely because it was long. Set a positive value to opt in to a ceiling; yaml `-1` / CLI `--max-turns 0` also mean unlimited. Only enforced when > 0 |
-| Auto-compact | always on | History budget is `context_window` × 0.5 (char estimate, ~4 chars/token), floored at 80k chars and hard-capped at `MaxContextCharsHardCap` ≈ 400k tok-eq. Compaction pins user task anchors + tools used. Not a yaml knob — Go `Options.MaxContextChars` can override or disable |
+| Auto-compact | always on | Trips at 80% of `context_window` in **tokens** (same units as the host ctx chip). Occupancy is last billed input tokens, or history chars ÷ calibrated chars/token when the provider has not reported usage yet. Compaction pins user task anchors + tools used. Not a yaml knob — Go `Options.MaxContextChars` can override (char budget, tests) or disable (`< 0`). Unknown window falls back to a 100k-char floor |
 | `llm.context_window` / `input_price` / `output_price` | (optional) | Override metering; otherwise `Engine.Limits()` uses `GET /v1/models` fields (`context_window`, `pricing.input_per_mtok` / `output_per_mtok`) — no client-side price table |
 | `policy.max_tool_result_chars` | `24000` | Cap each tool result stored for the model (~6k tokens) |
 | `policy.max_read_bytes` | `512KiB` | Cap `read` tool raw file size |
@@ -231,7 +231,7 @@ reasoning**. Hosts must not render the wait state as "thinking".
 | `policy.max_parallel_tools` | `8` | Concurrent tool Exec per assistant batch; `1` = sequential |
 | Loop truncate | always | Oversized tools trimmed even under context budget |
 
-Compaction is **character-estimate**, not a real tokenizer. It keeps the system message + **task anchors** (substantive user intents) + recent turns (aligned on a user boundary), stubs the middle (including which tools ran in the dropped span), and shrinks older tool bodies first.
+Compaction **trips on tokens vs `context_window`**. There is no client tokenizer: billed `input_tokens` from the last call is preferred, otherwise history chars ÷ a smoothed chars/token ratio (seeded at ~4, updated from provider usage so dense code does not under-count). It keeps the system message + **task anchors** (substantive user intents) + recent turns (aligned on a user boundary), stubs the middle (including which tools ran in the dropped span), and shrinks older tool bodies first. After a compact it aims at ~70% of the tripwire so the next tool batch has headroom.
 
 **PreCompact hooks** (`RegisterPreCompact` / `Options.OnPreCompact`) already run when history exceeds the budget: skip compaction, or supply a better `Summary` (event includes `Messages` on the public API). Use that for LLM distill if the default stub is not enough; anchors still pin user intents either way.
 
@@ -387,7 +387,7 @@ tools:
 mowi:
   # mow_bin: mowx                # host yaml only; TUI spawn (not project .mow/)
   # acp_command: [some-agent, --stdio]  # instead of mow_bin; exact argv
-  theme: catppuccin-mocha
+  theme: default                 # alias: catppuccin-mocha
   mode: code                     # ask | code
   approvals: prompt              # prompt | always (skip overlay)
 extensions:

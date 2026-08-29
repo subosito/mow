@@ -186,27 +186,46 @@ func toolResultLimit(opt Options) int {
 
 // applyCompact returns the message list to send for one LLM call, plus
 // compacted = true when history was actually compacted (drop/snip tier ran,
-// not just the under-budget tool trim). The soft budget from opt is hard-
-// capped at MaxContextCharsHardCap regardless of ratio or explicit config.
+// not just the under-budget tool trim).
+//
+// Two tripwires:
+//   - MaxContextChars > 0: explicit char budget (tests), hard-capped.
+//   - MaxContextChars == 0 && ContextWindow > 0: 80% of the window in tokens
+//     (same units as the host ctx chip). Occupancy is last billed input or
+//     EstChars / calibrator, whichever is higher.
 func applyCompact(ctx context.Context, messages []llm.Message, opt Options, calib *ratioCalibrator) ([]llm.Message, bool, error) {
 	toolLim := toolResultLimit(opt)
-	if opt.MaxContextChars <= 0 {
+	if opt.MaxContextChars < 0 {
 		return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
 	}
-	// Absolute ceiling: never let the soft budget exceed the hard cap. This
-	// applies even to an explicit Options.MaxContextChars above the cap — a
-	// huge window must not grow history past ~400k tokens.
-	budget := opt.MaxContextChars
-	if budget > MaxContextCharsHardCap {
-		budget = MaxContextCharsHardCap
-	}
-	// Estimate in "budget chars": raw chars rescaled by the calibrated
-	// chars/token ratio, so a code-heavy history (which tokenizes denser than
-	// the 4 chars/token heuristic) compacts before it blows the real window.
 	ratio := calib.Ratio()
 	raw := EstChars(messages)
-	est := budgetChars(raw, ratio)
-	if est <= budget {
+	var est, budget, target int
+	switch {
+	case opt.MaxContextChars > 0:
+		budget = opt.MaxContextChars
+		if budget > MaxContextCharsHardCap {
+			budget = MaxContextCharsHardCap
+		}
+		est = budgetChars(raw, ratio)
+		if est <= budget {
+			return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
+		}
+		target = CompactTarget(CompactResumeBudget(budget), ratio)
+	case opt.ContextWindow > 0:
+		used := estimateUsedTokens(raw+opt.ToolSchemaChars, opt.LastInputTokens, ratio)
+		budgetTok := CompactTokenBudget(opt.ContextWindow)
+		if used < budgetTok {
+			return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
+		}
+		est = raw
+		budget = int(float64(budgetTok) * clampRatio(ratio))
+		resumeTok := CompactResumeBudget(budgetTok)
+		target = int(float64(resumeTok) * clampRatio(ratio))
+		if target < 1 {
+			target = 1
+		}
+	default:
 		return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
 	}
 	summary := ""
@@ -230,7 +249,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 			summary = d.Summary
 		}
 	}
-	result := CompactTiered(messages, CompactTarget(CompactResumeBudget(budget), ratio), summary, toolLim)
+	result := CompactTiered(messages, target, summary, toolLim)
 	if result.CharsSaved > 0 || result.OverBudget {
 		for _, h := range opt.Hooks.AfterCompact {
 			if h != nil {

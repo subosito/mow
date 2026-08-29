@@ -83,20 +83,32 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	}
 
 	auto := maxChars <= 0
-	if auto {
-		maxChars = resolveMaxContextChars(configured, window)
-		if maxChars <= 0 {
-			// Manual /compact still runs when auto-compact is off.
-			maxChars = agent.DefaultMaxContextChars
-		}
-	}
-	// CompactTiered takes a *raw* char target. The loop converts the configured
-	// budget through CompactTarget so density calibration matches applyCompact.
 	cpt := charsPerToken
 	if cpt <= 0 {
-		cpt = 4 // same default as agent.defaultCharsPerToken
+		cpt = agent.DefaultCharsPerToken
 	}
-	targetRaw := agent.CompactTarget(agent.CompactResumeBudget(maxChars), cpt)
+	// CompactTiered takes a *raw* char target. Token auto-compact converts
+	// 80%×0.7 of the window through the calibrator (same as applyCompact).
+	// Explicit char budgets still go through CompactTarget.
+	var targetRaw int
+	if auto {
+		maxChars = resolveMaxContextChars(configured, window)
+		if maxChars <= 0 && window > 0 && configured >= 0 {
+			resumeTok := agent.CompactResumeBudget(agent.CompactTokenBudget(window))
+			targetRaw = int(float64(resumeTok) * cpt)
+			if targetRaw < 1 {
+				targetRaw = 1
+			}
+		} else {
+			if maxChars <= 0 {
+				// Manual /compact still runs when auto-compact is off.
+				maxChars = agent.DefaultMaxContextChars
+			}
+			targetRaw = agent.CompactTarget(agent.CompactResumeBudget(maxChars), cpt)
+		}
+	} else {
+		targetRaw = agent.CompactTarget(agent.CompactResumeBudget(maxChars), cpt)
+	}
 	cur := agent.EstChars(prior)
 	if auto && cur > 1 {
 		// /compact must free real headroom even when history is still under the

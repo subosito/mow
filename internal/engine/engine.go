@@ -63,6 +63,9 @@ type Engine struct {
 	// lastProviderTokens is the last provider-reported input token count.
 	// 0 until the first call. Never overwritten by a char-budget estimate.
 	lastProviderTokens int
+	// calib is the chars/token smoother reused across Prompts so auto-compact
+	// occupancy tracks billed density instead of resetting to 4.0 each turn.
+	calib *agent.RatioCalibrator
 	// lastCtxEstimate is a post-compact token guess. ContextTokens prefers
 	// lastProviderTokens when the provider has reported usage.
 	lastCtxEstimate int
