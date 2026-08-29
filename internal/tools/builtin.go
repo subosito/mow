@@ -452,6 +452,10 @@ func (t *writeTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
+	a.Content = stripHashlineChrome(a.Content)
+	if hasReadPagingBanner(a.Content) {
+		return "", fmt.Errorf("write: content looks like a paged read (contains a truncation banner) — re-read the whole file or omit the …(showing lines…) footer")
+	}
 	// Probe prior content via jailed open (missing file → create).
 	var old []byte
 	created := false
@@ -485,7 +489,7 @@ func (t *editTool) Description() string {
 	if t.p != nil && t.p.Hashline {
 		return "Edit a file " + jail + ". Prefer hashline: path + line_hash (8 hex from read) + new_string replaces that line. Or classic old_string/new_string. Returns path + diff."
 	}
-	return "Replace old_string with new_string in a file " + jail + " (first occurrence). Returns path + unified diff of the hunk. Args: path, old_string, new_string."
+	return "Replace old_string with new_string in a file " + jail + " (must be unique whole lines). Returns path + unified diff of the hunk. Args: path, old_string, new_string."
 }
 func (t *editTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"line_hash":{"type":"string"}},"required":["path","new_string"]}`)
@@ -512,9 +516,10 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	rel := workspaceRel(t.p.Workspace, path)
 	orig := string(data)
 	s := orig
+	newStr := stripHashlineChrome(a.NewString)
 	var oldSnippet string
 	if h := strings.TrimSpace(a.LineHash); h != "" {
-		s2, err := applyHashlineEdit(s, h, a.NewString)
+		s2, err := applyHashlineEdit(s, h, newStr)
 		if err != nil {
 			return "", err
 		}
@@ -533,16 +538,17 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		if a.OldString == "" {
 			return "", fmt.Errorf("old_string or line_hash required")
 		}
-		if !strings.Contains(s, a.OldString) {
-			return "", fmt.Errorf("edit: old_string not found — re-read the file; content may have changed")
+		oldSnippet = stripHashlineChrome(a.OldString)
+		replaced, err := replaceOnceLineAnchored(s, oldSnippet, newStr)
+		if err != nil {
+			return "", err
 		}
-		oldSnippet = a.OldString
-		s = strings.Replace(s, a.OldString, a.NewString, 1)
+		s = replaced
 	}
 	if _, err := writeFileJailed(t.p, a.Path, []byte(s), 0o644); err != nil {
 		return "", err
 	}
-	return formatEditDiff(rel, oldSnippet, a.NewString, firstLineOf(orig, oldSnippet)), nil
+	return formatEditDiff(rel, oldSnippet, newStr, firstLineOf(orig, oldSnippet)), nil
 }
 
 const (
@@ -794,6 +800,174 @@ func lineHash(s string) string {
 	return hex.EncodeToString(sum[:4])
 }
 
+// replaceOnceLineAnchored replaces the first old with new, but only when old
+// is a whole-line span (starts after \n or BOF, ends before \n or EOF).
+// A mid-line unique snippet used to splice (e.g. YAML `design advice` leftover
+// plus duplicated tail) and leave invalid files. Copy whole lines from read.
+func replaceOnceLineAnchored(content, old, new string) (string, error) {
+	if old == "" {
+		return "", fmt.Errorf("old_string or line_hash required")
+	}
+	idx := strings.Index(content, old)
+	if idx < 0 {
+		return "", fmt.Errorf("edit: old_string not found — re-read the file; content may have changed")
+	}
+	if strings.Count(content, old) > 1 {
+		return "", fmt.Errorf("edit: old_string matches more than once — include more surrounding lines so the match is unique")
+	}
+	if idx > 0 && !isLineStart(content, idx) {
+		return "", fmt.Errorf("edit: old_string must start at a line boundary — re-read and copy whole lines")
+	}
+	end := idx + len(old)
+	if end < len(content) && !isLineEnd(content, end) && !strings.HasSuffix(old, "\n") {
+		return "", fmt.Errorf("edit: old_string must end at a line boundary — re-read and copy whole lines")
+	}
+	// old ended with a newline but new did not: the following line glued on
+	// (YAML `description: bar    models:`). Keep the break.
+	if strings.HasSuffix(old, "\n") && !strings.HasSuffix(new, "\n") {
+		new += "\n"
+	}
+	skip := overlapRestBytes(new, content[end:])
+	return content[:idx] + new + content[end+skip:], nil
+}
+
+func isLineStart(content string, idx int) bool {
+	if idx <= 0 {
+		return true
+	}
+	c := content[idx-1]
+	return c == '\n' || c == '\r'
+}
+
+func isLineEnd(content string, end int) bool {
+	if end >= len(content) {
+		return true
+	}
+	c := content[end]
+	return c == '\n' || c == '\r'
+}
+
+func hasReadPagingBanner(s string) bool {
+	return strings.Contains(s, "…(showing lines ") ||
+		strings.Contains(s, "…(truncated at the ")
+}
+
+// overlapRestBytes is how much of rest to drop because new already contains
+// that tail (copied following lines). Require a real line, not `}` / `end`.
+func overlapRestBytes(new, rest string) int {
+	if rest == "" {
+		return 0
+	}
+	nl := 0
+	switch {
+	case strings.HasPrefix(rest, "\r\n"):
+		rest = rest[2:]
+		nl = 2
+	case strings.HasPrefix(rest, "\n"), strings.HasPrefix(rest, "\r"):
+		rest = rest[1:]
+		nl = 1
+	}
+	np := strings.Split(strings.TrimRight(new, "\n"), "\n")
+	rp := strings.Split(strings.TrimRight(rest, "\n"), "\n")
+	k := overlappingLineCount(np, rp)
+	if k == 0 {
+		return 0
+	}
+	consumed := 0
+	remain := rest
+	for i := 0; i < k; i++ {
+		if !strings.HasPrefix(remain, rp[i]) {
+			return 0
+		}
+		consumed += len(rp[i])
+		remain = remain[len(rp[i]):]
+		if strings.HasPrefix(remain, "\r\n") {
+			consumed += 2
+			remain = remain[2:]
+		} else if strings.HasPrefix(remain, "\n") || strings.HasPrefix(remain, "\r") {
+			consumed++
+			remain = remain[1:]
+		}
+	}
+	return nl + consumed
+}
+
+func overlappingLineCount(newParts, restParts []string) int {
+	max := len(newParts)
+	if len(restParts) < max {
+		max = len(restParts)
+	}
+	for cand := max; cand >= 1; cand-- {
+		ok := true
+		for i := 0; i < cand; i++ {
+			if newParts[len(newParts)-cand+i] != restParts[i] {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		if cand >= 2 || (cand == 1 && len(restParts[0]) >= 8) {
+			return cand
+		}
+	}
+	return 0
+}
+
+// stripHashlineChrome removes read-tool `N:hash|` prefixes if the model pasted
+// a hashline dump back into edit. Leaving them in the file is the "random
+// numbers at the start of every line" failure.
+func stripHashlineChrome(s string) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	changed := false
+	for i, line := range lines {
+		if stripped, ok := stripHashlineChromeLine(line); ok {
+			lines[i] = stripped
+			changed = true
+		}
+	}
+	if !changed {
+		return s
+	}
+	return strings.Join(lines, "\n")
+}
+
+func stripHashlineChromeLine(line string) (string, bool) {
+	i := 0
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	j := i
+	if j >= len(line) || line[j] < '0' || line[j] > '9' {
+		return line, false
+	}
+	for j < len(line) && line[j] >= '0' && line[j] <= '9' {
+		j++
+	}
+	if j >= len(line) || line[j] != ':' {
+		return line, false
+	}
+	j++
+	if j+8 >= len(line) {
+		return line, false
+	}
+	for k := 0; k < 8; k++ {
+		c := line[j+k]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return line, false
+		}
+	}
+	j += 8
+	if j >= len(line) || line[j] != '|' {
+		return line, false
+	}
+	return line[j+1:], true
+}
+
 func applyHashlineEdit(content, hash, newLine string) (string, error) {
 	hash = strings.ToLower(strings.TrimSpace(hash))
 	if len(hash) != 8 {
@@ -819,8 +993,15 @@ func applyHashlineEdit(content, hash, newLine string) (string, error) {
 	if found < 0 {
 		return "", fmt.Errorf("edit: line_hash %s not found — re-read the file for a fresh N:hash|line", hash)
 	}
-	lines[found] = newLine
-	return strings.Join(lines, "\n"), nil
+	newLine = stripHashlineChrome(newLine)
+	newLine = strings.TrimRight(newLine, "\n")
+	parts := strings.Split(newLine, "\n")
+	rest := lines[found+1:]
+	if k := overlappingLineCount(parts, rest); k > 0 {
+		rest = rest[k:]
+	}
+	out := append(append(append([]string{}, lines[:found]...), parts...), rest...)
+	return strings.Join(out, "\n"), nil
 }
 
 // nearbyHint suggests real files when a read path does not exist: name-stem
