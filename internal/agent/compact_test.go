@@ -374,6 +374,32 @@ func TestApplyCompactReportsLayerAndSavings(t *testing.T) {
 	}
 }
 
+func TestApplyCompactNotifiesAfterCompactOnNoop(t *testing.T) {
+	// Stale LastInputTokens still trip the 80% token budget even though the
+	// projection is already tiny. CompactTiered saves nothing; AfterCompact
+	// must still fire so hosts can drop "auto-compact…" chrome.
+	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "hi"}}
+	var fired bool
+	var event AfterCompactEvent
+	opt := Options{
+		ContextWindow:   1_000,
+		LastInputTokens: 900,
+		Hooks: Hooks{AfterCompact: []AfterCompactFunc{func(_ context.Context, e AfterCompactEvent) {
+			fired = true
+			event = e
+		}}},
+	}
+	if _, _, err := applyCompact(t.Context(), msgs, opt, newRatioCalibrator()); err != nil {
+		t.Fatal(err)
+	}
+	if !fired {
+		t.Fatal("noop compact must still notify AfterCompact")
+	}
+	if event.CharsSaved != 0 {
+		t.Fatalf("expected a no-op save, got %+v", event)
+	}
+}
+
 func TestCompactTieredSmallOveragePreservesToolContext(t *testing.T) {
 	tool := strings.Repeat("x", 24_000)
 	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "inspect"},
