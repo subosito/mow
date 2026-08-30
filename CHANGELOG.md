@@ -1,8 +1,8 @@
 # Changelog
 
-## 1.0.0-rc.1
+## 1.0.0
 
-ACP v1 is the host protocol (`mow acp` plus optional extras). `mow rpc` is gone.
+First stable release. ACP v1 is the host protocol (`mow acp` plus optional extras). `mow rpc` is gone.
 
 - Lean `mow` (acp, cli, tty, focus, proc, cmdhook, mcp) vs full `mowx` (+ goal, review, ops, media).
 - `extensions.acp.peers`: each row is `command` (external ACP) or `model` (native `mow acp`).
@@ -25,5 +25,7 @@ ACP v1 is the host protocol (`mow acp` plus optional extras). `mow rpc` is gone.
 - Dropped `policy.max_context_chars` and `policy.compact_ratio`. Auto-compact trips at 80% of `context_window` in tokens (same units as the ctx chip). Go `Options.MaxContextChars` remains for tests. `loop.compact` always follows `loop.compact.start`, including no-ops, so hosts can drop in-progress chrome.
 - Focus pack: repeated grep/glob tool calls degrade then refuse like inventory (distinct patterns stay distinct).
 - Review/sec path and whole-tree scopes use git ls-files (honour gitignore) so `.devenv` and similar trees do not burn the budget. Default excludes match glob junk dirs (`target`, `.next`, `coverage`, …).
-- TUI spawn docs: `mowi.acp_command` is an exact ACP argv, mutually exclusive with `mow_bin`.
-EOF
+
+## 1.0.0-rc.1
+
+Prerelease of the ACP host cutover. Superseded by 1.0.0.

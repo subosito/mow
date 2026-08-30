@@ -8,7 +8,7 @@ import (
 // Version is the fallback release when the binary has no module/build version.
 // Release builds override it with -ldflags "-X …/internal/engine.Version=$VERSION"
 // (same string as the repo-root VERSION file and the git tag).
-var Version = "1.0.0-rc.1"
+var Version = "1.0.0"
 
 // VersionString returns a human-readable version for CLI/RPC.
 // A tagged `go install` / module build wins. Untagged checkouts report
