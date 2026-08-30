@@ -301,7 +301,7 @@ func resolveHooksFile(dir string) string {
 }
 
 // HostOwnedPluginRoots is $MOW_HOME/plugins, workspace-profile plugins/,
-// then ~/.agents/plugins and ~/.claude/plugins (asp install targets).
+// then ~/.agents/plugins and ~/.claude/plugins.
 // Project .mow/plugins is not included — skills may load from there; MCP and
 // hooks must not auto-spawn from the workspace.
 func HostOwnedPluginRoots(home string, configPaths []string) []string {
