@@ -479,11 +479,7 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 	// rewrite results for history register as ordinary ext hooks — there is
 	// no special tail slot.
 	post = append([]agent.PostToolFunc{func(ctx context.Context, ev agent.PostToolEvent) (agent.PostToolDecision, error) {
-		res := ev.Result
-		const max = 4000
-		if len(res) > max {
-			res = res[:max] + "…(truncated)"
-		}
+		res := eventToolResult(ev.Name, ev.Result)
 		errStr := ""
 		// ErrDone is a clean stop from tools like goal_report — not a failure.
 		// Emitting it as Error made the CLI print "✗ goal_report: agent: done".
@@ -567,6 +563,31 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 	}
 	return h
 }
+
+// eventToolResult is the EventToolEnd body for hosts. Read/grep/bash stay
+// clipped so a log dump cannot blow the TUI; write/edit keep the unified
+// diff (already bounded by the tool's hunk cap) so a card is always paintable.
+func eventToolResult(name, result string) string {
+	if keepFullToolEventResult(name) {
+		return result
+	}
+	const max = 4000
+	if len(result) > max {
+		return result[:max] + "…(truncated)"
+	}
+	return result
+}
+
+func keepFullToolEventResult(name string) bool {
+	verb, _, _ := strings.Cut(strings.TrimSpace(name), " ")
+	switch strings.ToLower(verb) {
+	case "write", "edit", "delete":
+		return true
+	default:
+		return false
+	}
+}
+
 func stopReasonFrom(err error) string {
 	if err == nil {
 		return StopCompleted
