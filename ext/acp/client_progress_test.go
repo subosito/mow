@@ -13,6 +13,8 @@ func TestFormatPeerToolProgress(t *testing.T) {
 		want string
 	}{
 		{sessionUpdate{Kind: "read", Title: "engine.go", Status: "pending"}, "read engine.go"},
+		{sessionUpdate{Kind: "read", Title: "read engine.go", Status: "pending"}, "read engine.go"},
+		{sessionUpdate{Kind: "read", Title: "Read engine.go", Status: "pending"}, "Read engine.go"},
 		{sessionUpdate{Kind: "bash", Title: "bash", Status: "completed"}, "bash ✓"},
 		{sessionUpdate{Title: "Search files", Status: "failed"}, "Search files ✗"},
 		{sessionUpdate{Kind: "edit", Status: "in_progress"}, "edit"},

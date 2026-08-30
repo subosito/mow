@@ -2,6 +2,9 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -159,6 +162,78 @@ func TestApplyApprovalsConfig(t *testing.T) {
 	}
 	if err := a.applyApprovalsConfig("s1", "nope"); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+func TestEffortConfigOptionPaintsCatalogDefault(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" && r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{
+				"id":             "gpt-5-mini",
+				"facet":          "chat",
+				"efforts":        []string{"low", "medium", "high"},
+				"default_effort": "medium",
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MOW_HOME", t.TempDir())
+	t.Setenv("MOW_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	eng, err := mow.New(mow.Options{
+		NoSession:     true,
+		BaseURL:       srv.URL + "/v1",
+		Model:         "gpt-5-mini",
+		ExplicitModel: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.Close() })
+	_, _ = eng.ListModels(context.Background())
+	a := &agentServer{eng: eng}
+	opt := a.effortConfigOption()
+	if opt == nil {
+		t.Fatal("want effort selector")
+	}
+	if opt["currentValue"] != "medium" {
+		t.Fatalf("currentValue=%v want catalog default medium, not the default pseudo-id", opt["currentValue"])
+	}
+	opts, _ := opt["options"].([]map[string]any)
+	var sawMediumDefault, sawDefaultId bool
+	for _, o := range opts {
+		if o["value"] == "default" {
+			sawDefaultId = true
+		}
+		if o["value"] == "medium" {
+			name, _ := o["name"].(string)
+			if strings.Contains(name, "default") {
+				sawMediumDefault = true
+			}
+		}
+	}
+	if sawDefaultId {
+		t.Fatalf("must not advertise value=default: %v", opts)
+	}
+	if !sawMediumDefault {
+		t.Fatalf("catalog default tier should be labeled (default): %v", opts)
+	}
+}
+
+func TestEffortConfigOptionStaticHasNoDefaultPseudo(t *testing.T) {
+	opt := effortConfigOptionStatic("")
+	if opt["currentValue"] == "default" {
+		t.Fatalf("empty effort must not advertise currentValue=default: %v", opt)
+	}
+	opts, _ := opt["options"].([]map[string]any)
+	for _, o := range opts {
+		if o["value"] == "default" {
+			t.Fatalf("effort options must not include a default pseudo-id: %v", opts)
+		}
 	}
 }
 

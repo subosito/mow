@@ -76,32 +76,25 @@ func (a *agentServer) effortConfigOption() map[string]any {
 		}
 	}
 
-	options := make([]map[string]any, 0, len(efforts)+1)
-	// Leading "default" clears client override so gateway applies default_effort.
-	if def != "" {
-		options = append(options, map[string]any{
-			"value":       "default",
-			"name":        "Default (" + def + ")",
-			"description": "Gateway default for this model",
-		})
-	}
+	options := make([]map[string]any, 0, len(efforts))
 	for _, e := range efforts {
 		e = strings.ToLower(strings.TrimSpace(e))
 		if e == "" {
 			continue
 		}
-		options = append(options, map[string]any{
-			"value": e,
-			"name":  strings.ToUpper(e[:1]) + e[1:],
-		})
+		name := strings.ToUpper(e[:1]) + e[1:]
+		opt := map[string]any{"value": e, "name": name}
+		if def != "" && e == def {
+			opt["name"] = name + " (default)"
+		}
+		options = append(options, opt)
 	}
 	if len(options) == 0 {
 		return nil
 	}
-	// UI currentValue: show default pseudo when effort matches default and engine effort is empty.
-	uiCurrent := current
-	if strings.TrimSpace(a.eng.Effort()) == "" && def != "" {
-		uiCurrent = "default"
+	uiCurrent := strings.ToLower(strings.TrimSpace(a.eng.DisplayEffort()))
+	if uiCurrent == "" || uiCurrent == "default" {
+		uiCurrent = current
 	}
 	return map[string]any{
 		"id":           configIDEffort,
@@ -118,7 +111,7 @@ func effortConfigOptionStatic(current string) map[string]any {
 	switch current {
 	case "none", "low", "medium", "high":
 	default:
-		current = "default"
+		current = ""
 	}
 	return map[string]any{
 		"id":           configIDEffort,
@@ -128,7 +121,6 @@ func effortConfigOptionStatic(current string) map[string]any {
 		"type":         "select",
 		"currentValue": current,
 		"options": []map[string]any{
-			{"value": "default", "name": "Default", "description": "Provider / model default"},
 			{"value": "none", "name": "None"},
 			{"value": "low", "name": "Low"},
 			{"value": "medium", "name": "Medium"},

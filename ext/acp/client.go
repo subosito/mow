@@ -503,13 +503,7 @@ func formatPeerToolProgress(u sessionUpdate) string {
 	if kind == "" && title == "" {
 		return ""
 	}
-	// Prefer human title; fall back to kind.
-	label := title
-	if label == "" {
-		label = kind
-	} else if kind != "" && !strings.EqualFold(kind, title) {
-		label = kind + " " + title
-	}
+	label := joinKindTitle(kind, title)
 	switch strings.ToLower(status) {
 	case "", "pending", "in_progress", "running":
 		return label
@@ -520,6 +514,32 @@ func formatPeerToolProgress(u sessionUpdate) string {
 	default:
 		return label + " (" + status + ")"
 	}
+}
+
+// joinKindTitle is "kind title" unless the title already is the kind or
+// starts with it. Peers often send title="read engine.go" with kind="read";
+// concatenating that printed "read read engine.go" on the host.
+func joinKindTitle(kind, title string) string {
+	switch {
+	case title == "":
+		return kind
+	case kind == "":
+		return title
+	case titleHasKindPrefix(kind, title):
+		return title
+	default:
+		return kind + " " + title
+	}
+}
+
+func titleHasKindPrefix(kind, title string) bool {
+	if len(title) < len(kind) {
+		return false
+	}
+	if !strings.EqualFold(title[:len(kind)], kind) {
+		return false
+	}
+	return len(title) == len(kind) || title[len(kind)] == ' '
 }
 
 // toolCallKindTitle maps a mow tool event into ACP tool_call kind + title so
