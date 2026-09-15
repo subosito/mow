@@ -35,12 +35,12 @@
               mainProgram = "mow";
             };
           };
-          mowx = pkgs.buildGoModule {
-            pname = "mowx";
+          customhost = pkgs.buildGoModule {
+            pname = "customhost";
             inherit version;
             src = lib.cleanSource ./.;
             vendorHash = "sha256-1E3PywLh8UXMO9eAiIumGzoQ6MijuImOibkoFbZw9sk=";
-            subPackages = [ "cmd/mowx" ];
+            subPackages = [ "cmd/customhost" ];
             env.CGO_ENABLED = "0";
             env.GOWORK = "off";
             ldflags = [
@@ -52,12 +52,12 @@
               description = "mow with workflow packs (goal, ops, review, media, …)";
               homepage = "https://github.com/subosito/mow";
               license = lib.licenses.mit;
-              mainProgram = "mowx";
+              mainProgram = "customhost";
             };
           };
         in
         {
-          inherit mow mowx;
+          inherit mow customhost;
           default = mow;
         });
 

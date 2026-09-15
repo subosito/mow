@@ -43,7 +43,7 @@ func runMow(t *testing.T, args ...string) (string, int) {
 }
 
 // The lean binary links acp, focus, proc, cmdhook, mcp — and must not
-// show the mowx packs in help.
+// show the custom-host packs in help.
 func TestLeanHelpListsLeanCommands(t *testing.T) {
 	output, code := runMow(t, "help")
 	if code != 0 {
@@ -90,7 +90,7 @@ func TestDoctorReportsUnregisteredMediaTool(t *testing.T) {
 	if !strings.Contains(text, "not registered") || !strings.Contains(text, "this binary") {
 		t.Fatalf("want unregistered wording:\n%s", text)
 	}
-	if !strings.Contains(text, "packs/media") || !strings.Contains(text, "mowx") {
+	if !strings.Contains(text, "packs/media") || !strings.Contains(text, "custom-host") {
 		t.Fatalf("want lean hint:\n%s", text)
 	}
 }

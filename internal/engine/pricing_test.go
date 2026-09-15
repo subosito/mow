@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/llm"
 )
 
@@ -55,8 +54,8 @@ func TestResolveMaxContextChars(t *testing.T) {
 	if got := resolveMaxContextChars(200_000, 1_000_000); got != 200_000 {
 		t.Fatalf("explicit opt → %d", got)
 	}
-	if got := resolveMaxContextChars(0, 0); got != agent.DefaultMaxContextChars {
-		t.Fatalf("auto, no window → %d", got)
+	if got := resolveMaxContextChars(0, 0); got != 0 {
+		t.Fatalf("auto, no window → %d want 0 (off)", got)
 	}
 }
 

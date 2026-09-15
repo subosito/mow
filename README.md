@@ -62,7 +62,7 @@ devenv shell -- just build    # → bin/mow (embeds VERSION)
 
 # Or with plain Go:
 go build -o bin/mow ./cmd/mow
-go build -o bin/mowx ./cmd/mowx
+go build -o bin/custom-host ./cmd/custom-host
 
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_API_KEY=sk-…
@@ -77,19 +77,19 @@ export OPENAI_MODEL=gpt-5-mini
 ./bin/mow acp                                     # ext/acp — ACP agent + extras
 ./bin/mow help                                # linked commands, dynamically
 
-# mowx links the workflow packs on top of mow:
-./bin/mowx goal run --goal "Make CI green"   # packs/goal — multi-step
-./bin/mowx review                            # packs/review — advisory review
-./bin/mowx sec --format sarif                # advisory security review / SARIF
-./bin/mowx job                               # packs/job — interval jobs
-./bin/mowx ops list                          # packs/ops — fleet ops
+# custom-host links the workflow packs on top of mow:
+./bin/custom-host goal run --goal "Make CI green"   # packs/goal — multi-step
+./bin/custom-host review                            # packs/review — advisory review
+./bin/custom-host sec --format sarif                # advisory security review / SARIF
+./bin/custom-host job                               # packs/job — interval jobs
+./bin/custom-host ops list                          # packs/ops — fleet ops
 
 ```
 
 **Pack-owned subcommands:** stock binaries blank-import linked packs. Remove an
 import (for example `_ "github.com/subosito/mow/ext/acp"`) and its tools and
 subcommand disappear from that binary and help. `bin/mow` is the lean stock
-binary (acp, tty, focus, proc, cmdhook, mcp); `bin/mowx` adds the
+binary (acp, tty, focus, proc, cmdhook, mcp); `bin/custom-host` adds the
 workflow packs (goal, job, ops, review, media).
 
 Secure default tools: **read**, **glob**, **grep**. Power tools need
@@ -124,7 +124,7 @@ Three Go modules (`go.work` wires them for local dev). Full public/internal map:
 | `ext/` + `cliutil/` + `extcfg/` | Stock surfaces (cli, tty, acp), CLI helpers, extension config decode |
 | `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job |
 | `cmd/mow/` | Lean host: `ext/cli.Main` + tty, acp, focus, proc, cmdhook, mcp |
-| `cmd/mowx/` | Full host (lean set + goal, job, ops, review, media) |
+| `cmd/custom-host/` | Full host (lean set + goal, job, ops, review, media) |
 
 ## Pick extensions when embedding
 

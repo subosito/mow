@@ -1,6 +1,6 @@
 # mow sec
 
-Ships on **`mowx`**. Invoke as `mowx sec` (examples below keep the
+Ships on **`custom-host`**. Invoke as `custom-host sec` (examples below keep the
 short `mow sec` form for the subcommand itself).
 
 `mow sec` is mow's read-only, evidence-backed security review command. It reads

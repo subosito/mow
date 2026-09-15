@@ -37,8 +37,8 @@ tools it actually has.
 
 ## Linked binaries
 
-- `cmd/mow` and `cmd/mowx` are import lists over `ext/cli.Main`. Lean links
-  `ext/cli` + `ext/tty` + `ext/acp` plus focus, proc, cmdhook, mcp. `cmd/mowx`
+- `cmd/mow` and `cmd/custom-host` are import lists over `ext/cli.Main`. Lean links
+  `ext/cli` + `ext/tty` + `ext/acp` plus focus, proc, cmdhook, mcp. `cmd/custom-host`
   adds goal, job, ops, review, media. Drop an import and that subcommand is gone.
 - Host UIs launch `mow acp` (`ext/acp`), own terminal presentation, and receive
   registered command/tool events over ACP + extras. Spawn: `--mow-bin` /
@@ -339,7 +339,7 @@ runs.
 The Rust `mowi` sibling project/repository is the interactive terminal host.
 It launches `mow acp` and renders sessions, streaming, model/effort pickers,
 tool approval, peer streams, and pack command results. `mowi.mow_bin`
-in host `$MOW_HOME/config.yaml` selects `mow` vs `mowx` (CLI `--mow-bin`
+in host `$MOW_HOME/config.yaml` selects `mow` vs `custom-host` (CLI `--mow-bin`
 and `$MOW_BIN` win). `mowi.acp_command` is an exact ACP argv instead
 (mutually exclusive with `mow_bin`). Project `.mow/` is never read for
 either. See that project for installation and release instructions.
@@ -383,7 +383,7 @@ Media stays a side lane to the chat loop:
 | `understand_voice` | transcription endpoint |
 | `understand_video` | chat with video parts |
 
-Media ships as `packs/media`. `mowx` blank-imports it; lean `mow` does not.
+Media ships as `packs/media`. `custom-host` blank-imports it; lean `mow` does not.
 Each tool registers only when its model id is configured under
 `extensions.media.generate.*` / `extensions.media.understand.*`; `tools.enable`
 still gates visibility. Listing a media name in `tools.enable` on lean `mow`
@@ -394,7 +394,7 @@ yaml blobs.
 
 Both tiers register the same way (blank import + `ext.Register*`) and both
 detach the same way — delete one line from `cmd/mow/main.go` or
-`cmd/mowx/main.go` and the feature is
+`cmd/custom-host/main.go` and the feature is
 gone from the binary. That *link* boundary is what keeps core lean, and it is
 the only property a pack must have.
 

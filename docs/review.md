@@ -1,7 +1,7 @@
 # mow review / mow sec
 
-Ships on **`mowx`** (`cmd/mowx`), not the lean `mow` binary. Invoke as
-`mowx review` / `mowx sec` (examples below keep the short `mow review`
+Ships on **`custom-host`** (`cmd/custom-host`), not the lean `mow` binary. Invoke as
+`custom-host review` / `custom-host sec` (examples below keep the short `mow review`
 form for the subcommand itself).
 
 Two AI-assisted review commands over one read-only workflow. `mow review` looks

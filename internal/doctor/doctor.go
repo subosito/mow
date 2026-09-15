@@ -126,7 +126,7 @@ func hostBinary() string {
 	if _, ok := ext.LookupCommand("goal"); ok {
 		if _, ok := ext.LookupCommand("ops"); ok {
 			if _, ok := ext.LookupCommand("review"); ok {
-				return "mowx"
+				return "custom-host"
 			}
 		}
 	}

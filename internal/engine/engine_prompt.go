@@ -616,7 +616,7 @@ func stopReasonFrom(err error) string {
 //
 //	optMax < 0  → off (Go Options only)
 //	optMax > 0  → absolute char budget (capped)
-//	optMax == 0 → auto: 0 when window is known (token path); else DefaultMaxContextChars
+//	optMax == 0 → auto: 0 (token path when window is known; off when unknown)
 func resolveMaxContextChars(optMax, windowTokens int) int {
 	if optMax < 0 {
 		return 0
@@ -626,9 +626,6 @@ func resolveMaxContextChars(optMax, windowTokens int) int {
 			return agent.MaxContextCharsHardCap
 		}
 		return optMax
-	}
-	if windowTokens <= 0 {
-		return agent.DefaultMaxContextChars
 	}
 	return 0
 }

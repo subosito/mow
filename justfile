@@ -20,7 +20,7 @@ vet:
     go vet ./...
     cd packs && go vet ./...
 
-build: build-mow build-mowx
+build: build-mow build-customhost
 
 build-mow:
     #!/usr/bin/env bash
@@ -31,14 +31,14 @@ build-mow:
       -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
       -o bin/mow ./cmd/mow
 
-build-mowx:
+build-customhost:
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p bin
     ver="$(tr -d ' \n' < VERSION)"
     go build -trimpath \
       -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
-      -o bin/mowx ./cmd/mowx
+      -o bin/customhost ./cmd/customhost
 
 
 # Closest local approximation of a CI run: no developer credentials and an
@@ -67,5 +67,5 @@ verify-ci:
         MOW_HOME="$tmp/.mow" HOME="$tmp" \
         bash -c 'cd packs && go vet ./... && go test -race -count=1 ./...'
     just build-mow
-    just build-mowx
+    just build-customhost
     echo "→ verify-ci ok"

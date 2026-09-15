@@ -40,8 +40,8 @@ jobs:
             -o bin/mow ./cmd/mow
           go build -trimpath \
             -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
-            -o bin/mowx ./cmd/mowx
+            -o bin/custom-host ./cmd/custom-host
           ./bin/mow version
           ./bin/mow version | grep -F "mow $ver"
-          ./bin/mowx version
-          ./bin/mowx version | grep -F "mow $ver"
+          ./bin/custom-host version
+          ./bin/custom-host version | grep -F "mow $ver"

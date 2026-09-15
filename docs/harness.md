@@ -43,7 +43,7 @@ mow run -p "Summarize this repo"
 ```text
 mow tty                  # optional line session (ext/tty)
 mow acp                  # ACP agent for host UIs (ext/acp)
-mowx goal run --goal "…"  # multi-step outer loop (or --id NAME)
+custom-host goal run --goal "…"  # multi-step outer loop (or --id NAME)
 mow run -p "…"           # one-shot (ext/cli)
 ```
 
@@ -93,7 +93,7 @@ mow loop ──tool delegate──▶ peer ACP process
 | `ext/acp` | ACP agent + extras + client + `delegate` + `mow acp` (does not import `ext/cli`) |
 | `packs/mcp` | MCP servers → tools (config opt-in) |
 | `packs/proc` / `packs/cmdhook` / `packs/focus` | Background proc tools, command hooks, explore guards |
-| `packs/media` | Media tool pack: `generate_*` / `understand_*` (`mowx`, config-gated) |
+| `packs/media` | Media tool pack: `generate_*` / `understand_*` (`custom-host`, config-gated) |
 | `eval` | Eval/replay fixture library (`github.com/subosito/mow/eval`, root module) for `go test` hosts |
 | `packs/goal` | Outer multi-step goals + `mow goal` |
 | `packs/job` | Interval / cron jobs + `mow job` |
@@ -222,7 +222,7 @@ reasoning**. Hosts must not render the wait state as "thinking".
 | Knob | Default | Effect |
 |------|---------|--------|
 | `policy.max_turns` | *(unlimited)* | Optional budget: LLM round-trips per Prompt (a turn may batch up to 8 tools). **Unset by default** — a run ends when it is done, stuck, cancelled, or over an explicit spend budget, never merely because it was long. Set a positive value to opt in to a ceiling; yaml `-1` / CLI `--max-turns 0` also mean unlimited. Only enforced when > 0 |
-| Auto-compact | always on | Trips at 80% of `context_window` in **tokens** (same units as the host ctx chip). Occupancy is last billed input tokens, or history chars ÷ calibrated chars/token when the provider has not reported usage yet. Compaction pins user task anchors + tools used. Not a yaml knob — Go `Options.MaxContextChars` can override (char budget, tests) or disable (`< 0`). Unknown window falls back to a 100k-char floor |
+| Auto-compact | always on when `context_window` is known | Trips at 80% of `context_window` in **tokens** (same units as the host ctx chip). Occupancy is last billed input tokens, or history chars ÷ calibrated chars/token when the provider has not reported usage yet. Compaction pins user task anchors + tools used. Not a yaml knob — Go `Options.MaxContextChars` can override (char budget, tests) or disable (`< 0`). Unknown window: off (tool-result trim still runs). Manual `/compact` still has a default char target |
 | `llm.context_window` / `input_price` / `output_price` | (optional) | Override metering; otherwise `Engine.Limits()` uses `GET /v1/models` fields (`context_window`, `pricing.input_per_mtok` / `output_per_mtok`) — no client-side price table |
 | `policy.max_tool_result_chars` | `24000` | Cap each tool result stored for the model (~6k tokens) |
 | `policy.max_read_bytes` | `512KiB` | Cap `read` tool raw file size |
@@ -327,7 +327,7 @@ Optional HTTP attribution labels: `X-Mow-Actor`, `X-Mow-Session`, `X-Mow-Compone
 | `read`, `glob`, `grep` | **Yes** | Secure defaults |
 | `write`, `edit` | **No** | `--allow-write` or config |
 | `bash` | **No** | `--allow-shell` or config. Unsandboxed unless `--sandbox=bwrap` |
-| `generate_*` / `understand_*` | **No** | `mowx` + `packs/media` only. Model ids + names in `tools.enable`; generate writes under `media/` without `--allow-write` |
+| `generate_*` / `understand_*` | **No** | `custom-host` + `packs/media` only. Model ids + names in `tools.enable`; generate writes under `media/` without `--allow-write` |
 
 ```yaml
 tools:
@@ -335,7 +335,7 @@ tools:
     - read
     - glob
     - grep
-    # media names need mowx (packs/media) plus extensions.media.* model ids
+    # media names need custom-host (packs/media) plus extensions.media.* model ids
     # - generate_image
     # - understand_image
 ```
@@ -343,8 +343,8 @@ tools:
 ### Media tools (`generate_*` / `understand_*`) — end to end
 
 Media lives in the linked pack `packs/media`, the same category as `packs/mcp`
-and `packs/proc` — not a core builtin. The `mowx` binary blank-imports it
-(`_ "github.com/subosito/mow/packs/media"` in `cmd/mowx/main.go`); lean
+and `packs/proc` — not a core builtin. The `custom-host` binary blank-imports it
+(`_ "github.com/subosito/mow/packs/media"` in `cmd/custom-host/main.go`); lean
 `mow` does not. A custom binary that omits the import simply has no media tools.
 
 A media tool appears only when **both** hold: its model id is set under
@@ -368,8 +368,8 @@ provider's own ids).
 under `media/` **without** `--allow-write` — being in the enable list is the
 write consent for that folder.
 
-Same `$MOW_HOME/config.yaml` works for lean `mow` and `mowx`. Unused
-`extensions.*` keys stay as yaml blobs. Media tools only appear in `mowx`
+Same `$MOW_HOME/config.yaml` works for lean `mow` and `custom-host`. Unused
+`extensions.*` keys stay as yaml blobs. Media tools only appear in `custom-host`
 when the model id is set and the name is in `tools.enable`. Lean `mow` leaves
 those names off the tool list (`mow doctor` reports it).
 
@@ -383,10 +383,10 @@ tools:
     - read
     - glob
     - grep
-    # - understand_image               # mowx + extensions.media.understand.image
+    # - understand_image               # custom-host + extensions.media.understand.image
     # - generate_image
 mowi:
-  # mow_bin: mowx                # host yaml only; TUI spawn (not project .mow/)
+  # mow_bin: custom-host                # host yaml only; TUI spawn (not project .mow/)
   # acp_command: [some-agent, --stdio]  # instead of mow_bin; exact argv
   theme: default                 # alias: catppuccin-mocha
   mode: code                     # ask | code
@@ -554,7 +554,7 @@ Embedders build a session picker with **`Engine.Sessions()`** → `[]SessionInfo
 | Config-only | yaml, env, skills markdown |
 | Tool pack | `ext.RegisterTool` in `init` (blank-import) |
 | Hooks | `RegisterPreTool` / `PostTool` / `UserPrompt` / `SessionStart` / `PreCompact` / `AfterTurn` / `Stop` |
-| CLI pack | `ext.RegisterCommand` + blank-import in `cmd/mowx` (and `cmd/mow` for the lean set) |
+| CLI pack | `ext.RegisterCommand` + blank-import in `cmd/custom-host` (and `cmd/mow` for the lean set) |
 | Pre-New setup | `ext.RegisterBeforeNew` (e.g. register config-driven tools) |
 | Custom binary | `mow.New` + choose which packs to import |
 

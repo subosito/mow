@@ -154,14 +154,6 @@ func hashMessage(m llm.Message) uint64 {
 	return binary.BigEndian.Uint64(h.Sum(nil)[:8])
 }
 
-func msgChars(m llm.Message) int {
-	n := len(m.Content) + len(m.Role) + len(m.Name)
-	for _, tc := range m.ToolCalls {
-		n += len(tc.Function.Name) + len(tc.Function.Arguments)
-	}
-	return n
-}
-
 // driftSummary aggregates reports for an end-of-run line.
 type driftSummary struct {
 	Events     int

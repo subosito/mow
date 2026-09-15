@@ -29,7 +29,7 @@ Per-pack / per-extension one-pagers live next to the code (`ext/*/README.md`, `p
 
 ```bash
 devenv shell -- just verify
-devenv shell -- just build    # → bin/mow + bin/mowx
+devenv shell -- just build    # → bin/mow + bin/custom-host
 ```
 
 ## Name

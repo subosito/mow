@@ -181,11 +181,14 @@ func TestApplyCompactUsesCalibratedRatio(t *testing.T) {
 
 // The PreCompact hook sees the calibrated ratio and the rescaled estimate.
 func TestApplyCompactHookSeesRatio(t *testing.T) {
-	msgs := []llm.Message{
-		{Role: "system", Content: "sys"},
-		{Role: "user", Content: strings.Repeat("q", 4_000)},
-		{Role: "assistant", Content: strings.Repeat("a", 4_000)},
-		{Role: "user", Content: strings.Repeat("z", 4_000)},
+	// Enough turns that compaction can actually shrink history: PreCompact
+	// only fires when the probe shows there is something to save.
+	msgs := []llm.Message{{Role: "system", Content: "sys"}}
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs,
+			llm.Message{Role: "user", Content: strings.Repeat("q", 4_000)},
+			llm.Message{Role: "assistant", Content: strings.Repeat("a", 4_000)},
+		)
 	}
 	var gotRatio float64
 	var gotEst, gotMax int
@@ -323,5 +326,24 @@ func TestApplyCompactTokenThreshold(t *testing.T) {
 	}
 	if !compacted {
 		t.Fatal("char/calib estimate over 80% must compact")
+	}
+}
+
+func TestApplyCompactUnknownWindowIsOff(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "implement the refund API with idempotency keys"},
+		{Role: "assistant", Content: strings.Repeat("a", 50_000)},
+		{Role: "tool", Name: "read", Content: strings.Repeat("x", 50_000)},
+	}
+	if EstChars(msgs) < DefaultMaxContextChars {
+		t.Fatalf("fixture too small to have tripped the old 100k-char floor")
+	}
+	_, compacted, err := applyCompact(t.Context(), msgs, Options{}, newRatioCalibrator())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compacted {
+		t.Fatal("unknown window must not auto-compact")
 	}
 }

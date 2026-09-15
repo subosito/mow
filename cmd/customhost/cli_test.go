@@ -17,16 +17,16 @@ var mowBinary string
 // command dispatch, exit status, and stderr output rather than calling run
 // directly.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "mowx-cli-test-*")
+	dir, err := os.MkdirTemp("", "custom-host-cli-test-*")
 	if err != nil {
 		panic(err)
 	}
 	defer os.RemoveAll(dir)
 
-	mowBinary = filepath.Join(dir, "mowx")
+	mowBinary = filepath.Join(dir, "custom-host")
 	build := exec.Command("go", "build", "-o", mowBinary, ".")
 	if output, err := build.CombinedOutput(); err != nil {
-		panic("build mowx CLI: " + err.Error() + "\n" + string(output))
+		panic("build custom-host CLI: " + err.Error() + "\n" + string(output))
 	}
 	os.Exit(m.Run())
 }
@@ -123,7 +123,7 @@ func TestModelsListsCatalog(t *testing.T) {
 	}
 }
 
-func TestMowxVersionReportsFullBinary(t *testing.T) {
+func TestCustomHostVersionReportsFullBinary(t *testing.T) {
 	output, code := runMow(t, "version")
 	if code != 0 {
 		t.Fatalf("exit code = %d\n%s", code, output)

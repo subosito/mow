@@ -143,8 +143,19 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 		args = json.RawMessage(`{}`)
 	}
 	out, err := runTool(ctx, tool, name, tc.ID, args, opt.Hooks, func(s string) string {
-		s = TruncateToolResult(s, toolResultLimit(opt))
-		return frameUntrustedResult(tool, name, s, opt.UntrustedNonce)
+		// The cap applies to what enters history. A framed body pays for its
+		// own markers, so the framed result never exceeds the limit and a
+		// later tail trim cannot cut off the closing tag.
+		lim := toolResultLimit(opt)
+		framed := untrustedSource(tool, name)
+		if framed {
+			lim = max(lim-len(WrapUntrusted(opt.UntrustedNonce, name, ""))-len(truncatedMarker)-1, 1)
+		}
+		s = TruncateToolResult(s, lim)
+		if framed && s != "" {
+			return WrapUntrusted(opt.UntrustedNonce, name, s)
+		}
+		return s
 	})
 	if err != nil && !errors.Is(err, ErrDone) {
 		return toolSlot{hard: err}
@@ -164,17 +175,23 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 // frameUntrustedResult wraps external tool bodies when the tool opts in via
 // UntrustedSource (or is a known external builtin name).
 func frameUntrustedResult(tool Tool, name, out, nonce string) string {
-	if out == "" {
+	if out == "" || !untrustedSource(tool, name) {
 		return out
 	}
+	return WrapUntrusted(nonce, name, out)
+}
+
+// untrustedSource reports whether name's results are external content that
+// must be framed before entering history.
+func untrustedSource(tool Tool, name string) bool {
 	if u, ok := tool.(UntrustedSource); ok && u.Untrusted() {
-		return WrapUntrusted(nonce, name, out)
+		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "bash", "delegate":
-		return WrapUntrusted(nonce, name, out)
+		return true
 	}
-	return out
+	return false
 }
 
 func toolResultLimit(opt Options) int {
@@ -193,6 +210,7 @@ func toolResultLimit(opt Options) int {
 //   - MaxContextChars == 0 && ContextWindow > 0: 80% of the window in tokens
 //     (same units as the host ctx chip). Occupancy is last billed input or
 //     EstChars / calibrator, whichever is higher.
+//   - else: tool-result trim only (unknown window does not invent a char floor).
 func applyCompact(ctx context.Context, messages []llm.Message, opt Options, calib *ratioCalibrator) ([]llm.Message, bool, error) {
 	toolLim := toolResultLimit(opt)
 	if opt.MaxContextChars < 0 {
@@ -228,28 +246,37 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 	default:
 		return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
 	}
-	summary := ""
-	for _, h := range opt.Hooks.PreCompact {
-		if h == nil {
-			continue
+	// Probe first: CompactTiered is pure and cheap; PreCompact is not (hosts
+	// archive the history and may spend an LLM call on a summary). A history
+	// already at its floor — common while stale occupancy keeps tripping the
+	// budget turn after turn — must not pay that price for a no-op.
+	result := CompactTiered(messages, target, "", toolLim)
+	if result.CharsSaved > 0 {
+		summary := ""
+		for _, h := range opt.Hooks.PreCompact {
+			if h == nil {
+				continue
+			}
+			d, err := h(ctx, PreCompactEvent{
+				EstChars:      est,
+				MaxChars:      budget,
+				CharsPerToken: ratio,
+				Messages:      messages,
+			})
+			if err != nil {
+				return nil, false, err
+			}
+			if d.Skip {
+				return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
+			}
+			if d.Summary != "" {
+				summary = d.Summary
+			}
 		}
-		d, err := h(ctx, PreCompactEvent{
-			EstChars:      est,
-			MaxChars:      budget,
-			CharsPerToken: ratio,
-			Messages:      messages,
-		})
-		if err != nil {
-			return nil, false, err
-		}
-		if d.Skip {
-			return messages, false, nil
-		}
-		if d.Summary != "" {
-			summary = d.Summary
+		if summary != "" {
+			result = CompactTiered(messages, target, summary, toolLim)
 		}
 	}
-	result := CompactTiered(messages, target, summary, toolLim)
 	// Always notify, including no-ops: PreCompact already advertised start
 	// (TUI "auto-compact…"). Skipping AfterCompact when CharsSaved==0 left
 	// that chrome stuck for the rest of the turn — common when occupancy
@@ -323,7 +350,6 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 		// ErrDone is a clean stop request — keep the result text, do not soft-wrap.
 		if execErr != nil && !errors.Is(execErr, ErrDone) {
 			out = "error: " + execErr.Error()
-			execErr = nil
 		}
 	}
 

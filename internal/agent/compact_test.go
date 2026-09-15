@@ -170,8 +170,9 @@ func TestCompactStubPreservesTask(t *testing.T) {
 	if !strings.Contains(anchor, "line_hash bug") || !strings.Contains(anchor, "tui.go") {
 		t.Fatalf("anchor lost original task: %q", anchor)
 	}
-	if strings.Contains(anchor, "\n1. hi\n") || strings.HasPrefix(strings.TrimSpace(strings.Split(anchor, "\n")[0]), "1. hi") {
-		// "hi" is trivial and must not be the sole anchor when a real task exists
+	// "hi" is trivial and must not be the sole anchor when a real task exists.
+	if lines := strings.Split(anchor, "\n"); len(lines) < 2 || strings.HasPrefix(strings.TrimSpace(lines[1]), "1. hi") {
+		t.Fatalf("trivial user turn must not lead the anchor: %q", anchor)
 	}
 	if !strings.Contains(anchor, "line_hash") {
 		t.Fatalf("want real task not only hi: %q", anchor)
@@ -434,5 +435,123 @@ func TestCompactStubRecordsDroppedWork(t *testing.T) {
 	got := defaultCompactStub(dropped, kept, nil)
 	if !strings.Contains(got, "compacted") || !strings.Contains(got, "Dropped 2 messages") {
 		t.Fatalf("stub missing drop record:\n%s", got)
+	}
+}
+
+func TestApplyCompactSkipsPreCompactOnNoop(t *testing.T) {
+	// Stale LastInputTokens trip the budget while the projection is already
+	// at its floor. PreCompact (archive + optional summary LLM call) must not
+	// fire for a no-op, but AfterCompact still does (hosts drop chrome).
+	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "hi"}}
+	var pre, after int
+	opt := Options{
+		ContextWindow:   1_000,
+		LastInputTokens: 900,
+		Hooks: Hooks{
+			PreCompact: []PreCompactFunc{func(context.Context, PreCompactEvent) (PreCompactDecision, error) {
+				pre++
+				return PreCompactDecision{}, nil
+			}},
+			AfterCompact: []AfterCompactFunc{func(context.Context, AfterCompactEvent) { after++ }},
+		},
+	}
+	for range 3 {
+		if _, _, err := applyCompact(t.Context(), msgs, opt, newRatioCalibrator()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if pre != 0 {
+		t.Fatalf("PreCompact fired %d times on a no-op", pre)
+	}
+	if after != 3 {
+		t.Fatalf("AfterCompact fired %d times, want 3", after)
+	}
+
+	// A history that can shrink still consults PreCompact and uses its summary.
+	big := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "task"}}
+	for i := 0; i < 20; i++ {
+		big = append(big,
+			llm.Message{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{ID: "c", Function: llm.FunctionCall{Name: "read", Arguments: "{}"}}}},
+			llm.Message{Role: "tool", ToolCallID: "c", Content: strings.Repeat("x", 2_000)},
+		)
+	}
+	pre = 0
+	opt.Hooks.PreCompact = []PreCompactFunc{func(context.Context, PreCompactEvent) (PreCompactDecision, error) {
+		pre++
+		return PreCompactDecision{Summary: "the summary"}, nil
+	}}
+	opt.LastInputTokens = 0
+	out, compacted, err := applyCompact(t.Context(), big, Options{MaxContextChars: 5_000, Hooks: opt.Hooks}, newRatioCalibrator())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pre != 1 || !compacted {
+		t.Fatalf("pre=%d compacted=%v", pre, compacted)
+	}
+	found := false
+	for _, m := range out {
+		if strings.Contains(m.Content, "the summary") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("summary not applied: %+v", out)
+	}
+}
+
+func TestApplyCompactSkipDecisionStillTrims(t *testing.T) {
+	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "task"}}
+	for i := 0; i < 20; i++ {
+		msgs = append(msgs,
+			llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c", Function: llm.FunctionCall{Name: "read", Arguments: "{}"}}}},
+			llm.Message{Role: "tool", ToolCallID: "c", Content: strings.Repeat("x", 2_000)},
+		)
+	}
+	opt := Options{MaxContextChars: 5_000, MaxToolResultChars: 500, Hooks: Hooks{
+		PreCompact: []PreCompactFunc{func(context.Context, PreCompactEvent) (PreCompactDecision, error) {
+			return PreCompactDecision{Skip: true}, nil
+		}},
+	}}
+	out, compacted, err := applyCompact(t.Context(), msgs, opt, newRatioCalibrator())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compacted {
+		t.Fatal("Skip must not report a compaction")
+	}
+	for _, m := range out {
+		if m.Role == "tool" && len(m.Content) > 600 {
+			t.Fatalf("Skip path returned an untrimmed tool result (%d chars)", len(m.Content))
+		}
+	}
+}
+
+func TestTruncateKeepsUntrustedFrameClosed(t *testing.T) {
+	body := strings.Repeat("line of shell output\n", 200)
+	framed := WrapUntrusted("n0nce", "bash", body)
+	for _, tc := range []struct {
+		name string
+		cut  func(string, int) string
+	}{
+		{"truncate", TruncateToolResult},
+		{"snip", snipToolResult},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := tc.cut(framed, 900)
+			if !strings.HasPrefix(out, "<"+UntrustedTag) || !strings.HasSuffix(out, "</"+UntrustedTag+">") {
+				t.Fatalf("frame lost: %q", out)
+			}
+			if len(out) > 900+len(truncatedMarker) {
+				t.Fatalf("len=%d over limit", len(out))
+			}
+			if strings.Count(out, "</"+UntrustedTag+">") != 1 {
+				t.Fatalf("closing tag count: %q", out)
+			}
+			// Unframed content is cut exactly as before.
+			plain := tc.cut(body, 900)
+			if strings.Contains(plain, UntrustedTag) {
+				t.Fatalf("plain content grew a frame: %q", plain)
+			}
+		})
 	}
 }

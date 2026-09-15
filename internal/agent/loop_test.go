@@ -935,3 +935,70 @@ func TestCalibrationCountsToolOverhead(t *testing.T) {
 		t.Fatalf("compaction ran %d time(s) on an under-budget history — tool overhead not counted in calibration", n)
 	}
 }
+
+// A steer-interrupted call produced nothing, so the reissue must not count
+// against MaxTurns: with MaxTurns=1 the reissued call still completes.
+func TestRunMidTurnSteerDoesNotConsumeTurn(t *testing.T) {
+	var calls int
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		calls++
+		if calls == 1 {
+			return llm.Message{}, context.Canceled
+		}
+		return llm.Message{Role: "assistant", Content: "done"}, nil
+	}
+	steered := false
+	res, err := agent.Run(t.Context(), chat, "ask", agent.Options{
+		MaxTurns: 1,
+		Steer: func() []string {
+			if steered {
+				return nil
+			}
+			steered = true
+			return []string{"steer"}
+		},
+	})
+	if err != nil {
+		t.Fatalf("steer reissue consumed the only turn: %v", err)
+	}
+	if calls != 2 || res.Text != "done" {
+		t.Fatalf("calls=%d text=%q", calls, res.Text)
+	}
+}
+
+// The repeat-tool warning must not drop what AfterTurnDecide hooks injected
+// on the same turn: both nudges reach the model.
+func TestRunRepeatWarningKeepsTurnInject(t *testing.T) {
+	var calls int
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		calls++
+		if calls <= 3 {
+			return llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{
+				ID: fmt.Sprintf("c%d", calls), Type: "function",
+				Function: llm.FunctionCall{Name: "echo", Arguments: `{"text":"same"}`},
+			}}}, nil
+		}
+		return llm.Message{Role: "assistant", Content: "ok"}, nil
+	}
+	res, err := agent.Run(t.Context(), chat, "go", agent.Options{
+		MaxTurns: 10,
+		Tools:    []agent.Tool{echoTool{}},
+		Hooks: agent.Hooks{AfterTurnDecide: []agent.AfterTurnDecisionFunc{
+			func(context.Context, agent.AfterTurnEvent) (agent.AfterTurnDecision, error) {
+				return agent.AfterTurnDecision{Inject: "hook says hi"}, nil
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var both bool
+	for _, m := range res.Messages {
+		if m.Role == "user" && strings.Contains(m.Content, "repeated the same tool") {
+			both = strings.Contains(m.Content, "hook says hi")
+		}
+	}
+	if !both {
+		t.Fatalf("repeat warning dropped the hook injection: %+v", res.Messages)
+	}
+}

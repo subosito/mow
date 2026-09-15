@@ -14,8 +14,8 @@ import (
 // Default tool-result size when Options.MaxToolResultChars is unset.
 const DefaultMaxToolResultChars = 24_000
 
-// DefaultMaxContextChars is the unknown-window floor (~25–30k tokens). Used
-// only when auto-compact is on but the gateway did not publish context_window.
+// DefaultMaxContextChars is the target for manual /compact when no window
+// is known. Auto-compact does not use this — unknown window means off.
 const DefaultMaxContextChars = 100_000
 
 // DefaultCompactRatio is the fraction used by ContextCharsBudget (explicit
@@ -298,14 +298,36 @@ func snipLongestToolResults(messages []llm.Message, target, maxToolChars int) []
 }
 
 func snipToolResult(s string, maxChars int) string {
-	if maxChars <= 0 || len(s) <= maxChars {
-		return s
-	}
+	return cutKeepingFrame(s, maxChars, snipTail)
+}
+
+func snipTail(s string, maxChars int) string {
 	keep := maxChars - len(snipMarker)
 	if keep < 0 {
 		keep = 0
 	}
 	return s[:keep] + snipMarker
+}
+
+const untrustedClose = "</" + UntrustedTag + ">"
+
+// cutKeepingFrame shortens s with cut (which trims from the tail) while
+// keeping an <untrusted-output> frame closed: the tail is where the closing
+// tag lives, and an open frame would let the rest of history read as
+// external data. The re-closed result stays within maxChars.
+func cutKeepingFrame(s string, maxChars int, cut func(string, int) string) string {
+	if maxChars <= 0 || len(s) <= maxChars {
+		return s
+	}
+	if !strings.HasPrefix(s, "<"+UntrustedTag) || !strings.HasSuffix(s, untrustedClose) {
+		return cut(s, maxChars)
+	}
+	inner := strings.TrimSuffix(s, untrustedClose)
+	out := cut(inner, max(maxChars-len(untrustedClose)-1, 1))
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return out + untrustedClose
 }
 
 // CompactOpts reduces message history to roughly maxChars while keeping system
@@ -742,16 +764,19 @@ func trimAllToolResults(messages []llm.Message, recentMax, olderMax int) []llm.M
 	return out
 }
 
+const truncatedMarker = "\n…(truncated)"
+
 // TruncateToolResult shortens a tool result for model history.
 func TruncateToolResult(s string, maxChars int) string {
-	if maxChars <= 0 || len(s) <= maxChars {
-		return s
-	}
+	return cutKeepingFrame(s, maxChars, truncateTail)
+}
+
+func truncateTail(s string, maxChars int) string {
 	cut := maxChars
 	if i := lastIndexByte(s[:maxChars], '\n'); i > maxChars*3/4 {
 		cut = i
 	}
-	return s[:cut] + "\n…(truncated)"
+	return s[:cut] + truncatedMarker
 }
 
 func lastIndexByte(s string, c byte) int {
@@ -767,10 +792,16 @@ func lastIndexByte(s string, c byte) int {
 func EstChars(msgs []llm.Message) int {
 	n := 0
 	for _, m := range msgs {
-		n += len(m.Content) + len(m.Role) + 8
-		for _, tc := range m.ToolCalls {
-			n += len(tc.Function.Name) + len(tc.Function.Arguments)
-		}
+		n += msgChars(m)
+	}
+	return n
+}
+
+// msgChars is the per-message body of EstChars.
+func msgChars(m llm.Message) int {
+	n := len(m.Content) + len(m.Role) + 8
+	for _, tc := range m.ToolCalls {
+		n += len(tc.Function.Name) + len(tc.Function.Arguments)
 	}
 	return n
 }

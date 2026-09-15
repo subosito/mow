@@ -249,7 +249,6 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	}
 	opt.ToolSchemaChars = toolChars
 	for turn := 0; maxTurns <= 0 || turn < maxTurns; turn++ {
-		ctx = context.WithValue(ctx, "mow.turn", turn+1)
 		if err := ctx.Err(); err != nil {
 			return Result{Messages: messages, Usage: usage}, err
 		}
@@ -376,6 +375,9 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 					for _, s := range steers {
 						messages = append(messages, llm.Message{Role: "user", Content: s, Synthetic: true})
 					}
+					// The interrupted call produced nothing; the reissue is the
+					// same turn, so it must not consume MaxTurns budget.
+					turn--
 					continue
 				}
 			}
@@ -514,13 +516,17 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			}
 			turnInject += d.Inject
 		}
+		// The repeat warning and hook injections are independent nudges; a
+		// repeat must not swallow what a hook decided to say this turn.
 		if sameToolFP >= sameToolWarnAfter {
-			messages = append(messages, llm.Message{
-				Role:      "user",
-				Content:   sameToolWarnMessage(sameToolFP),
-				Synthetic: true,
-			})
-		} else if turnInject != "" {
+			warn := sameToolWarnMessage(sameToolFP)
+			if turnInject != "" {
+				turnInject = warn + "\n\n" + turnInject
+			} else {
+				turnInject = warn
+			}
+		}
+		if turnInject != "" {
 			messages = append(messages, llm.Message{
 				Role:      "user",
 				Content:   turnInject,
