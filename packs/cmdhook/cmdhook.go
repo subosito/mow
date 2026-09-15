@@ -30,11 +30,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/extcfg"
+	"github.com/subosito/mow/packs/internal/strx"
 )
 
 // PluginConfig is one hooks.json plugin instance (tests and plugin discovery).
@@ -290,8 +290,9 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmdStr := strings.ReplaceAll(ce.Command, "${CLAUDE_PLUGIN_ROOT}", b.root)
-	cmd := exec.CommandContext(tctx, "sh", "-c", cmdStr)
+	// ${CLAUDE_PLUGIN_ROOT} is exported in cmd.Env below; the shell expands
+	// it. Splicing the path into the command text left it unquoted.
+	cmd := exec.CommandContext(tctx, "sh", "-c", ce.Command)
 	// Own process group, and kill the whole group on cancel/timeout.
 	//
 	// CommandContext only signals the direct child (`sh`). A hook that spawns
@@ -315,7 +316,7 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(scrubEnv(os.Environ()),
 		"CLAUDE_PLUGIN_ROOT="+b.root,
 		"CLAUDE_PROJECT_DIR="+cwd,
 	)
@@ -354,7 +355,7 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 		if ctx.Err() != nil || errors.Is(runErr, context.Canceled) {
 			return ho, false, "", false
 		}
-		cmdLabel := sanitizeHookDiag(firstNonEmpty(truncate(cmdStr, 80), cmdStr))
+		cmdLabel := sanitizeHookDiag(firstNonEmpty(truncate(ce.Command, 80), ce.Command))
 		if errors.Is(runErr, context.DeadlineExceeded) || tctx.Err() != nil {
 			msg := "cmdhook: hook timed out"
 			if b.failClosed {
@@ -416,6 +417,9 @@ func sanitizeHookDiag(s string) string {
 	if s == "" {
 		return s
 	}
+	// Bearer first: the key=value rule would otherwise eat only "Bearer"
+	// from "Authorization: Bearer <token>" and leave the token on the line.
+	s = redactBearer(s)
 	// Key=value / key: value for common secret names.
 	for _, key := range []string{"api_key", "apikey", "token", "secret", "password", "authorization", "bearer"} {
 		s = redactKeyValue(s, key)
@@ -435,6 +439,37 @@ func sanitizeHookDiag(s string) string {
 
 func isSecretRune(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '-' || b == '_'
+}
+
+// redactBearer replaces the token after every "Bearer <ws>" (RFC 6750 b64token
+// alphabet) with [redacted].
+func redactBearer(s string) string {
+	const key = "bearer"
+	lower := strings.ToLower(s)
+	pos := 0
+	for pos < len(lower) {
+		i := strings.Index(lower[pos:], key)
+		if i < 0 {
+			break
+		}
+		i += pos
+		j := i + len(key)
+		for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
+			j++
+		}
+		k := j
+		for k < len(s) && (isSecretRune(s[k]) || strings.IndexByte("._~+/=", s[k]) >= 0) {
+			k++
+		}
+		if j == i+len(key) || k == j {
+			pos = i + len(key) // "bearer=" / bare word: leave to redactKeyValue
+			continue
+		}
+		s = s[:j] + "[redacted]" + s[k:]
+		lower = strings.ToLower(s)
+		pos = j + len("[redacted]")
+	}
+	return s
 }
 
 func redactKeyValue(s, key string) string {
@@ -670,23 +705,33 @@ func rawOrEmpty(raw json.RawMessage) json.RawMessage {
 	return raw
 }
 
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
+// credentialEnv names variables that must never reach a hook subprocess.
+// Hooks come from ~/.claude/plugins and ~/.agents/plugins — third-party shell
+// snippets that inherit this process' environment. Same rule as the bash
+// tool's scrub: these exact names plus any *_API_KEY.
+var credentialEnv = map[string]bool{
+	"MOW_API_KEY":       true,
+	"OPENAI_API_KEY":    true,
+	"ANTHROPIC_API_KEY": true,
 }
+
+// scrubEnv returns env without the agent's own credentials.
+func scrubEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if credentialEnv[k] || strings.HasSuffix(k, "_API_KEY") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
+// firstNonEmpty keeps the value untrimmed: hook stderr is shown verbatim.
+func firstNonEmpty(vals ...string) string { return strx.FirstNonEmptyRaw(vals...) }
 
 // truncate clamps s to n bytes, cutting on a rune boundary. Callers pass hook
 // subprocess output, so a naive s[:n] can split a rune and log invalid UTF-8.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n] + "…"
-}
+// Every call site passes a positive n.
+func truncate(s string, n int) string { return strx.TruncateBytes(s, n) }

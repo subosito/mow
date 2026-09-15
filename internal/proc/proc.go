@@ -79,6 +79,13 @@ func StoreDir(home, workspace string) string {
 // the parent so the recorded pid is still the session leader we later signal —
 // the backend is asked not to add its own --new-session.
 func Start(dir, id, command, logName, workdir string, box ...sandbox.Backend) (Info, error) {
+	return StartEnv(dir, id, command, logName, workdir, nil, box...)
+}
+
+// StartEnv is Start with envAllow: exact environment variable names that
+// survive the credential scrub (policy.env_passthrough). Host config only —
+// see sandbox.ScrubEnv.
+func StartEnv(dir, id, command, logName, workdir string, envAllow []string, box ...sandbox.Backend) (Info, error) {
 	id = SanitizeID(id)
 	command = strings.TrimSpace(command)
 	if id == "" || command == "" {
@@ -104,7 +111,7 @@ func Start(dir, id, command, logName, workdir string, box ...sandbox.Backend) (I
 	}
 	// Never hand the agent's own credentials to a child; bwrap replaces the
 	// whole environment anyway.
-	c.Env = sandbox.ScrubEnv(os.Environ())
+	c.Env = sandbox.ScrubEnv(os.Environ(), envAllow...)
 	c.Stdout = logF
 	c.Stderr = logF
 	c.Stdin = nil

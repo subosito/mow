@@ -87,7 +87,7 @@ func (startTool) Exec(ctx context.Context, args json.RawMessage) (string, error)
 	if err != nil {
 		return "error: " + err.Error(), nil
 	}
-	info, err := mow.ProcStart(dir, a.ID, a.Command, a.Log, eng.Workspace(), box)
+	info, err := mow.ProcStartEnv(dir, a.ID, a.Command, a.Log, eng.Workspace(), eng.EnvPassthrough(), box)
 	if errors.Is(err, mow.ProcErrAlreadyRunning) {
 		return fmt.Sprintf("already running id=%s pid=%d — pick a new id or proc_stop first; do not reuse a dead id's port", info.ID, info.PID), nil
 	}

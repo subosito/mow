@@ -40,6 +40,13 @@ func ProcStart(dir, id, command, logName, workdir string, box ...sandbox.Backend
 	return proc.Start(dir, id, command, logName, workdir, box...)
 }
 
+// ProcStartEnv is ProcStart with the host's policy.env_passthrough names: the
+// exact environment variables allowed past the credential scrub. Use
+// Engine.EnvPassthrough() for the list; ProcStart keeps the full scrub.
+func ProcStartEnv(dir, id, command, logName, workdir string, envAllow []string, box ...sandbox.Backend) (ProcInfo, error) {
+	return proc.StartEnv(dir, id, command, logName, workdir, envAllow, box...)
+}
+
 // ProcStatus returns the info for one id.
 func ProcStatus(dir, id string) (ProcInfo, error) { return proc.Status(dir, id) }
 

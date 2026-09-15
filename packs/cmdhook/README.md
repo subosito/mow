@@ -18,8 +18,15 @@ No pack CLI, no tools, no slash commands. Hooks re-register on every `BeforeNew`
 Host-owned Agent Plugins (`$MOW_HOME/plugins`, workspace profile `plugins/`)
 that ship `hooks/hooks.json` register automatically. There is no
 `extensions.cmdhook` section and no `$MOW_HOME/cmdhook.yaml`. Project
-`.mow/plugins` is skills-only. When unset, hooks also receive
-`CLAUDE_CONFIG_DIR=$MOW_HOME`.
+`.mow/plugins` is skills-only. Hooks run with `CLAUDE_PLUGIN_ROOT` (the plugin
+folder) and `CLAUDE_PROJECT_DIR`; when the process has no `CLAUDE_CONFIG_DIR`,
+hooks also receive `CLAUDE_CONFIG_DIR=$MOW_HOME` so Claude-style plugins keep
+their state under mow rather than `~/.claude`.
+
+Hooks inherit the rest of the environment, minus credentials: `MOW_API_KEY`,
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and any `*_API_KEY` are stripped before
+the hook runs (same rule as the bash tool). Plugin hooks are third-party shell
+snippets; they should not be handed the key mow authenticates with.
 
 Supported hook events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`, `PreCompact`. Tool names are translated to Claude conventions for matchers (`read` → `Read`, `mcp_srv_x` → `mcp__srv_x`). A PreToolUse `permissionDecision` of `"ask"` is treated as deny.
 

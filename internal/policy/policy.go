@@ -64,6 +64,10 @@ type Policy struct {
 	MaxBashTimeoutSec int
 	// Hashline enables N:hash|line read format and line_hash edits (tools.hashline).
 	Hashline bool
+	// EnvPassthrough are exact environment variable names that survive the
+	// credential scrub when mow spawns a shell (bash, proc_start). Comes from
+	// policy.env_passthrough — host/user config and CLI only, never project.
+	EnvPassthrough []string
 }
 
 // Power tools that are denied unless explicitly allowed.

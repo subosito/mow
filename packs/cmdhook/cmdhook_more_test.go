@@ -806,3 +806,61 @@ func TestSetupIgnoresPluginWithoutHooks(t *testing.T) {
 		t.Fatalf("skills-only plugin should not register hooks, got %d", n)
 	}
 }
+
+func TestSanitizeHookDiagAuthorizationBearer(t *testing.T) {
+	for _, in := range []string{
+		"Authorization: Bearer abc123def456",
+		`"authorization":"Bearer abc123def456"`,
+		"sent Bearer abc123def456 upstream",
+	} {
+		out := sanitizeHookDiag(in)
+		if strings.Contains(out, "abc123def456") {
+			t.Fatalf("%q leaked token: %q", in, out)
+		}
+	}
+	if out := sanitizeHookDiag("bearer=abc123def456"); strings.Contains(out, "abc123def456") {
+		t.Fatalf("bearer= leaked: %q", out)
+	}
+}
+
+// ${CLAUDE_PLUGIN_ROOT} is expanded by the shell from the exported env, not
+// spliced into the command text where a root containing shell syntax broke.
+func TestClaudePluginRootExpandedByShell(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "p$x")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scriptAt(t, root, "env.sh", `printf '%s' "$CLAUDE_PLUGIN_ROOT"`)
+	writeHooksJSON(t, root, oneEntry("", `\"${CLAUDE_PLUGIN_ROOT}/env.sh\"`))
+	b := mustLoad(t, PluginConfig{Root: root})
+	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{"cwd": root})
+	if len(out.contexts) != 1 || out.contexts[0] != root {
+		t.Fatalf("contexts = %+v want [%s]", out.contexts, root)
+	}
+}
+
+func TestScrubEnvDropsCredentials(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		keep bool
+	}{
+		{name: "mow key", in: "MOW_API_KEY=sk-1", keep: false},
+		{name: "openai key", in: "OPENAI_API_KEY=sk-2", keep: false},
+		{name: "anthropic key", in: "ANTHROPIC_API_KEY=sk-3", keep: false},
+		{name: "suffix rule", in: "ACME_API_KEY=sk-4", keep: false},
+		{name: "unrelated", in: "PATH=/usr/bin", keep: true},
+		{name: "near miss", in: "MY_API_KEYS=ok", keep: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := scrubEnv([]string{tc.in})
+			if tc.keep && (len(got) != 1 || got[0] != tc.in) {
+				t.Fatalf("scrubEnv dropped %q: %v", tc.in, got)
+			}
+			if !tc.keep && len(got) != 0 {
+				t.Fatalf("scrubEnv kept credential %q: %v", tc.in, got)
+			}
+		})
+	}
+}

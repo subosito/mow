@@ -749,7 +749,7 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	cmd.Dir = t.p.Workspace
 	// Never hand the agent's own credentials to the shell; the bwrap path
 	// below replaces the whole environment anyway.
-	cmd.Env = sandbox.ScrubEnv(os.Environ())
+	cmd.Env = sandbox.ScrubEnv(os.Environ(), t.p.EnvPassthrough...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Opt-in OS jail (policy.sandbox / --sandbox=bwrap). Identity by default;
 	// when enabled it rewrites argv to `bwrap ... -- bash -lc <command>` and

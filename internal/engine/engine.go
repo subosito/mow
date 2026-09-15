@@ -64,6 +64,12 @@ type Engine struct {
 	sid            string
 	prior          []llm.Message
 	transcript     []Message // user/assistant only (session resume)
+	// snapMsgs/snapBytes describe the last replay snapshot written to the
+	// session file (message count and total content size). A turn whose
+	// history is byte-identical — a steer that produced nothing, a cancelled
+	// call — skips the append instead of duplicating the whole history.
+	snapMsgs  int
+	snapBytes int
 	// lastProviderTokens is the last provider-reported input token count.
 	// 0 until the first call. Never overwritten by a char-budget estimate.
 	lastProviderTokens int
@@ -358,6 +364,7 @@ func New(opt Options) (*Engine, error) {
 		BashTimeoutSec:     cfg.Policy.BashTimeoutSec,
 		MaxBashTimeoutSec:  cfg.Policy.MaxBashTimeoutSec,
 		Hashline:           cfg.Tools.Hashline,
+		EnvPassthrough:     append([]string(nil), cfg.Policy.EnvPassthrough...),
 	}
 
 	enabled := cfg.Tools.Enable
@@ -803,6 +810,7 @@ func New(opt Options) (*Engine, error) {
 				return nil, fmt.Errorf("session load: %w", err)
 			}
 			e.prior = prior
+			e.snapMsgs, e.snapBytes = 0, 0
 			turns, err := store.LoadTranscriptEvents()
 			if err != nil {
 				return nil, fmt.Errorf("session transcript: %w", err)
@@ -978,6 +986,7 @@ func (e *Engine) BeginSession() (string, error) {
 		return "", fmt.Errorf("mow: engine closed")
 	}
 	e.prior = nil
+	e.snapMsgs, e.snapBytes = 0, 0
 	e.transcript = nil
 	e.steer = nil
 	e.lastProviderTokens = 0
@@ -1084,6 +1093,16 @@ func (e *Engine) ShellSandbox() (sandbox.Backend, error) {
 		return sandbox.None{}, nil
 	}
 	return e.pol.SandboxBackend()
+}
+
+// EnvPassthrough returns the exact environment variable names the host let
+// past the shell credential scrub (policy.env_passthrough). Shell entry points
+// outside internal/tools (proc_start) pass it to ProcStartEnv.
+func (e *Engine) EnvPassthrough() []string {
+	if e == nil || e.pol == nil {
+		return nil
+	}
+	return append([]string(nil), e.pol.EnvPassthrough...)
 }
 
 // SandboxMode reports the configured shell sandbox ("none" or "bwrap").

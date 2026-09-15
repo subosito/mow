@@ -445,3 +445,16 @@ func TestWrapChdirHonoursDirUnderBoundRoot(t *testing.T) {
 		})
 	}
 }
+
+func TestScrubEnvAllowList(t *testing.T) {
+	in := []string{"PATH=/bin", "MOW_API_KEY=a", "OPENAI_API_KEY=b", "NPM_API_KEY=t"}
+	got := ScrubEnv(in, "NPM_API_KEY", " ", "")
+	want := []string{"PATH=/bin", "NPM_API_KEY=t"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("ScrubEnv allow = %v, want %v", got, want)
+	}
+	// The allow list is exact-name only: a near miss stays scrubbed.
+	if out := ScrubEnv([]string{"OPENAI_API_KEY=b"}, "OPENAI_API_KEY_2"); len(out) != 0 {
+		t.Fatalf("prefix match leaked: %v", out)
+	}
+}

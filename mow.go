@@ -226,6 +226,13 @@ func ProcStoreDir(home, workspace string) string {
 func ProcStart(dir, id, command, logName, workdir string, box ...SandboxBackend) (ProcInfo, error) {
 	return engine.ProcStart(dir, id, command, logName, workdir, box...)
 }
+
+// ProcStartEnv is ProcStart with the host's policy.env_passthrough names, so
+// the child keeps the credential variables the operator explicitly allowed
+// (see Engine.EnvPassthrough).
+func ProcStartEnv(dir, id, command, logName, workdir string, envAllow []string, box ...SandboxBackend) (ProcInfo, error) {
+	return engine.ProcStartEnv(dir, id, command, logName, workdir, envAllow, box...)
+}
 func ProcStatus(dir, id string) (ProcInfo, error)    { return engine.ProcStatus(dir, id) }
 func ProcList(dir string) ([]ProcInfo, error)        { return engine.ProcList(dir) }
 func ProcStop(dir, id string) (ProcInfo, error)      { return engine.ProcStop(dir, id) }

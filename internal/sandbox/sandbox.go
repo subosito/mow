@@ -184,11 +184,21 @@ var credentialEnv = map[string]bool{
 // in credentialEnv plus any variable ending in _API_KEY. Used by the
 // unsandboxed bash tool and proc_start so a child cannot read the key mow
 // itself authenticates with; the bwrap path clears the environment entirely.
-func ScrubEnv(env []string) []string {
+//
+// allow lists exact variable names that survive the scrub anyway
+// (policy.env_passthrough) — a host opt-out for builds that genuinely need a
+// registry or CI token. Host/CLI config only; never project-settable.
+func ScrubEnv(env []string, allow ...string) []string {
+	keep := map[string]bool{}
+	for _, name := range allow {
+		if name = strings.TrimSpace(name); name != "" {
+			keep[name] = true
+		}
+	}
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
-		if credentialEnv[k] || strings.HasSuffix(k, "_API_KEY") {
+		if !keep[k] && (credentialEnv[k] || strings.HasSuffix(k, "_API_KEY")) {
 			continue
 		}
 		out = append(out, kv)
