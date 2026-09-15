@@ -51,7 +51,7 @@ func (e *Engine) SetModel(id string) error {
 	if id == "" {
 		return fmt.Errorf("mow: empty model id")
 	}
-	_ = e.ensureLLM()
+	_ = e.ensureLLM(context.Background())
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	curEffort := ""
@@ -249,7 +249,12 @@ func (e *Engine) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	if e == nil {
 		return nil, fmt.Errorf("mow: nil engine")
 	}
-	if err := e.ensureLLM(); err != nil && e.client == nil && e.provider == nil {
+	if err := e.ensureLLM(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		e.mu.Lock()
+		defer e.mu.Unlock()
 		// DeferLLM host without a key: return the configured model only.
 		if e.cfg != nil && strings.TrimSpace(e.cfg.LLM.Model) != "" {
 			return []ModelInfo{{ID: e.cfg.LLM.Model}}, nil
@@ -355,7 +360,7 @@ func (e *Engine) SetEffort(effort string) error {
 	if e == nil {
 		return fmt.Errorf("mow: nil engine")
 	}
-	_ = e.ensureLLM()
+	_ = e.ensureLLM(context.Background())
 	e.mu.Lock()
 	var allowed []string
 	if e.client != nil {
@@ -526,7 +531,7 @@ func (e *Engine) Efforts() []string {
 	if e == nil {
 		return nil
 	}
-	_ = e.ensureLLM()
+	_ = e.ensureLLM(context.Background())
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.client == nil {
@@ -540,7 +545,7 @@ func (e *Engine) DefaultEffort() string {
 	if e == nil {
 		return ""
 	}
-	_ = e.ensureLLM()
+	_ = e.ensureLLM(context.Background())
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.client == nil {
@@ -557,7 +562,7 @@ func (e *Engine) DisplayEffort() string {
 	if e == nil {
 		return ""
 	}
-	_ = e.ensureLLM()
+	_ = e.ensureLLM(context.Background())
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	cur := ""

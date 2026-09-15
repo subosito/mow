@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"context"
+
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/llm"
 )
@@ -129,7 +131,7 @@ func (e *Engine) Limits() ModelLimits {
 	if e == nil {
 		return ModelLimits{}
 	}
-	_ = e.ensureLLM()
+	_ = e.ensureLLM(context.Background())
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.limitsLocked()

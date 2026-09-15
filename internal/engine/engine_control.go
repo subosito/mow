@@ -83,7 +83,6 @@ func (e *Engine) SetOnEvent(fn EventFunc) {
 	}
 	e.onTokenMu.Lock()
 	e.onEvents = nil
-	e.nextEventID = 0
 	if fn != nil {
 		e.nextEventID++
 		e.onEvents = []eventSub{{id: e.nextEventID, fn: fn}}
@@ -154,7 +153,7 @@ func (e *Engine) RegisterCleanup(fn func()) {
 	e.mu.Unlock()
 }
 
-// Close cancels any in-flight run and runs registered cleanups once (LIFO).
+// Close prevents new prompts, cancels any in-flight run, and runs cleanups once (LIFO).
 // Idempotent. Hosts (mow run/tty, embedders) should defer Close so
 // session-scoped resources — notably ext/proc background processes — are torn
 // down on exit. A crashed process skips cleanups; leftover keep=true procs

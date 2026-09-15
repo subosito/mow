@@ -40,10 +40,9 @@ type Engine struct {
 	steerCancel context.CancelFunc
 	// promptMu: serialize Prompt without blocking Model()/Wire() readers.
 	promptMu sync.Mutex
-	// llmInitMu: serialize deferred client construction (ensureLLM) so
-	// concurrent Prompt / Efforts / SetModel calls under DeferLLM build one
-	// client; never held together with e.mu across the catalog fetch.
-	llmInitMu sync.Mutex
+	// llmInitializing is closed when deferred client construction finishes.
+	// Guarded by mu; waiting callers can cancel without waiting for the fetch.
+	llmInitializing chan struct{}
 
 	cfg            *config.File
 	pol            *policy.Policy
@@ -1165,34 +1164,50 @@ func (e *Engine) SandboxMode() string {
 
 // ensureLLM attaches the built-in LLM client when New ran with DeferLLM.
 // Injected Chat/Provider engines are already ready. Safe to call more than
-// once and from several goroutines: construction is serialized on llmInitMu
+// once and from several goroutines: construction is serialized, cancellable,
 // and the client is published under e.mu, the lock Model()/Wire() read with.
-func (e *Engine) ensureLLM() error {
+func (e *Engine) ensureLLM(ctx context.Context) error {
 	if e == nil {
 		return fmt.Errorf("mow: nil engine")
 	}
-	e.mu.Lock()
-	ready := e.chat != nil
-	e.mu.Unlock()
-	if ready {
-		return nil
+	var snap *config.File
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		e.mu.Lock()
+		if e.closed {
+			e.mu.Unlock()
+			return fmt.Errorf("mow: engine closed")
+		}
+		if e.chat != nil {
+			e.mu.Unlock()
+			return nil
+		}
+		if done := e.llmInitializing; done != nil {
+			e.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-done:
+				continue
+			}
+		}
+		e.llmInitializing = make(chan struct{})
+		if e.cfg != nil {
+			snap = new(*e.cfg)
+		}
+		e.mu.Unlock()
+		break
 	}
+	defer func() {
+		e.mu.Lock()
+		close(e.llmInitializing)
+		e.llmInitializing = nil
+		e.mu.Unlock()
+	}()
 	if e.opt.Provider != nil || e.opt.Chat != nil {
 		return fmt.Errorf("mow: chat backend missing")
-	}
-	e.llmInitMu.Lock()
-	defer e.llmInitMu.Unlock()
-	e.mu.Lock()
-	cfg := e.cfg
-	ready = e.chat != nil
-	var snap *config.File
-	if cfg != nil {
-		c := *cfg
-		snap = &c
-	}
-	e.mu.Unlock()
-	if ready {
-		return nil
 	}
 	if snap == nil {
 		return fmt.Errorf("mow: engine has no config")
@@ -1229,9 +1244,12 @@ func (e *Engine) ensureLLM() error {
 	}
 	// Catalog fetch on the private client — no engine lock across the network.
 	{
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, _ = client.ListModels(ctx)
+		catalogCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_, _ = client.ListModels(catalogCtx)
 		cancel()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		client.SyncEffortToModel(client.Model)
 	}
 	chat := func(ctx context.Context, messages []llm.Message, specs []llm.ToolSpec) (llm.Message, error) {
@@ -1252,9 +1270,13 @@ func (e *Engine) ensureLLM() error {
 		return msg, err
 	}
 	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return fmt.Errorf("mow: engine closed")
+	}
 	e.client = client
 	e.wireExplicit = snap.LLM.WireExplicit
-	cfg.LLM.Effort = client.Effort
+	e.cfg.LLM.Effort = client.Effort
 	e.applyPreferredWireLocked()
 	e.chat = chat
 	e.mu.Unlock()

@@ -32,7 +32,6 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 
 	e.promptMu.Lock()
 	defer e.promptMu.Unlock()
-	text = e.preparePluginCommand(text)
 
 	// Cancellable run context + stable id for hosts/orchestrators. Registered
 	// before setup (deferred client construction can spend seconds on the
@@ -42,12 +41,17 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	// the engine busy (and EventRunStart fires), a host may legitimately steer,
 	// and a later reset would wipe a steer aimed at this very turn.
 	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return RunResult{}, fmt.Errorf("mow: engine closed")
+	}
 	e.steer = nil
-	e.mu.Unlock()
 	ctx, runID := e.beginRun(ctx)
+	e.mu.Unlock()
 	defer e.endRun()
+	text = e.preparePluginCommand(text)
 
-	if err := e.ensureLLM(); err != nil {
+	if err := e.ensureLLM(ctx); err != nil {
 		return RunResult{}, err
 	}
 	if err := ctx.Err(); err != nil {
