@@ -138,7 +138,7 @@ type Options struct {
 	// Continue loads the latest session under the project dir when SessionID empty.
 	Continue bool
 	// MaxTurns overrides config when non-zero: positive = that many turns,
-	// negative (e.g. -1) = unlimited. Zero leaves config (default 120).
+	// negative (e.g. -1) = unlimited. Zero leaves config (default unlimited).
 	// CLI --max-turns 0 maps to -1 (unlimited).
 	MaxTurns int
 	// Extra system text appended after AGENTS.md.
@@ -203,7 +203,7 @@ type RunResult struct {
 	Text       string
 	SessionID  string
 	RunID      string // correlates with Event.RunID for this Prompt
-	StopReason string // completed | cancelled | max_turns | error
+	StopReason string // completed | cancelled | max_turns | stuck | budget | truncated | error
 	// Usage is provider-reported tokens summed across every LLM call in the
 	// run (zero when the provider sent none).
 	Usage Usage

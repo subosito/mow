@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -303,5 +304,91 @@ func TestMarkdownDigestBoundedAndJSONLUnchanged(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Fatal("MarkdownDigest modified canonical JSONL")
+	}
+}
+
+func TestNewIDUniqueAndValid(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		id := NewID()
+		if err := ValidateID(id); err != nil {
+			t.Fatal(err)
+		}
+		if seen[id] {
+			t.Fatalf("duplicate id within one second: %s", id)
+		}
+		seen[id] = true
+		if !strings.HasPrefix(id, time.Now().UTC().Format("2006")) {
+			t.Fatalf("id %q lost its timestamp prefix", id)
+		}
+	}
+	// Ids without a suffix (older files, Options.SessionID) stay valid.
+	if err := ValidateID("20240101T000000"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLastSystemSnapshotOffset(t *testing.T) {
+	line := func(ev Event) string {
+		b, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	sysSnap := line(Event{Type: "snapshot", Messages: []llm.Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u"}}})
+	userSnap := line(Event{Type: "snapshot", Messages: []llm.Message{{Role: "user", Content: "no system"}}})
+	// Content that mentions the key inside a JSON string must not be taken
+	// for a snapshot.
+	decoy := line(Event{Type: "assistant", Role: "assistant", Content: `{"messages": []}`})
+	simple := line(Event{Type: "user", Role: "user", Content: "hi"})
+
+	cases := []struct {
+		name  string
+		lines []string
+		want  int // index into lines, -1 for offset 0 with no match
+	}{
+		{"none", []string{simple, decoy}, -1},
+		{"single", []string{simple, sysSnap}, 1},
+		{"last of several", []string{sysSnap, simple, sysSnap, simple}, 2},
+		{"decoy after snapshot", []string{sysSnap, decoy}, 0},
+		{"user-started snapshot ignored", []string{sysSnap, userSnap}, 0},
+		{"only user-started", []string{simple, userSnap}, -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := strings.Join(tc.lines, "\n") + "\n"
+			want := 0
+			if tc.want >= 0 {
+				want = len(strings.Join(tc.lines[:tc.want], "\n"))
+				if tc.want > 0 {
+					want++ // the newline before the wanted line
+				}
+			}
+			if got := lastSystemSnapshotOffset([]byte(raw)); got != want {
+				t.Fatalf("offset=%d want %d", got, want)
+			}
+		})
+	}
+}
+
+func TestLoadMessagesSkipsToLastSnapshotWithDecoyContent(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: dir, ID: "decoy"}
+	if err := s.AppendSnapshot([]llm.Message{{Role: "system", Content: "s"}, {Role: "user", Content: "old"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendSnapshot([]llm.Message{{Role: "system", Content: "s"}, {Role: "user", Content: "new"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(Event{Type: "assistant", Role: "assistant", Content: `{"messages": [1]}`}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[1].Content != "new" {
+		t.Fatalf("LoadMessages=%+v want last system snapshot", got)
 	}
 }

@@ -39,6 +39,10 @@ type Engine struct {
 	steerCancel context.CancelFunc
 	// promptMu: serialize Prompt without blocking Model()/Wire() readers.
 	promptMu sync.Mutex
+	// llmInitMu: serialize deferred client construction (ensureLLM) so
+	// concurrent Prompt / Efforts / SetModel calls under DeferLLM build one
+	// client; never held together with e.mu across the catalog fetch.
+	llmInitMu sync.Mutex
 
 	cfg            *config.File
 	pol            *policy.Policy
@@ -189,14 +193,14 @@ func New(opt Options) (*Engine, error) {
 	if activeProfile != nil {
 		profileName = activeProfile.Name
 	}
-	cfg, err := config.LoadForEngine(opt.LoadUserConfig, profileName, opt.ConfigPaths...)
-	if err != nil {
-		return nil, err
-	}
-	// Explicit Options overrides (do not mutate process env).
-	// A matched profile wins for workspace roots; its extra_roots are
-	// prepended to policy.extra_roots — explicit --extra-root flags still
-	// append on top.
+	// Resolve the intended workspace before loading config so trust and the
+	// project .mow/config.yaml layer apply to the directory the engine will
+	// run in — not the process cwd. A matched profile wins for workspace
+	// roots; its extra_roots are prepended to policy.extra_roots — explicit
+	// --extra-root flags still append on top.
+	workspace := ""
+	var profileRW, profileRO []string
+	profileRoots := false
 	if w := strings.TrimSpace(opt.Workspace); w != "" {
 		if activeProfile != nil {
 			if activeProfile.WorkspaceSet.Root != "" {
@@ -204,35 +208,33 @@ func New(opt Options) (*Engine, error) {
 				if rerr != nil {
 					return nil, rerr
 				}
-				var rw, ro []string
 				for _, r := range roots {
 					path, readOnly := config.SplitExtraRootSpec(r)
 					if path == "" {
 						continue
 					}
 					if readOnly {
-						ro = append(ro, path)
+						profileRO = append(profileRO, path)
 					} else {
-						rw = append(rw, path)
+						profileRW = append(profileRW, path)
 					}
 				}
-				cfg.Workspace = ws
-				cfg.Policy.ExtraRoots = append(rw, cfg.Policy.ExtraRoots...)
-				cfg.Policy.ExtraRootsReadOnly = append(ro, cfg.Policy.ExtraRootsReadOnly...)
+				workspace = ws
+				profileRoots = true
 			}
 		} else if !opt.LoadUserConfig {
 			// Hermetic: directory path only — no profile names from $MOW_HOME.
 			if fi, serr := os.Stat(w); serr != nil || !fi.IsDir() {
 				return nil, fmt.Errorf("workspace %q is not an existing directory (workspace profiles require Options.LoadUserConfig)", w)
 			}
-			cfg.Workspace = w
+			workspace = w
 		} else if !config.IsWorkspaceProfileName(w) {
 			if fi, serr := os.Stat(w); serr != nil || !fi.IsDir() {
 				return nil, fmt.Errorf("workspace %q is not a valid profile name (use a single directory name under $MOW_HOME/workspaces, or an existing directory path)", w)
 			}
-			cfg.Workspace = w
+			workspace = w
 		} else if fi, serr := os.Stat(w); serr == nil && fi.IsDir() {
-			cfg.Workspace = w
+			workspace = w
 		} else {
 			names, nerr := config.ListProfiles()
 			if nerr != nil {
@@ -243,6 +245,23 @@ func New(opt Options) (*Engine, error) {
 			}
 			return nil, fmt.Errorf("workspace profile %q not found and not a directory", w)
 		}
+	}
+	cfg, err := config.LoadForEngineIn(workspace, opt.LoadUserConfig, profileName, opt.ConfigPaths...)
+	if err != nil {
+		return nil, err
+	}
+	for _, msg := range cfg.Warnings {
+		msg = "mow: " + msg
+		if opt.Logger != nil {
+			opt.Logger.Warn(msg)
+		} else {
+			fmt.Fprintln(os.Stderr, msg)
+		}
+	}
+	// Explicit Options overrides (do not mutate process env).
+	if profileRoots {
+		cfg.Policy.ExtraRoots = append(profileRW, cfg.Policy.ExtraRoots...)
+		cfg.Policy.ExtraRootsReadOnly = append(profileRO, cfg.Policy.ExtraRootsReadOnly...)
 	}
 	if len(opt.ExtraRoots) > 0 {
 		cfg.Policy.ExtraRoots = append(append([]string(nil), cfg.Policy.ExtraRoots...), opt.ExtraRoots...)
@@ -710,9 +729,7 @@ func New(opt Options) (*Engine, error) {
 		if sid == "" {
 			sid = session.NewID()
 		} else {
-			if err := session.ValidateID(sid); err != nil {
-				return nil, err
-			}
+			// sid was validated above (Options.SessionID or the latest id).
 			store := &session.Store{Dir: sessDir, ID: sid}
 			// Resume the model last used by this session. Model state is loaded
 			// after the client/catalog exists so effort and preferred wire remain
@@ -938,11 +955,14 @@ func (e *Engine) SessionID() string {
 	if e == nil {
 		return ""
 	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	return e.sid
 }
 
 // BeginSession starts a fresh JSONL session on this Engine. The previous file
-// stays on disk (Sessions still lists it). Refuses while a prompt is in flight.
+// stays on disk (Sessions still lists it). Waits for an in-flight prompt to
+// finish (promptMu is held for the whole Prompt) rather than refusing.
 //
 // NoSession engines only clear in-memory history and return "". Hosts that need
 // a different on-disk id should construct a new Engine with Options.SessionID.
@@ -953,17 +973,10 @@ func (e *Engine) BeginSession() (string, error) {
 	e.promptMu.Lock()
 	defer e.promptMu.Unlock()
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.closed {
-		e.mu.Unlock()
 		return "", fmt.Errorf("mow: engine closed")
 	}
-	e.mu.Unlock()
-	if e.Status().Busy {
-		return "", fmt.Errorf("mow: prompt in flight")
-	}
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.prior = nil
 	e.transcript = nil
 	e.steer = nil
@@ -1082,62 +1095,77 @@ func (e *Engine) SandboxMode() string {
 }
 
 // ensureLLM attaches the built-in LLM client when New ran with DeferLLM.
-// Injected Chat/Provider engines are already ready. Safe to call more than once.
+// Injected Chat/Provider engines are already ready. Safe to call more than
+// once and from several goroutines: construction is serialized on llmInitMu
+// and the client is published under e.mu, the lock Model()/Wire() read with.
 func (e *Engine) ensureLLM() error {
 	if e == nil {
 		return fmt.Errorf("mow: nil engine")
 	}
-	if e.chat != nil {
+	e.mu.Lock()
+	ready := e.chat != nil
+	e.mu.Unlock()
+	if ready {
 		return nil
 	}
 	if e.opt.Provider != nil || e.opt.Chat != nil {
 		return fmt.Errorf("mow: chat backend missing")
 	}
+	e.llmInitMu.Lock()
+	defer e.llmInitMu.Unlock()
+	e.mu.Lock()
 	cfg := e.cfg
-	if cfg == nil {
+	ready = e.chat != nil
+	var snap *config.File
+	if cfg != nil {
+		c := *cfg
+		snap = &c
+	}
+	e.mu.Unlock()
+	if ready {
+		return nil
+	}
+	if snap == nil {
 		return fmt.Errorf("mow: engine has no config")
 	}
-	key := cfg.ResolveAPIKey()
+	key := snap.ResolveAPIKey()
 	if key == "" {
 		return fmt.Errorf("api key required (OPENAI_API_KEY / MOW_API_KEY / ANTHROPIC_API_KEY, or llm.api_key in the config file under MOW_HOME)")
 	}
-	if strings.TrimSpace(cfg.LLM.Model) == "" && !e.opt.Continue && strings.TrimSpace(e.opt.SessionID) == "" {
+	if strings.TrimSpace(snap.LLM.Model) == "" && !e.opt.Continue && strings.TrimSpace(e.opt.SessionID) == "" {
 		return fmt.Errorf("model required (OPENAI_MODEL / MOW_MODEL / ANTHROPIC_MODEL or llm.model)")
 	}
-	headers := withActorHeaders(cfg.LLM.Headers, "mow")
+	headers := withActorHeaders(snap.LLM.Headers, "mow")
 	client := &llm.Client{
-		Wire:               cfg.LLM.Wire,
-		BaseURL:            cfg.LLM.BaseURL,
+		Wire:               snap.LLM.Wire,
+		BaseURL:            snap.LLM.BaseURL,
 		APIKey:             key,
-		Model:              cfg.LLM.Model,
-		Effort:             cfg.LLM.Effort,
-		EffortPinned:       strings.TrimSpace(cfg.LLM.Effort) != "",
+		Model:              snap.LLM.Model,
+		Effort:             snap.LLM.Effort,
+		EffortPinned:       strings.TrimSpace(snap.LLM.Effort) != "",
 		HTTP:               e.opt.HTTPClient,
 		ExtraHeaders:       headers,
-		Stream:             cfg.LLM.Stream || e.opt.Stream,
-		PromptCache:        cfg.LLM.PromptCache == nil || cfg.LLM.PromptCache.Enabled(),
-		CacheTTL:           cacheTTL(cfg.LLM.PromptCache),
-		MaxTokens:          cfg.LLM.MaxTokens,
-		NativeTools:        cfg.LLM.NativeTools,
-		SystemPrefix:       append([]string(nil), cfg.LLM.SystemPrefix...),
-		SystemPrefixModels: append([]string(nil), cfg.LLM.SystemPrefixModels...),
-		FirstByteTimeout:   time.Duration(cfg.LLM.FirstByteTimeoutSec) * time.Second,
-		CallTimeout:        time.Duration(cfg.LLM.CallTimeoutSec) * time.Second,
+		Stream:             snap.LLM.Stream || e.opt.Stream,
+		PromptCache:        snap.LLM.PromptCache == nil || snap.LLM.PromptCache.Enabled(),
+		CacheTTL:           cacheTTL(snap.LLM.PromptCache),
+		MaxTokens:          snap.LLM.MaxTokens,
+		NativeTools:        snap.LLM.NativeTools,
+		SystemPrefix:       append([]string(nil), snap.LLM.SystemPrefix...),
+		SystemPrefixModels: append([]string(nil), snap.LLM.SystemPrefixModels...),
+		FirstByteTimeout:   time.Duration(snap.LLM.FirstByteTimeoutSec) * time.Second,
+		CallTimeout:        time.Duration(snap.LLM.CallTimeoutSec) * time.Second,
 	}
-	e.client = client
-	e.wireExplicit = cfg.LLM.WireExplicit
 	if client.ExtraHeaders[llm.HeaderComponent] == "" {
 		client.ExtraHeaders[llm.HeaderComponent] = "turn.chat"
 	}
+	// Catalog fetch on the private client — no engine lock across the network.
 	{
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, _ = client.ListModels(ctx)
 		cancel()
 		client.SyncEffortToModel(client.Model)
-		cfg.LLM.Effort = client.Effort
-		e.applyPreferredWireFromCatalog()
 	}
-	e.chat = func(ctx context.Context, messages []llm.Message, specs []llm.ToolSpec) (llm.Message, error) {
+	chat := func(ctx context.Context, messages []llm.Message, specs []llm.ToolSpec) (llm.Message, error) {
 		e.onTokenMu.Lock()
 		hooks := llm.StreamHooks{OnContent: e.onToken, OnReasoning: e.onReasoning, OnActivity: e.signalModelActive}
 		e.onTokenMu.Unlock()
@@ -1154,6 +1182,13 @@ func (e *Engine) ensureLLM() error {
 		}
 		return msg, err
 	}
+	e.mu.Lock()
+	e.client = client
+	e.wireExplicit = snap.LLM.WireExplicit
+	cfg.LLM.Effort = client.Effort
+	e.applyPreferredWireLocked()
+	e.chat = chat
+	e.mu.Unlock()
 	return nil
 }
 

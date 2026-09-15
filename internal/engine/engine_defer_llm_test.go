@@ -1,8 +1,13 @@
 package engine
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -52,5 +57,78 @@ func TestNewSkipsUnconfiguredMediaTools(t *testing.T) {
 		if tl.Name() == "generate_image" {
 			t.Fatal("generate_image registered without extensions.media.generate.image")
 		}
+	}
+}
+
+// Under DeferLLM the client is built lazily by whichever call comes first:
+// Prompt and the handshake readers (Efforts/DefaultEffort/DisplayEffort) may
+// race on the first turn of `mow acp`. Run under -race.
+func TestEnsureLLMConcurrentCallers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/models"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{{
+					"id":             "gpt-5-mini",
+					"facet":          "chat",
+					"efforts":        []string{"low", "medium", "high"},
+					"default_effort": "medium",
+				}},
+			})
+		case strings.HasSuffix(r.URL.Path, "/chat/completions"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{{
+					"message":       map[string]any{"role": "assistant", "content": "ok"},
+					"finish_reason": "stop",
+				}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	cfg := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("llm:\n  base_url: "+srv.URL+"\n  api_key: k\n  model: gpt-5-mini\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := New(Options{DeferLLM: true, NoSession: true, LoadUserConfig: false, ConfigPaths: []string{cfg}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	var wg sync.WaitGroup
+	errc := make(chan error, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if _, perr := eng.Prompt(t.Context(), "hi"); perr != nil {
+			select {
+			case errc <- perr:
+			default:
+			}
+		}
+	}()
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = eng.Efforts()
+			_ = eng.DefaultEffort()
+			_ = eng.DisplayEffort()
+			_ = eng.Model()
+			_ = eng.Wire()
+		}()
+	}
+	wg.Wait()
+	select {
+	case perr := <-errc:
+		t.Fatalf("Prompt: %v", perr)
+	default:
+	}
+	if got := eng.Efforts(); len(got) != 3 {
+		t.Fatalf("Efforts=%v want catalog list", got)
 	}
 }

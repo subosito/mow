@@ -3,6 +3,8 @@ package session
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -41,10 +42,6 @@ type Event struct {
 type Store struct {
 	Dir string
 	ID  string
-
-	// mu serializes tool-result writes and prunes: parallel tool batches must
-	// not collide on sequence numbers or prune a just-written file.
-	mu sync.Mutex
 }
 
 // Path returns the session file path. ID must pass ValidateID so Join cannot
@@ -187,9 +184,12 @@ func (s *Store) LoadMessages() ([]llm.Message, error) {
 	}
 	// Scan the file bytes directly. Converting it to a string and building a
 	// []string for every line used to add an allocation per persisted event.
+	// Only the last system-started snapshot matters, so start there when one
+	// is found instead of JSON-decoding every historical snapshot.
 	var simple []llm.Message
 	var snapshot []llm.Message
 	hasSystem := false
+	raw = raw[lastSystemSnapshotOffset(raw):]
 	for len(raw) > 0 {
 		line, rest, _ := bytes.Cut(raw, []byte{'\n'})
 		raw = rest
@@ -225,6 +225,36 @@ func (s *Store) LoadMessages() ([]llm.Message, error) {
 		return repairToolCalls(snapshot), nil
 	}
 	return simple, nil
+}
+
+// lastSystemSnapshotOffset returns the byte offset of the last line holding a
+// system-started replay snapshot ("messages" event), or 0 when none is found.
+// Candidates are located textually (the key cannot appear unescaped inside a
+// JSON string) and only those candidate lines are decoded, newest first.
+func lastSystemSnapshotOffset(raw []byte) int {
+	key := []byte(`"messages":`)
+	end := len(raw)
+	for end > 0 {
+		i := bytes.LastIndex(raw[:end], key)
+		if i < 0 {
+			return 0
+		}
+		start := bytes.LastIndexByte(raw[:i], '\n') + 1
+		lineEnd := bytes.IndexByte(raw[start:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(raw)
+		} else {
+			lineEnd += start
+		}
+		var ev struct {
+			Messages []llm.Message `json:"messages"`
+		}
+		if json.Unmarshal(raw[start:lineEnd], &ev) == nil && len(ev.Messages) > 0 && ev.Messages[0].Role == "system" {
+			return start
+		}
+		end = start
+	}
+	return 0
 }
 
 // repairToolCalls synthesizes results for assistant tool_calls that have no
@@ -341,9 +371,18 @@ func splitLines(s string) []string {
 	return out
 }
 
-// NewID returns a timestamp-based session id.
+// NewID returns a timestamp-based session id with a short random suffix
+// (20060102T150405-a1b2c3). The stamp keeps ids sortable by creation time;
+// the suffix keeps two engines started in the same second — same workspace,
+// same session dir — from appending to one JSONL file. Ids without the
+// suffix (older files, Options.SessionID) stay valid.
 func NewID() string {
-	return time.Now().UTC().Format("20060102T150405")
+	stamp := time.Now().UTC().Format("20060102T150405")
+	var b [3]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return stamp
+	}
+	return stamp + "-" + hex.EncodeToString(b[:])
 }
 
 // ValidateID rejects ids that could escape the session directory when joined

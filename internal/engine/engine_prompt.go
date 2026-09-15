@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -24,9 +25,6 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	if e == nil {
 		return RunResult{}, fmt.Errorf("mow: nil engine")
 	}
-	if err := e.ensureLLM(); err != nil {
-		return RunResult{}, err
-	}
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return RunResult{}, fmt.Errorf("mow: empty prompt")
@@ -35,25 +33,57 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	e.promptMu.Lock()
 	defer e.promptMu.Unlock()
 
+	// Cancellable run context + stable id for hosts/orchestrators. Registered
+	// before setup (deferred client construction can spend seconds on the
+	// catalog fetch; skill loading walks disk) so a Cancel() during that
+	// window is honored instead of lost.
+	// Clear stale guidance BEFORE the run is observable: once beginRun marks
+	// the engine busy (and EventRunStart fires), a host may legitimately steer,
+	// and a later reset would wipe a steer aimed at this very turn.
 	e.mu.Lock()
-	if !e.skillsLoaded {
-		// Selector-on lazy load: prompt-matched skills + explicit skills.
-		// Explicit skills (from config/CLI) load unconditionally here too,
-		// merged with any prompt-matched skills so both appear in the prompt.
+	e.steer = nil
+	e.mu.Unlock()
+	ctx, runID := e.beginRun(ctx)
+	defer e.endRun()
+
+	if err := e.ensureLLM(); err != nil {
+		return RunResult{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return RunResult{}, err
+	}
+
+	// Selector-on lazy load: prompt-matched skills + explicit skills.
+	// Explicit skills (from config/CLI) load unconditionally here too,
+	// merged with any prompt-matched skills so both appear in the prompt.
+	// The disk walk runs outside e.mu; the result is swapped in under it.
+	e.mu.Lock()
+	loadSkills := !e.skillsLoaded
+	skillDirs := e.skillDirs
+	explicit := e.explicitSkills
+	skillSelect := e.skillSelect
+	e.mu.Unlock()
+	if loadSkills {
 		var skills string
-		sel := contextload.LoadSelectedSkills(e.skillDirs, text, e.skillSelect)
-		if len(e.explicitSkills) > 0 {
-			ex := contextload.LoadExplicitSkills(e.skillDirs, e.explicitSkills)
+		sel := contextload.LoadSelectedSkills(skillDirs, text, skillSelect)
+		if len(explicit) > 0 {
+			ex := contextload.LoadExplicitSkills(skillDirs, explicit)
 			skills = mergeSkillText(sel, ex)
 		} else {
 			skills = sel
 		}
-		e.skillsText = skills
-		if skills != "" {
-			e.sys = e.recomposeSystemLocked()
+		e.mu.Lock()
+		if !e.skillsLoaded {
+			e.skillsText = skills
+			if skills != "" {
+				e.sys = e.recomposeSystemLocked()
+			}
+			e.skillsLoaded = true
 		}
-		e.skillsLoaded = true
+		e.mu.Unlock()
 	}
+
+	e.mu.Lock()
 	sys := e.sys
 	sid := e.sid
 	ws := ""
@@ -109,7 +139,8 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	hooks := e.hooks
 	pol := e.pol
 	cfg := e.cfg
-	readOnlyExt := e.readOnlyExt
+	// Snapshot: AddTool writes this map under e.mu while the run reads it.
+	readOnlyExt := maps.Clone(e.readOnlyExt)
 	e.mu.Unlock()
 
 	// Per-call tools (e.g. goal_report only during goal.Runner steps).
@@ -129,15 +160,6 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		tools = filterReadOnlyAgentTools(tools, readOnlyExt)
 	}
 
-	// Cancellable run context + stable id for hosts/orchestrators.
-	// Clear stale guidance BEFORE the run is observable: once beginRun marks
-	// the engine busy (and EventRunStart fires), a host may legitimately steer,
-	// and a later reset would wipe a steer aimed at this very turn.
-	e.mu.Lock()
-	e.steer = nil
-	e.mu.Unlock()
-	ctx, runID := e.beginRun(ctx)
-	defer e.endRun()
 	// Tools (e.g. delegate) can Emit via EngineFromContext without a stored pointer.
 	ctx = ContextWithEngine(ctx, e)
 
@@ -331,6 +353,13 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		},
 	})
 
+	// Everything from here to EventRunEnd runs after the model has stopped
+	// producing, so a host is painting a "finishing" verb across it. Time the
+	// commit so a long tail can be attributed to a phase instead of guessed
+	// at; debug-level, one line, no content.
+	commitStart := time.Now()
+	var snapshotDur time.Duration
+
 	// Ephemeral asides run against current context but leave no trace: skip the
 	// history/transcript update and the session append, so the exchange never
 	// re-enters a later prompt.
@@ -354,7 +383,10 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 			// One complete replay snapshot per turn. Legacy per-message snapshots
 			// remain readable, but rewriting every historical message here made
 			// session files and append syscalls grow quadratically.
-			if perr := sess.AppendSnapshot(res.Messages); perr != nil && aerr == nil {
+			snapStart := time.Now()
+			perr := sess.AppendSnapshot(res.Messages)
+			snapshotDur = time.Since(snapStart)
+			if perr != nil && aerr == nil {
 				aerr = perr
 			}
 			if aerr != nil {
@@ -384,11 +416,22 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	})
 	e.log().Debug("mow run end", "run_id", runID, "session_id", sid, "stop_reason", stop, "err", err)
 
+	hooksStart := time.Now()
 	for _, fn := range stopHooks {
 		if fn != nil {
 			fn(ctx, StopEvent{Text: out.Text, Err: err, SessionID: sid})
 		}
 	}
+	// Attribute the post-stream tail. The host cannot see inside this window
+	// — it only knows the answer stopped and the reply has not landed — so
+	// name the phases here rather than leaving "slow finish" unexplained.
+	e.log().Debug("mow run commit",
+		"run_id", runID,
+		"total", time.Since(commitStart),
+		"snapshot", snapshotDur,
+		"stop_hooks", time.Since(hooksStart),
+		"messages", len(res.Messages),
+	)
 	if err != nil {
 		return out, err
 	}
@@ -453,9 +496,6 @@ func retryCopy(info RetryInfo) string {
 	case RetryNetwork:
 		return fmt.Sprintf("network error · retrying in %s", d)
 	default:
-		if info.Status > 0 {
-			return fmt.Sprintf("provider busy · retrying in %s", d)
-		}
 		return fmt.Sprintf("provider busy · retrying in %s", d)
 	}
 }

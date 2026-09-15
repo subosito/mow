@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 
 	"github.com/subosito/mow/ext"
@@ -500,7 +501,13 @@ func appendUnique(list []string, names ...string) []string {
 	return list
 }
 
+// projectHash names the per-project session dir. Symlinks are resolved first
+// so a repo reached through a link shares sessions with its real path (trust
+// canonicalizes the same way); on error the raw path is hashed.
 func projectHash(workspace string) string {
+	if r, err := filepath.EvalSymlinks(workspace); err == nil {
+		workspace = r
+	}
 	sum := sha256.Sum256([]byte(workspace))
 	return hex.EncodeToString(sum[:8])
 }
