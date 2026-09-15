@@ -65,12 +65,6 @@ type Engine struct {
 	sid            string
 	prior          []llm.Message
 	transcript     []Message // user/assistant only (session resume)
-	// snapMsgs/snapBytes describe the last replay snapshot written to the
-	// session file (message count and total content size). A turn whose
-	// history is byte-identical — a steer that produced nothing, a cancelled
-	// call — skips the append instead of duplicating the whole history.
-	snapMsgs  int
-	snapBytes int
 	// lastProviderTokens is the last provider-reported input token count.
 	// 0 until the first call. Never overwritten by a char-budget estimate.
 	lastProviderTokens int
@@ -801,7 +795,6 @@ func New(opt Options) (*Engine, error) {
 				return nil, fmt.Errorf("session load: %w", err)
 			}
 			e.prior = prior
-			e.snapMsgs, e.snapBytes = 0, 0
 			turns, err := store.LoadTranscriptEvents()
 			if err != nil {
 				return nil, fmt.Errorf("session transcript: %w", err)
@@ -987,7 +980,6 @@ func (e *Engine) BeginSession() (string, error) {
 		return "", fmt.Errorf("mow: engine closed")
 	}
 	e.prior = nil
-	e.snapMsgs, e.snapBytes = 0, 0
 	e.transcript = nil
 	e.steer = nil
 	e.lastProviderTokens = 0

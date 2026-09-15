@@ -374,15 +374,6 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		if strings.TrimSpace(res.Text) != "" {
 			e.transcript = append(e.transcript, Message{Role: "assistant", Content: res.Text, Timestamp: time.Now().UTC()})
 		}
-		// A snapshot is the whole history, so re-appending an unchanged one
-		// doubles the session file for nothing (a steer turn that produced no
-		// messages, a cancelled call). Compare count and total size against the
-		// last snapshot and skip when neither moved.
-		snapN, snapSize := snapshotSize(res.Messages)
-		writeSnapshot := snapN > 0 && (snapN != e.snapMsgs || snapSize != e.snapBytes)
-		if writeSnapshot {
-			e.snapMsgs, e.snapBytes = snapN, snapSize
-		}
 		e.mu.Unlock()
 
 		if sess != nil {
@@ -390,16 +381,13 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 			if res.Text != "" {
 				aerr = sess.Append(session.Event{Type: "assistant", Role: "assistant", Content: res.Text})
 			}
-			// One complete replay snapshot per turn. Legacy per-message snapshots
-			// remain readable, but rewriting every historical message here made
-			// session files and append syscalls grow quadratically.
-			if writeSnapshot {
-				snapStart := time.Now()
-				perr := sess.AppendSnapshot(res.Messages)
-				snapshotDur = time.Since(snapStart)
-				if perr != nil && aerr == nil {
-					aerr = perr
-				}
+			// The store compares persisted content and writes a checkpoint or
+			// delta; failed writes never advance its replay base.
+			snapStart := time.Now()
+			perr := sess.AppendSnapshot(res.Messages)
+			snapshotDur = time.Since(snapStart)
+			if perr != nil && aerr == nil {
+				aerr = perr
 			}
 			if aerr != nil {
 				e.log().Warn("mow: session append failed (resume history incomplete)", "err", aerr)
@@ -687,18 +675,4 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
-}
-
-// snapshotSize summarizes a replay history as (message count, total content
-// bytes) — enough to tell "same history as last snapshot" from "a turn
-// happened" without hashing or re-serializing it.
-func snapshotSize(msgs []llm.Message) (int, int) {
-	size := 0
-	for _, m := range msgs {
-		size += len(m.Role) + len(m.Content) + len(m.Name) + len(m.ToolCallID)
-		for _, tc := range m.ToolCalls {
-			size += len(tc.ID) + len(tc.Function.Name) + len(tc.Function.Arguments)
-		}
-	}
-	return len(msgs), size
 }

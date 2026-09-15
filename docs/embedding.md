@@ -292,12 +292,14 @@ for _, s := range sessions {
 construction:
 
 ```go
-eng, _ := mow.New(mow.Options{SessionID: picked}) // or Continue: true
+eng, _ := mow.NewHarness(mow.Options{SessionID: picked}) // or Continue: true
 ```
 
 `eng.SessionID()` reports the active id; `eng.Transcript()` returns the loaded
 messages (useful to render a resumed conversation). Pass `NoSession: true` to
-run without persistence (tests/CI).
+run without persistence (tests/CI). Hermetic `mow.New` engines do not persist
+sessions; use `mow.NewHarness` to load and store host sessions. Storage uses
+full checkpoints plus incremental JSONL records and reads older session formats.
 
 ---
 

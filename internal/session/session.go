@@ -2,6 +2,7 @@
 package session
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -40,15 +42,25 @@ type Event struct {
 	ReadOnly   *bool `json:"read_only,omitempty"`
 	// Raw message for legacy full-fidelity snapshots.
 	Message *llm.Message `json:"message,omitempty"`
-	// Messages is one complete replay snapshot. New writers use one snapshot
-	// event per turn; readers retain Message support for existing JSONL files.
+	// Messages is a full checkpoint, or the new suffix when Type is "delta".
 	Messages []llm.Message `json:"messages,omitempty"`
+	// Base is the byte offset of the preceding replay record for a delta.
+	// A mismatched base must never be applied to a different conversation.
+	Base *int64 `json:"base,omitempty"`
 }
 
-// Store appends events under Dir/ID.jsonl
+// Store appends events under Dir/ID.jsonl. Do not copy a Store after use.
 type Store struct {
 	Dir string
 	ID  string
+
+	mu               sync.Mutex
+	file             os.FileInfo
+	end              int64
+	snapshot         []byte
+	snapshotOffset   int64
+	snapshotMessages int
+	checkpointBytes  int
 }
 
 // Path returns the session file path. ID must pass ValidateID so Join cannot
@@ -88,41 +100,142 @@ func (s *Store) resolvedPath() (string, error) {
 // Append writes one event. Exclusive flock serializes multi-process writers
 // so concurrent hosts sharing a session id cannot interleave partial lines.
 func (s *Store) Append(ev Event) error {
-	if s.Dir == "" || s.ID == "" {
-		return fmt.Errorf("session: dir and id required")
-	}
-	path, err := s.resolvedPath()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
-		return err
-	}
-	if ev.TS.IsZero() {
-		ev.TS = time.Now().UTC()
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	// Best-effort exclusive lock for the append. Failure to lock is not fatal
-	// (some FS types lack flock); the write still proceeds.
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
-	enc := json.NewEncoder(f)
-	return enc.Encode(ev)
+	return s.append(ev, nil)
 }
 
-// AppendSnapshot writes one complete replay snapshot as a single JSONL event.
-// Keeping one event per turn avoids the open/flock/write cycle per message and
-// remains append-only so older snapshots preserve rewind history on disk.
+// AppendSnapshot persists a replay history. Unchanged histories are skipped;
+// append-only growth writes just the new messages. Full checkpoints are
+// written after edits/compaction, a writer change, or a doubling in history
+// size, keeping ordinary session storage linear while bounding replay work.
 func (s *Store) AppendSnapshot(messages []llm.Message) error {
 	if len(messages) == 0 {
 		return nil
 	}
-	cp := append([]llm.Message(nil), messages...)
-	return s.Append(Event{Type: "snapshot", Messages: cp})
+	// ponytail: serialize history to compare it; use per-message hashes if
+	// profiling shows encoding dominates long-session turn commits.
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		return err
+	}
+	return s.append(Event{Type: "snapshot", Messages: messages}, raw)
+}
+
+func (s *Store) append(ev Event, snapshot []byte) error {
+	path, err := s.resolvedPath()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	// Filesystems without flock retain full-snapshot writes. Deltas require
+	// a lock so another writer cannot change the base between stat and write.
+	locked := syscall.Flock(int(f.Fd()), syscall.LOCK_EX) == nil
+	if locked {
+		defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	}
+	st, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !locked || s.file == nil || !os.SameFile(s.file, st) || s.end != st.Size() {
+		s.snapshot = nil
+	}
+	n := len(ev.Messages)
+	if snapshot != nil && len(s.snapshot) > 0 {
+		if bytes.Equal(snapshot, s.snapshot) {
+			return nil
+		}
+		// The comma must follow the exact serialized previous prefix; count
+		// or byte length alone misses same-length edits and tool metadata.
+		prefix := len(s.snapshot) - 1
+		if len(snapshot) < 2*s.checkpointBytes && n > s.snapshotMessages &&
+			len(snapshot) > prefix && snapshot[prefix] == ',' &&
+			bytes.Equal(snapshot[:prefix], s.snapshot[:prefix]) {
+			ev.Type = "delta"
+			ev.Base = new(s.snapshotOffset)
+			ev.Messages = ev.Messages[s.snapshotMessages:]
+		}
+	}
+	// A failed/partial append invalidates the cached base until a full
+	// checkpoint succeeds. Keep malformed crash tails on their own line.
+	previous := s.snapshot
+	s.snapshot = nil
+	offset := st.Size()
+	if offset > 0 {
+		var last [1]byte
+		if _, err := f.ReadAt(last[:], offset-1); err != nil {
+			return err
+		}
+		if last[0] != '\n' {
+			if _, err := f.Write([]byte{'\n'}); err != nil {
+				return err
+			}
+			offset++
+		}
+	}
+	if ev.TS.IsZero() {
+		ev.TS = time.Now().UTC()
+	}
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	if _, err := f.Write(raw); err != nil {
+		return err
+	}
+	s.file, s.end = st, offset+int64(len(raw))
+	if snapshot != nil {
+		s.snapshot, s.snapshotOffset, s.snapshotMessages = snapshot, offset, n
+		if ev.Type == "snapshot" {
+			s.checkpointBytes = len(snapshot)
+		}
+	} else if ev.Message == nil && len(ev.Messages) == 0 && ev.Type != "delta" {
+		s.snapshot = previous
+	}
+	return nil
+}
+
+// scanLines streams JSONL without a scanner token limit: one replay record
+// can be larger than 64 KiB. Memory follows record size, not session length.
+func (s *Store) scanLines(visit func(int64, []byte) error) error {
+	path, err := s.resolvedPath()
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	r := bufio.NewReader(f)
+	var offset int64
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if len(line) > 0 {
+			if err := visit(offset, line); err != nil {
+				return err
+			}
+			offset += int64(len(line))
+		}
+		if err == io.EOF {
+			return nil
+		}
+	}
 }
 
 // Runtime is the last model/wire/effort/policy set recorded for a session.
@@ -142,27 +255,18 @@ type Runtime struct {
 // runtime events and return zero values. Model and wire are carried forward
 // independently so a later partial event cannot erase either field.
 func (s *Store) LoadRuntime() (Runtime, error) {
-	path, err := s.resolvedPath()
-	if err != nil {
-		return Runtime{}, err
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return Runtime{}, nil
-		}
-		return Runtime{}, err
-	}
 	var last Runtime
-	for len(raw) > 0 {
-		line, rest, _ := bytes.Cut(raw, []byte{'\n'})
-		raw = rest
-		if len(line) == 0 {
-			continue
+	err := s.scanLines(func(_ int64, line []byte) error {
+		var ev struct {
+			Model      string
+			Wire       string
+			Effort     string
+			AllowWrite *bool `json:"allow_write"`
+			AllowShell *bool `json:"allow_shell"`
+			ReadOnly   *bool `json:"read_only"`
 		}
-		var ev Event
 		if json.Unmarshal(line, &ev) != nil {
-			continue
+			return nil
 		}
 		if v := strings.TrimSpace(ev.Model); v != "" {
 			last.Model = v
@@ -185,101 +289,88 @@ func (s *Store) LoadRuntime() (Runtime, error) {
 			last.ReadOnly = *ev.ReadOnly
 			last.HasPolicy = true
 		}
-	}
-	return last, nil
+		return nil
+	})
+	return last, err
 }
 
-// LoadMessages reconstructs agent prior history for session resume.
-//
-// Session files append (1) simple user/assistant turns for the UI and (2) full
-// message dumps after each turn. Naïvely concatenating every line duplicates
-// history exponentially. We take the **last system-started message snapshot**
-// when present; otherwise fall back to simple user/assistant turns only.
+// LoadMessages reconstructs the last checkpoint plus its deltas. Legacy
+// per-message snapshots and simple user/assistant transcripts remain readable.
 func (s *Store) LoadMessages() ([]llm.Message, error) {
-	path, err := s.resolvedPath()
-	if err != nil {
-		return nil, err
+	var simple, snapshot []llm.Message
+	var pending json.RawMessage
+	lastOffset := int64(-1)
+	materialize := func() error {
+		if len(pending) == 0 {
+			return nil
+		}
+		err := json.Unmarshal(pending, &snapshot)
+		pending = nil
+		return err
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
+	err := s.scanLines(func(offset int64, line []byte) error {
+		var ev struct {
+			Role     string
+			Content  string
+			Type     string
+			Message  *llm.Message
+			Messages json.RawMessage
+			Base     *int64
 		}
-		return nil, err
-	}
-	// Scan the file bytes directly. Converting it to a string and building a
-	// []string for every line used to add an allocation per persisted event.
-	// Only the last system-started snapshot matters, so start there when one
-	// is found instead of JSON-decoding every historical snapshot.
-	var simple []llm.Message
-	var snapshot []llm.Message
-	hasSystem := false
-	raw = raw[lastSystemSnapshotOffset(raw):]
-	for len(raw) > 0 {
-		line, rest, _ := bytes.Cut(raw, []byte{'\n'})
-		raw = rest
-		if len(line) == 0 {
-			continue
+		if json.Unmarshal(line, &ev) != nil {
+			return nil // tolerate an incomplete final record after a crash
 		}
-		var ev Event
-		if err := json.Unmarshal(line, &ev); err != nil {
-			continue
+		if ev.Type == "delta" {
+			if ev.Base == nil || *ev.Base != lastOffset {
+				return fmt.Errorf("session: delta at %d has no matching replay base", offset)
+			}
+			if err := materialize(); err != nil {
+				return err
+			}
+			var suffix []llm.Message
+			if err := json.Unmarshal(ev.Messages, &suffix); err != nil {
+				return err
+			}
+			snapshot = append(snapshot, suffix...)
+			lastOffset = offset
+			return nil
 		}
-		if len(ev.Messages) > 0 {
-			snapshot = append(snapshot[:0], ev.Messages...)
-			hasSystem = snapshot[0].Role == "system"
-			continue
+		if len(ev.Messages) > 0 && !bytes.Equal(ev.Messages, []byte("null")) && !bytes.Equal(ev.Messages, []byte("[]")) {
+			// Superseded full checkpoints need not decode every message.
+			pending, snapshot, lastOffset = ev.Messages, nil, offset
+			return nil
 		}
 		if ev.Message != nil {
 			m := *ev.Message
 			if m.Role == "system" {
-				hasSystem = true
-				// A later system snapshot replaces the preceding one; retain its
-				// capacity for the following messages.
-				snapshot = append(snapshot[:0], m)
-			} else if hasSystem {
-				snapshot = append(snapshot, m)
+				pending = nil
+				snapshot = []llm.Message{m}
+			} else {
+				if err := materialize(); err != nil {
+					return err
+				}
+				if len(snapshot) > 0 && snapshot[0].Role == "system" {
+					snapshot = append(snapshot, m)
+				}
 			}
-			continue
+			lastOffset = offset
+			return nil
 		}
 		if (ev.Role == "user" || ev.Role == "assistant") && strings.TrimSpace(ev.Content) != "" {
 			simple = append(simple, llm.Message{Role: ev.Role, Content: ev.Content})
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if hasSystem && len(snapshot) > 0 {
+	if err := materialize(); err != nil {
+		return nil, err
+	}
+	if len(snapshot) > 0 && snapshot[0].Role == "system" {
 		return repairToolCalls(snapshot), nil
 	}
 	return simple, nil
-}
-
-// lastSystemSnapshotOffset returns the byte offset of the last line holding a
-// system-started replay snapshot ("messages" event), or 0 when none is found.
-// Candidates are located textually (the key cannot appear unescaped inside a
-// JSON string) and only those candidate lines are decoded, newest first.
-func lastSystemSnapshotOffset(raw []byte) int {
-	key := []byte(`"messages":`)
-	end := len(raw)
-	for end > 0 {
-		i := bytes.LastIndex(raw[:end], key)
-		if i < 0 {
-			return 0
-		}
-		start := bytes.LastIndexByte(raw[:i], '\n') + 1
-		lineEnd := bytes.IndexByte(raw[start:], '\n')
-		if lineEnd < 0 {
-			lineEnd = len(raw)
-		} else {
-			lineEnd += start
-		}
-		var ev struct {
-			Messages []llm.Message `json:"messages"`
-		}
-		if json.Unmarshal(raw[start:lineEnd], &ev) == nil && len(ev.Messages) > 0 && ev.Messages[0].Role == "system" {
-			return start
-		}
-		end = start
-	}
-	return 0
 }
 
 // repairToolCalls synthesizes results for assistant tool_calls that have no
@@ -321,28 +412,19 @@ func repairToolCalls(msgs []llm.Message) []llm.Message {
 // LoadTranscriptEvents returns user/assistant turns for UI display (no tool
 // dumps, no system prompts), preserving event timestamps for host resume.
 func (s *Store) LoadTranscriptEvents() ([]Event, error) {
-	path, err := s.resolvedPath()
-	if err != nil {
-		return nil, err
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
 	var turns []Event
-	for line := range strings.SplitSeq(string(raw), "\n") {
-		var ev Event
-		if line == "" || json.Unmarshal([]byte(line), &ev) != nil {
-			continue
+	err := s.scanLines(func(_ int64, line []byte) error {
+		var role struct{ Role string }
+		if json.Unmarshal(line, &role) != nil || (role.Role != "user" && role.Role != "assistant") {
+			return nil
 		}
-		if ev.Message == nil && len(ev.Messages) == 0 && (ev.Role == "user" || ev.Role == "assistant") && strings.TrimSpace(ev.Content) != "" {
+		var ev Event
+		if json.Unmarshal(line, &ev) == nil && ev.Message == nil && len(ev.Messages) == 0 && strings.TrimSpace(ev.Content) != "" {
 			turns = append(turns, ev)
 		}
-	}
-	return turns, nil
+		return nil
+	})
+	return turns, err
 }
 
 // NewID returns a timestamp-based session id with a short random suffix

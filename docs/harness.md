@@ -424,7 +424,14 @@ Example template: [`internal/config/mow.yaml.example`](../internal/config/mow.ya
 ## 8. Sessions
 
 JSONL under `session.dir` (default `$MOW_HOME/sessions/<project-hash>/`).  
-Default: new session. Resume: `--continue` (latest) or `--session ID` (loads agent prior). `--no-session` for tests/CI. Agent prior uses the last full message snapshot. Resume also restores the last model, effort, and tool policy (write/shell/read-only) unless you pass an explicit `--model` / `--effort` / `--read-only` / `--allow-*` / `--disallow-*` flag.
+Default: new session. Resume: `--continue` (latest) or `--session ID` (loads agent prior). `--no-session` for tests/CI. Agent prior uses the last full checkpoint plus subsequent incremental records. Resume also restores the last model, effort, and tool policy (write/shell/read-only) unless you pass an explicit `--model` / `--effort` / `--read-only` / `--allow-*` / `--disallow-*` flag.
+
+Normal conversation growth stores only new messages. Full checkpoints are
+appended after edits, compaction, a writer change, or a doubling of history
+size. Existing full-snapshot and per-message JSONL sessions remain readable;
+new incremental records require a version of mow that understands them.
+Session readers stream records instead of buffering the whole file. Raw
+history remains append-only, including superseded turns.
 
 Works on **`mow run`** and **`mow tty`** (same `Options.Continue` / `SessionID`). The line session prints `session=…` at start (and a short transcript when resuming) and again on exit with a resume hint (`mow tty --session <id>` or `--continue`).
 

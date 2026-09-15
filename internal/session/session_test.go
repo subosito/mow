@@ -1,7 +1,6 @@
 package session
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -316,50 +315,6 @@ func TestNewIDUniqueAndValid(t *testing.T) {
 	// Ids without a suffix (older files, Options.SessionID) stay valid.
 	if err := ValidateID("20240101T000000"); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestLastSystemSnapshotOffset(t *testing.T) {
-	line := func(ev Event) string {
-		b, err := json.Marshal(ev)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(b)
-	}
-	sysSnap := line(Event{Type: "snapshot", Messages: []llm.Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u"}}})
-	userSnap := line(Event{Type: "snapshot", Messages: []llm.Message{{Role: "user", Content: "no system"}}})
-	// Content that mentions the key inside a JSON string must not be taken
-	// for a snapshot.
-	decoy := line(Event{Type: "assistant", Role: "assistant", Content: `{"messages": []}`})
-	simple := line(Event{Type: "user", Role: "user", Content: "hi"})
-
-	cases := []struct {
-		name  string
-		lines []string
-		want  int // index into lines, -1 for offset 0 with no match
-	}{
-		{"none", []string{simple, decoy}, -1},
-		{"single", []string{simple, sysSnap}, 1},
-		{"last of several", []string{sysSnap, simple, sysSnap, simple}, 2},
-		{"decoy after snapshot", []string{sysSnap, decoy}, 0},
-		{"user-started snapshot ignored", []string{sysSnap, userSnap}, 0},
-		{"only user-started", []string{simple, userSnap}, -1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			raw := strings.Join(tc.lines, "\n") + "\n"
-			want := 0
-			if tc.want >= 0 {
-				want = len(strings.Join(tc.lines[:tc.want], "\n"))
-				if tc.want > 0 {
-					want++ // the newline before the wanted line
-				}
-			}
-			if got := lastSystemSnapshotOffset([]byte(raw)); got != want {
-				t.Fatalf("offset=%d want %d", got, want)
-			}
-		})
 	}
 }
 
