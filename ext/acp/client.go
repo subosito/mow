@@ -37,6 +37,7 @@ type Client struct {
 	nextID atomic.Int64
 	// pending request id → response channel
 	pending map[string]chan response
+	readErr error // sticky stdout failure, guarded by pendMu
 	pendMu  sync.Mutex
 	// accumulated agent text from session/update
 	textMu sync.Mutex
@@ -60,8 +61,9 @@ type Client struct {
 	// started is true after Start until Close.
 	started bool
 	// exited is closed by the reaper goroutine once the process exits.
-	exited chan struct{}
-	stderr *redact.Ring
+	exited   chan struct{}
+	readDone chan struct{} // closed after stdout is drained and waiters are notified
+	stderr   *redact.Ring
 }
 
 // Start launches the peer process and completes initialize + session/new.
@@ -74,8 +76,11 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 	c.procMu.Lock()
 	started, sid := c.started, c.SessionID
 	c.procMu.Unlock()
-	if started && sid != "" {
+	if started && sid != "" && c.Alive() {
 		return sid, nil
+	}
+	if started {
+		_ = c.Close()
 	}
 	if err := c.startProcess(); err != nil {
 		return "", appendStderrHint(fmt.Errorf("acp client start: %w", err), c.stderrTail())
@@ -123,7 +128,18 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 // startProcess launches the peer and starts the read loop plus a reaper
 // goroutine that owns cmd.Wait, so Alive() can observe process exit.
 func (c *Client) startProcess() error {
+	// A reused Client must not let an old reader fail the new connection's
+	// waiters. Close stops the process; wait for its reader before resetting.
+	c.procMu.Lock()
+	previousRead := c.readDone
+	c.procMu.Unlock()
+	if previousRead != nil {
+		<-previousRead
+	}
+	c.pendMu.Lock()
 	c.pending = map[string]chan response{}
+	c.readErr = nil
+	c.pendMu.Unlock()
 	c.stderr = redact.NewRing(0)
 	// Long-lived peer: do not use CommandContext(ctx) so Prompt timeout does not kill the process.
 	// Own process group (unix) so Close can tear down npx/node/claude trees.
@@ -139,26 +155,39 @@ func (c *Client) startProcess() error {
 	if err != nil {
 		return err
 	}
-	stdout, err := c.cmd.StdoutPipe()
+	// Own stdout's read end: Cmd.Wait closes StdoutPipe and can discard a
+	// final response before readLoop consumes it when a peer exits quickly.
+	stdout, peerOut, err := os.Pipe()
 	if err != nil {
+		_ = stdin.Close()
 		return err
 	}
+	c.cmd.Stdout = peerOut
+	defer peerOut.Close()
 	stderrPipe, err := c.cmd.StderrPipe()
 	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return err
 	}
 	c.stdin = stdin
 	c.stdout = stdout
 	if err := c.cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderrPipe.Close()
 		return fmt.Errorf("acp client start: %w", err)
 	}
+	ring := c.stderr
 	go func() {
-		_, _ = io.Copy(c.stderr, stderrPipe)
+		_, _ = io.Copy(ring, stderrPipe)
 	}()
 	exited := make(chan struct{})
+	readDone := make(chan struct{})
 	c.procMu.Lock()
 	c.started = true
 	c.exited = exited
+	c.readDone = readDone
 	cmd := c.cmd
 	c.procMu.Unlock()
 	// Reaper owns cmd.Wait; Close waits on exited instead of Wait-ing itself.
@@ -166,7 +195,11 @@ func (c *Client) startProcess() error {
 		_ = cmd.Wait()
 		close(exited)
 	}()
-	go c.readLoop()
+	go func() {
+		defer close(readDone)
+		defer stdout.Close()
+		c.readLoop()
+	}()
 	return nil
 }
 
@@ -233,12 +266,6 @@ func (c *Client) Close() error {
 	c.exited = nil
 	c.SessionID = ""
 	c.procMu.Unlock()
-	c.encMu.Lock()
-	if c.stdin != nil {
-		_ = c.stdin.Close()
-		c.stdin = nil
-	}
-	c.encMu.Unlock()
 	if cmd != nil && cmd.Process != nil {
 		killPeerTree(cmd)
 		if exited != nil {
@@ -257,12 +284,29 @@ func (c *Client) Close() error {
 			_, _ = cmd.Process.Wait()
 		}
 	}
+	// Stop the process before taking the encoder lock: a peer that stopped
+	// reading stdin may have a writer blocked while holding that lock.
+	c.encMu.Lock()
+	if c.stdin != nil {
+		_ = c.stdin.Close()
+		c.stdin = nil
+	}
+	c.encMu.Unlock()
+	if c.stdout != nil {
+		_ = c.stdout.Close()
+	}
 	return nil
 }
 
 // Alive reports whether the peer process is still running.
 func (c *Client) Alive() bool {
 	if c == nil {
+		return false
+	}
+	c.pendMu.Lock()
+	readFailed := c.readErr != nil
+	c.pendMu.Unlock()
+	if readFailed {
 		return false
 	}
 	c.procMu.Lock()
@@ -303,9 +347,17 @@ func (c *Client) SetOnFileMutation(fn func(fileMutation)) {
 }
 
 func (c *Client) call(ctx context.Context, method string, params any, onCancel ...func()) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	id := fmt.Sprintf("%d", c.nextID.Add(1))
 	ch := make(chan response, 1)
 	c.pendMu.Lock()
+	if c.readErr != nil {
+		err := c.readErr
+		c.pendMu.Unlock()
+		return nil, fmt.Errorf("acp %s: %w", method, err)
+	}
 	if c.pending == nil {
 		c.pending = map[string]chan response{}
 	}
@@ -329,9 +381,20 @@ func (c *Client) call(ctx context.Context, method string, params any, onCancel .
 	}
 	c.procMu.Lock()
 	exited := c.exited
+	readDone := c.readDone
 	c.procMu.Unlock()
+	decode := func(resp response) (json.RawMessage, error) {
+		if resp.Error != nil {
+			return nil, appendStderrHint(fmt.Errorf("acp %s: %s", method, resp.Error.Message), c.stderrTail())
+		}
+		raw, _ := json.Marshal(resp.Result)
+		return raw, nil
+	}
 	select {
 	case <-ctx.Done():
+		if len(onCancel) == 0 {
+			return nil, ctx.Err()
+		}
 		for _, fn := range onCancel {
 			if fn != nil {
 				fn()
@@ -353,14 +416,35 @@ func (c *Client) call(ctx context.Context, method string, params any, onCancel .
 			return nil, appendStderrHint(fmt.Errorf("acp %s: peer process exited during cancel", method), c.stderrTail())
 		}
 	case <-waitExited(exited):
-		// Peer died without a response — fail fast instead of waiting for timeout.
+		// A peer can flush its final response and exit immediately. Prefer a
+		// delivered reply over the reaper notification when both are ready.
+		select {
+		case resp := <-ch:
+			return decode(resp)
+		default:
+		}
+		if readDone != nil {
+			// Give buffered stdout a bounded chance to deliver the response;
+			// descendants may retain the pipe, so EOF is not guaranteed.
+			timer := time.NewTimer(200 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case resp := <-ch:
+				return decode(resp)
+			case <-readDone:
+				select {
+				case resp := <-ch:
+					return decode(resp)
+				default:
+				}
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+		}
 		return nil, appendStderrHint(fmt.Errorf("acp %s: peer process exited", method), c.stderrTail())
 	case resp := <-ch:
-		if resp.Error != nil {
-			return nil, appendStderrHint(fmt.Errorf("acp %s: %s", method, resp.Error.Message), c.stderrTail())
-		}
-		raw, _ := json.Marshal(resp.Result)
-		return raw, nil
+		return decode(resp)
 	}
 }
 
@@ -410,6 +494,7 @@ func (c *Client) readLoop() {
 			msg = "peer stdout read: " + err.Error()
 		}
 		c.pendMu.Lock()
+		c.readErr = fmt.Errorf("%s", msg)
 		pending := c.pending
 		c.pending = nil
 		c.pendMu.Unlock()
@@ -446,7 +531,10 @@ func (c *Client) readLoop() {
 			ch := c.pending[id]
 			c.pendMu.Unlock()
 			if ch != nil {
-				ch <- resp
+				select {
+				case ch <- resp:
+				default: // duplicate response; never stall the shared reader
+				}
 			}
 		}
 	}

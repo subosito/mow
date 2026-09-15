@@ -66,13 +66,15 @@ func Agent(ctx context.Context, opt AgentOptions) error {
 }
 
 type agentServer struct {
-	eng     *mow.Engine
-	out     io.Writer
-	name    string
-	ver     string
-	mu      sync.Mutex
-	encMu   sync.Mutex
-	cancels map[string]context.CancelFunc
+	eng       *mow.Engine
+	out       io.Writer
+	name      string
+	ver       string
+	mu        sync.Mutex
+	encMu     sync.Mutex
+	writeErr  error                   // sticky output failure, guarded by encMu
+	stopWrite context.CancelCauseFunc // cancels serving on output failure
+	cancels   map[string]context.CancelFunc
 	// ACP session id → state (mode, etc.)
 	sessions map[string]*acpSession
 	// PTY terminals for terminal/* methods
@@ -159,19 +161,38 @@ func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 	// Every handler runs under this ctx so stdin EOF / SIGINT cancels in-flight
 	// prompts before wg.Wait (defers run LIFO): no turn keeps running against a
 	// closed editor, and no late write hits a closed stdout.
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
+	a.encMu.Lock()
+	a.stopWrite = cancel
+	a.encMu.Unlock()
 	defer a.wg.Wait()
-	defer cancel()
+	defer cancel(nil)
 	lines := make(chan stdinLine)
 	go readLines(ctx, in, lines)
+	// Catalog-backed mutations are ordered but never run on the input loop:
+	// permission replies, cancellation, and ping must remain responsive.
+	configRequests := make(chan request, 8)
+	a.wg.Go(func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case req := <-configRequests:
+				if ctx.Err() != nil {
+					return
+				}
+				a.handleRequest(ctx, req)
+			}
+		}
+	})
 	for {
 		var ln stdinLine
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case l, ok := <-lines:
 			if !ok {
-				return nil
+				return context.Cause(ctx)
 			}
 			ln = l
 		}
@@ -215,7 +236,13 @@ func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 			continue
 		}
 		switch req.Method {
-		case "session/prompt", "session/load", "terminal/wait_for_exit", "terminal/waitForExit", "compact", "slash", "rewind", "skill.activate", "transcript":
+		case "session/set_config_option", "session/setConfigOption", "session/set_mode", "session/setMode":
+			select {
+			case configRequests <- req:
+			default:
+				a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "configuration request queue full; wait for the pending change"}})
+			}
+		case "session/prompt", "session/load", "terminal/wait_for_exit", "terminal/waitForExit", "compact", "slash", "rewind", "skill.activate", "transcript", "context":
 			// Long-blocking methods run off the read loop so session/cancel
 			// (and other traffic) is still read while they are in flight.
 			// compact rewrites in-memory history and can take long enough that
@@ -879,14 +906,23 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 	}
 }
 
-func (a *agentServer) write(v any) {
-	if a.out == nil {
-		return
-	}
+func (a *agentServer) write(v any) error {
 	a.encMu.Lock()
 	defer a.encMu.Unlock()
-	enc := json.NewEncoder(a.out)
-	_ = enc.Encode(v)
+	if a.writeErr != nil {
+		return a.writeErr
+	}
+	if a.out == nil {
+		return nil
+	}
+	if err := json.NewEncoder(a.out).Encode(v); err != nil {
+		a.writeErr = fmt.Errorf("acp output: %w", err)
+		if a.stopWrite != nil {
+			a.stopWrite(a.writeErr)
+		}
+		return a.writeErr
+	}
+	return nil
 }
 
 // toolCallAttachesResult is false for read/glob/grep: those bodies are

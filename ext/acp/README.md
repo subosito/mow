@@ -36,6 +36,20 @@ peer process group so delegated trees do not reparent to PID 1.
 
 See [docs/acp.md](../../docs/acp.md) for extras on the same connection.
 
+## Connection lifecycle
+
+- Catalog-backed configuration changes use an ordered, bounded worker queue;
+  slow provider metadata must not block ping, cancellation, or permission replies.
+- Output-write failures terminate the connection and cancel its active work.
+  Permission requests fail immediately if they cannot be written to the client.
+- A peer whose stdout closes is not reusable, even if its process is still alive.
+  Pending requests fail promptly; duplicate responses cannot block the reader.
+- A response already delivered by an exiting peer wins over the process-exit
+  notification. Buffered stdout gets a bounded drain opportunity before an
+  unanswered request is reported as a process failure.
+- Connection failures do not automatically replay prompts: earlier tool work may
+  have side effects. Provider errors remain distinct from ACP transport failures.
+
 
 ## Config (`extensions.acp`)
 

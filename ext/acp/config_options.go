@@ -300,6 +300,9 @@ func (a *agentServer) applyModelConfig(ctx context.Context, value string) error 
 		value = strings.TrimSpace(value[:i])
 	}
 	list, err := a.listModels(ctx)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	wire := ""
 	if err == nil {
 		for _, m := range list {

@@ -45,12 +45,14 @@ func (a *agentServer) callClient(ctx context.Context, method string, params any)
 		a.mu.Unlock()
 	}()
 
-	a.write(request{
+	if err := a.write(request{
 		JSONRPC: "2.0",
 		ID:      rawID,
 		Method:  method,
 		Params:  mustJSON(params),
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	select {
 	case <-ctx.Done():
