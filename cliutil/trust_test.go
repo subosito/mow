@@ -70,3 +70,23 @@ func captureFile(t *testing.T, target **os.File, fn func()) string {
 	_ = r.Close()
 	return b.String()
 }
+
+// A group/other-readable trust file is ignored by TrustedWorkspaces, so
+// granting through it would silently drop every existing entry: refuse.
+func TestTrustCommandRefusesLooseTrustFilePerms(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MOW_HOME", home)
+	path := home + "/trusted"
+	if err := os.WriteFile(path, []byte("/old/workspace\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	out := captureStderr(t, func() { code = TrustCommand("mow", []string{t.TempDir()}) })
+	if code != 1 || !strings.Contains(out, "chmod 600") {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "/old/workspace\n" {
+		t.Fatalf("trust file rewritten: %q %v", data, err)
+	}
+}

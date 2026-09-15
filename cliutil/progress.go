@@ -84,6 +84,9 @@ func (f *EngineFlags) OptionsCLI() mow.Options {
 
 // NewEngineCLI is NewEngine with OptionsCLI (tool progress + stream + verbose).
 func (f *EngineFlags) NewEngineCLI() (*mow.Engine, error) {
+	if err := f.Validate(); err != nil {
+		return nil, err
+	}
 	return mow.New(f.OptionsCLI())
 }
 

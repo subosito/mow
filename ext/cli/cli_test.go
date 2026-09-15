@@ -40,3 +40,10 @@ func TestPackEnvHelpOpsOnlyWhenLinked(t *testing.T) {
 		t.Fatalf("ops-linked host: %q", got)
 	}
 }
+
+// run must reject contradictory capability flags before building an Engine.
+func TestRunCmdValidatesFlags(t *testing.T) {
+	if code := runCmd([]string{"-p", "hi", "--allow-shell", "--read-only"}); code != 2 {
+		t.Fatalf("code=%d, want 2", code)
+	}
+}

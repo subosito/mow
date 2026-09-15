@@ -250,3 +250,16 @@ func TestConfigPathsEdges(t *testing.T) {
 		})
 	}
 }
+
+// NewEngineCLI (mow acp, packs) must reject contradictory flags like NewEngine.
+func TestNewEngineCLIValidates(t *testing.T) {
+	var ef cliutil.EngineFlags
+	fs := cliutil.NewFlagSet("acp")
+	ef.Bind(fs)
+	if err := fs.Parse([]string{"--allow-shell", "--read-only"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ef.NewEngineCLI(); err == nil || !strings.Contains(err.Error(), "--allow-shell conflicts") {
+		t.Fatalf("err=%v, want --allow-shell conflict", err)
+	}
+}

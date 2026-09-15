@@ -198,6 +198,10 @@ func runCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "  mow run -p \"…\" [flags]   or   mow run help")
 		return 2
 	}
+	if err := ef.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "mow run: %v\n", err)
+		return 2
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	eng, err := mow.NewHarness(ef.OptionsCLI())
@@ -239,7 +243,9 @@ func printRunUsage() {
   -p TEXT              prompt (or pass as args)
   -e, --ephemeral      do not save this turn
   --config --workspace --model --provider --effort --base-url --extra-root
-  --allow-shell --allow-write --sandbox (Linux) --max-turns
+  --system-prefix --skill --max-turns
+  --allow-shell --allow-write --disallow-shell --disallow-write --read-only
+  --sandbox (Linux)
   --stream --verbose --session --continue --no-session
 
   mow run -p "summarize this repo"
@@ -291,9 +297,11 @@ Core:
 		printCmdGroup("Extensions (this binary):", extensions)
 		printCmdGroup("Packs (this binary):", preferFirst(packs, "mcp"))
 	}
-	fmt.Fprintf(os.Stderr, `Flags: --config --workspace --model --provider --effort --base-url --extra-root
-       --allow-shell --allow-write --sandbox --max-turns --stream --verbose
-       --session --continue --no-session
+	fmt.Fprintf(os.Stderr, `Engine flags (after a subcommand, e.g. mow run …; see mow run help):
+       --config --workspace --model --provider --effort --base-url --extra-root
+       --system-prefix --skill --max-turns
+       --allow-shell --allow-write --disallow-shell --disallow-write --read-only
+       --sandbox --stream --verbose --session --continue --no-session
 
 Env:   MOW_HOME  MOW_API_KEY  MOW_MODEL  MOW_BASE_URL  MOW_WIRE  MOW_EFFORT  MOW_PROVIDER%s
 

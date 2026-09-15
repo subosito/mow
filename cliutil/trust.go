@@ -54,6 +54,13 @@ func TrustCommand(prog string, args []string) int {
 		fmt.Fprintf(os.Stderr, "%s: untrusted %s\n", prog, abs)
 		return 0
 	}
+	// TrustedWorkspaces ignores a group/other-readable trust file, so writing
+	// through it would silently replace every existing entry with this one.
+	if fi, err := os.Stat(filepath.Join(mow.Home(), "trusted")); err == nil && fi.Mode().Perm()&0o077 != 0 {
+		fmt.Fprintf(os.Stderr, "%s trust: %s has mode %04o; existing entries are ignored and would be lost\n  fix: chmod 600 %s\n",
+			prog, fi.Name(), fi.Mode().Perm(), filepath.Join(mow.Home(), "trusted"))
+		return 1
+	}
 	if err := mow.TrustWorkspace(*dir); err != nil {
 		fmt.Fprintf(os.Stderr, "%s trust: %v\n", prog, err)
 		return 1

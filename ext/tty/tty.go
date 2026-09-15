@@ -39,6 +39,10 @@ func runCmd(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if err := ef.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "mow tty: %v\n", err)
+		return 2
+	}
 	eng, err := mow.NewHarness(ef.OptionsCLI())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mow tty: %v\n", err)
@@ -54,6 +58,8 @@ func runCmd(args []string) int {
 	// --continue / --session use the same Options path as mow run; surface that here.
 	printSession(eng, ef)
 	sc := bufio.NewScanner(os.Stdin)
+	// Pasted prompts can be long; the 64 KB default would end the REPL silently.
+	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
 	for {
 		fmt.Fprint(os.Stderr, "mow> ")
 		if !sc.Scan() {
@@ -106,6 +112,9 @@ func runCmd(args []string) int {
 			}
 			fmt.Println(res.Text)
 		}
+	}
+	if err := sc.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "mow tty: stdin: %v\n", err)
 	}
 	printSessionExit(eng, ef)
 	return 0

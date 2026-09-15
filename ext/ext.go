@@ -96,7 +96,7 @@ type SessionStartDecision struct {
 type SessionStartFunc func(ctx context.Context, e SessionStartEvent) (SessionStartDecision, error)
 
 // PreCompactEvent is emitted when soft history compaction is about to run.
-// MessageCount is len(history). Full messages are available on mow.Options.OnPreCompact
+// MessageCount is len(history). Full messages are available on mow.Options.Hooks.OnPreCompact
 // (avoids duplicating Message types here and import cycles).
 type PreCompactEvent struct {
 	EstChars     int
@@ -1033,6 +1033,7 @@ func Reset() {
 	preCompact = nil
 	preModel = nil
 	afterTurn = nil
+	afterTurnDecide = nil
 	stop = nil
 	sysSegments = nil
 	extInstances = nil
