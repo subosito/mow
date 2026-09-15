@@ -165,20 +165,38 @@ This is a **backstop, not a knob** — it is a package-level constant with no
 config surface, on purpose. It exists to stop pathological spin, not to tune
 how persistent an agent is.
 
-Since `max_turns` is unlimited by default, this is the primary liveness guard.
-It keys on *evidence* rather than elapsed turns, so it catches a spinning loop
-in three batches while never cutting short work that is still making progress.
+Exploration also has built-in checkpoints, with no configuration required:
 
-Note that repeating the *same tool calls* is a separate, softer signal: the
-loop injects a nudge message after several identical batches but never stops
-for it. Only the evidence signal hard-stops.
+- After six exploration batches, two minutes of exploration, or two
+  low-progress batches, the model is asked to state its leading explanation and make only targeted checks.
+- Checkpoints are advisory only: elapsed time, overlapping reads, and searches
+  with no matches never remove tools or force a final answer. A miss can be useful
+  evidence when investigating multiple repositories. The independent exact-repeat
+  backstop still stops consecutive batches that repeat previously seen calls/results.
+- Read-only extension tools and MCP discovery/search tools count as exploration,
+  including search tools that maintain indexes and advertise `readOnlyHint: false`.
+  This classification affects advisory guidance only, not execution permissions.
+- Successful edits, writes, other application-specific tools, and recognized test or
+  build commands reset the exploration streak. Cancellation and explicit spend
+  limits still take precedence. This is not a wall-clock limit on the whole run.
 
-The guards described above (`max_turns`, the evidence/`ErrStuck` backstop,
-context cancel, and the identical-batch nudge) are engine mechanism and live in
-core. The *workflow* heuristics — re-read caps, inventory caps, the
-destructive-git block, and the explore-only nag — are not: they ship as the
-an optional external policy extension and can be tuned or omitted
-entirely by removing its blank import. See docs/extensions.md.
+These checkpoints complement the exact-repeat backstop above. They live in
+core so stock CLI and ACP hosts receive the same behavior. Optional policy
+extensions may still add result degradation, inventory caps, or workflow rules.
+
+Grep keeps compact default results. Use `max_results: 100` to request up to
+100 matching lines without the default per-file display caps, or
+`files_only: true` to list matching filenames (default 100). `max_results`
+accepts 1–500 for either mode. Filenames count once regardless of matches in
+each file. Truncation is explicit; narrow the path or pattern when the cap is
+reached. Normal file-jail, excluded-directory, file-size, and history-output
+limits still apply.
+
+The `grep` tool searches literal text by default. Pass `regex: true` for regular
+expressions such as `model|effort` or escaped symbols. Invalid expressions are
+reported as tool errors; literal misses containing regex punctuation include
+an actionable reminder. Both ripgrep and the fallback walker support this mode
+with the same filesystem jail and result caps.
 
 **Hosts:** surface `StopStuck` distinctly from `StopMaxTurns`. They mean
 opposite things — out of an explicitly configured budget vs. out of ideas —
@@ -216,7 +234,7 @@ reasoning**. Hosts must not render the wait state as "thinking".
 
 | Knob | Default | Effect |
 |------|---------|--------|
-| `policy.max_turns` | *(unlimited)* | Optional budget: LLM round-trips per Prompt (a turn may batch up to 8 tools). **Unset by default** — a run ends when it is done, stuck, cancelled, or over an explicit spend budget, never merely because it was long. Set a positive value to opt in to a ceiling; yaml `-1` / CLI `--max-turns 0` also mean unlimited. Only enforced when > 0 |
+| `policy.max_turns` | *(unlimited)* | Optional budget: LLM round-trips per Prompt (a turn may batch up to 8 tools). **Unset by default** — a run ends when it is done, stuck, cancelled, or over an explicit spend budget, with built-in checkpoints for prolonged exploration. Set a positive value to opt in to a ceiling; yaml `-1` / CLI `--max-turns 0` also mean unlimited. Only enforced when > 0 |
 | Auto-compact | always on when `context_window` is known | Trips at 80% of `context_window` in **tokens** (same units as the host ctx chip). Occupancy is last billed input tokens, or history chars ÷ calibrated chars/token when the provider has not reported usage yet. Compaction pins user task anchors + tools used. Not a yaml knob — Go `Options.MaxContextChars` can override (char budget, tests) or disable (`< 0`). Unknown window: off (tool-result trim still runs). Manual `/compact` still has a default char target |
 | `llm.context_window` / `input_price` / `output_price` | (optional) | Override metering; otherwise `Engine.Limits()` uses `GET /v1/models` fields (`context_window`, `pricing.input_per_mtok` / `output_per_mtok`) — no client-side price table |
 | `policy.max_tool_result_chars` | `24000` | Cap each tool result stored for the model (~6k tokens) |

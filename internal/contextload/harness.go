@@ -28,6 +28,7 @@ Workspace and path jail
 
 Tools
 - Prefer grep, glob, read, edit, write for file work. Use bash for git, tests, builds — not cat/sed/head/tail/wc/ls/rg/find/fd. Bash dumps re-enter history.
+- grep patterns are literal by default. Pass regex:true for alternatives (foo|bar) or escaped symbols; do not interpret a literal miss as proof a symbol is absent.
 - Discover with the grep tool (content) or glob (file names). Do not bash rg/grep/find/fd/ls — those calls are refused. glob is an index: do not read every match. Read only files you will change or cite.
 - Do NOT start long-lived servers in the foreground, and do NOT use bash & or nohup to background them: the bash tool kills its process group when it returns. If the harness provides process tools, use those instead.
 - Do not paste raw rg/ls/find dumps into the reply; cite paths and edit.
@@ -41,7 +42,7 @@ Context cost
 - When context feels large: explore less, act more; avoid re-surveying paths already known.
 
 Progress
-- Explore only enough to act. Once touch points are clear, edit or write.
+- Explore only enough to answer or act. For investigations, state the evidence, conclusion, and remaining uncertainty once the key checks are done. Do not keep surveying to avoid saying that a cause is unconfirmed. For implementation, edit or write once touch points are clear.
 - "Continue" / resume means pick up unfinished work — not re-survey the repository from scratch.
 - Prefer a small correct change over a broad rewrite.
 

@@ -62,8 +62,8 @@ func normalizeBashCmd(cmd string) string {
 
 func sameToolWarnMessage(n int) string {
 	return fmt.Sprintf(
-		"You repeated the same tool call(s) %d times. Change args, act (edit/write), or finish — "+
-			"the run is not stopped; avoid tight loops.",
+		"You repeated the same tool call(s) %d times. Use the evidence already collected. "+
+			"Make a targeted check only if it can change the conclusion; otherwise report findings and uncertainty. Do not change arguments merely to repeat the same investigation.",
 		n,
 	)
 }

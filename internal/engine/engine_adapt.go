@@ -48,6 +48,14 @@ func (a toolAdapter) ReadOnly() bool {
 	return false
 }
 
+// Exploratory forwards the optional liveness hint without changing permissions.
+func (a toolAdapter) Exploratory() bool {
+	if t, ok := a.t.(interface{ Exploratory() bool }); ok {
+		return t.Exploratory()
+	}
+	return false
+}
+
 func adaptChat(fn ChatFunc) agent.ChatFn {
 	if fn == nil {
 		return nil

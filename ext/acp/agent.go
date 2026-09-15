@@ -664,6 +664,11 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		// another prompt. Save cancellation first: cleanup cancels ctx too.
 		cancelled := ctx.Err() != nil
 		cleanup()
+		// A stopped investigation can still carry a useful final answer. Send
+		// it before the terminal error so non-streaming hosts retain it too.
+		if err != nil && !cancelled && !streamed.Load() && res.Text != "" {
+			writeAgentText(res.Text)
+		}
 		if err != nil {
 			if cancelled {
 				a.write(response{

@@ -15,6 +15,9 @@ import (
 
 // Tool is a host-executed function (same shape as mow.Tool).
 // Packs implement this interface; Engine adapts into the agent loop.
+// Optional Exploratory() bool marks investigative work for the exploration
+// guard without granting read-only execution permissions. ReadOnly() true
+// also counts as exploration.
 type Tool interface {
 	Name() string
 	Description() string

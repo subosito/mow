@@ -25,11 +25,11 @@ var ErrMaxTurns = errors.New("agent: max turns exceeded")
 var ErrDone = errors.New("agent: done")
 
 // ErrStuck ends a run that stopped making progress: stallBarrenBatches
-// consecutive tool batches re-ran calls this run had already made for results
-// it had already seen. Maps to StopStuck.
+// consecutive tool batches re-ran calls for unchanged results. Maps to StopStuck.
 //
 // Repeating the same tool calls is only a soft hint (sameToolWarnAfter); the
-// hard stop is the evidence signal below. Prefer ctx cancel for a clean abort.
+// exact-repeat guard bounds unproductive work. Exploration is advisory. Prefer ctx
+// cancel for a clean abort.
 var ErrStuck = errors.New("agent: stuck repeating tool calls")
 
 // ErrTruncated is returned when the provider cut the final assistant reply at
@@ -222,11 +222,12 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	}
 
 	var (
-		lastToolFP string
-		sameToolFP int
-		calib      = opt.Calib
-		evidence   = newEvidenceSet()
-		barrenRuns int
+		lastToolFP  string
+		sameToolFP  int
+		calib       = opt.Calib
+		evidence    = newEvidenceSet()
+		barrenRuns  int
+		exploration = explorationGuard{workspace: opt.Workspace, started: time.Now(), tools: byName, nonce: opt.UntrustedNonce}
 		// truncatedBatches counts consecutive turns where the provider cut
 		// the tool-call arguments at its output limit.
 		truncatedBatches int
@@ -496,7 +497,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		// observers above: a hook that judges the turn's tool use (explore
 		// guards) must see the tool calls resolve first. Multiple hooks
 		// compose by ordered concatenation of non-empty Inject strings.
-		turnInject := ""
+		turnInject := exploration.note(msg.ToolCalls, toolMsgs)
 		for _, h := range opt.Hooks.AfterTurnDecide {
 			if h == nil {
 				continue
@@ -676,7 +677,7 @@ func (m *modelWaitMonitor) abort() {
 // with ErrStuck. Three, not two: two identical batches are a plausible retry
 // (a flaky command, a re-read after a failed edit), three is a loop. This is a
 // package-level backstop, not a tuning knob. With max_turns unlimited by
-// default this is the primary liveness guard: it catches a spinning loop in
+// default this is an exact-repeat liveness guard: it catches a spinning loop in
 // three batches rather than after a hundred, and it keys on evidence rather
 // than on elapsed turns, so legitimately long work is never cut short.
 const stallBarrenBatches = 3

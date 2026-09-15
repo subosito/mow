@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -38,6 +39,20 @@ const (
 	grepMaxLineChars = 240
 )
 
+// grepOptions keeps compact defaults while allowing bounded expanded results.
+type grepOptions struct {
+	limit     int
+	filesOnly bool
+	expanded  bool
+}
+
+func grepSettings(opts []grepOptions) grepOptions {
+	if len(opts) > 0 {
+		return opts[0]
+	}
+	return grepOptions{limit: grepMaxMatches}
+}
+
 type grepHit struct {
 	Path string
 	Line int
@@ -55,19 +70,22 @@ var lookupRipgrep = func() string {
 
 func (t *grepTool) Name() string { return "grep" }
 func (t *grepTool) Description() string {
-	return "Repo content search (fixed string) " + pathJailHint(t.p) +
-		". Call this instead of bash rg/grep. Args: pattern, path (optional dir/file, default .; absolute under jail OK). " +
+	return "Repo content search (literal by default; regex:true enables regular expressions) " + pathJailHint(t.p) +
+		". Call this instead of bash rg/grep. Args: pattern, regex (optional boolean; use true for alternatives like foo|bar or escaped symbols), path (optional dir/file, default .; absolute under jail OK). " +
 		"Uses ripgrep when installed (same jail and caps); otherwise a bounded walk. " +
-		"Results are grouped by file and capped; do not reprint the dump — cite paths and edit."
+		"Results default to a compact sample. Set max_results (1–500) to expand matching lines, or files_only:true to list matching filenames (default 100). Truncated results are not exhaustive; narrow path/pattern if needed."
 }
 func (t *grepTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Maximum matching lines, or filenames with files_only. Omit for a compact sample."},"files_only":{"type":"boolean","description":"Return matching filenames instead of line excerpts; default false."},"regex":{"type":"boolean","description":"Interpret pattern as a regular expression; default false searches the exact literal text."}},"required":["pattern"]}`)
 }
 
 func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
-		Pattern string `json:"pattern"`
-		Path    string `json:"path"`
+		Pattern    string `json:"pattern"`
+		Path       string `json:"path"`
+		Regex      bool   `json:"regex"`
+		MaxResults *int   `json:"max_results"`
+		FilesOnly  bool   `json:"files_only"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
@@ -75,6 +93,25 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if a.Pattern == "" {
 		return "", fmt.Errorf("pattern required")
 	}
+	opts := grepOptions{limit: grepMaxMatches, filesOnly: a.FilesOnly, expanded: a.MaxResults != nil}
+	if a.FilesOnly {
+		opts.limit = 100
+	}
+	if a.MaxResults != nil {
+		if *a.MaxResults < 1 || *a.MaxResults > 500 {
+			return "", fmt.Errorf("max_results must be between 1 and 500")
+		}
+		opts.limit = *a.MaxResults
+	}
+	var re *regexp.Regexp
+	if a.Regex {
+		var err error
+		re, err = regexp.Compile(a.Pattern)
+		if err != nil {
+			return "", fmt.Errorf("invalid grep regex: %w", err)
+		}
+	}
+
 	rel := a.Path
 	if rel == "" {
 		rel = "."
@@ -83,14 +120,18 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if err != nil {
 		return "", err
 	}
-	hits, truncated, err := t.search(ctx, a.Pattern, root)
+	hits, truncated, err := t.search(ctx, a.Pattern, root, re, opts)
 	if err != nil {
 		return "", err
 	}
 	if len(hits) == 0 {
-		return formatGrepHits(hits, truncated) + emptyResultHint(t.p, a.Path), nil
+		out := formatGrepHits(hits, truncated, opts) + emptyResultHint(t.p, a.Path)
+		if !a.Regex && strings.ContainsAny(a.Pattern, `|\^$*+?()[]{}`) {
+			out += "\nSearch was literal. For a regular expression (including alternatives or escaped symbols), retry with regex:true; otherwise search a simpler literal."
+		}
+		return out, nil
 	}
-	return formatGrepHits(hits, truncated), nil
+	return formatGrepHits(hits, truncated, opts), nil
 }
 
 func (t *grepTool) ripgrepBin() string {
@@ -103,19 +144,21 @@ func (t *grepTool) ripgrepBin() string {
 	return lookupRipgrep()
 }
 
-func (t *grepTool) search(ctx context.Context, pattern, root string) ([]grepHit, bool, error) {
+func (t *grepTool) search(ctx context.Context, pattern, root string, re *regexp.Regexp, options ...grepOptions) ([]grepHit, bool, error) {
+	opts := grepSettings(options)
 	if bin := t.ripgrepBin(); bin != "" {
-		hits, truncated, ok := t.grepRipgrep(ctx, bin, pattern, root)
+		hits, truncated, ok := t.grepRipgrep(ctx, bin, pattern, root, re, opts)
 		if ok {
 			return hits, truncated, nil
 		}
 	}
-	return t.grepWalk(ctx, pattern, root)
+	return t.grepWalk(ctx, pattern, root, re, opts)
 }
 
-// grepRipgrep runs rg --json (fixed-string) under the already-resolved jail
+// grepRipgrep runs rg --json (literal or regex) under the already-resolved jail
 // root. Hits outside the jail are dropped. false means "caller should walk".
-func (t *grepTool) grepRipgrep(ctx context.Context, bin, pattern, root string) ([]grepHit, bool, bool) {
+func (t *grepTool) grepRipgrep(ctx context.Context, bin, pattern, root string, re *regexp.Regexp, options ...grepOptions) ([]grepHit, bool, bool) {
+	opts := grepSettings(options)
 	lim := 2 << 20
 	if t.p != nil && t.p.MaxReadBytes > 0 {
 		lim = t.p.MaxReadBytes
@@ -123,13 +166,18 @@ func (t *grepTool) grepRipgrep(ctx context.Context, bin, pattern, root string) (
 	args := []string{
 		"--json",
 		"--no-config",
-		"--fixed-strings",
 		"--hidden",
 		"--no-ignore",
 		"--no-messages",
 		"--max-columns", fmt.Sprintf("%d", grepMaxLineChars*2),
 		"--max-columns-preview",
 		"--max-filesize", fmt.Sprintf("%d", lim),
+	}
+	if opts.filesOnly {
+		args = append(args, "--max-count", "1")
+	}
+	if re == nil {
+		args = append(args, "--fixed-strings")
 	}
 	for name := range skipDirNames {
 		args = append(args, "--glob", "!"+name, "--glob", "!"+name+"/**")
@@ -145,7 +193,7 @@ func (t *grepTool) grepRipgrep(ctx context.Context, bin, pattern, root string) (
 	if err := cmd.Start(); err != nil {
 		return nil, false, false
 	}
-	hits, truncated := parseRipgrepJSON(stdout, t.p, root)
+	hits, truncated := parseRipgrepJSON(stdout, t.p, root, opts)
 	if truncated && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
@@ -178,7 +226,9 @@ type rgEvent struct {
 	} `json:"data"`
 }
 
-func parseRipgrepJSON(r io.Reader, p *policy.Policy, root string) ([]grepHit, bool) {
+func parseRipgrepJSON(r io.Reader, p *policy.Policy, root string, options ...grepOptions) ([]grepHit, bool) {
+	opts := grepSettings(options)
+	seen := map[string]bool{}
 	dec := json.NewDecoder(r)
 	var hits []grepHit
 	truncated := false
@@ -201,9 +251,14 @@ func parseRipgrepJSON(r io.Reader, p *policy.Policy, root string) ([]grepHit, bo
 		if err != nil {
 			relp = full
 		}
+		if opts.filesOnly && seen[relp] {
+			continue
+		}
+		seen[relp] = true
 		line := strings.TrimRight(ev.Data.Lines.Text, "\n\r")
 		hits = append(hits, grepHit{Path: relp, Line: ev.Data.LineNumber, Text: line})
-		if len(hits) >= grepMaxMatches {
+		if len(hits) > opts.limit {
+			hits = hits[:opts.limit]
 			truncated = true
 			break
 		}
@@ -222,7 +277,8 @@ var skipGrepExt = map[string]bool{
 }
 
 // grepWalk is the no-rg path: WalkDir + line scan, same jail and caps as rg.
-func (t *grepTool) grepWalk(ctx context.Context, pattern, root string) ([]grepHit, bool, error) {
+func (t *grepTool) grepWalk(ctx context.Context, pattern, root string, re *regexp.Regexp, options ...grepOptions) ([]grepHit, bool, error) {
+	opts := grepSettings(options)
 	lim := 2 << 20
 	if t.p != nil && t.p.MaxReadBytes > 0 {
 		lim = t.p.MaxReadBytes
@@ -272,13 +328,17 @@ func (t *grepTool) grepWalk(ctx context.Context, pattern, root string) ([]grepHi
 		for sc.Scan() {
 			lineNo++
 			line := sc.Text()
-			if !strings.Contains(line, pattern) {
+			if (re == nil && !strings.Contains(line, pattern)) || (re != nil && !re.MatchString(line)) {
 				continue
 			}
 			hits = append(hits, grepHit{Path: relp, Line: lineNo, Text: line})
-			if len(hits) >= grepMaxMatches {
+			if len(hits) > opts.limit {
+				hits = hits[:opts.limit]
 				truncated = true
 				return filepath.SkipAll
+			}
+			if opts.filesOnly {
+				break
 			}
 		}
 		return nil
@@ -291,9 +351,24 @@ func (t *grepTool) grepWalk(ctx context.Context, pattern, root string) ([]grepHi
 
 // formatGrepHits groups matches by file so a broad pattern is a file index,
 // not a 100-line dump. Per-file and per-result caps keep the wall of text down.
-func formatGrepHits(hits []grepHit, truncatedWalk bool) string {
+func formatGrepHits(hits []grepHit, truncatedWalk bool, options ...grepOptions) string {
+	opts := grepSettings(options)
 	if len(hits) == 0 {
 		return "(no matches)"
+	}
+	if opts.filesOnly {
+		paths := make([]string, 0, len(hits))
+		for _, h := range hits {
+			paths = append(paths, h.Path)
+		}
+		if truncatedWalk {
+			paths = append(paths, "…(more matching files; increase max_results up to 500 or narrow path/pattern)")
+		}
+		return strings.Join(paths, "\n")
+	}
+	maxFiles, maxPerFile := grepMaxFiles, grepMaxPerFile
+	if opts.expanded {
+		maxFiles, maxPerFile = opts.limit, opts.limit
 	}
 	type fileHits struct {
 		path string
@@ -312,14 +387,14 @@ func formatGrepHits(hits []grepHit, truncatedWalk bool) string {
 	var b strings.Builder
 	shownFiles := 0
 	for _, f := range files {
-		if shownFiles >= grepMaxFiles {
+		if shownFiles >= maxFiles {
 			break
 		}
 		shownFiles++
 		fmt.Fprintf(&b, "%s (%d)\n", f.path, len(f.hits))
 		show := len(f.hits)
-		if show > grepMaxPerFile {
-			show = grepMaxPerFile
+		if show > maxPerFile {
+			show = maxPerFile
 		}
 		for i := 0; i < show; i++ {
 			fmt.Fprintf(&b, "  %d:%s\n", f.hits[i].Line, clampGrepLine(f.hits[i].Text))
@@ -329,8 +404,8 @@ func formatGrepHits(hits []grepHit, truncatedWalk bool) string {
 		}
 	}
 	hiddenFiles := len(files) - shownFiles
-	if hiddenFiles > 0 || truncatedWalk || len(hits) >= grepMaxMatches {
-		note := "narrow the pattern or pass a path"
+	if hiddenFiles > 0 || truncatedWalk {
+		note := "increase max_results up to 500, use files_only:true, or narrow path/pattern"
 		if truncatedWalk {
 			note = "walk stopped at match cap; " + note
 		}

@@ -848,3 +848,68 @@ func (l *lockedBuffer) String() string {
 	defer l.mu.Unlock()
 	return l.b.String()
 }
+
+func TestAgentAdvisoryInvestigationCompletesNormally(t *testing.T) {
+	workspace := t.TempDir()
+	calls := 0
+	eng, err := mow.New(mow.Options{Workspace: workspace, NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, specs []mow.ToolSpec) (mow.Message, error) {
+			calls++
+			if len(specs) == 0 {
+				return mow.Message{}, fmt.Errorf("advisory checkpoint removed tools")
+			}
+			if calls == 31 {
+				return mow.Message{Role: "assistant", Content: "The inspected files do not establish a cause."}, nil
+			}
+			return mow.Message{Role: "assistant", ToolCalls: []mow.ToolCall{{ID: fmt.Sprintf("c%d", calls), Type: "function", Function: mow.FunctionCall{Name: "grep", Arguments: fmt.Sprintf(`{"pattern":"missing%d"}`, calls)}}}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	defer aw.Close()
+	defer cr.Close()
+	go func() { _ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw}); _ = cw.Close() }()
+	cl := newPipeClient(cr, aw)
+	var mu sync.Mutex
+	var text strings.Builder
+	cl.onNotify = func(method string, params json.RawMessage) {
+		if method != "session/update" {
+			return
+		}
+		var p struct {
+			Update struct {
+				SessionUpdate string `json:"sessionUpdate"`
+				Content       struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"update"`
+		}
+		if json.Unmarshal(params, &p) == nil && p.Update.SessionUpdate == "agent_message_chunk" {
+			mu.Lock()
+			text.WriteString(p.Update.Content.Text)
+			mu.Unlock()
+		}
+	}
+	go cl.readLoop()
+	if err := cl.callOK(ctx, "initialize", map[string]any{"protocolVersion": 1}); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := cl.sessionNew(ctx, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = cl.prompt(ctx, sid, "find the cause"); err != nil {
+		t.Fatalf("advisory investigation failed: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(text.String(), "do not establish a cause") {
+		t.Fatalf("final answer lost: %q", text.String())
+	}
+}

@@ -88,3 +88,14 @@ replace tool descriptions or automatically adopt server-provided instructions.
 - [docs/extensions.md](../../docs/extensions.md) — client/server, lifecycle, `min_turns`
 - [docs/harness.md](../../docs/harness.md) — MCP results as untrusted output
 - [docs/architecture.md](../../docs/architecture.md)
+
+## Exploration limits
+
+Read-only MCP tools and recognized discovery names (such as `code_search`,
+`read_file`, or `list_files`) participate in the same investigation checkpoints
+as native search. Search can count as exploratory even when `readOnlyHint` is
+false because it maintains an auxiliary index. This does not change tool
+permissions. Mutation names such as `delete_search_index` or
+`search_and_replace` are not classified as discovery merely because they
+contain a search word. Opaque names without read-only metadata keep the normal
+application-tool behavior; name inference is a liveness heuristic.

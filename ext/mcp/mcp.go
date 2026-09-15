@@ -892,6 +892,44 @@ type mcpTool struct {
 // that declare it run in read-only prompts.
 func (t *mcpTool) ReadOnly() bool { return t.readOnly }
 
+// Exploratory classifies discovery tools separately from write permissions.
+// Some search servers maintain an index and correctly advertise readOnlyHint
+// false. Inspect the remote tool name, never the server prefix or description.
+func (t *mcpTool) Exploratory() bool {
+	if t.readOnly {
+		return true
+	}
+	name := t.name
+	// Split camelCase names as well as underscore/dash-separated MCP names.
+	var b strings.Builder
+	for i, r := range name {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			r += 'a' - 'A'
+		}
+		b.WriteRune(r)
+	}
+	words := strings.FieldsFunc(b.String(), func(r rune) bool { return r == '_' || r == '-' || r == '.' || r == '/' })
+	if len(words) == 0 {
+		return false
+	}
+	for _, w := range words {
+		switch w {
+		case "create", "write", "edit", "update", "delete", "remove", "drop", "replace", "rebuild", "execute", "run", "send", "publish":
+			return false
+		}
+	}
+	for _, w := range []string{words[0], words[len(words)-1]} {
+		switch w {
+		case "search", "grep", "find", "lookup", "fetch", "read", "list", "query", "inspect", "describe":
+			return true
+		}
+	}
+	return false
+}
+
 // Untrusted marks MCP tool output as external content so the agent loop
 // frames it in <untrusted-output> (prompt-injection boundary). Server text is
 // never treated as harness/user instructions.
