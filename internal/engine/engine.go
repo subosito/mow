@@ -314,6 +314,13 @@ func New(opt Options) (*Engine, error) {
 	if cfg.Tools.Shell {
 		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "bash")
 	}
+	if !opt.ExplicitCapabilities {
+		rt, rerr := peekResumeRuntime(opt, cfg)
+		if rerr != nil {
+			return nil, fmt.Errorf("session runtime load: %w", rerr)
+		}
+		applySessionPolicy(&opt, rt)
+	}
 	if opt.AllowWrite {
 		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit")
 	}
@@ -822,6 +829,11 @@ func New(opt Options) (*Engine, error) {
 		}
 		e.sid = sid
 		e.sess = &session.Store{Dir: sessDir, ID: sid}
+		if !opt.DeferSessionWrite {
+			if aerr := e.sess.Append(sessionPolicyEvent(e, e.Model(), e.Wire(), e.Effort())); aerr != nil {
+				e.log().Warn("mow: session runtime append failed (resume may use default policy)", "err", aerr)
+			}
+		}
 		if mediaClient != nil && sid != "" {
 			if mediaClient.ExtraHeaders == nil {
 				mediaClient.ExtraHeaders = map[string]string{}
@@ -1103,6 +1115,67 @@ func (e *Engine) EnvPassthrough() []string {
 		return nil
 	}
 	return append([]string(nil), e.pol.EnvPassthrough...)
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func sessionPolicyEvent(e *Engine, model, wire, effort string) session.Event {
+	ev := session.Event{Type: "runtime", Model: model, Wire: wire, Effort: effort}
+	if e == nil {
+		return ev
+	}
+	aw, as, ro := false, false, false
+	if e.pol != nil {
+		aw = e.pol.AllowWrite
+		as = e.pol.AllowShell
+		ro = e.pol.ReadOnly || e.opt.DisableWrite || e.opt.DisableShell
+	}
+	ev.AllowWrite = boolPtr(aw)
+	ev.AllowShell = boolPtr(as)
+	ev.ReadOnly = boolPtr(ro)
+	return ev
+}
+
+func peekResumeRuntime(opt Options, cfg *config.File) (session.Runtime, error) {
+	if opt.NoSession || !opt.LoadUserConfig || cfg == nil {
+		return session.Runtime{}, nil
+	}
+	sessDir := filepath.Join(cfg.Session.Dir, projectHash(cfg.Workspace))
+	sid := strings.TrimSpace(opt.SessionID)
+	if sid != "" {
+		if err := session.ValidateID(sid); err != nil {
+			return session.Runtime{}, err
+		}
+	} else if opt.Continue {
+		latest, err := session.LatestID(sessDir)
+		if err != nil {
+			return session.Runtime{}, err
+		}
+		if latest == "" {
+			return session.Runtime{}, nil
+		}
+		if err := session.ValidateID(latest); err != nil {
+			return session.Runtime{}, err
+		}
+		sid = latest
+	} else {
+		return session.Runtime{}, nil
+	}
+	return (&session.Store{Dir: sessDir, ID: sid}).LoadRuntime()
+}
+
+func applySessionPolicy(opt *Options, rt session.Runtime) {
+	if opt == nil || !rt.HasPolicy {
+		return
+	}
+	opt.AllowWrite = rt.AllowWrite
+	opt.AllowShell = rt.AllowShell
+	opt.DisableWrite = !rt.AllowWrite
+	opt.DisableShell = !rt.AllowShell
+	if rt.ReadOnly && len(opt.WritableRoots) > 0 {
+		opt.ReadOnly = true
+		opt.DisableWrite = false
+	}
 }
 
 // SandboxMode reports the configured shell sandbox ("none" or "bwrap").

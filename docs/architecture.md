@@ -6,8 +6,8 @@
 ## One-liner
 
 **mow** is a secure-by-default Go agent harness: tool loop + sessions + config,
-extended by detachable protocol extensions, workflow packs, and telemetry. The
-Rust `mowi` sibling project provides the interactive TUI over `mow acp`.
+extended by detachable protocol extensions, workflow packs, and telemetry.
+External host UIs can drive the harness over `mow acp`.
 
 LLM access is plain OpenAI-compatible or Anthropic-compatible HTTP. No gateway,
 broker, host UI, or sibling repository is required for `mow.Engine`.
@@ -102,23 +102,18 @@ Lean `cmd/mow` links the first four; `cmd/custom-host` adds the rest.
 - `packs/ops`: ops profiles, logs, actions, incidents, runbooks
 - `packs/job`: interval/cron jobs (depends on goal); ops depends on job
 
-### Heavy nested modules
-
-- Rust `mowi`: external TUI host that drives `mow acp`
-
 ## Binaries
 
 | Binary | Source | Ships |
 |---|---|---|
 | `mow` | `cmd/mow` | Import list: `ext/cli` + `ext/tty` + `ext/acp` + focus, proc, cmdhook, mcp |
 | `custom-host` | `cmd/custom-host` | Lean set plus goal, job, ops, review, media |
-| Rust `mowi` | sibling project/repository | Interactive TUI over `mow acp` |
 
 Composition lives in `cmd/` (blank imports + `ext/cli.Main`). Host UIs spawn
 `mow acp`; they do not need `run` or `tty`. The Engine library requires neither.
 
-The Rust `mowi` host launches `mow acp` and owns terminal presentation; pack
-commands and tools remain registered in the mow host that is on `PATH`.
+External host UIs own presentation; pack commands and tools remain registered
+in the mow host that is on `PATH`.
 
 ## Catalog behavior
 
@@ -145,4 +140,3 @@ use the workspace/extra-root jail; shell is a separate explicit trust decision.
 - [harness.md](harness.md) — loop, tools, config, sessions
 - [extensions.md](extensions.md) — extension and pack details
 - [workspace-profiles.md](workspace-profiles.md) — `$MOW_HOME/workspaces/<name>/`
- `$MOW_HOME/workspaces/<name>/`

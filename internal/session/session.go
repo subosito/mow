@@ -31,6 +31,13 @@ type Event struct {
 	// Effort records the reasoning effort active for the turn so resume can
 	// restore it (empty when no effort was ever set).
 	Effort string `json:"effort,omitempty"`
+	// AllowWrite / AllowShell / ReadOnly record the tool policy this session
+	// actually ran with. Pointers so false is distinct from "not recorded"
+	// (legacy JSONL). Resume restores these unless the new process passed an
+	// explicit capability flag.
+	AllowWrite *bool `json:"allow_write,omitempty"`
+	AllowShell *bool `json:"allow_shell,omitempty"`
+	ReadOnly   *bool `json:"read_only,omitempty"`
 	// Raw message for legacy full-fidelity snapshots.
 	Message *llm.Message `json:"message,omitempty"`
 	// Messages is one complete replay snapshot. New writers use one snapshot
@@ -118,11 +125,17 @@ func (s *Store) AppendSnapshot(messages []llm.Message) error {
 	return s.Append(Event{Type: "snapshot", Messages: cp})
 }
 
-// Runtime is the last model/wire/effort set recorded for a session.
+// Runtime is the last model/wire/effort/policy set recorded for a session.
 type Runtime struct {
-	Model  string
-	Wire   string
-	Effort string
+	Model      string
+	Wire       string
+	Effort     string
+	AllowWrite bool
+	AllowShell bool
+	ReadOnly   bool
+	// HasPolicy is true when at least one capability field was persisted.
+	// Older session files have none; resume then keeps config defaults.
+	HasPolicy bool
 }
 
 // LoadRuntime returns the last recorded runtime. Older session files have no
@@ -159,6 +172,18 @@ func (s *Store) LoadRuntime() (Runtime, error) {
 		}
 		if v := strings.TrimSpace(ev.Effort); v != "" {
 			last.Effort = v
+		}
+		if ev.AllowWrite != nil {
+			last.AllowWrite = *ev.AllowWrite
+			last.HasPolicy = true
+		}
+		if ev.AllowShell != nil {
+			last.AllowShell = *ev.AllowShell
+			last.HasPolicy = true
+		}
+		if ev.ReadOnly != nil {
+			last.ReadOnly = *ev.ReadOnly
+			last.HasPolicy = true
 		}
 	}
 	return last, nil

@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/subosito/mow/internal/llm"
-	"github.com/subosito/mow/internal/session"
 )
 
 // LLMProvider is the selected llm.providers name after overlay, or empty
@@ -386,7 +385,7 @@ func (e *Engine) SetEffort(effort string) error {
 		// the operator quits before the next prompt — the turn-boundary
 		// runtime event in PromptWith is the only other writer. File I/O
 		// stays outside e.mu.
-		if aerr := sess.Append(session.Event{Type: "runtime", Model: e.Model(), Wire: e.Wire(), Effort: norm}); aerr != nil {
+		if aerr := sess.Append(sessionPolicyEvent(e, e.Model(), e.Wire(), norm)); aerr != nil {
 			e.log().Warn("mow: session runtime append failed (resume may use previous effort)", "err", aerr)
 		}
 	}

@@ -124,6 +124,12 @@ type Options struct {
 	AllowShell   bool
 	DisableWrite bool
 	DisableShell bool
+	// ExplicitCapabilities marks AllowWrite/AllowShell/DisableWrite/
+	// DisableShell/ReadOnly as a user/CLI override. When false (config
+	// defaults), resuming a session restores the policy that session last
+	// ran with — so `mowi --continue` keeps a prior `--read-only` session
+	// read-only even if yaml enables write/shell.
+	ExplicitCapabilities bool
 	// Sandbox opts shell execution (bash + proc_start) into an OS jail.
 	// "" / "none" = today's behavior (unsandboxed shell as the user);
 	// "bwrap" = bubblewrap on Linux. Overrides config policy.sandbox when set.
@@ -133,6 +139,10 @@ type Options struct {
 	Sandbox string
 	// NoSession skips JSONL persistence.
 	NoSession bool
+	// DeferSessionWrite skips the initial runtime append at construction.
+	// Existing sessions still load; the first non-ephemeral prompt persists
+	// runtime and history normally. Hosts use this for ephemeral runs.
+	DeferSessionWrite bool
 	// SessionID forces a session id (resume that file).
 	SessionID string
 	// Continue loads the latest session under the project dir when SessionID empty.

@@ -204,7 +204,9 @@ func runCmd(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	eng, err := mow.NewHarness(ef.OptionsCLI())
+	opt := ef.OptionsCLI()
+	opt.DeferSessionWrite = ephemeral
+	eng, err := mow.NewHarness(opt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mow: %v\n", err)
 		return 1

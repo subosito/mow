@@ -30,6 +30,9 @@ func TestReadOnlyDisablesBothCapabilities(t *testing.T) {
 	if !opt.DisableShell || !opt.DisableWrite {
 		t.Fatalf("read-only not mapped: shell=%v write=%v", opt.DisableShell, opt.DisableWrite)
 	}
+	if !opt.ExplicitCapabilities {
+		t.Fatal("read-only should mark ExplicitCapabilities")
+	}
 }
 
 func TestCapabilityFlagConflicts(t *testing.T) {

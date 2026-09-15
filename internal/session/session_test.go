@@ -54,6 +54,34 @@ func TestLoadModelReturnsLastRecordedModel(t *testing.T) {
 	}
 }
 
+func TestLoadRuntimePolicyPointers(t *testing.T) {
+	s := &Store{Dir: t.TempDir(), ID: "policy"}
+	if err := s.Append(Event{Type: "runtime", Model: "gpt-5-mini"}); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := s.LoadRuntime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.HasPolicy {
+		t.Fatal("legacy runtime event should not report policy")
+	}
+	f, ttrue := false, true
+	if err := s.Append(Event{
+		Type: "runtime", Model: "gpt-5-mini",
+		AllowWrite: &f, AllowShell: &f, ReadOnly: &ttrue,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rt, err = s.LoadRuntime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rt.HasPolicy || rt.AllowWrite || rt.AllowShell || !rt.ReadOnly {
+		t.Fatalf("policy=%+v", rt)
+	}
+}
+
 func TestLoadMessagesLastSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	s := &Store{Dir: dir, ID: "t1"}
