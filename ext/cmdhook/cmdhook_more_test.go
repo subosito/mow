@@ -136,7 +136,7 @@ func oneEntry(matcher, cmd string) string {
 }
 
 func TestRunDecisionVariants(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	payload := map[string]any{"hook_event_name": "PreToolUse"}
 
 	tests := []struct {
@@ -257,7 +257,7 @@ func TestRunCompositionAndOrdering(t *testing.T) {
 		]}
 	]}}`)
 	b := mustLoad(t, PluginConfig{Root: root})
-	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
+	out := b.run(t.Context(), "PreToolUse", "Bash", map[string]any{})
 	if !out.blocked || out.reason != "first reason" {
 		t.Fatalf("composition: %+v", out)
 	}
@@ -275,7 +275,7 @@ func TestRunCompositionAndOrdering(t *testing.T) {
 		{"matcher":"B.*","hooks":[{"type":"command","command":"`+c+`"}]}
 	]}}`)
 	b = mustLoad(t, PluginConfig{Root: root})
-	out = b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
+	out = b.run(t.Context(), "PreToolUse", "Bash", map[string]any{})
 	if !out.blocked || out.reason != "reason-A" {
 		t.Fatalf("ordering: %+v", out)
 	}
@@ -290,7 +290,7 @@ func TestRunUpdatedInput(t *testing.T) {
 		`echo '{"hookSpecificOutput":{"updatedInput":{"command":"safe -la","path":"/tmp"}}}'`)
 	writeHooksJSON(t, root, oneEntry("Bash", cmd))
 	b := mustLoad(t, PluginConfig{Root: root})
-	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
+	out := b.run(t.Context(), "PreToolUse", "Bash", map[string]any{})
 	if out.blocked {
 		t.Fatalf("unexpected block: %+v", out)
 	}
@@ -306,10 +306,10 @@ func TestRunMatcherSemantics(t *testing.T) {
 	// Regex matcher only fires on matching tool names.
 	writeHooksJSON(t, root, oneEntry("^(Bash|Edit)$", hit))
 	b := mustLoad(t, PluginConfig{Root: root})
-	if out := b.run(context.Background(), "PreToolUse", "Read", map[string]any{}); out.blocked {
+	if out := b.run(t.Context(), "PreToolUse", "Read", map[string]any{}); out.blocked {
 		t.Fatalf("Read should not match: %+v", out)
 	}
-	if out := b.run(context.Background(), "PreToolUse", "Edit", map[string]any{}); !out.blocked {
+	if out := b.run(t.Context(), "PreToolUse", "Edit", map[string]any{}); !out.blocked {
 		t.Fatalf("Edit should match: %+v", out)
 	}
 
@@ -319,7 +319,7 @@ func TestRunMatcherSemantics(t *testing.T) {
 		{"matcher":"Bash","hooks":[{"type":"command","command":"`+hit+`"}]}
 	]}}`)
 	b = mustLoad(t, PluginConfig{Root: root})
-	if out := b.run(context.Background(), "UserPromptSubmit", "", map[string]any{}); !out.blocked {
+	if out := b.run(t.Context(), "UserPromptSubmit", "", map[string]any{}); !out.blocked {
 		t.Fatalf("non-tool event with matcher should run: %+v", out)
 	}
 }
@@ -334,7 +334,7 @@ func TestTimeouts(t *testing.T) {
 		{"type":"command","command":"`+slow+`","timeout":1}
 	]}]}}`)
 	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 30})
-	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
+	out := b.run(t.Context(), "PreToolUse", "Bash", map[string]any{})
 	if out.blocked || len(out.contexts) != 0 {
 		t.Fatalf("timed-out hook must be non-blocking: %+v", out)
 	}
@@ -342,7 +342,7 @@ func TestTimeouts(t *testing.T) {
 	// Global timeout applies when the command has none.
 	writeHooksJSON(t, root, oneEntry("", slow))
 	b = mustLoad(t, PluginConfig{Root: root, TimeoutSec: 1})
-	out = b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
+	out = b.run(t.Context(), "PreToolUse", "Bash", map[string]any{})
 	if out.blocked {
 		t.Fatalf("global timeout should be non-blocking: %+v", out)
 	}
@@ -362,7 +362,7 @@ func TestClaudePluginRootAndEnv(t *testing.T) {
 	writeHooksJSON(t, root, oneEntry("", sh+" "+`'`+`dummy`+`'`)) // silence unused
 	writeHooksJSON(t, root, oneEntry("", sh))
 	b := mustLoad(t, PluginConfig{Root: root})
-	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{"cwd": root})
+	out := b.run(t.Context(), "PreToolUse", "Bash", map[string]any{"cwd": root})
 	if len(out.contexts) != 1 {
 		t.Fatalf("contexts: %+v", out)
 	}
@@ -376,7 +376,7 @@ func TestClaudePluginRootAndEnv(t *testing.T) {
 	cwdScript := scriptAt(t, root, "cwd.sh", `pwd > marker`)
 	writeHooksJSON(t, root, oneEntry("", cwdScript))
 	b = mustLoad(t, PluginConfig{Root: root})
-	b.run(context.Background(), "PreToolUse", "Bash", map[string]any{"cwd": root})
+	b.run(t.Context(), "PreToolUse", "Bash", map[string]any{"cwd": root})
 	raw, err := os.ReadFile(marker)
 	if err != nil {
 		t.Fatal(err)
@@ -438,6 +438,9 @@ func TestTruncate(t *testing.T) {
 	if got := truncate("exact", 5); got != "exact" {
 		t.Fatalf("got %q", got)
 	}
+	if got := truncate("aéb", 2); got != "a…" {
+		t.Fatalf("multibyte: %q", got)
+	}
 }
 
 // --- basePayload --------------------------------------------------------------
@@ -449,7 +452,7 @@ func TestBasePayload(t *testing.T) {
 	b := mustLoad(t, PluginConfig{Root: root})
 
 	// Without an engine: hook_event_name + cwd fallback from os.Getwd.
-	p := b.basePayload(context.Background(), "Stop")
+	p := b.basePayload(t.Context(), "Stop")
 	if p["hook_event_name"] != "Stop" {
 		t.Fatalf("payload: %+v", p)
 	}
@@ -466,7 +469,7 @@ func TestBasePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p = b.basePayload(mow.ContextWithEngine(context.Background(), eng), "PreToolUse")
+	p = b.basePayload(mow.ContextWithEngine(t.Context(), eng), "PreToolUse")
 	if p["cwd"] != eng.Workspace() {
 		t.Fatalf("cwd=%v want %q", p["cwd"], eng.Workspace())
 	}
@@ -483,7 +486,7 @@ func resetHooks(t *testing.T) {
 
 func driveAllEvents(t *testing.T, root string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// PreTool: Bash is blocked via exit-2; Write gets args rewritten.
 	for _, fn := range ext.PreToolHooks() {
@@ -632,7 +635,7 @@ func TestRegisterUserPromptAllow(t *testing.T) {
 		t.Fatalf("hooks = %d", len(ext.UserPromptHooks()))
 	}
 	// Non-blocking hook: contexts become SystemAppend.
-	d, err := ext.UserPromptHooks()[0](context.Background(),
+	d, err := ext.UserPromptHooks()[0](t.Context(),
 		ext.UserPromptEvent{Text: "hello", SessionID: "sess-9", Workspace: root})
 	if err != nil {
 		t.Fatal(err)
@@ -641,7 +644,7 @@ func TestRegisterUserPromptAllow(t *testing.T) {
 		t.Fatalf("SystemAppend: %+v", d)
 	}
 	// Without session/workspace fields the hook still runs.
-	d, err = ext.UserPromptHooks()[0](context.Background(), ext.UserPromptEvent{Text: "hi"})
+	d, err = ext.UserPromptHooks()[0](t.Context(), ext.UserPromptEvent{Text: "hi"})
 	if err != nil || !strings.Contains(d.SystemAppend, "be nice") {
 		t.Fatalf("bare prompt: %+v err=%v", d, err)
 	}
@@ -751,7 +754,7 @@ func TestFailClosedTimeoutBlocks(t *testing.T) {
 	slow := scriptAt(t, root, "slow.sh", `sleep 5`)
 	writeHooksJSON(t, root, oneEntry("", slow))
 	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 1, FailClosed: true})
-	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
+	out := b.run(t.Context(), "PreToolUse", "Bash", map[string]any{})
 	if !out.blocked {
 		t.Fatalf("fail_closed timeout must block: %+v", out)
 	}
@@ -833,7 +836,7 @@ func TestClaudePluginRootExpandedByShell(t *testing.T) {
 	scriptAt(t, root, "env.sh", `printf '%s' "$CLAUDE_PLUGIN_ROOT"`)
 	writeHooksJSON(t, root, oneEntry("", `\"${CLAUDE_PLUGIN_ROOT}/env.sh\"`))
 	b := mustLoad(t, PluginConfig{Root: root})
-	out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{"cwd": root})
+	out := b.run(t.Context(), "PreToolUse", "Bash", map[string]any{"cwd": root})
 	if len(out.contexts) != 1 || out.contexts[0] != root {
 		t.Fatalf("contexts = %+v want [%s]", out.contexts, root)
 	}

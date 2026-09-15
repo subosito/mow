@@ -195,7 +195,7 @@ func looksUnifiedDiff(s string) bool {
 		return false
 	}
 	hasHunk, hasBody := false, false
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.HasPrefix(line, "@@") {
 			hasHunk = true
 		} else if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {

@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -37,7 +36,7 @@ func TestToolMetadataAndRegistry(t *testing.T) {
 	p.ExtraRoots = []string{t.TempDir()}
 
 	allTools := Registry(p, []string{"read", "write", "edit", "glob", "grep", "bash"})
-	// media tools moved to packs/media (covered by packs/media tests).
+	// media tools live in an external extension.
 
 	for _, tool := range allTools {
 		if tool.Name() == "" {
@@ -75,7 +74,7 @@ func TestReadToolExtra(t *testing.T) {
 
 	t.Run("basic read", func(t *testing.T) {
 		t.Parallel()
-		res, err := rt.Exec(context.Background(), json.RawMessage(`{"path":"test.txt"}`))
+		res, err := rt.Exec(t.Context(), json.RawMessage(`{"path":"test.txt"}`))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -86,7 +85,7 @@ func TestReadToolExtra(t *testing.T) {
 
 	t.Run("path traversal protection", func(t *testing.T) {
 		t.Parallel()
-		_, err := rt.Exec(context.Background(), json.RawMessage(`{"path":"../../etc/passwd"}`))
+		_, err := rt.Exec(t.Context(), json.RawMessage(`{"path":"../../etc/passwd"}`))
 		if err == nil {
 			t.Fatal("expected path traversal error")
 		}
@@ -98,7 +97,7 @@ func TestReadToolExtra(t *testing.T) {
 		smallP.MaxReadBytes = 5
 		rtSmall := &readTool{p: smallP}
 
-		res, err := rtSmall.Exec(context.Background(), json.RawMessage(`{"path":"test.txt"}`))
+		res, err := rtSmall.Exec(t.Context(), json.RawMessage(`{"path":"test.txt"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -114,7 +113,7 @@ func TestReadToolExtra(t *testing.T) {
 		smallP.Hashline = true
 		rtSmall := &readTool{p: smallP}
 
-		res, err := rtSmall.Exec(context.Background(), json.RawMessage(`{"path":"test.txt"}`))
+		res, err := rtSmall.Exec(t.Context(), json.RawMessage(`{"path":"test.txt"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +128,7 @@ func TestReadToolExtra(t *testing.T) {
 		hashP.Hashline = true
 		rtHash := &readTool{p: hashP}
 
-		res, err := rtHash.Exec(context.Background(), json.RawMessage(`{"path":"test.txt"}`))
+		res, err := rtHash.Exec(t.Context(), json.RawMessage(`{"path":"test.txt"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +139,7 @@ func TestReadToolExtra(t *testing.T) {
 
 	t.Run("non-existent file nearby hint", func(t *testing.T) {
 		t.Parallel()
-		_, err := rt.Exec(context.Background(), json.RawMessage(`{"path":"tst.txt"}`))
+		_, err := rt.Exec(t.Context(), json.RawMessage(`{"path":"tst.txt"}`))
 		if err == nil || !strings.Contains(err.Error(), "no such file") {
 			t.Fatalf("expected no such file error with hint, got %v", err)
 		}
@@ -148,7 +147,7 @@ func TestReadToolExtra(t *testing.T) {
 
 	t.Run("invalid json args", func(t *testing.T) {
 		t.Parallel()
-		_, err := rt.Exec(context.Background(), json.RawMessage(`invalid json`))
+		_, err := rt.Exec(t.Context(), json.RawMessage(`invalid json`))
 		if err == nil {
 			t.Fatal("expected json unmarshal error")
 		}
@@ -164,7 +163,7 @@ func TestWriteToolExtra(t *testing.T) {
 		t.Parallel()
 		p := newTestPolicy(tmpDir) // write not allowed
 		wt := &writeTool{p: p}
-		_, err := wt.Exec(context.Background(), json.RawMessage(`{"path":"a.txt","content":"data"}`))
+		_, err := wt.Exec(t.Context(), json.RawMessage(`{"path":"a.txt","content":"data"}`))
 		if err == nil || !strings.Contains(err.Error(), "write disabled") {
 			t.Fatalf("expected tool write disabled error, got %v", err)
 		}
@@ -179,7 +178,7 @@ func TestWriteToolExtra(t *testing.T) {
 			"path":    "nested/sub/file.txt",
 			"content": "nested content",
 		})
-		res, err := wt.Exec(context.Background(), args)
+		res, err := wt.Exec(t.Context(), args)
 		if err != nil {
 			t.Fatalf("write failed: %v", err)
 		}
@@ -192,7 +191,7 @@ func TestWriteToolExtra(t *testing.T) {
 			"path":    "nested/sub/file.txt",
 			"content": "updated nested content",
 		})
-		res2, err := wt.Exec(context.Background(), args2)
+		res2, err := wt.Exec(t.Context(), args2)
 		if err != nil {
 			t.Fatalf("overwrite failed: %v", err)
 		}
@@ -210,7 +209,7 @@ func TestWriteToolExtra(t *testing.T) {
 			"path":    "../outside.txt",
 			"content": "bad",
 		})
-		_, err := wt.Exec(context.Background(), args)
+		_, err := wt.Exec(t.Context(), args)
 		if err == nil {
 			t.Fatal("expected path jail escape error")
 		}
@@ -236,7 +235,7 @@ func TestEditToolExtra(t *testing.T) {
 			"old_string": "foo = 1",
 			"new_string": "foo = 100",
 		})
-		res, err := et.Exec(context.Background(), args)
+		res, err := et.Exec(t.Context(), args)
 		if err != nil {
 			t.Fatalf("edit failed: %v", err)
 		}
@@ -252,7 +251,7 @@ func TestEditToolExtra(t *testing.T) {
 			"old_string": "nonexistent_string",
 			"new_string": "replacement",
 		})
-		_, err := et.Exec(context.Background(), args)
+		_, err := et.Exec(t.Context(), args)
 		if err == nil || !strings.Contains(err.Error(), "old_string not found") {
 			t.Fatalf("expected old_string not found error, got %v", err)
 		}
@@ -264,7 +263,7 @@ func TestEditToolExtra(t *testing.T) {
 			"path":       "edit_me.txt",
 			"new_string": "replacement",
 		})
-		_, err := et.Exec(context.Background(), args)
+		_, err := et.Exec(t.Context(), args)
 		if err == nil || !strings.Contains(err.Error(), "old_string or line_hash required") {
 			t.Fatalf("expected parameter required error, got %v", err)
 		}
@@ -285,7 +284,7 @@ func TestEditToolExtra(t *testing.T) {
 			"line_hash":  "abc",
 			"new_string": "replaced line",
 		})
-		if _, err := etHash.Exec(context.Background(), argsShort); err == nil {
+		if _, err := etHash.Exec(t.Context(), argsShort); err == nil {
 			t.Fatal("expected short hash error")
 		}
 
@@ -295,7 +294,7 @@ func TestEditToolExtra(t *testing.T) {
 			"line_hash":  "12345678",
 			"new_string": "replaced line",
 		})
-		if _, err := etHash.Exec(context.Background(), argsNotFound); err == nil {
+		if _, err := etHash.Exec(t.Context(), argsNotFound); err == nil {
 			t.Fatal("expected hash not found error")
 		}
 	})
@@ -314,7 +313,7 @@ func TestGlobToolExtra(t *testing.T) {
 
 	t.Run("match pattern", func(t *testing.T) {
 		t.Parallel()
-		res, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"*.go"}`))
+		res, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":"*.go"}`))
 		if err != nil {
 			t.Fatalf("glob failed: %v", err)
 		}
@@ -325,7 +324,7 @@ func TestGlobToolExtra(t *testing.T) {
 
 	t.Run("no matches", func(t *testing.T) {
 		t.Parallel()
-		res, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"*.txt"}`))
+		res, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":"*.txt"}`))
 		if err != nil {
 			t.Fatalf("glob failed: %v", err)
 		}
@@ -349,7 +348,7 @@ func TestGrepToolExtra(t *testing.T) {
 
 	t.Run("grep matching string", func(t *testing.T) {
 		t.Parallel()
-		res, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"targetFunc"}`))
+		res, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":"targetFunc"}`))
 		if err != nil {
 			t.Fatalf("grep failed: %v", err)
 		}
@@ -363,7 +362,7 @@ func TestGrepToolExtra(t *testing.T) {
 
 	t.Run("empty pattern error", func(t *testing.T) {
 		t.Parallel()
-		_, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":""}`))
+		_, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":""}`))
 		if err == nil || !strings.Contains(err.Error(), "pattern required") {
 			t.Fatalf("expected pattern required error, got %v", err)
 		}
@@ -379,7 +378,7 @@ func TestBashToolExtra(t *testing.T) {
 
 	t.Run("bash execution success", func(t *testing.T) {
 		t.Parallel()
-		res, err := bt.Exec(context.Background(), json.RawMessage(`{"command":"echo hello_bash"}`))
+		res, err := bt.Exec(t.Context(), json.RawMessage(`{"command":"echo hello_bash"}`))
 		if err != nil {
 			t.Fatalf("bash failed: %v", err)
 		}
@@ -390,7 +389,7 @@ func TestBashToolExtra(t *testing.T) {
 
 	t.Run("bash command required", func(t *testing.T) {
 		t.Parallel()
-		_, err := bt.Exec(context.Background(), json.RawMessage(`{"command":""}`))
+		_, err := bt.Exec(t.Context(), json.RawMessage(`{"command":""}`))
 		if err == nil || !strings.Contains(err.Error(), "command required") {
 			t.Fatalf("expected command required error, got %v", err)
 		}
@@ -400,7 +399,7 @@ func TestBashToolExtra(t *testing.T) {
 		t.Parallel()
 		deniedP := newTestPolicy(tmpDir) // bash disabled
 		btDenied := &bashTool{p: deniedP}
-		_, err := btDenied.Exec(context.Background(), json.RawMessage(`{"command":"echo test"}`))
+		_, err := btDenied.Exec(t.Context(), json.RawMessage(`{"command":"echo test"}`))
 		if err == nil || !strings.Contains(err.Error(), "shell disabled") {
 			t.Fatalf("expected tool bash disabled error, got %v", err)
 		}
@@ -413,7 +412,7 @@ func TestBashToolExtra(t *testing.T) {
 		btTimeout := &bashTool{p: pTimeout}
 
 		start := time.Now()
-		res, err := btTimeout.Exec(context.Background(), json.RawMessage(`{"command":"sleep 5"}`))
+		res, err := btTimeout.Exec(t.Context(), json.RawMessage(`{"command":"sleep 5"}`))
 		if err != nil {
 			t.Fatalf("unexpected exec error: %v", err)
 		}

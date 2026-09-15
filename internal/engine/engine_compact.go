@@ -99,10 +99,7 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 		maxChars = resolveMaxContextChars(configured, window)
 		if maxChars <= 0 && window > 0 && configured >= 0 {
 			resumeTok := agent.CompactResumeBudget(agent.CompactTokenBudget(window))
-			targetRaw = int(float64(resumeTok) * cpt)
-			if targetRaw < 1 {
-				targetRaw = 1
-			}
+			targetRaw = max(int(float64(resumeTok)*cpt), 1)
 		} else {
 			if maxChars <= 0 {
 				// Manual /compact still runs when auto-compact is off.
@@ -125,10 +122,7 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 		if len(prior) > 0 && prior[0].Role == "system" {
 			sysChars = agent.EstChars(prior[:1])
 		}
-		body := cur - sysChars
-		if body < 0 {
-			body = 0
-		}
+		body := max(cur-sysChars, 0)
 		const keepBodyPct = 20 // of non-system history
 		keepBody := body * keepBodyPct / 100
 		const minBody = 2_000

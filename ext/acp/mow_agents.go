@@ -3,7 +3,7 @@ package acp
 import (
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -142,7 +142,7 @@ func extraRootFlags(host *hostPeerPolicy) []string {
 	for _, r := range host.extraRootsRO {
 		add(r, true)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

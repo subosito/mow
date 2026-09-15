@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -101,11 +102,8 @@ func fenceEnv(env []string) []string {
 	out := []string{}
 	for _, kv := range env {
 		key, _, _ := strings.Cut(kv, "=")
-		for _, allowed := range envAllowlist {
-			if key == allowed {
-				out = append(out, kv)
-				break
-			}
+		if slices.Contains(envAllowlist, key) {
+			out = append(out, kv)
 		}
 	}
 	return out

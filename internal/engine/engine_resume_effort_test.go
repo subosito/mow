@@ -33,7 +33,7 @@ func TestResumeRestoresSessionEffort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng1.Prompt(context.Background(), "hello"); err != nil {
+	if _, err := eng1.Prompt(t.Context(), "hello"); err != nil {
 		t.Fatal(err)
 	}
 	eng1.Close()
@@ -136,7 +136,7 @@ func TestResumeLegacySessionKeepsConfiguredEffort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng1.Prompt(context.Background(), "hello"); err != nil {
+	if _, err := eng1.Prompt(t.Context(), "hello"); err != nil {
 		t.Fatal(err)
 	}
 	eng1.Close()
@@ -156,7 +156,7 @@ func TestResumeLegacySessionKeepsConfiguredEffort(t *testing.T) {
 		t.Fatal(err)
 	}
 	var kept []string
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.Contains(line, `"type":"runtime"`) || strings.Contains(line, `"type":"snapshot"`) {
 			continue
 		}
@@ -208,7 +208,7 @@ func TestResumeSessionEffortPersistedInRuntimeEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Prompt(context.Background(), "hello"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "hello"); err != nil {
 		t.Fatal(err)
 	}
 	eng.Close()

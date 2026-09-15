@@ -30,7 +30,7 @@ func BenchmarkCompactOptsLarge(b *testing.B) {
 	msgs := benchMessages(100_000)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		out := CompactOpts(msgs, 50_000, "", 24_000)
 		if len(out) == 0 {
 			b.Fatal("empty compact result")
@@ -58,13 +58,6 @@ func BenchmarkRatioCalibrator(b *testing.B) {
 		c.Observe(1000, 250)
 		_ = c.Ratio()
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 var _ = fmt.Sprintf // keep fmt import stable

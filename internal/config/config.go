@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,7 +111,7 @@ type LLMConfig struct {
 	// credentials, wire, headers, and default model onto live llm.*.
 	Providers map[string]LLMProviderProfile `yaml:"providers"`
 
-	// Media model ids moved to extensions.media (owned by packs/media).
+	// Media model ids live in extensions.media (external media extension).
 	// The media tools still share llm.base_url / api_key / headers — only the
 	// per-modality model ids are pack config.
 }
@@ -218,7 +219,7 @@ type SkillsConfig struct {
 //
 // Callers that need a workspace profile overlay should use LoadWithProfile.
 // Explicit Options/CLI applied by the engine after Load still win over all of
-// the above. For hermetic embedding (no $MOW_HOME), use LoadForEngine(false, …)
+// the above. For hermetic embedding (no $MOW_HOME), use LoadForEngineIn(false, …)
 // or LoadPaths.
 func Load(paths ...string) (*File, error) {
 	return LoadWithProfile("", paths...)
@@ -232,18 +233,13 @@ func LoadPaths(paths ...string) (*File, error) {
 	return loadConfig(false, "", "", paths...)
 }
 
-// LoadForEngine is the Engine construction entry: when loadUserConfig is true
-// it matches LoadWithProfile (CLI/host); when false it is hermetic like
-// LoadPaths plus an optional profile name is ignored (profiles are $MOW_HOME).
-func LoadForEngine(loadUserConfig bool, profile string, paths ...string) (*File, error) {
-	return LoadForEngineIn("", loadUserConfig, profile, paths...)
-}
-
-// LoadForEngineIn is LoadForEngine with the intended workspace fixed up front.
-// When workspace is non-empty it replaces the file/env `workspace` value
-// before trust is decided and the project .mow/config.yaml layer is merged,
-// so `--workspace other` (or a profile root) loads other's project config —
-// not the one under the process cwd. Empty keeps LoadForEngine behavior.
+// LoadForEngineIn is the Engine construction entry with the intended workspace
+// fixed up front. When loadUserConfig is true it matches LoadWithProfile
+// (CLI/host); when false it is hermetic like LoadPaths (profile is ignored —
+// profiles are $MOW_HOME). When workspace is non-empty it replaces the
+// file/env `workspace` value before trust is decided and the project
+// .mow/config.yaml layer is merged, so `--workspace other` (or a profile
+// root) loads other's project config — not the one under the process cwd.
 func LoadForEngineIn(workspace string, loadUserConfig bool, profile string, paths ...string) (*File, error) {
 	if !loadUserConfig {
 		profile = ""
@@ -782,9 +778,7 @@ func mergeLLM(dst *LLMConfig, o LLMConfig) {
 		if dst.Headers == nil {
 			dst.Headers = map[string]string{}
 		}
-		for k, v := range o.Headers {
-			dst.Headers[k] = v
-		}
+		maps.Copy(dst.Headers, o.Headers)
 	}
 	if len(o.NativeTools) > 0 {
 		// Replace, not append: a later layer saying "these tools" must be able

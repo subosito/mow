@@ -32,7 +32,7 @@ func TestCancelIsSilent(t *testing.T) {
 	writeHooksJSON(t, root, oneEntry("", slow))
 	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 30})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	var out outcome
 	start := time.Now()
 	logs := captureLogs(t, func() {
@@ -73,7 +73,7 @@ func TestAlreadyCancelledSkipsExec(t *testing.T) {
 	writeHooksJSON(t, root, oneEntry("", sh))
 	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 30})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	logs := captureLogs(t, func() {
@@ -98,7 +98,7 @@ func TestTimeoutIsStillReported(t *testing.T) {
 	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 1})
 
 	logs := captureLogs(t, func() {
-		if out := b.run(context.Background(), "PreToolUse", "Bash", map[string]any{}); out.blocked {
+		if out := b.run(t.Context(), "PreToolUse", "Bash", map[string]any{}); out.blocked {
 			t.Errorf("timed-out hook must be non-blocking: %+v", out)
 		}
 	})
@@ -115,7 +115,7 @@ func TestOrdinaryFailureStillWarns(t *testing.T) {
 	b := mustLoad(t, PluginConfig{Root: root, TimeoutSec: 30})
 
 	logs := captureLogs(t, func() {
-		b.run(context.Background(), "PreToolUse", "Bash", map[string]any{})
+		b.run(t.Context(), "PreToolUse", "Bash", map[string]any{})
 	})
 	if !strings.Contains(logs, "hook failed") {
 		t.Errorf("a genuinely failing hook must still warn:\n%s", logs)

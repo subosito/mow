@@ -8,7 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -187,7 +188,7 @@ type Command struct {
 	// DefaultInteractive: if true, used when mow is invoked with no args on a TTY.
 	// Only one pack should set this; last registration wins.
 	DefaultInteractive bool
-	// Layer is "ext" (core extension under ext/) or "pack" (optional packs/).
+	// Layer is "ext" (core extension under ext/) or "pack" (external module).
 	// Empty is treated as "ext" so older registrations stay in the Extensions
 	// help group.
 	Layer string
@@ -461,11 +462,7 @@ func IsExtensionActive(target string, currentTurn int) bool {
 func ListExtensions(currentTurn int) []ExtensionStatus {
 	mu.Lock()
 	defer mu.Unlock()
-	var keys []string
-	for k := range extInstances {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(extInstances))
 	out := make([]ExtensionStatus, 0, len(keys))
 	for _, k := range keys {
 		inst := extInstances[k]
@@ -872,7 +869,7 @@ func Commands() []Command {
 	mu.Lock()
 	defer mu.Unlock()
 	out := append([]Command(nil), commands...)
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b Command) int { return strings.Compare(a.Name, b.Name) })
 	return out
 }
 
@@ -892,9 +889,9 @@ func LookupCommand(name string) (Command, bool) {
 func DefaultInteractiveCommand() (Command, bool) {
 	mu.Lock()
 	defer mu.Unlock()
-	for i := len(commands) - 1; i >= 0; i-- {
-		if commands[i].DefaultInteractive {
-			return commands[i], true
+	for _, command := range slices.Backward(commands) {
+		if command.DefaultInteractive {
+			return command, true
 		}
 	}
 	return Command{}, false
@@ -939,7 +936,7 @@ func OptionalFeatures() []OptionalFeature {
 		out[i].Events = append([]string(nil), out[i].Events...)
 		out[i].Tools = append([]string(nil), out[i].Tools...)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	slices.SortFunc(out, func(a, b OptionalFeature) int { return strings.Compare(a.ID, b.ID) })
 	return out
 }
 
@@ -1070,8 +1067,7 @@ var setupMu sync.Mutex
 // Setup callbacks must not recursively construct another engine.
 func BeginSetup(ctx SetupContext) (release func(), err error) {
 	setupMu.Lock()
-	var once sync.Once
-	unlock := func() { once.Do(setupMu.Unlock) }
+	unlock := sync.OnceFunc(setupMu.Unlock)
 	returned := false
 	defer func() {
 		if !returned {

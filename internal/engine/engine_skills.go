@@ -2,7 +2,7 @@ package engine
 
 import (
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/subosito/mow/internal/agent"
@@ -56,7 +56,7 @@ func mergeSkillText(a, b string) string {
 	seen := map[string]bool{}
 	var out []string
 	for _, blob := range []string{a, b} {
-		for _, sec := range strings.Split(blob, "\n\n") {
+		for sec := range strings.SplitSeq(blob, "\n\n") {
 			sec = strings.TrimSpace(sec)
 			if sec == "" {
 				continue
@@ -135,7 +135,7 @@ func (e *Engine) ActivateSkills(names ...string) (activated, unknown []string) {
 			unknown = append(unknown, n)
 		}
 	}
-	sort.Strings(unknown)
+	slices.Sort(unknown)
 	if len(activated) == 0 {
 		return nil, unknown
 	}
@@ -158,7 +158,7 @@ func (e *Engine) ActivateSkills(names ...string) (activated, unknown []string) {
 	// Preserve the first-prompt selector and plugin defaults when activation
 	// happens before the first prompt. Keep manual selections in that merge.
 	e.explicitSkills = mergeSkillNames(e.explicitSkills, activated)
-	sort.Strings(activated)
+	slices.Sort(activated)
 	return activated, unknown
 }
 
@@ -197,9 +197,9 @@ func (e *Engine) SkillStatuses() map[string]string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	loaded := map[string]bool{}
-	for _, line := range strings.Split(e.skillsText, "\n") {
-		if strings.HasPrefix(line, "## skill: ") {
-			loaded[strings.ToLower(strings.TrimPrefix(line, "## skill: "))] = true
+	for line := range strings.SplitSeq(e.skillsText, "\n") {
+		if after, ok := strings.CutPrefix(line, "## skill: "); ok {
+			loaded[strings.ToLower(after)] = true
 		}
 	}
 	defaults := map[string]bool{}

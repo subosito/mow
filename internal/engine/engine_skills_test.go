@@ -54,7 +54,7 @@ func TestExplicitSkillsLoadAtStartup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Prompt(context.Background(), "unrelated prompt that mentions no skills"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "unrelated prompt that mentions no skills"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(sawSys, "DOCKER_SKILL_BODY") {
@@ -97,7 +97,7 @@ func TestExplicitSkillsMergeWithPromptSelected(t *testing.T) {
 		t.Fatal(err)
 	}
 	// "review" matches the prompt; "docker" is explicit; "private" matches neither.
-	if _, err := eng.Prompt(context.Background(), "please review this"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "please review this"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(sawSys, "DOCKER_SKILL_BODY") {
@@ -154,7 +154,7 @@ func TestExplicitSkillsDedupWithPromptMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Prompt(context.Background(), "docker help"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "docker help"); err != nil {
 		t.Fatal(err)
 	}
 	if c := strings.Count(sawSys, "## skill: docker"); c != 1 {
@@ -201,7 +201,7 @@ func TestExplicitSkillsSelectorOffNoDouble(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Prompt(context.Background(), "unrelated"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "unrelated"); err != nil {
 		t.Fatal(err)
 	}
 	if c := strings.Count(sawSys, "## skill: docker"); c != 1 {
@@ -255,7 +255,7 @@ func TestAgentsStandardSkillsAreFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Prompt(context.Background(), "hello"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "hello"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(sawSys, "STD_SHARED") {

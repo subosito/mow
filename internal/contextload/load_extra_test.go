@@ -43,9 +43,9 @@ func TestLoadHierarchy(t *testing.T) {
 	// Root instructions should come before deeper instructions
 	idxRoot := strings.Index(res, "Root AGENTS")
 	idxSubAgents := strings.Index(res, "Subchild AGENTS")
-	idxSubClaude := strings.Index(res, "Subchild CLAUDE")
+	found := strings.Contains(res, "Subchild CLAUDE")
 
-	if idxRoot < 0 || idxSubAgents < 0 || idxSubClaude < 0 {
+	if idxRoot < 0 || idxSubAgents < 0 || !found {
 		t.Fatalf("missing instruction parts in result:\n%s", res)
 	}
 

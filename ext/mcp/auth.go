@@ -459,7 +459,7 @@ func (t *tokenSource) authCodeAccessToken(ctx context.Context) (string, error) {
 		}
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /callback", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("state") != state {
 			http.Error(w, "state mismatch", http.StatusBadRequest)
 			fail(fmt.Errorf("mcp auth: state mismatch"))

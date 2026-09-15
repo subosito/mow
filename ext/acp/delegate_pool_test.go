@@ -34,7 +34,7 @@ func TestDelegateCwdAllowsEngineExtraRoot(t *testing.T) {
 		agents:    map[string]PeerSpec{"peer": {Name: "peer", Command: []string{"missing-peer"}, TimeoutSec: 1}},
 		workspace: workspace, peers: map[string]*peerSlot{},
 	}
-	ctx := mow.ContextWithEngine(context.Background(), eng)
+	ctx := mow.ContextWithEngine(t.Context(), eng)
 	_, err = tool.Exec(ctx, json.RawMessage(fmt.Sprintf(`{"agent":"peer","prompt":"hi","cwd":%q}`, extra)))
 	if err == nil {
 		t.Fatal("expected peer start failure")
@@ -188,16 +188,16 @@ func TestDelegateConcurrentSamePeer(t *testing.T) {
 	var wg sync.WaitGroup
 	replies := make([]string, n)
 	errs := make([]error, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			args, _ := json.Marshal(map[string]string{"agent": "fake", "prompt": fmt.Sprintf("p%d", i)})
-			replies[i], errs[i] = tool.Exec(context.Background(), args)
+			replies[i], errs[i] = tool.Exec(t.Context(), args)
 		}(i)
 	}
 	wg.Wait()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if errs[i] != nil {
 			t.Fatalf("call %d: %v", i, errs[i])
 		}

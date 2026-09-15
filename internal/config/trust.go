@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -28,12 +29,7 @@ func WorkspaceTrusted(workspace string) bool {
 	if !ok {
 		return false
 	}
-	for _, t := range TrustedWorkspaces() {
-		if t == ws {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(TrustedWorkspaces(), ws)
 }
 
 // TrustedWorkspaces returns the trust list (canonicalized, comments skipped).
@@ -57,7 +53,7 @@ func TrustedWorkspaces() []string {
 		return nil
 	}
 	var out []string
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -76,10 +72,8 @@ func TrustWorkspace(workspace string) error {
 		return fmt.Errorf("trust: cannot resolve workspace %q", workspace)
 	}
 	cur := TrustedWorkspaces()
-	for _, t := range cur {
-		if t == ws {
-			return nil
-		}
+	if slices.Contains(cur, ws) {
+		return nil
 	}
 	return writeTrusted(append(cur, ws))
 }

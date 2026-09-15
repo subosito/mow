@@ -61,7 +61,7 @@ func TestRunWithPriorMessages(t *testing.T) {
 func TestRunCompactionIsDurableAcrossTurns(t *testing.T) {
 	var prior []llm.Message
 	prior = append(prior, llm.Message{Role: "system", Content: "sys"})
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		prior = append(prior,
 			llm.Message{Role: "user", Content: strings.Repeat("u", 300)},
 			llm.Message{Role: "assistant", Content: strings.Repeat("a", 300)},
@@ -453,7 +453,6 @@ func TestParallelToolsRunConcurrently(t *testing.T) {
 	bothIn := make(chan struct{})
 	var tools []agent.Tool
 	for _, name := range []string{"a", "b"} {
-		name := name
 		tools = append(tools, &syncTool{
 			name: name,
 			fn: func(ctx context.Context) (string, error) {
@@ -881,20 +880,20 @@ func (t bigSpecTool) Exec(_ context.Context, _ json.RawMessage) (string, error) 
 // history that fits the budget is left alone.
 func TestCalibrationCountsToolOverhead(t *testing.T) {
 	tools := make([]agent.Tool, 0, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		tools = append(tools, bigSpecTool{name: fmt.Sprintf("big%d", i)})
 	}
 	// ~63K chars of history, under the 85K budget. ~41K chars of tool
 	// definitions ride along; billed at the same density the request totals
 	// ~26K tokens (history + tools together).
 	prior := []llm.Message{llm.Message{Role: "system", Content: "sys"}}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		prior = append(prior,
 			llm.Message{Role: "user", Content: strings.Repeat("u", 300)},
 			llm.Message{Role: "assistant", Content: strings.Repeat("a", 300)},
 		)
 	}
-	var compacted int32
+	var compacted atomic.Int32
 	turn := 0
 	chat := func(ctx context.Context, messages []llm.Message, specs []llm.ToolSpec) (llm.Message, error) {
 		turn++
@@ -923,7 +922,7 @@ func TestCalibrationCountsToolOverhead(t *testing.T) {
 		MaxToolResultChars: 24_000,
 		Hooks: agent.Hooks{PreCompact: []agent.PreCompactFunc{
 			func(ctx context.Context, e agent.PreCompactEvent) (agent.PreCompactDecision, error) {
-				atomic.AddInt32(&compacted, 1)
+				compacted.Add(1)
 				return agent.PreCompactDecision{}, nil
 			},
 		}},
@@ -931,7 +930,7 @@ func TestCalibrationCountsToolOverhead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := atomic.LoadInt32(&compacted); n > 0 {
+	if n := compacted.Load(); n > 0 {
 		t.Fatalf("compaction ran %d time(s) on an under-budget history — tool overhead not counted in calibration", n)
 	}
 }

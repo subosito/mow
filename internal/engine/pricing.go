@@ -211,10 +211,7 @@ func estimateCtxTokens(charsAfter int, charsPerToken float64) int {
 	if cpt > 8 {
 		cpt = 8
 	}
-	tok := int(float64(charsAfter)/cpt + 0.5)
-	if tok < 1 {
-		tok = 1
-	}
+	tok := max(int(float64(charsAfter)/cpt+0.5), 1)
 	return tok
 }
 

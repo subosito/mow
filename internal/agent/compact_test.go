@@ -12,7 +12,7 @@ import (
 func TestCompact(t *testing.T) {
 	var msgs []llm.Message
 	msgs = append(msgs, llm.Message{Role: "system", Content: "sys"})
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		msgs = append(msgs, llm.Message{Role: "user", Content: strings.Repeat("x", 100)})
 		msgs = append(msgs, llm.Message{Role: "assistant", Content: strings.Repeat("y", 100)})
 	}
@@ -69,7 +69,7 @@ func TestCompactTrimsHugeToolResults(t *testing.T) {
 func TestCompactDropsMiddle(t *testing.T) {
 	var msgs []llm.Message
 	msgs = append(msgs, llm.Message{Role: "system", Content: "sys"})
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		msgs = append(msgs, llm.Message{Role: "user", Content: strings.Repeat("u", 200)})
 		msgs = append(msgs, llm.Message{Role: "assistant", Content: strings.Repeat("a", 200)})
 	}
@@ -110,7 +110,7 @@ func TestCompactNoOrphanToolResults(t *testing.T) {
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "do the thing"},
 	}
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		msgs = append(msgs, llm.Message{
 			Role: "assistant",
 			ToolCalls: []llm.ToolCall{{ID: "id", Type: "function",
@@ -140,7 +140,7 @@ func TestCompactStubPreservesTask(t *testing.T) {
 		{Role: "assistant", Content: "hello"},
 		{Role: "user", Content: "Please fix the line_hash bug in tui.go and add a test"},
 	}
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		msgs = append(msgs, llm.Message{
 			Role: "assistant",
 			ToolCalls: []llm.ToolCall{{ID: "id", Type: "function",
@@ -185,35 +185,6 @@ func TestCompactStubPreservesTask(t *testing.T) {
 	}
 }
 
-func TestContextCharsBudgetScalesWithWindow(t *testing.T) {
-	if got := ContextCharsBudget(0, 0); got != 0 {
-		t.Fatalf("unknown window → %d", got)
-	}
-	// Default 0.75 ratio: 1M × 4 × 0.75 = 3M chars, hard-capped at 1.6M (~400k tok-eq).
-	got := ContextCharsBudget(1_000_000, 0)
-	if got != 1_600_000 {
-		t.Fatalf("1M @0.75 default: got %d want 1600000", got)
-	}
-	// Explicit lower ratio under the cap passes through.
-	if got := ContextCharsBudget(1_000_000, 0.3); got != 1_200_000 {
-		t.Fatalf("1M @0.3: got %d", got)
-	}
-	// Above the cap is clamped regardless of ratio.
-	if got := ContextCharsBudget(1_000_000, 0.55); got != 1_600_000 {
-		t.Fatalf("1M @0.55: got %d want 1600000 (hard cap)", got)
-	}
-	// Smaller window still usable.
-	if got := ContextCharsBudget(128_000, DefaultCompactRatio); got < 80_000 {
-		t.Fatalf("128k budget %d", got)
-	}
-	if ClampCompactRatio(0) != DefaultCompactRatio {
-		t.Fatal("zero ratio → default")
-	}
-	if ClampCompactRatio(0.1) != 0.3 || ClampCompactRatio(0.99) != 0.95 {
-		t.Fatal("clamp bounds")
-	}
-}
-
 func TestCompactPreservesTaskAndTools(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: "system", Content: "sys"},
@@ -226,7 +197,7 @@ func TestCompactPreservesTaskAndTools(t *testing.T) {
 		{Role: "assistant", Content: "found handlers"},
 	}
 	// Fill with noise so compact drops the middle.
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		msgs = append(msgs, llm.Message{Role: "user", Content: "ok continue"})
 		msgs = append(msgs, llm.Message{Role: "assistant", Content: strings.Repeat("x", 200)})
 	}
@@ -337,7 +308,7 @@ func TestCompactTieredAppliesPolicyCapUnderBudget(t *testing.T) {
 
 func TestCompactTieredEscalatesWithoutOrphans(t *testing.T) {
 	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "finish the task"}}
-	for i := 0; i < 35; i++ {
+	for i := range 35 {
 		id := fmt.Sprintf("call-%d", i)
 		msgs = append(msgs,
 			llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: id, Type: "function", Function: llm.FunctionCall{Name: "read", Arguments: `{}`}}}},
@@ -469,7 +440,7 @@ func TestApplyCompactSkipsPreCompactOnNoop(t *testing.T) {
 
 	// A history that can shrink still consults PreCompact and uses its summary.
 	big := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "task"}}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		big = append(big,
 			llm.Message{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{ID: "c", Function: llm.FunctionCall{Name: "read", Arguments: "{}"}}}},
 			llm.Message{Role: "tool", ToolCallID: "c", Content: strings.Repeat("x", 2_000)},
@@ -501,7 +472,7 @@ func TestApplyCompactSkipsPreCompactOnNoop(t *testing.T) {
 
 func TestApplyCompactSkipDecisionStillTrims(t *testing.T) {
 	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "task"}}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		msgs = append(msgs,
 			llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c", Function: llm.FunctionCall{Name: "read", Arguments: "{}"}}}},
 			llm.Message{Role: "tool", ToolCallID: "c", Content: strings.Repeat("x", 2_000)},

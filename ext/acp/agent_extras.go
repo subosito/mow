@@ -250,10 +250,7 @@ func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 		used := a.eng.ContextTokens()
 		lim := a.eng.Limits()
 		if lim.ContextWindow > 0 && used > lim.ContextWindow {
-			used = (used + 2) / 4
-			if used > lim.ContextWindow {
-				used = lim.ContextWindow
-			}
+			used = min((used+2)/4, lim.ContextWindow)
 		}
 		out := map[string]any{"tokens": used}
 		if lim.ContextWindow > 0 {

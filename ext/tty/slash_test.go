@@ -24,7 +24,7 @@ func TestSlashDispatchesRegistered(t *testing.T) {
 		},
 	})
 
-	handled, err := handleSlash(context.Background(), nil, "/ttyprobe --staged ./pkg")
+	handled, err := handleSlash(t.Context(), nil, "/ttyprobe --staged ./pkg")
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestSlashDispatchesRegistered(t *testing.T) {
 func TestSlashIgnoresUnknown(t *testing.T) {
 	// An unregistered token is not a command: it must fall through so the
 	// line reaches the model, because "/tmp is full" is a sentence.
-	handled, err := handleSlash(context.Background(), nil, "/tmp is full")
+	handled, err := handleSlash(t.Context(), nil, "/tmp is full")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestSlashPropagatesError(t *testing.T) {
 			return slash.Result{}, context.DeadlineExceeded
 		},
 	})
-	handled, err := handleSlash(context.Background(), nil, "/ttyfail")
+	handled, err := handleSlash(t.Context(), nil, "/ttyfail")
 	if !handled {
 		t.Fatal("command not handled")
 	}
@@ -85,7 +85,7 @@ func TestHelpListsRegisteredCommands(t *testing.T) {
 }
 
 func TestSlashEmptyLine(t *testing.T) {
-	handled, err := handleSlash(context.Background(), nil, "   ")
+	handled, err := handleSlash(t.Context(), nil, "   ")
 	if handled || err != nil {
 		t.Errorf("blank line: handled=%v err=%v, want false/nil", handled, err)
 	}

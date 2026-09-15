@@ -17,6 +17,7 @@ import (
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/internal/llm"
+	"github.com/subosito/mow/internal/redact"
 )
 
 // Client talks to a peer ACP agent (subprocess) as a *client*.
@@ -60,7 +61,7 @@ type Client struct {
 	started bool
 	// exited is closed by the reaper goroutine once the process exits.
 	exited chan struct{}
-	stderr *stderrRing
+	stderr *redact.Ring
 }
 
 // Start launches the peer process and completes initialize + session/new.
@@ -123,7 +124,7 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 // goroutine that owns cmd.Wait, so Alive() can observe process exit.
 func (c *Client) startProcess() error {
 	c.pending = map[string]chan response{}
-	c.stderr = newStderrRing(defaultStderrCap)
+	c.stderr = redact.NewRing(0)
 	// Long-lived peer: do not use CommandContext(ctx) so Prompt timeout does not kill the process.
 	// Own process group (unix) so Close can tear down npx/node/claude trees.
 	c.cmd = exec.Command(c.Command[0], c.Command[1:]...)
@@ -394,7 +395,7 @@ func (c *Client) stderrTail() string {
 	if c == nil || c.stderr == nil {
 		return ""
 	}
-	return c.stderr.tail()
+	return c.stderr.Tail()
 }
 
 func (c *Client) readLoop() {

@@ -30,11 +30,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/extcfg"
-	"github.com/subosito/mow/internal/strx"
 )
 
 // PluginConfig is one hooks.json plugin instance (tests and plugin discovery).
@@ -705,22 +705,13 @@ func rawOrEmpty(raw json.RawMessage) json.RawMessage {
 	return raw
 }
 
-// credentialEnv names variables that must never reach a hook subprocess.
-// Hooks come from ~/.claude/plugins and ~/.agents/plugins — third-party shell
-// snippets that inherit this process' environment. Same rule as the bash
-// tool's scrub: these exact names plus any *_API_KEY.
-var credentialEnv = map[string]bool{
-	"MOW_API_KEY":       true,
-	"OPENAI_API_KEY":    true,
-	"ANTHROPIC_API_KEY": true,
-}
-
-// scrubEnv returns env without the agent's own credentials.
+// scrubEnv drops hook-subprocess credentials: any variable ending in
+// _API_KEY (same rule as sandbox.ScrubEnv).
 func scrubEnv(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
-		if credentialEnv[k] || strings.HasSuffix(k, "_API_KEY") {
+		if strings.HasSuffix(k, "_API_KEY") {
 			continue
 		}
 		out = append(out, kv)
@@ -729,9 +720,23 @@ func scrubEnv(env []string) []string {
 }
 
 // firstNonEmpty keeps the value untrimmed: hook stderr is shown verbatim.
-func firstNonEmpty(vals ...string) string { return strx.FirstNonEmptyRaw(vals...) }
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // truncate clamps s to n bytes, cutting on a rune boundary. Callers pass hook
 // subprocess output, so a naive s[:n] can split a rune and log invalid UTF-8.
-// Every call site passes a positive n.
-func truncate(s string, n int) string { return strx.TruncateBytes(s, n) }
+func truncate(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
+}

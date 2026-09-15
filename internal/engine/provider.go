@@ -64,6 +64,16 @@ type Provider interface {
 	Chat(ctx context.Context, messages []Message, tools []ToolSpec, hooks ChatHooks) (Message, error)
 }
 
+// chatFuncProvider adapts Options.Chat onto the Provider seam. Hooks are
+// ignored: ChatFunc never streams.
+type chatFuncProvider struct {
+	fn ChatFunc
+}
+
+func (p chatFuncProvider) Chat(ctx context.Context, messages []Message, tools []ToolSpec, _ ChatHooks) (Message, error) {
+	return p.fn(ctx, messages, tools)
+}
+
 // ModelLister is an optional Provider extension backing Engine.ListModels.
 type ModelLister interface {
 	ListModels(ctx context.Context) ([]ModelInfo, error)

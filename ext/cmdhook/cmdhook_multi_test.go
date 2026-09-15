@@ -1,7 +1,6 @@
 package cmdhook
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,7 +48,7 @@ func TestMultiPluginConfigAndMinTurns(t *testing.T) {
 	}
 
 	// At turn 1: p1 active, p2 dormant
-	ctx1 := ext.WithTurn(context.Background(), 1)
+	ctx1 := ext.WithTurn(t.Context(), 1)
 	if !ext.IsExtensionActive("cmdhook:p1", 1) {
 		t.Error("p1 should be active at turn 1")
 	}
@@ -58,7 +57,7 @@ func TestMultiPluginConfigAndMinTurns(t *testing.T) {
 	}
 
 	// At turn 3: both active
-	ctx3 := ext.WithTurn(context.Background(), 3)
+	ctx3 := ext.WithTurn(t.Context(), 3)
 	if !ext.IsExtensionActive("cmdhook:p2", 3) {
 		t.Error("p2 should be active at turn 3")
 	}

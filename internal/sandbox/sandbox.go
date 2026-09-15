@@ -4,11 +4,12 @@
 package sandbox
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -135,18 +136,11 @@ var envAllowlist = []string{
 	"RUSTUP_HOME",
 }
 
-// credentialEnv lists environment variables that must never reach a child
-// shell. Suffix "_API_KEY" is dropped as well (see ScrubEnv).
-var credentialEnv = map[string]bool{
-	"MOW_API_KEY":       true,
-	"OPENAI_API_KEY":    true,
-	"ANTHROPIC_API_KEY": true,
-}
-
-// ScrubEnv returns env without the agent's own credentials: the exact names
-// in credentialEnv plus any variable ending in _API_KEY. Used by the
-// unsandboxed bash tool and proc_start so a child cannot read the key mow
-// itself authenticates with; Fence uses a stricter environment allowlist.
+// ScrubEnv returns env without the agent's own credentials: any variable
+// ending in _API_KEY (MOW_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, …).
+// Used by the unsandboxed bash tool and proc_start so a child cannot read
+// the key mow itself authenticates with; Fence uses a stricter environment
+// allowlist.
 //
 // allow lists exact variable names that survive the scrub anyway
 // (policy.env_passthrough) — a host opt-out for builds that genuinely need a
@@ -161,7 +155,7 @@ func ScrubEnv(env []string, allow ...string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
-		if !keep[k] && (credentialEnv[k] || strings.HasSuffix(k, "_API_KEY")) {
+		if !keep[k] && strings.HasSuffix(k, "_API_KEY") {
 			continue
 		}
 		out = append(out, kv)
@@ -196,7 +190,7 @@ func (b *rootLayout) binds() []Root {
 	for _, r := range b.Roots {
 		add(r.Path, r.ReadOnly)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	slices.SortFunc(out, func(a, b Root) int { return cmp.Compare(a.Path, b.Path) })
 	return out
 }
 

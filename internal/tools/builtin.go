@@ -14,7 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -122,7 +122,7 @@ func readLineBounded(br *bufio.Reader, max int) (string, error) {
 		if sb.Len() > max {
 			return "", errLineTooLong
 		}
-		if err == bufio.ErrBufferFull {
+		if errors.Is(err, bufio.ErrBufferFull) {
 			continue
 		}
 		return sb.String(), err
@@ -167,56 +167,6 @@ func isBinaryPrefix(b []byte) bool {
 		return true
 	}
 	return false
-}
-
-// renderRead is the in-memory paging helper used by tests. Exec uses
-// renderReadFrom so offset applies before the byte cap.
-func renderRead(content string, offset, limit int, hashline, byteCut bool, byteLim int) string {
-	lines := strings.Split(content, "\n")
-	trailingNL := false
-	if n := len(lines); n > 0 && lines[n-1] == "" {
-		lines = lines[:n-1]
-		trailingNL = true
-	}
-	total := len(lines)
-	start := offset - 1
-	if offset <= 0 {
-		start = 0
-	}
-	if start > total {
-		start = total
-	}
-	n := limit
-	if n <= 0 {
-		n = defaultReadLines
-	}
-	end := start + n
-	if end > total {
-		end = total
-	}
-	var b strings.Builder
-	for i := start; i < end; i++ {
-		if i > start {
-			b.WriteByte('\n')
-		}
-		if hashline {
-			fmt.Fprintf(&b, "%6d:%s|%s", i+1, lineHash(lines[i]), lines[i])
-		} else {
-			b.WriteString(lines[i])
-		}
-	}
-	if trailingNL && end == total && end > start {
-		b.WriteByte('\n')
-	}
-	switch {
-	case end < total:
-		fmt.Fprintf(&b, "\n…(showing lines %d-%d of %d; continue with offset=%d)", start+1, end, total, end+1)
-	case byteCut:
-		fmt.Fprintf(&b, "\n…(truncated at the %d-byte read cap)", byteLim)
-	case start > 0:
-		fmt.Fprintf(&b, "\n…(showing lines %d-%d of %d; end of file)", start+1, end, total)
-	}
-	return b.String()
 }
 
 // renderReadFrom pages by skipping offset-1 lines first, then collecting at
@@ -276,10 +226,7 @@ func renderReadFrom(r io.Reader, offset, limit int, hashline bool, byteLim int, 
 			more = true
 			byteCut = true
 			if len(lines) == 0 {
-				cut := byteLim
-				if cut > len(text) {
-					cut = len(text)
-				}
+				cut := min(byteLim, len(text))
 				for cut > 0 && cut < len(text) && !utf8.RuneStart(text[cut]) {
 					cut--
 				}
@@ -564,7 +511,7 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		if len(hh) > 8 {
 			hh = hh[:8]
 		}
-		for _, line := range strings.Split(s, "\n") {
+		for line := range strings.SplitSeq(s, "\n") {
 			if lineHash(line) == hh {
 				oldSnippet = line
 				break
@@ -621,10 +568,7 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	n := len(p)
 	b.total += n
 	if b.head.Len() < bashHeadBytes {
-		room := bashHeadBytes - b.head.Len()
-		if room > len(p) {
-			room = len(p)
-		}
+		room := min(bashHeadBytes-b.head.Len(), len(p))
 		_, _ = b.head.Write(p[:room])
 		p = p[room:]
 	}
@@ -733,10 +677,7 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		if t.p != nil && t.p.MaxBashTimeoutSec > 0 {
 			maxSec = t.p.MaxBashTimeoutSec
 		}
-		req := a.TimeoutSec
-		if req > maxSec {
-			req = maxSec
-		}
+		req := min(a.TimeoutSec, maxSec)
 		if d := time.Duration(req) * time.Second; d > timeout {
 			timeout = d
 		}
@@ -923,7 +864,7 @@ func overlapRestBytes(new, rest string) int {
 	}
 	consumed := 0
 	remain := rest
-	for i := 0; i < k; i++ {
+	for i := range k {
 		if !strings.HasPrefix(remain, rp[i]) {
 			return 0
 		}
@@ -941,10 +882,7 @@ func overlapRestBytes(new, rest string) int {
 }
 
 func overlappingLineCount(newParts, restParts []string) int {
-	max := len(newParts)
-	if len(restParts) < max {
-		max = len(restParts)
-	}
+	max := min(len(restParts), len(newParts))
 	for cand := max; cand >= 1; cand-- {
 		ok := true
 		for i := 0; i < cand; i++ {
@@ -1003,7 +941,7 @@ func stripHashlineChromeLine(line string) (string, bool) {
 	if j+8 >= len(line) {
 		return line, false
 	}
-	for k := 0; k < 8; k++ {
+	for k := range 8 {
 		c := line[j+k]
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 			return line, false
@@ -1021,7 +959,7 @@ func applyHashlineEdit(content, hash, newLine string) (string, error) {
 	if len(hash) != 8 {
 		return "", fmt.Errorf("hashline: hash must be 8 hex chars")
 	}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		c := hash[i]
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return "", fmt.Errorf("hashline: hash must be 8 hex chars")
@@ -1085,7 +1023,7 @@ func nearbyHint(path string) string {
 		pick = all
 		label = " — directory contains: "
 	}
-	sort.Strings(pick)
+	slices.Sort(pick)
 	extra := ""
 	if len(pick) > maxShow {
 		extra = fmt.Sprintf(" (+%d more)", len(pick)-maxShow)

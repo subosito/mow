@@ -14,8 +14,7 @@ const streamFinishGrace = 250 * time.Millisecond
 // Drain a small tail, bounded in both time and bytes. Cleanup failure must not
 // turn a complete model response into an error or delay a user cancellation.
 func finishStream(ctx context.Context, body io.ReadCloser, complete bool) {
-	var once sync.Once
-	closeBody := func() { once.Do(func() { _ = body.Close() }) }
+	closeBody := sync.OnceFunc(func() { _ = body.Close() })
 	defer closeBody()
 	if !complete || ctx.Err() != nil {
 		return

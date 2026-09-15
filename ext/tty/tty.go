@@ -259,11 +259,8 @@ func modelCmd(ctx context.Context, eng *mow.Engine, filter string) error {
 		fmt.Fprintf(os.Stderr, "models · current %s · wire %s\n", cur, wire)
 		const maxShow = 80
 		n := len(list)
-		show := n
-		if show > maxShow {
-			show = maxShow
-		}
-		for i := 0; i < show; i++ {
+		show := min(n, maxShow)
+		for i := range show {
 			info := list[i]
 			mark := "  "
 			if cur != "" && strings.EqualFold(info.ID, cur) {

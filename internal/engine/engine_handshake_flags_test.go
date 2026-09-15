@@ -137,7 +137,7 @@ func TestHandshakeFlagMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := eng.Prompt(context.Background(), "hello"); err != nil {
+		if _, err := eng.Prompt(t.Context(), "hello"); err != nil {
 			t.Fatal(err)
 		}
 		eng.Close()

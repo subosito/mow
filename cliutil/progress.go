@@ -82,14 +82,6 @@ func (f *EngineFlags) OptionsCLI() mow.Options {
 	return opt
 }
 
-// NewEngineCLI is NewEngine with OptionsCLI (tool progress + stream + verbose).
-func (f *EngineFlags) NewEngineCLI() (*mow.Engine, error) {
-	if err := f.Validate(); err != nil {
-		return nil, err
-	}
-	return mow.New(f.OptionsCLI())
-}
-
 // ToolProgressOnEvent prints short tool lines on stderr (not full slog dumps).
 // Includes a one-line target hint (path / pattern / command) and delegate
 // peer progress (delegate.progress / answer chunks when --stream).

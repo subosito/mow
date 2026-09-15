@@ -24,7 +24,7 @@ func TestSandboxBackendDefaultIsNone(t *testing.T) {
 		t.Error("SandboxEnabled should be false by default")
 	}
 	in := exec.Command("bash", "-lc", "echo hi")
-	out, err := p.WrapShell(in)
+	out, err := be.Wrap(in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,9 +57,6 @@ func TestSandboxUnknownModeErrors(t *testing.T) {
 	// The error must repeat, not memoize into a silent success.
 	if _, err := p.SandboxBackend(); err == nil {
 		t.Fatal("second call must also error")
-	}
-	if _, err := p.WrapShell(exec.Command("bash", "-lc", "echo hi")); err == nil {
-		t.Fatal("WrapShell must refuse rather than run unsandboxed")
 	}
 }
 

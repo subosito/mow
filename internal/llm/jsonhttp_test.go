@@ -32,7 +32,7 @@ func TestChatRetriesTransient200Error(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	msg, err := testClient(srv.URL, srv.Client()).Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+	msg, err := testClient(srv.URL, srv.Client()).Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("want success after retries, got %v", err)
 	}
@@ -52,7 +52,7 @@ func TestChatGivesUpOnPersistent200Error(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := testClient(srv.URL, srv.Client()).Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+	_, err := testClient(srv.URL, srv.Client()).Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil)
 	if err == nil {
 		t.Fatal("want error after exhausting attempts")
 	}
@@ -81,7 +81,7 @@ func TestChatDoesNotRetryPermanent200Error(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			_, err := testClient(srv.URL, srv.Client()).Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+			_, err := testClient(srv.URL, srv.Client()).Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil)
 			if err == nil {
 				t.Fatal("want error")
 			}
@@ -136,7 +136,7 @@ func TestChatBoundsAttemptWithUnboundedClient(t *testing.T) {
 	c := testClient(srv.URL, &http.Client{Timeout: 0}) // the easy host mistake
 	// Shrink the cap for the test by giving the parent ctx an earlier deadline;
 	// WithTimeout keeps whichever deadline is sooner.
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
 	defer cancel()
 
 	done := make(chan error, 1)

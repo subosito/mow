@@ -2,9 +2,10 @@ package engine
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -82,11 +83,7 @@ func (e *Engine) PluginCommands() []PluginCommand {
 			c.Name, c.Plugin, c.Description, c.Prompt = name, p.ID, spec.Description, spec.Prompt
 			commands[name] = c
 		}
-		names := make([]string, 0, len(commands))
-		for name := range commands {
-			names = append(names, name)
-		}
-		sort.Strings(names)
+		names := slices.Sorted(maps.Keys(commands))
 		for _, name := range names {
 			add(commands[name])
 		}

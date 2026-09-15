@@ -46,7 +46,7 @@ func TestStreamCompletionAllowsHTTPEOF(t *testing.T) {
 				}
 				defer srv.Close()
 				c := &Client{Wire: wire, BaseURL: srv.URL, APIKey: "test", Model: "gpt-5-mini", HTTP: srv.Client(), Stream: true}
-				msg, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{})
+				msg, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{})
 				if err != nil || msg.Content != "ok" || msg.Usage.OutputTokens != 1 {
 					t.Fatalf("message=%+v err=%v", msg, err)
 				}
@@ -79,7 +79,7 @@ func TestStreamFinishBoundsLingeringBody(t *testing.T) {
 	body := &blockedStreamBody{reading: make(chan struct{}), closed: make(chan struct{})}
 	done := make(chan struct{})
 	start := time.Now()
-	go func() { finishStream(context.Background(), body, true); close(done) }()
+	go func() { finishStream(t.Context(), body, true); close(done) }()
 	select {
 	case <-done:
 		if time.Since(start) < streamFinishGrace/2 {
@@ -93,7 +93,7 @@ func TestStreamFinishBoundsLingeringBody(t *testing.T) {
 
 func TestStreamFinishHonorsCancellation(t *testing.T) {
 	body := &blockedStreamBody{reading: make(chan struct{}), closed: make(chan struct{})}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan struct{})
 	go func() { finishStream(ctx, body, true); close(done) }()
@@ -122,7 +122,7 @@ func (b *countedStreamBody) Close() error { b.closes++; return nil }
 func TestStreamFinishByteLimitAndFailure(t *testing.T) {
 	for _, complete := range []bool{false, true} {
 		body := &countedStreamBody{Reader: strings.NewReader(strings.Repeat("x", 1<<20))}
-		finishStream(context.Background(), body, complete)
+		finishStream(t.Context(), body, complete)
 		want := 0
 		if complete {
 			want = 64 << 10

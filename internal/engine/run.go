@@ -6,9 +6,8 @@
 //   - Options.HTTPClient / Options.Logger — inject transport + structured logs
 //   - mow.Tool / Options.Tools / Hooks — integration types (per-engine tools)
 //   - RunResult.Usage / Event tokens — provider-reported token accounting
-//   - ext/* — stock Engine surfaces (cli, tty, acp)
-//   - packs/* — optional packs (mcp, focus, goal, …)
-//   - cliutil / extcfg — host helpers (not packs)
+//   - ext/* — stock Engine surfaces (cli, tty, acp, proc, cmdhook, mcp)
+//   - cliutil / extcfg — host helpers (not extensions)
 //
 // Implementation lives under internal/ (agent loop, llm, tools, config, …).
 package engine

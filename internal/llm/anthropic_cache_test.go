@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +18,7 @@ func captureAnthropic(t *testing.T, cache bool, reply string) map[string]any {
 	t.Cleanup(srv.Close)
 	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client(), PromptCache: cache}
 	tools := []ToolSpec{{Type: "function", Function: ToolSpecFunction{Name: "read"}}}
-	if _, err := c.Chat(context.Background(), []Message{
+	if _, err := c.Chat(t.Context(), []Message{
 		{Role: "system", Content: "big system prompt"},
 		{Role: "user", Content: "hello"},
 	}, tools); err != nil {
@@ -73,7 +72,7 @@ func TestAnthropicCacheTokensSummed(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client(), PromptCache: true}
-	msg, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "x"}}, nil)
+	msg, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "x"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +105,7 @@ func TestAnthropicBreakpointBudget(t *testing.T) {
 		SystemPrefix: []string{"prefix-a", "prefix-b", "prefix-c"},
 	}
 	tools := []ToolSpec{{Type: "function", Function: ToolSpecFunction{Name: "read"}}}
-	if _, err := c.Chat(context.Background(), []Message{
+	if _, err := c.Chat(t.Context(), []Message{
 		{Role: "system", Content: "big system prompt"},
 		{Role: "user", Content: "one"},
 		{Role: "assistant", Content: "two"},
@@ -196,7 +195,7 @@ func TestAnthropicStreamBreakpointBudget(t *testing.T) {
 		SystemPrefix: []string{"prefix-a", "prefix-b", "prefix-c"},
 	}
 	tools := []ToolSpec{{Type: "function", Function: ToolSpecFunction{Name: "read"}}}
-	if _, err := c.ChatWithStream(context.Background(), []Message{
+	if _, err := c.ChatWithStream(t.Context(), []Message{
 		{Role: "system", Content: "big system prompt"},
 		{Role: "user", Content: "one"},
 		{Role: "assistant", Content: "two"},

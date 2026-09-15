@@ -89,7 +89,7 @@ func TestModelConfigOptionShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &agentServer{eng: eng}
-	opt := a.modelConfigOption(context.Background())
+	opt := a.modelConfigOption(t.Context())
 	if opt == nil {
 		t.Fatal("expected model option")
 	}
@@ -110,7 +110,7 @@ func TestModelConfigOptionShape(t *testing.T) {
 			t.Fatalf("wire leaked into name: %q", name)
 		}
 	}
-	if err := a.applyModelConfig(context.Background(), "beta"); err != nil {
+	if err := a.applyModelConfig(t.Context(), "beta"); err != nil {
 		t.Fatal(err)
 	}
 	if eng.Model() != "beta" || prov.model != "beta" {
@@ -129,7 +129,7 @@ func TestSessionConfigOptionsIncludesModeModelEffort(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &agentServer{eng: eng}
-	opts := a.sessionConfigOptions(context.Background(), ModeAsk)
+	opts := a.sessionConfigOptions(t.Context(), ModeAsk)
 	if len(opts) < 2 {
 		t.Fatalf("opts=%v", opts)
 	}
@@ -194,7 +194,7 @@ func TestEffortConfigOptionPaintsCatalogDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = eng.Close() })
-	_, _ = eng.ListModels(context.Background())
+	_, _ = eng.ListModels(t.Context())
 	a := &agentServer{eng: eng}
 	opt := a.effortConfigOption()
 	if opt == nil {
@@ -258,7 +258,7 @@ func TestModelConfigIncludesCurrentWhenMissingFromCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &agentServer{eng: eng}
-	opt := a.modelConfigOption(context.Background())
+	opt := a.modelConfigOption(t.Context())
 	if opt["currentValue"] != "custom-local" {
 		t.Fatalf("%v", opt)
 	}

@@ -128,7 +128,7 @@ func TestWorkspaceProfileSkillsPrecedeTrustedWorkspaceSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer eng.Close()
-	if _, err := eng.Prompt(context.Background(), "review this change"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "review this change"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(system, "PROFILE_REVIEW_SKILL") || strings.Contains(system, "WORKSPACE_REVIEW_SKILL") {

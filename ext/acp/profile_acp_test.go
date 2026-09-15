@@ -243,7 +243,7 @@ func TestEngineProfileCapturesAcpDelegateModel(t *testing.T) {
 		t.Fatalf("registered deepseek --model=%q want %q ok=%v", gotModel, profileModel, ok)
 	}
 
-	if _, err := eng.Prompt(context.Background(), "inspect"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "inspect"); err != nil {
 		t.Fatal(err)
 	}
 	if !hasTool(tools, "delegate") {

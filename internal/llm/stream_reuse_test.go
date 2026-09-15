@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -45,7 +44,7 @@ func TestChatStreamHooksReusedDecoderNoStaleFields(t *testing.T) {
 
 	c := &Client{APIKey: "k", Model: "m", BaseURL: srv.URL}
 	var content, reasoning []string
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{
 		OnContent:   func(d string) { content = append(content, d) },
 		OnReasoning: func(d string) { reasoning = append(reasoning, d) },
 	})
@@ -93,7 +92,7 @@ func TestChatStreamHooksMalformedLineDoesNotPoisonStream(t *testing.T) {
 	srv := streamTestServer(t, body)
 
 	c := &Client{APIKey: "k", Model: "m", BaseURL: srv.URL}
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{})
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +110,7 @@ func TestChatStreamHooksMalformedLineDoesNotPoisonStream(t *testing.T) {
 func TestChatStreamHooksBuilderAccumulationOrder(t *testing.T) {
 	var lines []string
 	want := strings.Builder{}
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		part := string(rune('a' + i%26))
 		want.WriteString(part)
 		lines = append(lines, `data: {"choices":[{"delta":{"content":"`+part+`"}}]}`)
@@ -128,7 +127,7 @@ func TestChatStreamHooksBuilderAccumulationOrder(t *testing.T) {
 	srv := streamTestServer(t, sseBody(lines...))
 
 	c := &Client{APIKey: "k", Model: "m", BaseURL: srv.URL}
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{})
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +152,7 @@ func TestChatStreamHooksNoToolCallsStaysNil(t *testing.T) {
 		"data: [DONE]",
 	))
 	c := &Client{APIKey: "k", Model: "m", BaseURL: srv.URL}
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{})
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}

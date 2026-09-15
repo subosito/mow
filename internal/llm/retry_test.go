@@ -32,7 +32,7 @@ func TestDoWithRetrySucceedsAfter5xx(t *testing.T) {
 	defer srv.Close()
 
 	raw := []byte(`{"x":1}`)
-	req, err := newJSONRequest(context.Background(), http.MethodPost, srv.URL, raw)
+	req, err := newJSONRequest(t.Context(), http.MethodPost, srv.URL, raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestDoWithRetryHonoursRetryAfter(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	req, err := newJSONRequest(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := newJSONRequest(t.Context(), http.MethodGet, srv.URL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,12 +147,9 @@ func TestRetryDelayJitterBounds(t *testing.T) {
 	// Backoff must stay in [base, 1.25*base) so concurrent runs that hit the
 	// same 429 do not wake in lockstep.
 	for attempt := 1; attempt <= 4; attempt++ {
-		base := 200 * time.Millisecond * time.Duration(1<<(attempt-1))
-		if base > 5*time.Second {
-			base = 5 * time.Second
-		}
+		base := min(200*time.Millisecond*time.Duration(1<<(attempt-1)), 5*time.Second)
 		var distinct = map[time.Duration]bool{}
-		for i := 0; i < 200; i++ {
+		for range 200 {
 			d := retryDelay(attempt, nil)
 			if d < base || d >= base+base/4+time.Millisecond {
 				t.Fatalf("attempt %d: delay %v out of [%v,%v)", attempt, d, base, base+base/4)
@@ -349,7 +346,7 @@ func TestDoWithRetryNotifiesClassifiedBusy(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	req, err := newJSONRequest(context.Background(), http.MethodPost, srv.URL, []byte(`{"x":1}`))
+	req, err := newJSONRequest(t.Context(), http.MethodPost, srv.URL, []byte(`{"x":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}

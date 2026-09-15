@@ -337,8 +337,7 @@ func hostSafeTransport(err error) error {
 	if err == nil {
 		return nil
 	}
-	var already *hostSafeError
-	if errors.As(err, &already) {
+	if _, ok := errors.AsType[*hostSafeError](err); ok {
 		return err
 	}
 	if responseHeaderTimedOut(err) {
@@ -390,10 +389,7 @@ func retryDelay(attempt int, res *http.Response) time.Duration {
 	if res != nil {
 		if ra := strings.TrimSpace(res.Header.Get("Retry-After")); ra != "" {
 			if sec, err := strconv.Atoi(ra); err == nil && sec > 0 {
-				d := time.Duration(sec) * time.Second
-				if d > 30*time.Second {
-					d = 30 * time.Second
-				}
+				d := min(time.Duration(sec)*time.Second, 30*time.Second)
 				return d
 			}
 			if t, err := http.ParseTime(ra); err == nil {
@@ -411,10 +407,7 @@ func retryDelay(attempt int, res *http.Response) time.Duration {
 		attempt = 1
 	}
 	base := 200 * time.Millisecond
-	d := time.Duration(float64(base) * math.Pow(2, float64(attempt-1)))
-	if d > 5*time.Second {
-		d = 5 * time.Second
-	}
+	d := min(time.Duration(float64(base)*math.Pow(2, float64(attempt-1))), 5*time.Second)
 	return withJitter(d)
 }
 

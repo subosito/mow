@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -70,7 +69,7 @@ func TestChatOpenAISendsSystemPrefix(t *testing.T) {
 		SystemPrefix:       []string{"prefix-block-a"},
 		SystemPrefixModels: []string{"family-*"},
 	}
-	if _, err := c.Chat(context.Background(), []Message{
+	if _, err := c.Chat(t.Context(), []Message{
 		{Role: "system", Content: "main-system"},
 		{Role: "user", Content: "hi"},
 	}, nil); err != nil {

@@ -90,6 +90,10 @@ var (
 // Event types (loop / harness bus).
 const (
 	EventRunStart         = engine.EventRunStart
+	EventToken            = engine.EventToken
+	EventReasoning        = engine.EventReasoning
+	EventTurn             = engine.EventTurn
+	EventStall            = engine.EventStall
 	EventRunEnd           = engine.EventRunEnd
 	EventCompactStart     = engine.EventCompactStart
 	EventCompact          = engine.EventCompact

@@ -264,11 +264,11 @@ func firstLineOf(content, snippet string) int {
 	if snippet == "" {
 		return 1
 	}
-	idx := strings.Index(content, snippet)
-	if idx < 0 {
+	before, _, ok := strings.Cut(content, snippet)
+	if !ok {
 		return 1
 	}
-	return strings.Count(content[:idx], "\n") + 1
+	return strings.Count(before, "\n") + 1
 }
 
 func splitLines(s string) []string {
@@ -286,11 +286,8 @@ func splitLines(s string) []string {
 
 func writePrefixed(b *strings.Builder, prefix string, lines []string, limit int) {
 	n := len(lines)
-	show := n
-	if show > limit {
-		show = limit
-	}
-	for i := 0; i < show; i++ {
+	show := min(n, limit)
+	for i := range show {
 		b.WriteString(prefix)
 		b.WriteString(lines[i])
 		b.WriteByte('\n')

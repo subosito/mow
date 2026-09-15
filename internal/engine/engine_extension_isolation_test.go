@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -103,13 +104,7 @@ func TestNewDefaultRunsBeforeNewAndExtTools(t *testing.T) {
 	if len(ext.Tools()) != 1 {
 		t.Fatalf("ext.Tools() = %d want 1", len(ext.Tools()))
 	}
-	found := false
-	for _, name := range specsSeen {
-		if name == "visible_ext" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(specsSeen, "visible_ext")
 	if !found {
 		t.Fatalf("extension tool not merged: specs=%v", specsSeen)
 	}

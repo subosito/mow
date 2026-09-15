@@ -36,7 +36,7 @@ func TestPromptEventsRunLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := eng.Prompt(context.Background(), "hi")
+	res, err := eng.Prompt(t.Context(), "hi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestCancelInFlightPrompt(t *testing.T) {
 	done := make(chan mow.RunResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		res, err := eng.Prompt(context.Background(), "block")
+		res, err := eng.Prompt(t.Context(), "block")
 		done <- res
 		errCh <- err
 	}()
@@ -110,14 +110,14 @@ func TestOnEventFanOut(t *testing.T) {
 			b++
 		}
 	})
-	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "hi"); err != nil {
 		t.Fatal(err)
 	}
 	if a != 1 || b != 1 {
 		t.Fatalf("a=%d b=%d want both 1", a, b)
 	}
 	unsub()
-	if _, err := eng.Prompt(context.Background(), "again"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "again"); err != nil {
 		t.Fatal(err)
 	}
 	if a != 2 || b != 1 {
@@ -141,7 +141,7 @@ func TestEngineFromContextDuringPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "hi"); err != nil {
 		t.Fatal(err)
 	}
 	if !saw {
@@ -210,7 +210,7 @@ func TestPromptModelWaitActiveEvents(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := eng.Prompt(context.Background(), "hi")
+		_, err := eng.Prompt(t.Context(), "hi")
 		done <- err
 	}()
 	<-inChat
@@ -300,7 +300,7 @@ func TestPromptModelWaitActiveOnFirstToken(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := eng.Prompt(context.Background(), "hi")
+		_, err := eng.Prompt(t.Context(), "hi")
 		done <- err
 	}()
 	<-p.inChat
@@ -340,7 +340,7 @@ func TestPromptModelWaitNoActiveOnError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = eng.Prompt(context.Background(), "hi")
+	_, err = eng.Prompt(t.Context(), "hi")
 	if err == nil {
 		t.Fatal("expected chat error")
 	}
@@ -413,7 +413,7 @@ func TestPromptModelActiveOnUpstreamFrame(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := eng.Prompt(context.Background(), "hi")
+		_, err := eng.Prompt(t.Context(), "hi")
 		done <- err
 	}()
 	<-p.inChat
@@ -473,7 +473,7 @@ func TestPromptModelRetryEventOn429(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = eng.Close() })
 
-	res, err := eng.Prompt(context.Background(), "hi")
+	res, err := eng.Prompt(t.Context(), "hi")
 	if err != nil {
 		t.Fatal(err)
 	}

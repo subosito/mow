@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 )
 
@@ -32,10 +33,8 @@ func effectivePermissionMode(spec PeerSpec) string {
 	if spec.native() {
 		return PermissionAllow
 	}
-	for _, a := range spec.Command {
-		if a == "--force" {
-			return PermissionAllow
-		}
+	if slices.Contains(spec.Command, "--force") {
+		return PermissionAllow
 	}
 	return PermissionReject
 }

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -570,10 +571,15 @@ func New(opt Options) (*Engine, error) {
 			_ = e.Close()
 		}
 	}()
+	prov := opt.Provider
+	if prov == nil && opt.Chat != nil {
+		prov = chatFuncProvider{fn: opt.Chat}
+	}
 	switch {
-	case opt.Provider != nil:
-		prov := opt.Provider
-		e.provider = prov
+	case prov != nil:
+		// Only a real Options.Provider is stored: Chat inject keeps e.provider
+		// nil so SetModel / session restore retain Chat-inject semantics.
+		e.provider = opt.Provider
 		e.chat = func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
 			// Hooks are read per call so SetOnToken/Prompt wrappers apply to
 			// custom providers exactly like the built-in client.
@@ -593,19 +599,7 @@ func New(opt Options) (*Engine, error) {
 			}
 			return toInternalMessage(out), nil
 		}
-	case opt.Chat != nil:
-		inner := adaptChat(opt.Chat)
-		e.chat = func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
-			msg, err := inner(ctx, messages, tools)
-			if err == nil && msg.Usage.InputTokens > 0 {
-				e.mu.Lock()
-				e.lastProviderTokens = msg.Usage.InputTokens
-				e.lastCtxEstimate = 0
-				e.mu.Unlock()
-			}
-			return msg, err
-		}
-		if e.cfg != nil && strings.TrimSpace(opt.Model) != "" {
+		if opt.Provider == nil && e.cfg != nil && strings.TrimSpace(opt.Model) != "" {
 			e.cfg.LLM.Model = strings.TrimSpace(opt.Model)
 		}
 	default:
@@ -1060,9 +1054,7 @@ func (e *Engine) Transcript() []Message {
 	if len(e.transcript) == 0 {
 		return nil
 	}
-	out := make([]Message, len(e.transcript))
-	copy(out, e.transcript)
-	return out
+	return slices.Clone(e.transcript)
 }
 
 // Messages returns the full last agent-loop history (roles include tool), after
@@ -1112,8 +1104,6 @@ func (e *Engine) EnvPassthrough() []string {
 	return append([]string(nil), e.pol.EnvPassthrough...)
 }
 
-func boolPtr(v bool) *bool { return &v }
-
 func sessionPolicyEvent(e *Engine, model, wire, effort string) session.Event {
 	ev := session.Event{Type: "runtime", Model: model, Wire: wire, Effort: effort}
 	if e == nil {
@@ -1125,9 +1115,9 @@ func sessionPolicyEvent(e *Engine, model, wire, effort string) session.Event {
 		as = e.pol.AllowShell
 		ro = e.pol.ReadOnly || e.opt.DisableWrite || e.opt.DisableShell
 	}
-	ev.AllowWrite = boolPtr(aw)
-	ev.AllowShell = boolPtr(as)
-	ev.ReadOnly = boolPtr(ro)
+	ev.AllowWrite = new(aw)
+	ev.AllowShell = new(as)
+	ev.ReadOnly = new(ro)
 	return ev
 }
 

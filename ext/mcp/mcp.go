@@ -18,10 +18,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,6 +35,7 @@ import (
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/extcfg"
+	"github.com/subosito/mow/internal/redact"
 )
 
 // ServerConfig is one MCP server (stdio or streamable HTTP).
@@ -95,11 +97,7 @@ func withCallTimeout(ctx context.Context, d time.Duration) (context.Context, con
 // resolved merges both config forms into a name-ordered server list.
 func (c Config) resolved() []ServerConfig {
 	var out []ServerConfig
-	names := make([]string, 0, len(c.MCPServers))
-	for name := range c.MCPServers {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(c.MCPServers))
 	for _, name := range names {
 		s := c.MCPServers[name]
 		if strings.TrimSpace(s.Name) == "" {
@@ -302,9 +300,7 @@ func pluginMCPEnv(pluginRoot string, extra map[string]string) map[string]string 
 			env["CLAUDE_CONFIG_DIR"] = home
 		}
 	}
-	for k, v := range extra {
-		env[k] = v
-	}
+	maps.Copy(env, extra)
 	return env
 }
 
@@ -535,11 +531,11 @@ func isTransportErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	var exitErr *exec.ExitError
+	_, isExit := errors.AsType[*exec.ExitError](err)
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.Is(err, io.ErrClosedPipe) || errors.Is(err, os.ErrClosed) ||
 		errors.Is(err, syscall.EPIPE) || errors.Is(err, errLineExceeds) ||
-		errors.As(err, &exitErr)
+		isExit
 }
 
 // processPID is the OS pid captured at cmd.Start, or 0 if no client is live.
@@ -557,7 +553,7 @@ type client struct {
 	pid       int // OS pid at cmd.Start; stable identity for the live process
 	stdin     io.WriteCloser
 	stdout    *bufio.Reader
-	stderr    *stderrRing
+	stderr    *redact.Ring
 	mu        sync.Mutex // guards stdin writes
 	semOnce   sync.Once
 	callSem   chan struct{} // capacity 1: one request/response exchange on stdout at a time
@@ -582,7 +578,7 @@ func startServer(s ServerConfig) (*client, error) {
 	if err != nil {
 		return nil, err
 	}
-	errOut := newStderrRing(maxStderrRetain)
+	errOut := redact.NewRing(maxStderrRetain)
 	cmd.Stderr = errOut
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -600,7 +596,7 @@ func startServer(s ServerConfig) (*client, error) {
 		"clientInfo":      map[string]any{"name": "mow", "version": mow.Version},
 	})
 	if err != nil {
-		tail := c.stderr.tail()
+		tail := c.stderr.Tail()
 		_ = c.Close()
 		return nil, appendStderrHint(err, tail)
 	}
@@ -609,7 +605,7 @@ func startServer(s ServerConfig) (*client, error) {
 	// initializing state and every later call would block or fail with a
 	// confusing error instead of naming the real cause.
 	if err := c.notify("notifications/initialized", map[string]any{}); err != nil {
-		tail := c.stderr.tail()
+		tail := c.stderr.Tail()
 		_ = c.Close()
 		return nil, appendStderrHint(fmt.Errorf("initialized notification: %w", err), tail)
 	}

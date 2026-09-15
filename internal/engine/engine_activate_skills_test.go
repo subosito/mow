@@ -75,7 +75,7 @@ func TestActivateSkillsLoadsForSubsequentTurns(t *testing.T) {
 		t.Errorf("activated=%v want 2 names", activated)
 	}
 	// Subsequent prompt must see the activated skills.
-	if _, err := eng.Prompt(context.Background(), "unrelated prompt"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "unrelated prompt"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(sawSys, "DOCKER_SKILL_BODY") {
@@ -111,12 +111,12 @@ func TestActivateSkillsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Prompt(context.Background(), "docker help"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "docker help"); err != nil {
 		t.Fatal(err)
 	}
 	// 'docker' was prompt-matched; activating it again should not duplicate.
 	eng.ActivateSkills("docker")
-	if _, err := eng.Prompt(context.Background(), "more help"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "more help"); err != nil {
 		t.Fatal(err)
 	}
 	if c := strings.Count(sawSys, "## skill: docker"); c != 1 {
@@ -151,11 +151,11 @@ func TestActivateSkillsPreservesExplicit(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Run a prompt so explicit skills load, then activate 'go'.
-	if _, err := eng.Prompt(context.Background(), "unrelated"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "unrelated"); err != nil {
 		t.Fatal(err)
 	}
 	eng.ActivateSkills("go")
-	if _, err := eng.Prompt(context.Background(), "next"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "next"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(sawSys, "DOCKER_SKILL_BODY") {
@@ -215,13 +215,13 @@ func TestActivateSkillsConcurrentWithPrompt(t *testing.T) {
 	// One goroutine repeatedly activates skills.
 	go func() {
 		defer close(done)
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			eng.ActivateSkills("docker", "go", "review")
 		}
 	}()
 	// Main goroutine drives prompts concurrently.
-	for i := 0; i < 20; i++ {
-		_, _ = eng.Prompt(context.Background(), "do a thing")
+	for range 20 {
+		_, _ = eng.Prompt(t.Context(), "do a thing")
 	}
 	<-done
 }

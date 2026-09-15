@@ -130,7 +130,7 @@ func TestPreCompactSummary(t *testing.T) {
 	}
 	var prior []llm.Message
 	prior = append(prior, llm.Message{Role: "system", Content: "sys"})
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		prior = append(prior, llm.Message{Role: "user", Content: strings.Repeat("x", 80)})
 		prior = append(prior, llm.Message{Role: "assistant", Content: strings.Repeat("y", 80)})
 	}

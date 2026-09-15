@@ -46,7 +46,7 @@ func TestEngineHooksUserPromptAndStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := eng.Prompt(context.Background(), "hello")
+	res, err := eng.Prompt(t.Context(), "hello")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestEngineOptionsPreToolDeny(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := eng.Prompt(context.Background(), "hi")
+	res, err := eng.Prompt(t.Context(), "hi")
 	if err != nil {
 		t.Fatal(err)
 	}

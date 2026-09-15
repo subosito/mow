@@ -75,7 +75,7 @@ func TestPromptEndDropsEnginePeer(t *testing.T) {
 			tool.dropPeers()
 		}
 	})
-	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 	assertProcessGone(t, parent, "peer after Prompt")
@@ -252,9 +252,9 @@ func parentPID(pid int) int {
 	if err != nil {
 		return 0
 	}
-	for _, line := range strings.Split(string(b), "\n") {
-		if strings.HasPrefix(line, "PPid:") {
-			n, _ := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "PPid:")))
+	for line := range strings.SplitSeq(string(b), "\n") {
+		if after, ok := strings.CutPrefix(line, "PPid:"); ok {
+			n, _ := strconv.Atoi(strings.TrimSpace(after))
 			return n
 		}
 	}

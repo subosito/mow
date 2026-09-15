@@ -31,7 +31,7 @@ func TestAnthropicStreamToolAfterText(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client()}
-	msg, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	msg, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnContent: func(string) {},
 	})
 	if err != nil {
@@ -65,7 +65,7 @@ func TestAnthropicStreamToolsKeepOrder(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client()}
-	msg, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	msg, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnContent: func(string) {},
 	})
 	if err != nil {
@@ -99,7 +99,7 @@ func TestAnthropicStreamMaxTokensStopSurfaced(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client()}
-	msg, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	msg, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnContent: func(string) {},
 	})
 	if err != nil {
@@ -137,7 +137,7 @@ func TestAnthropicStreamActivitySkipsPing(t *testing.T) {
 
 	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client()}
 	var activityN int
-	msg, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	msg, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnActivity: func() { activityN++ },
 	})
 	if err != nil {
@@ -168,7 +168,7 @@ func TestAnthropicStreamActivitySilentOnPingOnlyStream(t *testing.T) {
 
 	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client()}
 	var activityN int
-	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	_, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnActivity: func() { activityN++ },
 	})
 	// The connection dropped before message_stop: that is a failed call, not
@@ -197,7 +197,7 @@ func TestAnthropicStreamFailsOnEOFBeforeMessageStop(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
-	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	_, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if !errors.Is(err, errStreamIncomplete) {
 		t.Fatalf("err=%v want errStreamIncomplete", err)
 	}
@@ -222,10 +222,10 @@ func TestAnthropicAuthHeadersOnBothPaths(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client()}
-	if _, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{OnContent: func(string) {}}); err != nil {
+	if _, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{OnContent: func(string) {}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "x"}}, nil); err != nil {
+	if _, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "x"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got[0].Get("Accept") != "text/event-stream" || got[1].Get("Accept") == "text/event-stream" {
@@ -259,7 +259,7 @@ func TestAnthropicStreamReturnsAtMessageStopWithoutEOF(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	start := time.Now()
 	msg, err := c.ChatWithStream(ctx, []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})

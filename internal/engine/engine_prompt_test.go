@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -39,7 +40,7 @@ func TestPromptReadOnlyDeniesWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = eng.PromptWith(context.Background(), "write a file", mow.PromptOpts{ReadOnly: true})
+	_, err = eng.PromptWith(t.Context(), "write a file", mow.PromptOpts{ReadOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestPromptReadOnlyOmitsPowerToolsFromSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.PromptWith(context.Background(), "inspect", mow.PromptOpts{ReadOnly: true}); err != nil {
+	if _, err := eng.PromptWith(t.Context(), "inspect", mow.PromptOpts{ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(specs, ",")
@@ -76,13 +77,7 @@ func TestPromptReadOnlyOmitsPowerToolsFromSpecs(t *testing.T) {
 			}
 		}
 	}
-	hasRead := false
-	for _, got := range specs {
-		if got == "read" {
-			hasRead = true
-			break
-		}
-	}
+	hasRead := slices.Contains(specs, "read")
 	if !hasRead {
 		t.Fatalf("read-only prompt dropped read: %s", joined)
 	}

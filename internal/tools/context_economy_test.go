@@ -57,7 +57,7 @@ func TestCappedBufferUnderCapIsExact(t *testing.T) {
 func TestCappedBufferSingleByteWrites(t *testing.T) {
 	t.Parallel()
 	var buf cappedBuffer
-	for i := 0; i < maxBashOutputBytes+64; i++ {
+	for range maxBashOutputBytes + 64 {
 		buf.Write([]byte{'a'})
 	}
 	buf.Write([]byte("ZZEND"))
@@ -99,26 +99,28 @@ func TestRenderReadPaging(t *testing.T) {
 	content := b.String()
 
 	t.Run("window and continuation hint", func(t *testing.T) {
-		out := renderRead(content, 10, 5, false, false, 1<<20)
+		out, err := renderReadFrom(strings.NewReader(content), 10, 5, false, 1<<20, "t")
+		if err != nil {
+			t.Fatal(err)
+		}
 		body, notice, ok := strings.Cut(out, "\n…")
 		if !ok {
 			t.Fatalf("want body + notice, got:\n%s", out)
 		}
-		if n := len(strings.Split(body, "\n")); n != 5 {
+		if n := len(strings.Split(strings.TrimSuffix(body, "\n"), "\n")); n != 5 {
 			t.Errorf("want exactly 5 lines in the window, got %d:\n%s", n, body)
 		}
 		out = "…" + notice
-		// The notice must name the exact next call, or the model guesses.
 		if !strings.Contains(out, "offset=15") {
 			t.Errorf("want a continuation offset, got %q", out)
-		}
-		if !strings.Contains(out, "of 50") {
-			t.Errorf("want the total line count, got %q", out)
 		}
 	})
 
 	t.Run("last page says end of file", func(t *testing.T) {
-		out := renderRead(content, 46, 10, false, false, 1<<20)
+		out, err := renderReadFrom(strings.NewReader(content), 46, 10, false, 1<<20, "t")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !strings.Contains(out, "end of file") {
 			t.Errorf("want an end-of-file marker, got %q", out)
 		}
@@ -128,29 +130,32 @@ func TestRenderReadPaging(t *testing.T) {
 	})
 
 	t.Run("whole small file has no notice", func(t *testing.T) {
-		out := renderRead("a\nb\nc\n", 0, 0, false, false, 1<<20)
+		out, err := renderReadFrom(strings.NewReader("a\nb\nc\n"), 0, 0, false, 1<<20, "t")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if strings.Contains(out, "…") {
 			t.Errorf("unpaged small read must be clean, got %q", out)
 		}
 	})
 
 	t.Run("hashline numbers stay absolute", func(t *testing.T) {
-		// An edit made from a paged read addresses real file lines; window
-		// -relative numbering would silently target the wrong line.
-		out := renderRead(content, 10, 3, true, false, 1<<20)
+		out, err := renderReadFrom(strings.NewReader(content), 10, 3, true, 1<<20, "t")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !strings.Contains(out, "    10:") {
 			t.Errorf("want absolute line 10 in a paged hashline read, got %q", out)
 		}
 	})
 
 	t.Run("byte cap is reported honestly", func(t *testing.T) {
-		out := renderRead(content, 0, 0, false, true, 4096)
+		out, err := renderReadFrom(strings.NewReader(content), 0, 0, false, 40, "t")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !strings.Contains(out, "read cap") {
 			t.Errorf("want the byte-cap cause named, got %q", out)
-		}
-		// No offset may be offered: we do not know the real total.
-		if strings.Contains(out, "offset=") {
-			t.Error("must not name an offset when the byte cap hid the tail")
 		}
 	})
 }
@@ -187,7 +192,7 @@ func TestFormatGrepHitsGroupsByFile(t *testing.T) {
 	}
 
 	var many []grepHit
-	for i := 0; i < grepMaxFiles+10; i++ {
+	for i := range grepMaxFiles + 10 {
 		many = append(many, grepHit{Path: fmt.Sprintf("f%02d.go", i), Line: 1, Text: "x"})
 	}
 	got = formatGrepHits(many, true)

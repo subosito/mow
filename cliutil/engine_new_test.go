@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
 )
 
@@ -52,7 +53,7 @@ func TestNewEngineFromFlags(t *testing.T) {
 	}
 }
 
-func TestNewEngineCLIFromFlags(t *testing.T) {
+func TestNewEngineFromCLIFlags(t *testing.T) {
 	ws := t.TempDir()
 	cfg := writeConfig(t, t.TempDir())
 
@@ -62,12 +63,15 @@ func TestNewEngineCLIFromFlags(t *testing.T) {
 	if err := fs.Parse([]string{"--workspace", ws, "--config", cfg, "--stream"}); err != nil {
 		t.Fatal(err)
 	}
-	eng, err := ef.NewEngineCLI()
+	if err := ef.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := mow.New(ef.OptionsCLI())
 	if err != nil {
-		t.Fatalf("NewEngineCLI: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	if eng == nil {
-		t.Fatal("NewEngineCLI returned nil engine")
+		t.Fatal("New returned nil engine")
 	}
 	eng.Close()
 }
@@ -251,15 +255,14 @@ func TestConfigPathsEdges(t *testing.T) {
 	}
 }
 
-// NewEngineCLI (mow acp, packs) must reject contradictory flags like NewEngine.
-func TestNewEngineCLIValidates(t *testing.T) {
+func TestEngineFlagsValidateConflicts(t *testing.T) {
 	var ef cliutil.EngineFlags
 	fs := cliutil.NewFlagSet("acp")
 	ef.Bind(fs)
 	if err := fs.Parse([]string{"--allow-shell", "--read-only"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ef.NewEngineCLI(); err == nil || !strings.Contains(err.Error(), "--allow-shell conflicts") {
+	if err := ef.Validate(); err == nil || !strings.Contains(err.Error(), "--allow-shell conflicts") {
 		t.Fatalf("err=%v, want --allow-shell conflict", err)
 	}
 }

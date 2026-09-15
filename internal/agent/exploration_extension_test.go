@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/subosito/mow/internal/llm"
 	"strings"
 	"testing"
+
+	"github.com/subosito/mow/internal/llm"
 )
 
 type exploratoryFixture struct {
@@ -31,7 +32,7 @@ func TestExplorationExtensionResults(t *testing.T) {
 		tool := &exploratoryFixture{name: "mcp_index_search", readOnly: ro, exploratory: !ro}
 		g := explorationGuard{tools: map[string]Tool{tool.Name(): tool}, nonce: "real"}
 		call := exploreCall(tool.Name(), `{}`)
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			g.note([]llm.ToolCall{call}, exploreResult(WrapUntrusted("real", tool.Name(), fmt.Sprintf("evidence %d", i))))
 		}
 	}
@@ -66,7 +67,7 @@ func TestExplorationMixedNativeAndExtensionBatch(t *testing.T) {
 	a.ID = "native"
 	b := exploreCall(tool.Name(), `{}`)
 	b.ID = "mcp"
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		g.note([]llm.ToolCall{a, b}, []llm.Message{{ToolCallID: "native", Content: "(no matches)"}, {ToolCallID: "mcp", Content: WrapUntrusted("", tool.Name(), "error: missing index")}})
 	}
 	if !g.warned || g.rounds != 2 {
@@ -75,7 +76,7 @@ func TestExplorationMixedNativeAndExtensionBatch(t *testing.T) {
 	// Identical framed successful results must count as repeated evidence.
 	g = explorationGuard{tools: map[string]Tool{tool.Name(): tool}}
 	warned := false
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		hint := g.note([]llm.ToolCall{b}, []llm.Message{{ToolCallID: "mcp", Content: WrapUntrusted("", tool.Name(), "same evidence")}})
 		warned = warned || strings.Contains(hint, "checkpoint")
 	}

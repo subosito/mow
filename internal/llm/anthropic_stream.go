@@ -2,12 +2,14 @@ package llm
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -103,8 +105,8 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 		if strings.HasPrefix(line, ":") {
 			continue
 		}
-		if strings.HasPrefix(line, "event:") {
-			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		if after, ok := strings.CutPrefix(line, "event:"); ok {
+			eventName = strings.TrimSpace(after)
 			continue
 		}
 		if !strings.HasPrefix(line, "data:") {
@@ -146,11 +148,7 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 	msg.Content = content.String()
 	// Keys are Anthropic content-block indices shared with text blocks, so they
 	// are not contiguous from 0 — iterate the actual keys in order.
-	idxs := make([]int, 0, len(toolsByIdx))
-	for i := range toolsByIdx {
-		idxs = append(idxs, i)
-	}
-	sort.Ints(idxs)
+	idxs := slices.Sorted(maps.Keys(toolsByIdx))
 	for _, i := range idxs {
 		a := toolsByIdx[i]
 		if a == nil {
@@ -314,10 +312,7 @@ func (c *Client) setAnthropicAuth(req *http.Request) {
 }
 
 func anthropicMessagesURL(baseURL string) string {
-	base := strings.TrimRight(baseURL, "/")
-	if base == "" {
-		base = "https://api.anthropic.com"
-	}
+	base := cmp.Or(strings.TrimRight(baseURL, "/"), "https://api.anthropic.com")
 	if strings.HasSuffix(base, "/v1/messages") {
 		return base
 	}

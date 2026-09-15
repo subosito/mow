@@ -1,7 +1,6 @@
 package eval_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -17,7 +16,7 @@ func TestRunScriptedContains(t *testing.T) {
 	// Touch a marker file so a real tool path isn't required for this case.
 	_ = os.WriteFile(filepath.Join(dir, "hello.go"), []byte("package h\n"), 0o600)
 
-	rep, err := eval.Run(context.Background(), eval.Case{
+	rep, err := eval.Run(t.Context(), eval.Case{
 		Name:   "scripted-ok",
 		Prompt: "say hi",
 		Script: []mow.Message{
@@ -38,7 +37,7 @@ func TestRunScriptedContains(t *testing.T) {
 }
 
 func TestRunScriptedMissingSubstringFails(t *testing.T) {
-	_, err := eval.Run(context.Background(), eval.Case{
+	_, err := eval.Run(t.Context(), eval.Case{
 		Prompt: "x",
 		Script: []mow.Message{{Role: "assistant", Content: "nope"}},
 		Expect: eval.Expect{Contains: []string{"must-have"}},
@@ -67,7 +66,7 @@ func TestRunScriptedToolExpectation(t *testing.T) {
 		},
 		{Role: "assistant", Content: "found a.go"},
 	}
-	rep, err := eval.Run(context.Background(), eval.Case{
+	rep, err := eval.Run(t.Context(), eval.Case{
 		Name:   "uses-glob",
 		Prompt: "find go files",
 		Script: script,
@@ -115,14 +114,14 @@ func TestLoadFixtureAndRunSuite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sr := eval.RunFixture(context.Background(), fix, eval.Options{Workspace: dir})
+	sr := eval.RunFixture(t.Context(), fix, eval.Options{Workspace: dir})
 	if !sr.OK || sr.Passed != 1 || sr.Failed != 0 {
 		t.Fatalf("%+v", sr)
 	}
 }
 
 func TestNotContains(t *testing.T) {
-	_, err := eval.Run(context.Background(), eval.Case{
+	_, err := eval.Run(t.Context(), eval.Case{
 		Prompt: "x",
 		Script: []mow.Message{{Role: "assistant", Content: "secret leaked"}},
 		Expect: eval.Expect{NotContains: []string{"secret"}},

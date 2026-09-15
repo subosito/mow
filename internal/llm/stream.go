@@ -3,13 +3,15 @@ package llm
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -193,8 +195,7 @@ func onceActivity(fn func()) func() {
 	if fn == nil {
 		return nil
 	}
-	var once sync.Once
-	return func() { once.Do(fn) }
+	return sync.OnceFunc(fn)
 }
 
 // resolveSSEType names one SSE frame: the event: line when present, else the
@@ -303,10 +304,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		return Message{}, fmt.Errorf("llm: model required")
 	}
 	// ChatStreamHooks is OpenAI chat-completions SSE only. Anthropic is routed in ChatWithStream.
-	base := strings.TrimRight(c.BaseURL, "/")
-	if base == "" {
-		base = "https://api.openai.com/v1"
-	}
+	base := cmp.Or(strings.TrimRight(c.BaseURL, "/"), "https://api.openai.com/v1")
 	url := base + "/chat/completions"
 	if strings.HasSuffix(base, "/chat/completions") {
 		url = base
@@ -492,11 +490,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	msg.Content = content.String()
 	// Order tool calls by index. Some gateways send non-contiguous indices (or
 	// start above 0), so iterate the actual keys in order — never 0..len-1.
-	idxs := make([]int, 0, len(toolsAcc))
-	for i := range toolsAcc {
-		idxs = append(idxs, i)
-	}
-	sort.Ints(idxs)
+	idxs := slices.Sorted(maps.Keys(toolsAcc))
 	if len(idxs) > 0 {
 		msg.ToolCalls = make([]ToolCall, 0, len(idxs))
 	}

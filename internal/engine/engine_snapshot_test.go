@@ -50,7 +50,7 @@ func TestSessionWritesOneSnapshotPerChangedTurn(t *testing.T) {
 	}
 	defer eng.Close()
 	for _, p := range []string{"one", "two"} {
-		if _, err := eng.Prompt(context.Background(), p); err != nil {
+		if _, err := eng.Prompt(t.Context(), p); err != nil {
 			t.Fatal(err)
 		}
 	}

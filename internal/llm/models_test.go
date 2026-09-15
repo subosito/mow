@@ -1,7 +1,6 @@
 package llm_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -29,7 +28,7 @@ func TestListModels(t *testing.T) {
 	defer srv.Close()
 
 	c := &llm.Client{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list, err := c.ListModels(context.Background())
+	list, err := c.ListModels(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +54,7 @@ func TestListModelsWorksForAnthropicWire(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &llm.Client{Wire: llm.WireAnthropicMsg, BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list, err := c.ListModels(context.Background())
+	list, err := c.ListModels(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +76,7 @@ func TestListModelsParsesFacet(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &llm.Client{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list, err := c.ListModels(context.Background())
+	list, err := c.ListModels(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +120,7 @@ func TestListModelsParsesContextAndPricing(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &llm.Client{BaseURL: srv.URL + "/v1", APIKey: "k"}
-	list, err := c.ListModels(context.Background())
+	list, err := c.ListModels(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -121,7 +121,7 @@ func TestChatOpenAIResponsesNonStream(t *testing.T) {
 		Model:   "test-model",
 		HTTP:    srv.Client(),
 	}
-	msg, err := c.Chat(context.Background(), []Message{
+	msg, err := c.Chat(t.Context(), []Message{
 		{Role: "user", Content: "read x"},
 	}, []ToolSpec{{
 		Type: "function",
@@ -189,7 +189,7 @@ func TestChatOpenAIResponsesStream(t *testing.T) {
 		Stream:  true,
 	}
 	var content strings.Builder
-	msg, err := c.ChatWithStream(context.Background(), []Message{
+	msg, err := c.ChatWithStream(t.Context(), []Message{
 		{Role: "user", Content: "x"},
 	}, nil, StreamHooks{
 		OnContent: func(d string) { content.WriteString(d) },
@@ -240,7 +240,7 @@ func TestResponsesStreamActivitySkipsLifecycleEnvelopes(t *testing.T) {
 	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
 	var activityN int
 	var content strings.Builder
-	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	_, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnActivity: func() { activityN++ },
 		OnContent:  func(d string) { content.WriteString(d) },
 	})
@@ -275,7 +275,7 @@ func TestResponsesStreamActivitySilentOnEnvelopesOnlyStream(t *testing.T) {
 
 	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
 	var activityN int
-	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	_, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnActivity: func() { activityN++ },
 	})
 	// The connection dropped before response.completed: a failed call, not
@@ -299,7 +299,7 @@ func TestResponsesStreamFailedEnvelope(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
-	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	_, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if err == nil || !strings.Contains(err.Error(), "upstream exploded") {
 		t.Fatalf("err=%v want the provider's failure message", err)
 	}
@@ -313,7 +313,7 @@ func TestResponsesStreamFailsOnEOFBeforeCompleted(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
-	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	_, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if !errors.Is(err, errStreamIncomplete) {
 		t.Fatalf("err=%v want errStreamIncomplete", err)
 	}
@@ -327,7 +327,7 @@ func TestChatOpenAIResponsesNonStreamStatusFailed(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-	_, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "x"}}, nil)
+	_, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "x"}}, nil)
 	if err == nil {
 		t.Fatal("status failed must be an error")
 	}
@@ -433,7 +433,7 @@ func TestChatOpenAIResponsesWebSearchNonStream(t *testing.T) {
 		Model:   "m",
 		HTTP:    srv.Client(),
 	}
-	msg, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "search x"}}, nil)
+	msg, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "search x"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +488,7 @@ func TestChatOpenAIResponsesWebSearchStream(t *testing.T) {
 		HTTP:    srv.Client(),
 		Stream:  true,
 	}
-	msg, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	msg, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +577,7 @@ func TestResponsesStreamReturnsAtCompletedWithoutEOF(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	start := time.Now()
 	msg, err := c.ChatWithStream(ctx, []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})

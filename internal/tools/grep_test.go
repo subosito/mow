@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -32,7 +31,7 @@ func TestGrepRipgrepAndWalkAgree(t *testing.T) {
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
 
 	walk := &grepTool{p: p, noRipgrep: true}
-	walkOut, err := walk.Exec(context.Background(), json.RawMessage(`{"pattern":"Wanted"}`))
+	walkOut, err := walk.Exec(t.Context(), json.RawMessage(`{"pattern":"Wanted"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +46,7 @@ func TestGrepRipgrepAndWalkAgree(t *testing.T) {
 		t.Skip("rg not on PATH")
 	}
 	rg := &grepTool{p: p}
-	rgOut, err := rg.Exec(context.Background(), json.RawMessage(`{"pattern":"Wanted"}`))
+	rgOut, err := rg.Exec(t.Context(), json.RawMessage(`{"pattern":"Wanted"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +65,7 @@ func TestGrepMissingRipgrepFallsBackToWalk(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
 	gt := &grepTool{p: p, rgBin: filepath.Join(root, "rg-not-installed")}
-	out, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"Fallback"}`))
+	out, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":"Fallback"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +89,7 @@ func TestGrepBrokenRipgrepFallsBackToWalk(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
 	gt := &grepTool{p: p, rgBin: stub}
-	out, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"Broken"}`))
+	out, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":"Broken"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +108,7 @@ func TestGrepWalkSkipsBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	gt := &grepTool{p: &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}, noRipgrep: true}
-	out, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"Hit"}`))
+	out, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":"Hit"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +154,7 @@ func TestGrepExpandedAndFilenameResults(t *testing.T) {
 				t.Skip("rg not installed")
 			}
 			root := t.TempDir()
-			for i := 0; i < 12; i++ {
+			for i := range 12 {
 				body := "needle\n"
 				if i == 0 {
 					body = strings.Repeat("needle\n", 60)

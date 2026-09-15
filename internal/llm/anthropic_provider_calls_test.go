@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -32,7 +31,7 @@ func TestAnthropicServerToolUseIsReportedNotExecuted(t *testing.T) {
 		Wire: "anthropic-messages", BaseURL: srv.URL, APIKey: "k", Model: "claude-sonnet-4",
 		NativeTools: []map[string]any{{"type": "web_search_20250305", "name": "web_search"}},
 	}
-	msg, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "q"}}, nil)
+	msg, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "q"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +61,7 @@ func TestAnthropicToolUseStillExecutes(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{Wire: "anthropic-messages", BaseURL: srv.URL, APIKey: "k", Model: "claude-sonnet-4"}
-	msg, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "q"}}, nil)
+	msg, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "q"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

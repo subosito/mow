@@ -29,7 +29,7 @@ func TestPromptNoDeadlockOnLimits(t *testing.T) {
 			return
 		}
 		defer eng.Close()
-		if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+		if _, err := eng.Prompt(t.Context(), "hi"); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -172,7 +172,7 @@ func TestLimitsFromGatewayModels(t *testing.T) {
 	defer eng.Close()
 
 	// Prefer explicit ListModels (also what /model does) over racing the prefetch.
-	if _, err := eng.ListModels(context.Background()); err != nil {
+	if _, err := eng.ListModels(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	// Prefetch may still be in flight; brief wait if needed.

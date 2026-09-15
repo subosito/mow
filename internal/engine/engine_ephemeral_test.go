@@ -22,7 +22,7 @@ func TestPromptEphemeralDoesNotPollute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, err := eng.Prompt(ctx, "first normal message"); err != nil {
 		t.Fatal(err)

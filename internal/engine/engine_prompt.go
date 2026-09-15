@@ -498,10 +498,7 @@ func (g *retryGate) waitCopy(elapsed time.Duration) (copy string, suppress bool)
 // retryCopy renders a scheduled retry as honest status copy. The status code
 // is the most it names — never URLs, headers, or bodies.
 func retryCopy(info RetryInfo) string {
-	d := info.Delay.Round(time.Second)
-	if d < time.Second {
-		d = time.Second
-	}
+	d := max(info.Delay.Round(time.Second), time.Second)
 	switch info.Kind {
 	case RetryUnavailable:
 		return fmt.Sprintf("provider unavailable · reconnecting in %s", d)

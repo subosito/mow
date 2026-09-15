@@ -204,8 +204,7 @@ func (t *grepTool) grepRipgrep(ctx context.Context, bin, pattern, root string, r
 	if waitErr == nil {
 		return hits, truncated, true // genuine miss
 	}
-	var ee *exec.ExitError
-	if errors.As(waitErr, &ee) && ee.ExitCode() == 1 {
+	if ee, ok := errors.AsType[*exec.ExitError](waitErr); ok && ee.ExitCode() == 1 {
 		return hits, truncated, true // rg: no matches
 	}
 	// Missing flags, crash, not executable, … → walk. Never fail the tool
@@ -392,11 +391,8 @@ func formatGrepHits(hits []grepHit, truncatedWalk bool, options ...grepOptions) 
 		}
 		shownFiles++
 		fmt.Fprintf(&b, "%s (%d)\n", f.path, len(f.hits))
-		show := len(f.hits)
-		if show > maxPerFile {
-			show = maxPerFile
-		}
-		for i := 0; i < show; i++ {
+		show := min(len(f.hits), maxPerFile)
+		for i := range show {
 			fmt.Fprintf(&b, "  %d:%s\n", f.hits[i].Line, clampGrepLine(f.hits[i].Text))
 		}
 		if extra := len(f.hits) - show; extra > 0 {

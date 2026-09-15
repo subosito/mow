@@ -20,7 +20,7 @@ func engCtx(t *testing.T, allowShell bool) (context.Context, *mow.Engine) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return mow.ContextWithEngine(context.Background(), eng), eng
+	return mow.ContextWithEngine(t.Context(), eng), eng
 }
 
 func TestProcToolsGatedByShell(t *testing.T) {

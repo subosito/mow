@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -29,7 +30,7 @@ func TestAgentRequestPermissionAllow(t *testing.T) {
 
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
@@ -91,7 +92,7 @@ func TestAgentRequestPermissionReject(t *testing.T) {
 
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
@@ -140,7 +141,7 @@ func TestAgentRequestPermissionRejectAlways(t *testing.T) {
 
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
@@ -197,7 +198,7 @@ func TestAgentRequestPermissionMissingClientDenies(t *testing.T) {
 
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
@@ -244,7 +245,7 @@ func TestAgentApprovalsAlwaysSkipsOverlay(t *testing.T) {
 
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
@@ -319,9 +320,9 @@ func writeChat(path string) func(ctx context.Context, messages []mow.Message, to
 				Function: mow.FunctionCall{Name: "write", Arguments: string(args)},
 			}}}, nil
 		}
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == "tool" {
-				return mow.Message{Role: "assistant", Content: "tool:" + messages[i].Content}, nil
+		for _, message := range slices.Backward(messages) {
+			if message.Role == "tool" {
+				return mow.Message{Role: "assistant", Content: "tool:" + message.Content}, nil
 			}
 		}
 		return mow.Message{Role: "assistant", Content: "no tool result"}, nil

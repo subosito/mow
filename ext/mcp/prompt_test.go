@@ -63,7 +63,7 @@ func TestServerPromptLifecycle(t *testing.T) {
 		t.Helper()
 		var parts []string
 		for _, fn := range ext.UserPromptHooks() {
-			d, err := fn(ext.WithTurn(context.Background(), turn), ext.UserPromptEvent{})
+			d, err := fn(ext.WithTurn(t.Context(), turn), ext.UserPromptEvent{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -106,13 +106,13 @@ func TestServerPromptLifecycle(t *testing.T) {
 	}
 	defer eng.Close()
 	for range 2 {
-		if _, err := eng.Prompt(ext.WithTurn(context.Background(), 2), "hello"); err != nil {
+		if _, err := eng.Prompt(ext.WithTurn(t.Context(), 2), "hello"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	ext.SetExtensionEnabled("mcp:search", false)
 	expectedCount = 0
-	if _, err := eng.Prompt(ext.WithTurn(context.Background(), 3), "hello again"); err != nil {
+	if _, err := eng.Prompt(ext.WithTurn(t.Context(), 3), "hello again"); err != nil {
 		t.Fatal(err)
 	}
 	ext.SetExtensionEnabled("mcp:search", false)
@@ -128,7 +128,7 @@ func TestServerPromptLifecycle(t *testing.T) {
 	if got := render(2); got != "MCP server search guidance:\nReplacement." {
 		t.Fatalf("replacement: %q", got)
 	}
-	d, err := old[0](ext.WithTurn(context.Background(), 2), ext.UserPromptEvent{})
+	d, err := old[0](ext.WithTurn(t.Context(), 2), ext.UserPromptEvent{})
 	if err != nil || d.SystemAppend != want {
 		t.Fatalf("captured engine hook changed: %+v %v", d, err)
 	}

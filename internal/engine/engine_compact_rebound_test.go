@@ -39,8 +39,8 @@ func TestCompactShrinksNextRequestPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 20; i++ {
-		if _, err := eng.Prompt(context.Background(), strings.Repeat("x", 500)); err != nil {
+	for range 20 {
+		if _, err := eng.Prompt(t.Context(), strings.Repeat("x", 500)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -57,7 +57,7 @@ func TestCompactShrinksNextRequestPayload(t *testing.T) {
 	}
 
 	// Next turn: short prompt, so any growth is history, not new input.
-	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "hi"); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -103,8 +103,8 @@ func TestContextTokensAcrossCompactAndNextTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 20; i++ {
-		if _, err := eng.Prompt(context.Background(), strings.Repeat("x", 2000)); err != nil {
+	for range 20 {
+		if _, err := eng.Prompt(t.Context(), strings.Repeat("x", 2000)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -116,7 +116,7 @@ func TestContextTokensAcrossCompactAndNextTurn(t *testing.T) {
 	}
 	afterCompact := eng.ContextTokens()
 
-	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "hi"); err != nil {
 		t.Fatal(err)
 	}
 	afterTurn := eng.ContextTokens()

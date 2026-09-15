@@ -38,7 +38,7 @@ func TestChatStreamHooksSeparatesReasoningAndContent(t *testing.T) {
 	}
 
 	var content, reasoning strings.Builder
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, StreamHooks{
 		OnContent:   func(d string) { content.WriteString(d) },
 		OnReasoning: func(d string) { reasoning.WriteString(d) },
 	})
@@ -69,7 +69,7 @@ func TestChatStreamHooksReasoningContentField(t *testing.T) {
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
 	var reason strings.Builder
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnReasoning: func(d string) { reason.WriteString(d) },
 	})
 	if err != nil {
@@ -98,7 +98,7 @@ func TestChatStreamHooksThoughtSignature(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestChatStreamHooksNonContiguousToolIndices(t *testing.T) {
 			t.Cleanup(srv.Close)
 
 			c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-			msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+			msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -165,7 +165,7 @@ func TestChatStreamHooksSkipsMalformedChunk(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestChatStreamHooksFinishReasonLength(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestChatStreamHooksTruncatedToolCallJSON(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestChatStreamHooksFailsOnEOFBeforeDone(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-	_, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	_, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if !errors.Is(err, errStreamIncomplete) {
 		t.Fatalf("err=%v want errStreamIncomplete", err)
 	}
@@ -259,7 +259,7 @@ func TestChatStreamHooksFinishReasonWithoutDoneIsComplete(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if err != nil || msg.Content != "ok" {
 		t.Fatalf("msg=%+v err=%v", msg, err)
 	}
@@ -279,7 +279,7 @@ func TestChatStreamHooksCompleteToolCallAtLength(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestChatStreamActivitySilentOnKeepaliveOnlyStream(t *testing.T) {
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
 	var activityN int
-	_, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	_, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnActivity: func() { activityN++ },
 	})
 	if err != nil {
@@ -334,7 +334,7 @@ func TestChatStreamActivityFiresOnToolCallOnlyReply(t *testing.T) {
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
 	var activityN, contentN int
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnActivity: func() { activityN++ },
 		OnContent:  func(string) { contentN++ },
 	})
@@ -370,7 +370,7 @@ func TestUsageParsedAcrossPaths(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 		c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-		msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+		msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -386,7 +386,7 @@ func TestUsageParsedAcrossPaths(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 		c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-		msg, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "x"}}, nil)
+		msg, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "x"}}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -415,7 +415,7 @@ func TestIdleReaderTimesOut(t *testing.T) {
 	r := &idleReader{
 		r:    &neverReader{},
 		idle: 50 * time.Millisecond,
-		ctx:  context.Background(),
+		ctx:  t.Context(),
 	}
 	start := time.Now()
 	_, err := r.Read(make([]byte, 16))
@@ -436,9 +436,9 @@ func TestIdleReaderRespectsContextCancel(t *testing.T) {
 	r := &idleReader{
 		r:    &neverReader{},
 		idle: 10 * time.Second,
-		ctx:  context.Background(),
+		ctx:  t.Context(),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	r.ctx = ctx
 	go func() {
 		time.Sleep(20 * time.Millisecond)
@@ -461,7 +461,7 @@ func TestIdleReaderPassesThroughData(t *testing.T) {
 	r := &idleReader{
 		r:    strings.NewReader("data: hello\n\n"),
 		idle: 5 * time.Second,
-		ctx:  context.Background(),
+		ctx:  t.Context(),
 	}
 	buf := make([]byte, 64)
 	n, err := r.Read(buf)
@@ -519,7 +519,7 @@ func TestChatStreamHooksAcceptsPlainCompletionBody(t *testing.T) {
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
 	var got strings.Builder
-	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+	msg, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnContent: func(d string) { got.WriteString(d) },
 	})
 	if err != nil {

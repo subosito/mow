@@ -30,11 +30,9 @@ func captureStderr(t *testing.T, fn func()) string {
 		wg  sync.WaitGroup
 		buf bytes.Buffer
 	)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, _ = io.Copy(&buf, r)
-	}()
+	})
 
 	func() {
 		defer func() {

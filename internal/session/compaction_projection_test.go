@@ -29,7 +29,7 @@ func TestRunCompactionDoesNotRewriteSessionJSONL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = agent.Run(context.Background(), func(_ context.Context, got []llm.Message, _ []llm.ToolSpec) (llm.Message, error) {
+	_, err = agent.Run(t.Context(), func(_ context.Context, got []llm.Message, _ []llm.ToolSpec) (llm.Message, error) {
 		compacted := false
 		for _, m := range got {
 			if m.Role == "tool" && strings.Contains(m.Content, "…(snip)") {

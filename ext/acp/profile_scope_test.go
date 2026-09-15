@@ -61,7 +61,7 @@ func TestProfileMowAgentCommandRespectsHostCaps(t *testing.T) {
 	if !spec.native() {
 		t.Fatal("expected native mow agent")
 	}
-	host := hostPolicyFromContext(mow.ContextWithEngine(context.Background(), eng), workspace)
+	host := hostPolicyFromContext(mow.ContextWithEngine(t.Context(), eng), workspace)
 	cmd := peerCommand(spec, host, workspace)
 	joined := strings.Join(cmd, " ")
 	if strings.Contains(joined, "--allow-write") || strings.Contains(joined, "--allow-shell") {
@@ -136,11 +136,11 @@ func TestProfileAgentsAreScopedPerEngineWithoutCapabilityEscalation(t *testing.T
 		t.Fatal(err)
 	}
 	defer first.Close()
-	if _, err := first.Prompt(context.Background(), "inspect"); err != nil {
+	if _, err := first.Prompt(t.Context(), "inspect"); err != nil {
 		t.Fatal(err)
 	}
 	toolOne := captureDelegateViaEngineConfig(t, first)
-	hostOne := hostPolicyFromContext(mow.ContextWithEngine(context.Background(), first), workspaceA)
+	hostOne := hostPolicyFromContext(mow.ContextWithEngine(t.Context(), first), workspaceA)
 	cmdOne := peerCommand(toolOne.agents["peer-one"], hostOne, workspaceA)
 	if strings.Contains(strings.Join(cmdOne, " "), "--allow-write") {
 		t.Fatalf("profile one must not escalate write: %v", cmdOne)
@@ -160,7 +160,7 @@ func TestProfileAgentsAreScopedPerEngineWithoutCapabilityEscalation(t *testing.T
 	}
 	defer second.Close()
 	toolTwo := captureDelegateViaEngineConfig(t, second)
-	hostTwo := hostPolicyFromContext(mow.ContextWithEngine(context.Background(), second), workspaceB)
+	hostTwo := hostPolicyFromContext(mow.ContextWithEngine(t.Context(), second), workspaceB)
 	cmdTwo := peerCommand(toolTwo.agents["peer-two"], hostTwo, workspaceB)
 	joined := strings.Join(cmdTwo, " ")
 	if !strings.Contains(joined, "--allow-write") || !strings.Contains(joined, "--allow-shell") {

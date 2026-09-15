@@ -37,7 +37,7 @@ func TestReadAndGlobUnderWorkspace(t *testing.T) {
 	if readT == nil || globT == nil {
 		t.Fatal("missing tools")
 	}
-	out, err := readT.Exec(context.Background(), json.RawMessage(`{"path":"a.txt"}`))
+	out, err := readT.Exec(t.Context(), json.RawMessage(`{"path":"a.txt"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,10 +45,10 @@ func TestReadAndGlobUnderWorkspace(t *testing.T) {
 		t.Fatalf("read=%q", out)
 	}
 	// escape
-	if _, err := readT.Exec(context.Background(), json.RawMessage(`{"path":"../x"}`)); err == nil {
+	if _, err := readT.Exec(t.Context(), json.RawMessage(`{"path":"../x"}`)); err == nil {
 		t.Fatal("expected path jail")
 	}
-	list, err := globT.Exec(context.Background(), json.RawMessage(`{"pattern":"*.txt"}`))
+	list, err := globT.Exec(t.Context(), json.RawMessage(`{"pattern":"*.txt"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestWriteDeniedByPolicy(t *testing.T) {
 	if len(reg) != 1 {
 		t.Fatalf("want write tool in registry when enabled list includes it")
 	}
-	_, err := reg[0].Exec(context.Background(), json.RawMessage(`{"path":"x","content":"y"}`))
+	_, err := reg[0].Exec(t.Context(), json.RawMessage(`{"path":"x","content":"y"}`))
 	if err == nil {
 		t.Fatal("expected write deny")
 	}
@@ -74,7 +74,7 @@ func TestBashDeniedByPolicy(t *testing.T) {
 	root := t.TempDir()
 	p := &policy.Policy{Workspace: root, AllowShell: false}
 	reg := tools.Registry(p, []string{"bash"})
-	_, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"echo hi"}`))
+	_, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":"echo hi"}`))
 	if err == nil {
 		t.Fatal("expected bash deny")
 	}
@@ -84,7 +84,7 @@ func TestWriteAllowedUnderWorkspace(t *testing.T) {
 	root := t.TempDir()
 	p := &policy.Policy{Workspace: root, AllowWrite: true}
 	reg := tools.Registry(p, []string{"write"})
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"path":"out.txt","content":"ok"}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"path":"out.txt","content":"ok"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestEditReturnsDiffWithPath(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: root, AllowWrite: true}
 	reg := tools.Registry(p, []string{"edit"})
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(
 		`{"path":"f.go","old_string":"func A() {}","new_string":"func B() {}"}`,
 	))
 	if err != nil {
@@ -126,7 +126,7 @@ func TestBashOutputIsBoundedWhileRunning(t *testing.T) {
 	root := t.TempDir()
 	p := &policy.Policy{Workspace: root, AllowShell: true}
 	reg := tools.Registry(p, []string{"bash"})
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"head -c 1000000 /dev/zero | tr '\\0' x"}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":"head -c 1000000 /dev/zero | tr '\\0' x"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestBashOutputPassesThroughAsIs(t *testing.T) {
 	root := t.TempDir()
 	p := &policy.Policy{Workspace: root, AllowShell: true}
 	reg := tools.Registry(p, []string{"bash"})
-	seq, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"seq 1 200"}`))
+	seq, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":"seq 1 200"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestBashTimeoutSoftReturns(t *testing.T) {
 	root := t.TempDir()
 	p := &policy.Policy{Workspace: root, AllowShell: true, BashTimeoutSec: 1}
 	reg := tools.Registry(p, []string{"bash"})
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"sleep 30"}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":"sleep 30"}`))
 	if err != nil {
 		t.Fatalf("timeout must soft-return, not error: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestBashTimeoutKillsProcessGroup(t *testing.T) {
 	// Child outlives the timeout window: it would write the marker ~5s in, but
 	// the group kill at 1s must stop it first.
 	cmd := "(sleep 5; echo yes > " + marker + ") & disown; sleep 30"
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":`+jsonQuote(cmd)+`}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":`+jsonQuote(cmd)+`}`))
 	if err != nil {
 		t.Fatalf("timeout must soft-return: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestBashCustomTimeoutFromPolicy(t *testing.T) {
 			reg := tools.Registry(p, []string{"bash"})
 			// Fast command completes well under any timeout; confirms wiring
 			// does not regress the happy path.
-			out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"echo fast"}`))
+			out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":"echo fast"}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -232,7 +232,7 @@ func TestBashPerCallTimeoutExtendsDefault(t *testing.T) {
 	reg := tools.Registry(p, []string{"bash"})
 
 	// Without the override, a 2s command exceeds the 1s policy default.
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"sleep 2; echo late"}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":"sleep 2; echo late"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestBashPerCallTimeoutExtendsDefault(t *testing.T) {
 		t.Fatalf("expected timeout without override, got %q", out)
 	}
 	// With timeout_sec it completes.
-	out, err = reg[0].Exec(context.Background(), json.RawMessage(`{"command":"sleep 2; echo late","timeout_sec":30}`))
+	out, err = reg[0].Exec(t.Context(), json.RawMessage(`{"command":"sleep 2; echo late","timeout_sec":30}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestBashPerCallTimeoutClampedToCeiling(t *testing.T) {
 	p := &policy.Policy{Workspace: root, AllowShell: true, BashTimeoutSec: 1, MaxBashTimeoutSec: 2}
 	reg := tools.Registry(p, []string{"bash"})
 	start := time.Now()
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"sleep 60","timeout_sec":600}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":"sleep 60","timeout_sec":600}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestBashTimeoutMessageSuggestsRetry(t *testing.T) {
 	root := t.TempDir()
 	p := &policy.Policy{Workspace: root, AllowShell: true, BashTimeoutSec: 1}
 	reg := tools.Registry(p, []string{"bash"})
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"sleep 5"}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":"sleep 5"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestReadMissingFileSuggestsNearby(t *testing.T) {
 	if rd == nil {
 		t.Fatal("read tool missing from registry")
 	}
-	_, err := rd.Exec(context.Background(), json.RawMessage(`{"path":"layout.go"}`))
+	_, err := rd.Exec(t.Context(), json.RawMessage(`{"path":"layout.go"}`))
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -315,7 +315,7 @@ func TestReadMissingFileSuggestsNearby(t *testing.T) {
 		t.Fatalf("expected nearby suggestion in error: %v", err)
 	}
 	// No stem match → directory listing fallback.
-	_, err = rd.Exec(context.Background(), json.RawMessage(`{"path":"zzz.go"}`))
+	_, err = rd.Exec(t.Context(), json.RawMessage(`{"path":"zzz.go"}`))
 	if err == nil || !strings.Contains(err.Error(), "directory contains:") {
 		t.Fatalf("expected directory fallback: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestEditDiffPathWorkspaceRelative(t *testing.T) {
 	reg := tools.Registry(p, []string{"edit"})
 
 	// Model passes the ABSOLUTE path — display must still be workspace-relative.
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(
 		`{"path":"`+target+`","old_string":"func A() {}","new_string":"func B() {}"}`,
 	))
 	if err != nil {
@@ -364,7 +364,7 @@ func TestEditDiffPathExtraRootRelative(t *testing.T) {
 	p := &policy.Policy{Workspace: root, AllowWrite: true, ExtraRoots: []string{other}}
 	reg := tools.Registry(p, []string{"edit"})
 
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(
 		`{"path":"`+filepath.Join(other, "x.go")+`","old_string":"package x","new_string":"package y"}`,
 	))
 	if err != nil {
@@ -389,7 +389,7 @@ func TestReadPagesPastByteCapAndRefusesBinary(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 40}
 	reg := tools.Registry(p, []string{"read"})
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"path":"big.txt","offset":70,"limit":5}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"path":"big.txt","offset":70,"limit":5}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestReadPagesPastByteCapAndRefusesBinary(t *testing.T) {
 	if strings.Contains(strings.ToLower(out), "bash") || strings.Contains(out, "sed") {
 		t.Fatalf("must not send the model to bash: %q", out)
 	}
-	_, err = reg[0].Exec(context.Background(), json.RawMessage(`{"path":"bin.dat"}`))
+	_, err = reg[0].Exec(t.Context(), json.RawMessage(`{"path":"bin.dat"}`))
 	if err == nil {
 		t.Fatal("binary read must fail")
 	}
@@ -424,7 +424,7 @@ func TestGrepSkipsDotGitUnlessPathIsDotGit(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
 	reg := tools.Registry(p, []string{"grep"})
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"pattern":"PATTERN"}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"pattern":"PATTERN"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestGrepSkipsDotGitUnlessPathIsDotGit(t *testing.T) {
 	if strings.Contains(out, "secret.txt") || strings.Contains(out, ".git") {
 		t.Fatalf(".git must be skipped from .: %q", out)
 	}
-	gitOut, err := reg[0].Exec(context.Background(), json.RawMessage(`{"pattern":"PATTERN","path":".git"}`))
+	gitOut, err := reg[0].Exec(t.Context(), json.RawMessage(`{"pattern":"PATTERN","path":".git"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,15 +451,15 @@ func TestHashlineEditRejectsDuplicateLines(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: root, AllowWrite: true, Hashline: true}
 	reg := tools.Registry(p, []string{"read", "edit"})
-	readOut, err := reg[0].Exec(context.Background(), json.RawMessage(`{"path":"f.txt"}`))
+	readOut, err := reg[0].Exec(t.Context(), json.RawMessage(`{"path":"f.txt"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// First hashline token after "1:"
-	line := strings.Split(readOut, "\n")[0]
+	line, _, _ := strings.Cut(readOut, "\n")
 	parts := strings.SplitN(line, "|", 2)
 	hash := strings.TrimSpace(strings.Split(parts[0], ":")[1])
-	_, err = reg[1].Exec(context.Background(), json.RawMessage(
+	_, err = reg[1].Exec(t.Context(), json.RawMessage(
 		`{"path":"f.txt","line_hash":"`+hash+`","new_string":"changed"}`))
 	if err == nil {
 		t.Fatal("duplicate hash must fail")
@@ -476,7 +476,7 @@ func TestBashKillsBackgroundChildOnReturn(t *testing.T) {
 	p := &policy.Policy{Workspace: root, AllowShell: true}
 	reg := tools.Registry(p, []string{"bash"})
 	cmd := "(sleep 8; echo leaked > " + marker + ") & echo started"
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":`+jsonQuote(cmd)+`}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":`+jsonQuote(cmd)+`}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,11 +502,11 @@ func TestReadRefusesOverlongLine(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 4 << 20}
 	reg := tools.Registry(p, []string{"read"})
-	_, err := reg[0].Exec(context.Background(), json.RawMessage(`{"path":"min.js"}`))
+	_, err := reg[0].Exec(t.Context(), json.RawMessage(`{"path":"min.js"}`))
 	if err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("want over-long line refusal, got %v", err)
 	}
-	if out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"path":"ok.txt"}`)); err != nil || !strings.Contains(out, "fine") {
+	if out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"path":"ok.txt"}`)); err != nil || !strings.Contains(out, "fine") {
 		t.Fatalf("normal read broken: %q %v", out, err)
 	}
 }
@@ -524,12 +524,12 @@ func TestWriteAndEditCapOldContent(t *testing.T) {
 		byName[tl.Name()] = i
 	}
 	// edit refuses the oversized file outright.
-	_, err := reg[byName["edit"]].Exec(context.Background(), json.RawMessage(`{"path":"big.txt","old_string":"y","new_string":"z"}`))
+	_, err := reg[byName["edit"]].Exec(t.Context(), json.RawMessage(`{"path":"big.txt","old_string":"y","new_string":"z"}`))
 	if err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("edit must refuse oversized file, got %v", err)
 	}
 	// write still succeeds but skips the diff instead of loading 8 MiB.
-	out, err := reg[byName["write"]].Exec(context.Background(), json.RawMessage(`{"path":"big.txt","content":"small\n"}`))
+	out, err := reg[byName["write"]].Exec(t.Context(), json.RawMessage(`{"path":"big.txt","content":"small\n"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +545,7 @@ func TestBashCancelledContextIsNotATimeout(t *testing.T) {
 	root := t.TempDir()
 	p := &policy.Policy{Workspace: root, AllowShell: true}
 	reg := tools.Registry(p, []string{"bash"})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	out, err := reg[0].Exec(ctx, json.RawMessage(`{"command":"sleep 30"}`))
 	if err != nil {
@@ -562,7 +562,7 @@ func TestBashScrubsCredentialEnv(t *testing.T) {
 	root := t.TempDir()
 	p := &policy.Policy{Workspace: root, AllowShell: true}
 	reg := tools.Registry(p, []string{"bash"})
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"env"}`))
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":"env"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

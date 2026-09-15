@@ -42,7 +42,7 @@ func TestSteerInjectsMidTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng.Steer("PRE-STEER") // before the run — should be cleared at run start
-	if _, err := eng.Prompt(context.Background(), "start"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "start"); err != nil {
 		t.Fatal(err)
 	}
 	if !sawMid {
@@ -90,7 +90,7 @@ func TestSteerOnRunStartNotDropped(t *testing.T) {
 			eng.Steer("START-STEER")
 		}
 	})
-	if _, err := eng.Prompt(context.Background(), "start"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "start"); err != nil {
 		t.Fatal(err)
 	}
 	if !sawSteer {

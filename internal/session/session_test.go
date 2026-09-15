@@ -133,7 +133,7 @@ func TestLoadMessagesLastSnapshot(t *testing.T) {
 		t.Fatalf("snapshot wrong: %+v", msgs)
 	}
 
-	turns, err := s.LoadTranscript()
+	turns, err := s.LoadTranscriptEvents()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestLoadTranscriptSkipsMessageDumps(t *testing.T) {
 	mm := llm.Message{Role: "user", Content: "should-not-appear-twice"}
 	_ = s.Append(Event{Type: "message", Message: &mm})
 	_ = s.Append(Event{Type: "assistant", Role: "assistant", Content: "a"})
-	turns, err := s.LoadTranscript()
+	turns, err := s.LoadTranscriptEvents()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,46 +298,9 @@ func TestListSessions(t *testing.T) {
 	}
 }
 
-func TestMarkdownDigestBoundedAndJSONLUnchanged(t *testing.T) {
-	s := &Store{Dir: t.TempDir(), ID: "digest"}
-	if err := s.Append(Event{Type: "user", Role: "user", Content: "hello"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Append(Event{Type: "assistant", Role: "assistant", Content: "world"}); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 12; i++ {
-		if err := s.Append(Event{Type: "user", Role: "user", Content: strings.Repeat("x", 10_000)}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	before, err := os.ReadFile(s.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := MarkdownDigest(s.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, "# Session digest") || !strings.Contains(got, "Turns: 14") ||
-		!strings.Contains(got, "## user\n\nhello") || !strings.Contains(got, "## assistant\n\nworld") {
-		t.Fatalf("digest missing shape: %.500s", got)
-	}
-	if len(got) > MaxMarkdownDigestBytes || !strings.Contains(got, "…(digest truncated)") {
-		t.Fatalf("digest len=%d truncated=%v", len(got), strings.Contains(got, "digest truncated"))
-	}
-	after, err := os.ReadFile(s.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
-		t.Fatal("MarkdownDigest modified canonical JSONL")
-	}
-}
-
 func TestNewIDUniqueAndValid(t *testing.T) {
 	seen := map[string]bool{}
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		id := NewID()
 		if err := ValidateID(id); err != nil {
 			t.Fatal(err)

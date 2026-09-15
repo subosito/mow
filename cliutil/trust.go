@@ -1,6 +1,7 @@
 package cliutil
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,10 +14,7 @@ import (
 // os.Exit-style status code. prog is the display name shown in usage
 // ("mow", or whatever a TUI host calls itself).
 func TrustCommand(prog string, args []string) int {
-	prog = strings.TrimSpace(prog)
-	if prog == "" {
-		prog = "mow"
-	}
+	prog = cmp.Or(strings.TrimSpace(prog), "mow")
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
 		fmt.Fprintf(os.Stderr, `%s trust — allow project .mow config and skills
 

@@ -5,6 +5,7 @@
 <!-- draft: verify against final diff before release -->
 
 - feat(goal): stock `mow goal` outer loop (checklist, worktrees, parallel steps); bash refuses WIP-discard and discover-tool dumps.
+- refactor: drop unused leftover helpers and adopt Go 1.26 stdlib idioms (`min`/`max`, `slices`, `maps`, `errors.AsType`, `t.Context()`).
 - fix(tools): jail fallback no longer removes a pre-existing outside file on verification failure; openat2 fds are CLOEXEC; read tool bounds line length; FIFOs rejected.
 - fix(tools): bash and proc children no longer inherit API-key environment variables; `policy.env_passthrough: [NAMES]` (host config only) lets named variables through.
 - fix(sandbox): read-only workspace is bound read-only under bwrap; bind order follows longest-match.

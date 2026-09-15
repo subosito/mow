@@ -2,6 +2,7 @@
 package llm
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -139,18 +140,6 @@ func (u Usage) Add(o Usage) Usage {
 		SourcesUsed:           u.SourcesUsed + o.SourcesUsed,
 		ServerSideToolCalls:   u.ServerSideToolCalls + o.ServerSideToolCalls,
 	}
-}
-
-// FreshInputTokens is InputTokens minus the cache read and write shares: the
-// part billed at the plain input rate. Clamped at zero so a provider reporting
-// shares larger than the total (seen on some gateways) cannot produce a
-// negative.
-func (u Usage) FreshInputTokens() int {
-	used := u.CachedInputTokens + u.CacheWriteInputTokens
-	if used >= u.InputTokens {
-		return 0
-	}
-	return u.InputTokens - used
 }
 
 // Truncated reports whether the provider cut the reply at its token limit.
@@ -348,10 +337,7 @@ func (c *Client) chatOpenAI(ctx context.Context, messages []Message, tools []Too
 	if c.Model == "" {
 		return Message{}, fmt.Errorf("llm: model required")
 	}
-	base := strings.TrimRight(c.BaseURL, "/")
-	if base == "" {
-		base = "https://api.openai.com/v1"
-	}
+	base := cmp.Or(strings.TrimRight(c.BaseURL, "/"), "https://api.openai.com/v1")
 	url := base + "/chat/completions"
 	if strings.HasSuffix(base, "/chat/completions") {
 		url = base

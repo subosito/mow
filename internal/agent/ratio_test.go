@@ -45,7 +45,7 @@ func TestRatioCalibratorConverges(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newRatioCalibrator()
-			for i := 0; i < 40; i++ {
+			for range 40 {
 				c.Observe(tc.chars, tc.tokens)
 			}
 			if math.Abs(c.Ratio()-tc.want) > 0.05 {
@@ -61,7 +61,7 @@ func TestRatioCalibratorConverges(t *testing.T) {
 func TestRatioCalibratorClamps(t *testing.T) {
 	// Absurdly dense sample (1 char/token) clamps at the floor.
 	low := newRatioCalibrator()
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		low.Observe(1_000, 1_000)
 	}
 	if got := low.Ratio(); got < minCharsPerToken-1e-9 || got > minCharsPerToken+0.01 {
@@ -69,7 +69,7 @@ func TestRatioCalibratorClamps(t *testing.T) {
 	}
 	// Absurdly sparse sample (40 chars/token) clamps at the ceiling.
 	high := newRatioCalibrator()
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		high.Observe(40_000, 1_000)
 	}
 	if got := high.Ratio(); got > maxCharsPerToken+1e-9 || got < maxCharsPerToken-0.01 {
@@ -142,7 +142,7 @@ func TestApplyCompactUsesCalibratedRatio(t *testing.T) {
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "refactor the compaction budget in internal/agent"},
 	}
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		msgs = append(msgs,
 			llm.Message{Role: "assistant", Content: strings.Repeat("a", 500)},
 			llm.Message{Role: "tool", Name: "read", Content: strings.Repeat("x", 500)},
@@ -164,7 +164,7 @@ func TestApplyCompactUsesCalibratedRatio(t *testing.T) {
 	// Now the provider reports a dense code ratio (~2 chars/token): the same
 	// history costs ~2x the budget chars, so compaction must fire.
 	dense := newRatioCalibrator()
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		dense.Observe(2_000, 1_000)
 	}
 	out2, _, err := applyCompact(t.Context(), msgs, opt, dense)
@@ -184,7 +184,7 @@ func TestApplyCompactHookSeesRatio(t *testing.T) {
 	// Enough turns that compaction can actually shrink history: PreCompact
 	// only fires when the probe shows there is something to save.
 	msgs := []llm.Message{{Role: "system", Content: "sys"}}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		msgs = append(msgs,
 			llm.Message{Role: "user", Content: strings.Repeat("q", 4_000)},
 			llm.Message{Role: "assistant", Content: strings.Repeat("a", 4_000)},
@@ -202,7 +202,7 @@ func TestApplyCompactHookSeesRatio(t *testing.T) {
 		}},
 	}
 	c := newRatioCalibrator()
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		c.Observe(2_000, 1_000) // ~2 chars/token
 	}
 	if _, _, err := applyCompact(t.Context(), msgs, opt, c); err != nil {
@@ -252,7 +252,7 @@ func TestApplyCompactTokenThreshold(t *testing.T) {
 			{Role: "system", Content: "sys"},
 			{Role: "user", Content: "implement the refund API with idempotency keys"},
 		}
-		for i := 0; i < n; i++ {
+		for range n {
 			msgs = append(msgs,
 				llm.Message{Role: "assistant", Content: strings.Repeat("a", 800)},
 				llm.Message{Role: "tool", Name: "read", Content: strings.Repeat("x", 800)},

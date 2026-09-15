@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"path/filepath"
 	"strings"
 
@@ -56,21 +57,18 @@ func (a toolAdapter) Exploratory() bool {
 	return false
 }
 
-func adaptChat(fn ChatFunc) agent.ChatFn {
-	if fn == nil {
-		return nil
+// Enabled forwards optional Enabled(*Engine) so conditionally registered
+// extension and per-engine tools are filtered for the current engine.
+func (a toolAdapter) Enabled(e *Engine) bool {
+	type enabled interface{ Enabled(*Engine) bool }
+	if x, ok := a.t.(enabled); ok {
+		return x.Enabled(e)
 	}
-	return func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
-		out, err := fn(ctx, toPublicMessages(messages), toPublicToolSpecs(tools))
-		if err != nil {
-			return llm.Message{}, err
-		}
-		return toInternalMessage(out), nil
-	}
+	return true
 }
 
 // mergeHooks combines ext globals + Options into agent loop hooks and engine life hooks.
-// Order: ext globals first, then Options (so Options can override/annotate after packs).
+// Order: ext globals first, then Options (so Options can override/annotate after extensions).
 func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 	var h agent.Hooks
 	var life lifeHooks
@@ -79,52 +77,43 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 	loadUser := opt.LoadUserConfig
 	if !opt.DisableExtensionHooks {
 		for _, fn := range ext.PreToolHooksForEngine(loadUser) {
-			fn := fn
-			h.PreTool = append(h.PreTool, adaptPreToolExt(fn))
+			h.PreTool = append(h.PreTool, adaptPreTool(fn))
 		}
 	}
 	for _, fn := range hooks.OnPreTool {
-		fn := fn
 		h.PreTool = append(h.PreTool, adaptPreTool(fn))
 	}
 	if !opt.DisableExtensionHooks {
 		for _, fn := range ext.PostToolHooksForEngine(loadUser) {
-			fn := fn
 			h.PostTool = append(h.PostTool, adaptPostToolExt(fn))
 		}
 	}
 	for _, fn := range hooks.OnPostTool {
-		fn := fn
 		h.PostTool = append(h.PostTool, adaptPostTool(fn))
 	}
 	if !opt.DisableExtensionHooks {
 		for _, fn := range ext.PreModelHooksForEngine(loadUser) {
-			fn := fn
 			h.PreModel = append(h.PreModel, adaptPreModelExt(fn))
 		}
 		for _, fn := range ext.PreCompactHooksForEngine(loadUser) {
-			fn := fn
 			h.PreCompact = append(h.PreCompact, adaptPreCompactExt(fn))
 		}
 	}
 	for _, fn := range hooks.OnPreCompact {
-		fn := fn
 		h.PreCompact = append(h.PreCompact, adaptPreCompact(fn))
 	}
 	if !opt.DisableExtensionHooks {
 		for _, fn := range ext.AfterTurnHooksForEngine(loadUser) {
-			fn := fn
 			h.AfterTurn = append(h.AfterTurn, func(ctx context.Context, e agent.AfterTurnEvent) {
-				fn(ctx, ext.AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
+				fn(ctx, AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
 			})
 		}
 		// Deciding form: may return text the loop injects before the next
 		// call. Kept separate from the observers above so an observer can
 		// never influence history.
 		for _, fn := range ext.AfterTurnDecisionHooksForEngine(loadUser) {
-			fn := fn
 			h.AfterTurnDecide = append(h.AfterTurnDecide, func(ctx context.Context, e agent.AfterTurnEvent) (agent.AfterTurnDecision, error) {
-				d, err := fn(ctx, ext.AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
+				d, err := fn(ctx, AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
 				if err != nil {
 					return agent.AfterTurnDecision{}, err
 				}
@@ -133,61 +122,29 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 		}
 	}
 	for _, fn := range hooks.OnAfterTurn {
-		fn := fn
 		h.AfterTurn = append(h.AfterTurn, func(ctx context.Context, e agent.AfterTurnEvent) {
 			fn(ctx, AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})
 		})
 	}
 
 	if !opt.DisableExtensionHooks {
-		for _, fn := range ext.SessionStartHooksForEngine(loadUser) {
-			fn := fn
-			life.onSessionStart = append(life.onSessionStart, adaptSessionStartExt(fn))
-		}
+		life.onSessionStart = append(life.onSessionStart, ext.SessionStartHooksForEngine(loadUser)...)
 	}
-	for _, fn := range hooks.OnSessionStart {
-		fn := fn
-		life.onSessionStart = append(life.onSessionStart, fn)
-	}
+	life.onSessionStart = append(life.onSessionStart, hooks.OnSessionStart...)
 	if !opt.DisableExtensionHooks {
-		for _, fn := range ext.UserPromptHooksForEngine(loadUser) {
-			fn := fn
-			life.onUserPrompt = append(life.onUserPrompt, adaptUserPromptExt(fn))
-		}
+		life.onUserPrompt = append(life.onUserPrompt, ext.UserPromptHooksForEngine(loadUser)...)
 	}
-	for _, fn := range hooks.OnUserPrompt {
-		fn := fn
-		life.onUserPrompt = append(life.onUserPrompt, fn)
-	}
+	life.onUserPrompt = append(life.onUserPrompt, hooks.OnUserPrompt...)
 	if !opt.DisableExtensionHooks {
-		for _, fn := range ext.StopHooksForEngine(loadUser) {
-			fn := fn
-			life.onStop = append(life.onStop, adaptStopExt(fn))
-		}
+		life.onStop = append(life.onStop, ext.StopHooksForEngine(loadUser)...)
 	}
-	for _, fn := range hooks.OnStop {
-		fn := fn
-		life.onStop = append(life.onStop, fn)
-	}
+	life.onStop = append(life.onStop, hooks.OnStop...)
 	return h, life
 }
 
 func adaptPreTool(fn PreToolFunc) agent.PreToolFunc {
 	return func(ctx context.Context, e agent.PreToolEvent) (agent.PreToolDecision, error) {
 		d, err := fn(ctx, PreToolEvent{Name: e.Name, Args: e.Args, ToolCallID: e.ToolCallID})
-		if err != nil {
-			return agent.PreToolDecision{}, err
-		}
-		return agent.PreToolDecision{
-			Deny: d.Deny, Message: d.Message, Args: d.Args,
-			RewriteArgs: d.RewriteArgs, AdditionalContext: d.AdditionalContext,
-		}, nil
-	}
-}
-
-func adaptPreToolExt(fn ext.PreToolFunc) agent.PreToolFunc {
-	return func(ctx context.Context, e agent.PreToolEvent) (agent.PreToolDecision, error) {
-		d, err := fn(ctx, ext.PreToolEvent{Name: e.Name, Args: e.Args, ToolCallID: e.ToolCallID})
 		if err != nil {
 			return agent.PreToolDecision{}, err
 		}
@@ -267,38 +224,6 @@ func adaptPreCompactExt(fn ext.PreCompactFunc) agent.PreCompactFunc {
 			return agent.PreCompactDecision{}, err
 		}
 		return agent.PreCompactDecision{Skip: d.Skip, Summary: d.Summary}, nil
-	}
-}
-
-func adaptSessionStartExt(fn ext.SessionStartFunc) SessionStartFunc {
-	return func(ctx context.Context, e SessionStartEvent) (SessionStartDecision, error) {
-		d, err := fn(ctx, ext.SessionStartEvent{
-			Workspace: e.Workspace, SessionID: e.SessionID, Model: e.Model, System: e.System,
-		})
-		if err != nil {
-			return SessionStartDecision{}, err
-		}
-		return SessionStartDecision{SystemAppend: d.SystemAppend}, nil
-	}
-}
-
-func adaptUserPromptExt(fn ext.UserPromptFunc) UserPromptFunc {
-	return func(ctx context.Context, e UserPromptEvent) (UserPromptDecision, error) {
-		d, err := fn(ctx, ext.UserPromptEvent{
-			Text: e.Text, SessionID: e.SessionID, Workspace: e.Workspace,
-		})
-		if err != nil {
-			return UserPromptDecision{}, err
-		}
-		return UserPromptDecision{
-			Text: d.Text, RewriteText: d.RewriteText, SystemAppend: d.SystemAppend,
-		}, nil
-	}
-}
-
-func adaptStopExt(fn ext.StopFunc) StopFunc {
-	return func(ctx context.Context, e StopEvent) {
-		fn(ctx, ext.StopEvent{Text: e.Text, Err: e.Err, SessionID: e.SessionID})
 	}
 }
 
@@ -458,9 +383,7 @@ func toolPresent(list []agent.Tool, name string) bool {
 
 func withActorHeaders(in map[string]string, actor string) map[string]string {
 	out := map[string]string{}
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	if actor != "" && out[llm.HeaderActor] == "" {
 		out[llm.HeaderActor] = actor
 	}
@@ -544,8 +467,6 @@ func cloneStringMap(src map[string]string) map[string]string {
 		return nil
 	}
 	dst := make(map[string]string, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 	return dst
 }

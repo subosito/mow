@@ -37,7 +37,7 @@ func TestWriteRejectsPagedReadBanner(t *testing.T) {
 	dir := t.TempDir()
 	p := &policy.Policy{Workspace: dir, AllowWrite: true}
 	wt := &writeTool{p: p}
-	_, err := wt.Exec(context.Background(), json.RawMessage(
+	_, err := wt.Exec(t.Context(), json.RawMessage(
 		`{"path":"a.yaml","content":"groups:\n…(showing lines 1-2000 of 4000; continue with offset=2001)\n"}`,
 	))
 	if err == nil || !strings.Contains(err.Error(), "paged read") {
@@ -111,7 +111,7 @@ func TestHashlineReadEdit(t *testing.T) {
 			editT = tool
 		}
 	}
-	out, err := readT.Exec(context.Background(), json.RawMessage(`{"path":"a.txt"}`))
+	out, err := readT.Exec(t.Context(), json.RawMessage(`{"path":"a.txt"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestHashlineReadEdit(t *testing.T) {
 	}
 	// extract hash for hello
 	var hash string
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(line, "|hello") {
 			// "     1:abcd1234|hello"
 			parts := strings.SplitN(strings.TrimSpace(line), ":", 2)
@@ -137,7 +137,7 @@ func TestHashlineReadEdit(t *testing.T) {
 	args, _ := json.Marshal(map[string]string{
 		"path": "a.txt", "line_hash": hash, "new_string": "hi",
 	})
-	if _, err := editT.Exec(context.Background(), args); err != nil {
+	if _, err := editT.Exec(t.Context(), args); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func TestSetModelRequiresLiveClient(t *testing.T) {
 	if err := eng.SetModel("other"); err == nil {
 		t.Fatal("expected error with custom Chat")
 	}
-	list, err := eng.ListModels(context.Background())
+	list, err := eng.ListModels(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +113,7 @@ func TestMaxTurnsStopReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := eng.Prompt(context.Background(), "loop")
+	res, err := eng.Prompt(t.Context(), "loop")
 	if err == nil {
 		t.Fatal("want max turns error")
 	}
@@ -148,7 +149,7 @@ func TestPromptDoesNotBlockModelDuringChat(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, e := eng.Prompt(context.Background(), "hello")
+		_, e := eng.Prompt(t.Context(), "hello")
 		errCh <- e
 	}()
 
@@ -189,9 +190,9 @@ func TestEngineMultiTurn(t *testing.T) {
 	chat := func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
 		n++
 		var last string
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == "user" {
-				last = messages[i].Content
+		for _, message := range slices.Backward(messages) {
+			if message.Role == "user" {
+				last = message.Content
 				break
 			}
 		}
@@ -201,14 +202,14 @@ func TestEngineMultiTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r1, err := eng.Prompt(context.Background(), "one")
+	r1, err := eng.Prompt(t.Context(), "one")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if r1.Text != "echo:one" {
 		t.Fatalf("r1=%q", r1.Text)
 	}
-	r2, err := eng.Prompt(context.Background(), "two")
+	r2, err := eng.Prompt(t.Context(), "two")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +235,7 @@ func TestPromptOptsExtraTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "hi"); err != nil {
 		t.Fatal(err)
 	}
 	for _, n := range saw {
@@ -243,7 +244,7 @@ func TestPromptOptsExtraTools(t *testing.T) {
 		}
 	}
 	saw = nil
-	if _, err := eng.PromptWith(context.Background(), "hi", mow.PromptOpts{
+	if _, err := eng.PromptWith(t.Context(), "hi", mow.PromptOpts{
 		ExtraTools: []mow.Tool{extraPromptTool{}},
 	}); err != nil {
 		t.Fatal(err)
@@ -286,7 +287,7 @@ func TestPromptWithSystemAppend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.PromptWith(context.Background(), "hi", mow.PromptOpts{
+	if _, err := eng.PromptWith(t.Context(), "hi", mow.PromptOpts{
 		SystemAppend: "GOAL_PROTOCOL_MARKER",
 	}); err != nil {
 		t.Fatal(err)
@@ -335,7 +336,7 @@ llm:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "hi"); err != nil {
 		t.Fatal(err)
 	}
 	// Identity line only — AGENTS.md may still mention "mow" elsewhere.
@@ -368,7 +369,7 @@ func TestResumeModelUsesSessionModelOverConfigDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng1.Prompt(context.Background(), "hello"); err != nil {
+	if _, err := eng1.Prompt(t.Context(), "hello"); err != nil {
 		t.Fatal(err)
 	}
 	eng1.Close()
@@ -407,7 +408,7 @@ func TestResumeModelExplicitOverrideWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng1.Prompt(context.Background(), "hello"); err != nil {
+	if _, err := eng1.Prompt(t.Context(), "hello"); err != nil {
 		t.Fatal(err)
 	}
 	eng1.Close()

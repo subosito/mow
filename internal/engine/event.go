@@ -83,7 +83,7 @@ const (
 	EventModelRetry EventType = "loop.model.retry"
 	EventRunEnd     EventType = "loop.run.end"
 
-	// graph.* — orchestration (packs/goal): state transitions and node progress.
+	// graph.* — goal orchestration: state transitions and node progress.
 	EventGoalStart   EventType = "graph.goal.start"
 	EventGoalStep    EventType = "graph.goal.step"
 	EventGoalDone    EventType = "graph.goal.done"

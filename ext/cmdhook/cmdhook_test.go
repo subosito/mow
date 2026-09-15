@@ -1,7 +1,6 @@
 package cmdhook
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -58,25 +57,25 @@ func TestPreToolUseDecisions(t *testing.T) {
 	b := mustLoad(t, PluginConfig{Root: root})
 
 	// Bash matcher → deny decision.
-	out := b.run(context.Background(), "PreToolUse", "Bash",
+	out := b.run(t.Context(), "PreToolUse", "Bash",
 		map[string]any{"hook_event_name": "PreToolUse", "cwd": root})
 	if !out.blocked || !strings.Contains(out.reason, "not on my watch") {
 		t.Fatalf("deny: %+v", out)
 	}
 	// Read matcher → context only.
-	out = b.run(context.Background(), "PreToolUse", "Read",
+	out = b.run(t.Context(), "PreToolUse", "Read",
 		map[string]any{"hook_event_name": "PreToolUse", "cwd": root})
 	if out.blocked || len(out.contexts) != 1 || out.contexts[0] != "use the sandbox" {
 		t.Fatalf("context: %+v", out)
 	}
 	// Grep matcher → exit-2 block with stderr reason.
-	out = b.run(context.Background(), "PreToolUse", "Grep",
+	out = b.run(t.Context(), "PreToolUse", "Grep",
 		map[string]any{"hook_event_name": "PreToolUse", "cwd": root})
 	if !out.blocked || !strings.Contains(out.reason, "stderr says no") {
 		t.Fatalf("exit2: %+v", out)
 	}
 	// Unmatched tool → nothing fires.
-	out = b.run(context.Background(), "PreToolUse", "Write",
+	out = b.run(t.Context(), "PreToolUse", "Write",
 		map[string]any{"hook_event_name": "PreToolUse", "cwd": root})
 	if out.blocked || len(out.contexts) != 0 {
 		t.Fatalf("unmatched: %+v", out)
@@ -96,7 +95,7 @@ func TestPayloadReachesStdin(t *testing.T) {
 	b := mustLoad(t, PluginConfig{Root: root})
 
 	args := json.RawMessage(`{"command":"ls -la"}`)
-	b.run(context.Background(), "PreToolUse", "Bash", map[string]any{
+	b.run(t.Context(), "PreToolUse", "Bash", map[string]any{
 		"hook_event_name": "PreToolUse",
 		"tool_name":       "Bash",
 		"tool_input":      args,
@@ -154,7 +153,7 @@ func TestContextModeRealHook(t *testing.T) {
 	// per-session dedup does not suppress a repeat run.
 	cwd := t.TempDir()
 	args := json.RawMessage(`{"pattern":"error"}`)
-	out := b.run(context.Background(), "PreToolUse", "Grep", map[string]any{
+	out := b.run(t.Context(), "PreToolUse", "Grep", map[string]any{
 		"hook_event_name": "PreToolUse",
 		"tool_name":       "Grep",
 		"tool_input":      args,

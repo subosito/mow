@@ -1,7 +1,6 @@
 package compaction_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +41,7 @@ func TestCompactionCost(t *testing.T) {
 		MaxContextChars: 12_000,
 	}
 
-	stub, summary, verdict, err := compaction.Compare(context.Background(), opt)
+	stub, summary, verdict, err := compaction.Compare(t.Context(), opt)
 	if err != nil {
 		t.Fatalf("compare: %v", err)
 	}

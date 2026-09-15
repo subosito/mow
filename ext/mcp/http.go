@@ -277,8 +277,8 @@ func readSSEResult(r io.Reader, wantID int64) (json.RawMessage, error) {
 	var data strings.Builder
 	for sc.Scan() {
 		line := sc.Text()
-		if strings.HasPrefix(line, "data:") {
-			data.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		if after, ok := strings.CutPrefix(line, "data:"); ok {
+			data.WriteString(strings.TrimSpace(after))
 			continue
 		}
 		if line == "" && data.Len() > 0 {

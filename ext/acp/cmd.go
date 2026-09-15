@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -58,7 +59,7 @@ func runCmd(args []string) int {
 	defer stop()
 	if err := Agent(ctx, AgentOptions{Engine: eng, In: os.Stdin, Out: os.Stdout}); err != nil {
 		// Clean EOF/cancel is normal when the editor disconnects.
-		if err == context.Canceled || strings.Contains(err.Error(), "EOF") {
+		if errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "EOF") {
 			return 0
 		}
 		fmt.Fprintf(os.Stderr, "mow acp: %v\n", err)

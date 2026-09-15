@@ -18,11 +18,6 @@ const DefaultMaxToolResultChars = 24_000
 // is known. Auto-compact does not use this — unknown window means off.
 const DefaultMaxContextChars = 100_000
 
-// DefaultCompactRatio is the fraction used by ContextCharsBudget (explicit
-// char-budget path / tests). Auto-compact trips on tokens — see
-// CompactTokenThreshold.
-const DefaultCompactRatio = 0.5
-
 // CompactTokenThreshold is the auto-compact tripwire as a fraction of
 // context_window (tokens). Same units as the host ctx chip: fire at 80% of
 // the advertised window.
@@ -32,41 +27,6 @@ const CompactTokenThreshold = 0.80
 // (in chars, ~400k tokens at ~4 chars/token). Auto-compact (token path) is
 // not capped here — it follows CompactTokenThreshold of the real window.
 const MaxContextCharsHardCap = 1_600_000
-
-// ClampCompactRatio bounds ratio for auto budget. Non-positive → default.
-func ClampCompactRatio(ratio float64) float64 {
-	if ratio <= 0 {
-		return DefaultCompactRatio
-	}
-	if ratio < 0.3 {
-		return 0.3
-	}
-	if ratio > 0.95 {
-		return 0.95
-	}
-	return ratio
-}
-
-// ContextCharsBudget converts a gateway context_window (tokens) into a soft
-// history char budget. ~4 chars/token × ratio of the window (default 0.5 so
-// system, tools, and reply keep headroom), floored at 80k and hard-capped at
-// MaxContextCharsHardCap so a huge window cannot inflate history past the
-// ceiling. Returns 0 when window is unknown.
-func ContextCharsBudget(windowTokens int, ratio float64) int {
-	if windowTokens <= 0 {
-		return 0
-	}
-	ratio = ClampCompactRatio(ratio)
-	b := int(float64(windowTokens) * 4 * ratio)
-	const floor = 80_000
-	if b < floor {
-		return floor
-	}
-	if b > MaxContextCharsHardCap {
-		return MaxContextCharsHardCap
-	}
-	return b
-}
 
 // CompactTokenBudget is the auto-compact tripwire in tokens: 80% of the
 // gateway context_window. Returns 0 when the window is unknown.
@@ -184,10 +144,7 @@ func CompactResumeBudget(budget int) int {
 	if budget <= 0 {
 		return budget
 	}
-	t := int(float64(budget) * CompactResumeRatio)
-	if t < 1 {
-		t = 1
-	}
+	t := max(int(float64(budget)*CompactResumeRatio), 1)
 	if budget > 1 && t >= budget {
 		return budget - 1
 	}
@@ -204,10 +161,7 @@ func CompactTarget(maxChars int, ratio float64) int {
 	if ratio <= 0 {
 		ratio = defaultCharsPerToken
 	}
-	t := int(float64(maxChars) * clampRatio(ratio) / defaultCharsPerToken)
-	if t < 1 {
-		t = 1
-	}
+	t := max(int(float64(maxChars)*clampRatio(ratio)/defaultCharsPerToken), 1)
 	return t
 }
 
@@ -268,20 +222,14 @@ func snipLongestToolResults(messages []llm.Message, target, maxToolChars int) []
 	slices.SortStableFunc(candidates, func(a, b candidate) int { return cmp.Compare(b.size, a.size) })
 	need := EstChars(out) - target
 	for _, c := range candidates {
-		limit := maxToolChars
-		if limit < minSnippedToolChars {
-			limit = minSnippedToolChars
-		}
+		limit := max(maxToolChars, minSnippedToolChars)
 		// Always enforce the per-result policy cap on oversized tools (even when
 		// the total is already under the context target). Then, only if we still
 		// need more room, snip further — but never below minSnippedToolChars.
 		// Taking the *larger* of (policy cap, need-driven size) when both apply
 		// would refuse to snip below the policy cap when need is large; instead
 		// policy is the ceiling and need can only go lower.
-		want := c.size
-		if c.size > limit {
-			want = limit
-		}
+		want := min(c.size, limit)
 		if need > 0 {
 			needCap := max(minSnippedToolChars, c.size-need)
 			if needCap < want {
@@ -302,10 +250,7 @@ func snipToolResult(s string, maxChars int) string {
 }
 
 func snipTail(s string, maxChars int) string {
-	keep := maxChars - len(snipMarker)
-	if keep < 0 {
-		keep = 0
-	}
+	keep := max(maxChars-len(snipMarker), 0)
 	return s[:keep] + snipMarker
 }
 
@@ -494,13 +439,7 @@ func collectUserPins(all, kept []llm.Message, maxChars int) []string {
 			continue
 		}
 		// Dedupe exact pins.
-		dup := false
-		for _, p := range pins {
-			if p == snip {
-				dup = true
-				break
-			}
-		}
+		dup := slices.Contains(pins, snip)
 		if dup {
 			continue
 		}
@@ -773,19 +712,10 @@ func TruncateToolResult(s string, maxChars int) string {
 
 func truncateTail(s string, maxChars int) string {
 	cut := maxChars
-	if i := lastIndexByte(s[:maxChars], '\n'); i > maxChars*3/4 {
+	if i := strings.LastIndexByte(s[:maxChars], '\n'); i > maxChars*3/4 {
 		cut = i
 	}
 	return s[:cut] + truncatedMarker
-}
-
-func lastIndexByte(s string, c byte) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
 }
 
 // EstChars is the raw character estimate used by compaction budgets.

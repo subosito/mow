@@ -247,7 +247,7 @@ func writeViaTemp(p *policy.Policy, path string, data []byte, mode os.FileMode) 
 	}
 	var f *os.File
 	var tmp string
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		cand := "." + base + ".tmp-" + strconv.FormatUint(rand.Uint64(), 36)
 		tf, oerr := parent.OpenFile(cand, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 		if oerr != nil {
@@ -330,7 +330,7 @@ func mkdirAllJailed(p *policy.Policy, dir string) error {
 		return nil
 	}
 	cur := root
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if part == "" || part == "." {
 			continue
 		}

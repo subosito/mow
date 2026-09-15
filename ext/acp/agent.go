@@ -2,8 +2,10 @@ package acp
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -44,14 +46,8 @@ func Agent(ctx context.Context, opt AgentOptions) error {
 	if out == nil {
 		out = os.Stdout
 	}
-	name := opt.Name
-	if name == "" {
-		name = "mow"
-	}
-	ver := opt.Version
-	if ver == "" {
-		ver = mow.Version
-	}
+	name := cmp.Or(opt.Name, "mow")
+	ver := cmp.Or(opt.Version, mow.Version)
 
 	a := &agentServer{
 		eng:  opt.Engine,
@@ -137,7 +133,7 @@ func readLines(ctx context.Context, in io.Reader, out chan<- stdinLine) {
 					tooLong, line = true, nil
 				}
 			}
-			if err == bufio.ErrBufferFull {
+			if errors.Is(err, bufio.ErrBufferFull) {
 				continue
 			}
 			if err != nil {
@@ -764,13 +760,11 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		a.mu.Unlock()
 		// Mode is applied; the catalog round trip for configOptions runs off
 		// the read loop so a slow gateway does not stall session/cancel.
-		a.wg.Add(1)
-		go func() {
-			defer a.wg.Done()
+		a.wg.Go(func() {
 			opts := a.sessionConfigOptions(parent, mode)
 			a.notifyConfigOptions(sid, opts)
 			a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
-		}()
+		})
 	case "session/set_config_option", "session/setConfigOption":
 		var p struct {
 			SessionID string `json:"sessionId"`
@@ -854,16 +848,14 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		}
 		a.mu.Unlock()
 		// Option is applied; the catalog round trip runs off the read loop.
-		a.wg.Add(1)
-		go func() {
-			defer a.wg.Done()
+		a.wg.Go(func() {
 			opts := a.sessionConfigOptions(parent, mode)
 			if opts == nil {
 				opts = []map[string]any{}
 			}
 			a.notifyConfigOptions(sid, opts)
 			a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"configOptions": opts}})
-		}()
+		})
 	case "terminal/kill":
 		var p struct {
 			TerminalID string `json:"terminalId"`

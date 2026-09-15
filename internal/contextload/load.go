@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -80,8 +81,8 @@ func loadAgents(workspace string, includeGlobal bool, extraPaths ...string) (str
 		dir = parent
 	}
 	// root-first then deeper so closer files sit later in the prompt
-	for i := len(layers) - 1; i >= 0; i-- {
-		parts = append(parts, layers[i]...)
+	for _, layer := range slices.Backward(layers) {
+		parts = append(parts, layer...)
 	}
 	return strings.Join(parts, "\n\n"), nil
 }

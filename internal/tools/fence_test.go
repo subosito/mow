@@ -37,11 +37,11 @@ func TestFenceShellAndProcessLifecycle(t *testing.T) {
 	if !strings.Contains(shell.Description(), "Fence") {
 		t.Fatal("wrong sandbox description")
 	}
-	out, err := shell.Exec(context.Background(), json.RawMessage(`{"command":"printf shell-ok"}`))
+	out, err := shell.Exec(t.Context(), json.RawMessage(`{"command":"printf shell-ok"}`))
 	if err != nil || !strings.Contains(out, "shell-ok") {
 		t.Fatalf("bash: %v %s", err, out)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	out, err = shell.Exec(ctx, json.RawMessage(`{"command":"sleep 2; printf leaked > bash-orphan"}`))
 	if err != nil || !strings.Contains(out, "bash timed out") {

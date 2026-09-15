@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -25,7 +24,7 @@ func TestEmptyResultHintNamesExtraRoots(t *testing.T) {
 
 	t.Run("glob miss points at roots", func(t *testing.T) {
 		gt := &globTool{p: p}
-		res, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.go"}`))
+		res, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":"**/*.go"}`))
 		if err != nil {
 			t.Fatalf("glob: %v", err)
 		}
@@ -39,7 +38,7 @@ func TestEmptyResultHintNamesExtraRoots(t *testing.T) {
 
 	t.Run("grep miss points at roots", func(t *testing.T) {
 		gt := &grepTool{p: p}
-		res, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"package"}`))
+		res, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":"package"}`))
 		if err != nil {
 			t.Fatalf("grep: %v", err)
 		}

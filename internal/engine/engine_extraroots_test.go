@@ -61,7 +61,7 @@ func TestEngineExtraRootsJailAndSystem(t *testing.T) {
 		t.Fatal("expected escape deny")
 	}
 
-	if _, err := eng.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "hi"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(sawSystem, extra) {

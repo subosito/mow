@@ -31,7 +31,7 @@ func TestAgentRoundTrip(t *testing.T) {
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 
 	go func() {
@@ -96,7 +96,7 @@ func TestAgentToolCallUpdateOmitsReadBodyKeepsEdit(t *testing.T) {
 
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
@@ -190,7 +190,7 @@ func TestSessionCancelDuringPrompt(t *testing.T) {
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 
 	go func() {
@@ -406,7 +406,7 @@ func TestSessionNewAdvertisesModelConfig(t *testing.T) {
 	}
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
@@ -546,7 +546,7 @@ func TestAgentPromptDelegateChunkNotForwardedAsAgentText(t *testing.T) {
 
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
@@ -611,7 +611,7 @@ func TestAgentPromptForwardsModelRetryAndScrubsRefused(t *testing.T) {
 
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
@@ -674,7 +674,7 @@ func TestAgentStopsOnContextCancelWithIdleStdin(t *testing.T) {
 	}
 	ar, aw := io.Pipe()
 	defer aw.Close()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: io.Discard}) }()
 	cancel()
@@ -707,7 +707,7 @@ func TestAgentStdinEOFCancelsInflightPrompt(t *testing.T) {
 	}
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
@@ -762,7 +762,7 @@ func TestAgentRejectsSecondPromptInFlight(t *testing.T) {
 	}
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
@@ -804,7 +804,7 @@ func TestAgentOverlongLineKeepsServing(t *testing.T) {
 	}
 	ar, aw := io.Pipe()
 	cr, cw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	go func() {
 		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})

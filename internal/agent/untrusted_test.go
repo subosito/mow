@@ -50,7 +50,7 @@ func (t stubTool) Exec(context.Context, json.RawMessage) (string, error) {
 }
 
 func TestFrameUntrustedResultDelegate(t *testing.T) {
-	out := frameUntrustedResult(stubTool{name: "delegate"}, "delegate", "peer text", "nonce")
+	out := WrapUntrusted("nonce", "delegate", "peer text")
 	if !strings.Contains(out, `source="delegate"`) || !strings.Contains(out, "peer text") {
 		t.Fatalf("delegate framing: %q", out)
 	}

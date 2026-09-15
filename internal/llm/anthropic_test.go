@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -60,7 +59,7 @@ func TestChatAnthropicSendsSystemPrefix(t *testing.T) {
 		SystemPrefix:       []string{"prefix-block-a"},
 		SystemPrefixModels: []string{"family-*"},
 	}
-	if _, err := c.Chat(context.Background(), []Message{
+	if _, err := c.Chat(t.Context(), []Message{
 		{Role: "system", Content: "main-system"},
 		{Role: "user", Content: "hi"},
 	}, nil); err != nil {
@@ -82,7 +81,7 @@ func TestChatAnthropicSendsSystemPrefix(t *testing.T) {
 	// Same prefix config, non-matching model → plain system string, no preamble.
 	c.Model = "other-model"
 	gotBody = nil
-	if _, err := c.Chat(context.Background(), []Message{
+	if _, err := c.Chat(t.Context(), []Message{
 		{Role: "system", Content: "main-system"},
 		{Role: "user", Content: "hi"},
 	}, nil); err != nil {
@@ -136,7 +135,7 @@ func TestChatAnthropicStopReasonAndMaxTokens(t *testing.T) {
 			t.Cleanup(srv.Close)
 
 			c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client(), MaxTokens: tc.maxTokens}
-			msg, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "x"}}, nil)
+			msg, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "x"}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

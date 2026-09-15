@@ -56,10 +56,6 @@ Safety
 - No secrets in logs, commits, or tool output.
 - Do not claim work is done when it is not.`
 
-// DefaultHarnessSystem is identity + rules (for docs/tests when no prefix).
-// Prefer ComposeSystem / WithOptionalIdentity at runtime.
-var DefaultHarnessSystem = strings.TrimSpace(DefaultHarnessIdentity + "\n\n" + DefaultHarnessRules)
-
 // ComposeSystem builds the compiled system body: harness rules first, then
 // optional project/skills/append segments. Does not include identity — call
 // WithOptionalIdentity at Prompt time based on active system_prefix.

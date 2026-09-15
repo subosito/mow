@@ -1,8 +1,6 @@
 package policy
 
 import (
-	"os/exec"
-
 	"github.com/subosito/mow/internal/sandbox"
 )
 
@@ -39,17 +37,4 @@ func (p *Policy) SandboxBackend() (sandbox.Backend, error) {
 // (used by tool descriptions and status output).
 func (p *Policy) SandboxEnabled() bool {
 	return p != nil && p.AllowShell && p.Sandbox != "" && p.Sandbox != sandbox.ModeNone
-}
-
-// WrapShell applies the sandbox backend to a shell command. Callers keep
-// ownership of process-group / session setup; Wrap preserves SysProcAttr.
-func (p *Policy) WrapShell(cmd *exec.Cmd) (*exec.Cmd, error) {
-	be, err := p.SandboxBackend()
-	if err != nil {
-		return nil, err
-	}
-	if be == nil {
-		return cmd, nil
-	}
-	return be.Wrap(cmd)
 }

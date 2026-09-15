@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -144,7 +143,7 @@ func TestChatOpenAIParsesThoughtSignature(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-	msg, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "x"}}, nil)
+	msg, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "x"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,10 +2,10 @@
 //
 // A slash command is a host-side action a user types into an interactive
 // session (`mow tty`, a TUI host): it is not a tool the model can call and
-// not a CLI subcommand. Packs register here in init, so the command exists in
-// every host exactly when the pack is linked — link `packs/review` and
-// `/review` and `/sec` appear; drop the blank import and they disappear from
-// both hosts at once, with no host-side edit.
+// not a CLI subcommand. Extensions register here in init, so the command
+// exists in every host exactly when the extension is linked — link `ext/cli`
+// and `/doctor` appears; drop the blank import and it disappears, with no
+// host-side edit.
 //
 // The contract is deliberately presentation-free. Run returns text; the host
 // decides how to paint it (ANSI on a plain terminal, transcript entries and a
@@ -17,8 +17,9 @@
 package slash
 
 import (
+	"cmp"
 	"context"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -111,9 +112,8 @@ func Register(c Command) {
 func Commands() []Command {
 	mu.Lock()
 	defer mu.Unlock()
-	out := make([]Command, len(commands))
-	copy(out, commands)
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	out := slices.Clone(commands)
+	slices.SortFunc(out, func(a, b Command) int { return cmp.Compare(a.Name, b.Name) })
 	return out
 }
 
@@ -130,10 +130,8 @@ func Lookup(token string) (Command, bool) {
 		if c.Name == name {
 			return c, true
 		}
-		for _, a := range c.Aliases {
-			if a == name {
-				return c, true
-			}
+		if slices.Contains(c.Aliases, name) {
+			return c, true
 		}
 	}
 	return Command{}, false
@@ -147,7 +145,7 @@ func Names() []string {
 		out = append(out, c.Name)
 		out = append(out, c.Aliases...)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

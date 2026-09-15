@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +27,7 @@ func TestNativeToolRoundTrip(t *testing.T) {
 		Wire: "openai-responses", BaseURL: srv.URL, APIKey: "k", Model: "grok-4.5",
 		NativeTools: []map[string]any{{"type": "web_search"}},
 	}
-	msg, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "q"}}, nil)
+	msg, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "q"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

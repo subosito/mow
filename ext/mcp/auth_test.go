@@ -63,7 +63,7 @@ func TestOAuth2DeviceCode(t *testing.T) {
 		ClientID:      "cid",
 		Scope:         "mcp",
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://x", nil)
 	if err := ts.apply(req); err != nil {
@@ -221,7 +221,7 @@ func TestOAuth2AuthCodeUniqueStateAndVerifier(t *testing.T) {
 		}
 		res.Body.Close()
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		// Force a fresh login each round.
 		ts.mu.Lock()
 		ts.token = ""
@@ -273,12 +273,8 @@ func TestBearerApplyNil(t *testing.T) {
 func TestOAuth2ClientCredentials(t *testing.T) {
 	var tokenHits atomic.Int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
 		tokenHits.Add(1)
-		if r.Method != http.MethodPost {
-			http.Error(w, "method", 405)
-			return
-		}
 		_ = r.ParseForm()
 		if r.Form.Get("grant_type") != "client_credentials" {
 			http.Error(w, "grant", 400)
@@ -326,7 +322,7 @@ func TestOAuth2ClientCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := tr.call(context.Background(), "initialize", map[string]any{})
+	raw, err := tr.call(t.Context(), "initialize", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +330,7 @@ func TestOAuth2ClientCredentials(t *testing.T) {
 		t.Fatalf("result=%s", raw)
 	}
 	// Cached token — second call should not re-hit token endpoint.
-	if _, err := tr.call(context.Background(), "ping", map[string]any{}); err != nil {
+	if _, err := tr.call(t.Context(), "ping", map[string]any{}); err != nil {
 		t.Fatal(err)
 	}
 	if n := tokenHits.Load(); n != 1 {
@@ -392,7 +388,7 @@ func TestOAuth2RefreshOn401(t *testing.T) {
 	tr.auth.expiry = time.Now().Add(time.Hour)
 	tr.auth.mu.Unlock()
 
-	raw, err := tr.call(context.Background(), "tools/list", map[string]any{})
+	raw, err := tr.call(t.Context(), "tools/list", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +429,7 @@ func TestHTTPBearerHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tr.call(context.Background(), "x", nil); err != nil {
+	if _, err := tr.call(t.Context(), "x", nil); err != nil {
 		t.Fatal(err)
 	}
 }

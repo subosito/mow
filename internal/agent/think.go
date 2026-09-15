@@ -112,7 +112,7 @@ func asciiLower(s string) string {
 		return s
 	}
 	b := []byte(s)
-	for i := 0; i < len(b); i++ {
+	for i := range b {
 		if c := b[i]; c >= 'A' && c <= 'Z' {
 			b[i] = c + ('a' - 'A')
 		}

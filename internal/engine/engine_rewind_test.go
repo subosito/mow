@@ -20,7 +20,7 @@ func TestRewind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	eng.Prompt(ctx, "first question")
 	eng.Prompt(ctx, "typo questiom")
 	before := len(eng.Transcript())

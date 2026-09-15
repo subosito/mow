@@ -395,7 +395,7 @@ func TestDeviceCodeFlow(t *testing.T) {
 			ClientID:      "test-cli",
 		})
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 
 		tok, err := ts.deviceAccessToken(ctx)
@@ -431,7 +431,7 @@ func TestDeviceCodeFlow(t *testing.T) {
 			ClientID:      "test-cli",
 		})
 
-		_, err := ts.deviceAccessToken(context.Background())
+		_, err := ts.deviceAccessToken(t.Context())
 		if err == nil || !strings.Contains(err.Error(), "expired_token") {
 			t.Fatalf("expected expired_token error, got %v", err)
 		}
@@ -513,7 +513,7 @@ func TestAuthCodeFlow(t *testing.T) {
 			authURLCaptured = u
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 
 		done := make(chan error, 1)
@@ -524,7 +524,7 @@ func TestAuthCodeFlow(t *testing.T) {
 
 		// Wait for authURL captured
 		var authURL string
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			if authURL = capturedAuthURL(); authURL != "" {
 				break
 			}
@@ -603,7 +603,7 @@ func TestHTTPTransport401TokenRefresh(t *testing.T) {
 	tr.auth.token = "stale-token"
 	tr.auth.expiry = time.Now().Add(10 * time.Minute)
 
-	raw, err := tr.call(context.Background(), "ping", nil)
+	raw, err := tr.call(t.Context(), "ping", nil)
 	if err != nil {
 		t.Fatalf("call failed: %v", err)
 	}
@@ -678,7 +678,7 @@ func TestMCPServerCmdAndLifecycle(t *testing.T) {
 			`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"mow_prompt","arguments":{"prompt":""}}}` + "\n",
 	)
 	var out bytes.Buffer
-	code := serve(context.Background(), eng, in, &out)
+	code := serve(t.Context(), eng, in, &out)
 	if code != 0 {
 		t.Fatalf("serve returned code %d, want 0", code)
 	}
@@ -868,14 +868,14 @@ func TestRegisterServersHTTPAndToolCalling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ht.initialize(context.Background()); err != nil {
+	if err := ht.initialize(t.Context()); err != nil {
 		t.Fatalf("ht.initialize failed: %v", err)
 	}
-	tools, err := ht.listTools(context.Background())
+	tools, err := ht.listTools(t.Context())
 	if err != nil || len(tools) == 0 {
 		t.Fatalf("ht.listTools failed: %v", err)
 	}
-	res, err := ht.callTool(context.Background(), "search", json.RawMessage(`{}`))
+	res, err := ht.callTool(t.Context(), "search", json.RawMessage(`{}`))
 	if err != nil || res != "search result" {
 		t.Fatalf("ht.callTool got %q, %v", res, err)
 	}
@@ -894,7 +894,7 @@ func TestStdioServerSubprocess(t *testing.T) {
 	rc := &reconnectingClient{cfg: cfg}
 	defer rc.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	tools, err := rc.listTools(ctx)
 	if err != nil {
 		t.Fatalf("rc.listTools failed: %v", err)

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -101,20 +102,17 @@ func (e *Engine) AddOnEvent(fn EventFunc) (unsubscribe func()) {
 	id := e.nextEventID
 	e.onEvents = append(e.onEvents, eventSub{id: id, fn: fn})
 	e.onTokenMu.Unlock()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			e.onTokenMu.Lock()
-			out := e.onEvents[:0]
-			for _, s := range e.onEvents {
-				if s.id != id {
-					out = append(out, s)
-				}
+	return sync.OnceFunc(func() {
+		e.onTokenMu.Lock()
+		out := e.onEvents[:0]
+		for _, s := range e.onEvents {
+			if s.id != id {
+				out = append(out, s)
 			}
-			e.onEvents = out
-			e.onTokenMu.Unlock()
-		})
-	}
+		}
+		e.onEvents = out
+		e.onTokenMu.Unlock()
+	})
 }
 
 // log returns the Options.Logger or the process default. Engine logging goes
@@ -176,10 +174,10 @@ func (e *Engine) Close() error {
 	e.mu.Unlock()
 
 	e.Cancel()
-	for i := len(fns) - 1; i >= 0; i-- {
+	for _, fn := range slices.Backward(fns) {
 		func() {
 			defer func() { _ = recover() }() // one bad cleanup must not skip the rest
-			fns[i]()
+			fn()
 		}()
 	}
 	return nil

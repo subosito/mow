@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"io"
 	"strings"
@@ -35,7 +34,7 @@ func TestCallAnswersServerRequestAndKeepsWaiting(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}` + "\n"
 	c, wrote := fakeStdio(t, frames)
 
-	raw, err := c.call(context.Background(), "tools/list", map[string]any{})
+	raw, err := c.call(t.Context(), "tools/list", map[string]any{})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -62,7 +61,7 @@ func TestCallAnswersPingWithResult(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n"
 	c, wrote := fakeStdio(t, frames)
 
-	if _, err := c.call(context.Background(), "tools/list", map[string]any{}); err != nil {
+	if _, err := c.call(t.Context(), "tools/list", map[string]any{}); err != nil {
 		t.Fatalf("call: %v", err)
 	}
 	sent := wrote.String()
@@ -82,7 +81,7 @@ func TestCallSkipsStaleReplyID(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"result":{"fresh":true}}` + "\n"
 	c, _ := fakeStdio(t, frames)
 
-	raw, err := c.call(context.Background(), "tools/list", map[string]any{})
+	raw, err := c.call(t.Context(), "tools/list", map[string]any{})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -100,7 +99,7 @@ func TestCallSkipsNotificationAndReportsError(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"error":{"message":"boom"}}` + "\n"
 	c, _ := fakeStdio(t, frames)
 
-	if _, err := c.call(context.Background(), "tools/list", map[string]any{}); err == nil ||
+	if _, err := c.call(t.Context(), "tools/list", map[string]any{}); err == nil ||
 		!strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err = %v, want the server error", err)
 	}

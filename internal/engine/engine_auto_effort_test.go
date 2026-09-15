@@ -50,7 +50,7 @@ func TestSimplePromptDoesNotMutatePublicEffort(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := eng.Prompt(context.Background(), "thanks")
+		_, err := eng.Prompt(t.Context(), "thanks")
 		errCh <- err
 	}()
 	select {
@@ -147,7 +147,7 @@ func TestExplicitEffortReachesTheWire(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := eng.Prompt(context.Background(), "thanks")
+		_, err := eng.Prompt(t.Context(), "thanks")
 		errCh <- err
 	}()
 	select {
@@ -242,7 +242,7 @@ func TestCatalogEffortDownshiftIsOnTheWireOnly(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := eng.Prompt(context.Background(), "thanks")
+		_, err := eng.Prompt(t.Context(), "thanks")
 		errCh <- err
 	}()
 	select {
@@ -345,7 +345,7 @@ func TestCatalogDefaultHighReachesWireOnLongPrompt(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := eng.Prompt(context.Background(), long)
+		_, err := eng.Prompt(t.Context(), long)
 		errCh <- err
 	}()
 	select {

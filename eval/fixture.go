@@ -36,7 +36,7 @@ type Case struct {
 	Script []mow.Message `json:"script,omitempty"`
 	// Expect is checked against the run result. Empty Expect only checks err==nil
 	// unless Expect.AllowError is set.
-	Expect Expect `json:"expect,omitempty"`
+	Expect Expect `json:"expect"`
 }
 
 // Expect is a behavioral assertion set. All non-empty fields must hold.

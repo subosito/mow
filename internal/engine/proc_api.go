@@ -1,9 +1,5 @@
-// Re-export of internal/proc for packs/ (which lives in a separate Go module
-// and cannot import internal/). Packs that need process management —
-// packs/goal's process tools — import mow.Proc* instead of internal/proc.
-//
-// ext/proc (the general proc_* tools) uses these
-// re-exports for the same reason.
+// Re-export of internal/proc for public mow.Proc* (extensions and external
+// modules cannot import internal/). ext/proc uses these.
 package engine
 
 import (
@@ -11,8 +7,8 @@ import (
 	"github.com/subosito/mow/internal/sandbox"
 )
 
-// SandboxBackend is the OS jail handed to ProcStart. Alias so packs/ can name
-// the type without importing internal/sandbox.
+// SandboxBackend is the OS jail handed to ProcStart. Alias so public callers
+// can name the type without importing internal/sandbox.
 type SandboxBackend = sandbox.Backend
 
 // ProcErrAlreadyRunning is returned by ProcStart when id is already alive.

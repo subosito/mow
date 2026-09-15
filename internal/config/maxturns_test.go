@@ -11,9 +11,9 @@ import (
 // max_turns is unlimited unless the operator asks for a ceiling.
 //
 // It used to default to 120, which ended healthy long-running work with
-// nothing wrong: a turn count is a poor proxy for cost or progress, and
-// packs/goal read the resulting ErrMaxTurns as a *user-set* budget hit and
-// failed the goal after five of them. Cost is bounded by max_run_tokens /
+// nothing wrong: a turn count is a poor proxy for cost or progress.
+// Goal workflows used to read the resulting ErrMaxTurns as a *user-set*
+// budget hit and failed the goal after five of them. Cost is bounded by max_run_tokens /
 // max_run_usd, spinning by ErrStuck; neither needs a turn cap.
 func TestMaxTurnsDefaultsUnlimited(t *testing.T) {
 	dir := t.TempDir()

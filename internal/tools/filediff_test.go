@@ -9,7 +9,7 @@ import (
 // diffBody returns the +/- lines of a diff (excluding file headers).
 func diffBody(out string) []string {
 	var o []string
-	for _, l := range strings.Split(out, "\n") {
+	for l := range strings.SplitSeq(out, "\n") {
 		if strings.HasPrefix(l, "+++") || strings.HasPrefix(l, "---") {
 			continue
 		}
@@ -28,7 +28,7 @@ func applyDiff(t *testing.T, oldContent, diff string) string {
 	oldLines := splitLines(oldContent)
 	var out []string
 	oldPos := 0 // 0-based index into oldLines
-	for _, line := range strings.Split(diff, "\n") {
+	for line := range strings.SplitSeq(diff, "\n") {
 		switch {
 		case strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ "):
 			continue
@@ -175,7 +175,7 @@ func TestReplaceDiffHunkHeadersMatchBody(t *testing.T) {
 			t.Fatalf("hunk counts disagree with body (old off by %d, new off by %d):\n%s", oc, nc, out)
 		}
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		switch {
 		case strings.HasPrefix(line, "@@"):
 			check()

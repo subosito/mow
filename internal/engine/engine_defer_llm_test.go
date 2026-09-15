@@ -101,26 +101,22 @@ func TestEnsureLLMConcurrentCallers(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errc := make(chan error, 1)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if _, perr := eng.Prompt(t.Context(), "hi"); perr != nil {
 			select {
 			case errc <- perr:
 			default:
 			}
 		}
-	}()
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	})
+	for range 4 {
+		wg.Go(func() {
 			_ = eng.Efforts()
 			_ = eng.DefaultEffort()
 			_ = eng.DisplayEffort()
 			_ = eng.Model()
 			_ = eng.Wire()
-		}()
+		})
 	}
 	wg.Wait()
 	select {

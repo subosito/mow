@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -72,9 +73,7 @@ func applyProviderProfile(dst *LLMConfig, p LLMProviderProfile) {
 	}
 	if p.Headers != nil {
 		dst.Headers = map[string]string{}
-		for k, v := range p.Headers {
-			dst.Headers[k] = v
-		}
+		maps.Copy(dst.Headers, p.Headers)
 	}
 }
 

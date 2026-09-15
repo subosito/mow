@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -120,7 +120,7 @@ func pruneArchive(dir string, keep int) {
 		}
 		names = append(names, e.Name())
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	for _, n := range names[:max(0, len(names)-keep)] {
 		_ = os.Remove(filepath.Join(dir, n))
 	}

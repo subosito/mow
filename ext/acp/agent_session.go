@@ -176,9 +176,7 @@ func (a *agentServer) bind(sid string) string {
 func (a *agentServer) writeSessionOpen(parent context.Context, req request, sid, mode string) {
 	// The session is already bound; the configOptions catalog round trip runs
 	// off the read loop so a slow gateway does not stall session/cancel.
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
+	a.wg.Go(func() {
 		result := map[string]any{
 			"sessionId": sid,
 			"modes":     modeState(mode),
@@ -188,5 +186,5 @@ func (a *agentServer) writeSessionOpen(parent context.Context, req request, sid,
 		}
 		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: result})
 		a.advertiseCommands(sid)
-	}()
+	})
 }

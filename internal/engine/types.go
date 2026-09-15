@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/internal/agent"
 	"github.com/subosito/mow/internal/policy"
 )
@@ -29,23 +30,15 @@ func StripThinking(s string) (visible, thinking string) {
 	return agent.StripThinking(s)
 }
 
-// Tool is a host-executed function available to the agent loop.
-// Extension packs implement this and register via ext.RegisterTool.
-// (Defined here so internal packages do not need to import ext.)
-type Tool interface {
-	Name() string
-	Description() string
-	// Parameters is a JSON Schema object for arguments.
-	Parameters() json.RawMessage
-	Exec(ctx context.Context, args json.RawMessage) (string, error)
-}
+// Tool is a host-executed function. Same type as ext.Tool; register via ext.RegisterTool.
+type Tool = ext.Tool
 
 // Lifecycle hooks live in hooks.go (PreTool, PostTool, UserPrompt, …).
 
 // Message is a chat message for injectable Chat funcs (tests / custom LLM).
 type Message struct {
 	Role       string     `json:"role"`
-	Timestamp  time.Time  `json:"ts,omitempty"`
+	Timestamp  time.Time  `json:"ts"`
 	Content    string     `json:"content,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`

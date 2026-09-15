@@ -29,7 +29,7 @@ func (b *blockingReader) Read(p []byte) (int, error) {
 func TestIdleReaderReadsThenTimesOut(t *testing.T) {
 	br := &blockingReader{prefix: []byte("hello world"), block: make(chan struct{})}
 	defer close(br.block)
-	ir := &idleReader{r: br, idle: 50 * time.Millisecond, ctx: context.Background()}
+	ir := &idleReader{r: br, idle: 50 * time.Millisecond, ctx: t.Context()}
 
 	buf := make([]byte, 4)
 	var got strings.Builder
@@ -66,7 +66,7 @@ func TestIdleReaderNilContext(t *testing.T) {
 func TestIdleReaderCancel(t *testing.T) {
 	br := &blockingReader{block: make(chan struct{})}
 	defer close(br.block)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	ir := &idleReader{r: br, idle: 10 * time.Second, ctx: ctx}
 	go func() {
 		time.Sleep(20 * time.Millisecond)
@@ -82,7 +82,7 @@ func TestIdleReaderPumpExitsAfterAbandon(t *testing.T) {
 	// Read finally returns (body closed), the pump goroutine must exit rather
 	// than park forever waiting for a request that will never come.
 	br := &blockingReader{block: make(chan struct{})}
-	r := &idleReader{r: br, idle: 20 * time.Millisecond, ctx: context.Background()}
+	r := &idleReader{r: br, idle: 20 * time.Millisecond, ctx: t.Context()}
 	base := runtime.NumGoroutine()
 	if _, err := r.Read(make([]byte, 8)); err == nil {
 		t.Fatal("expected idle timeout")

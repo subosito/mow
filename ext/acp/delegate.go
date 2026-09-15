@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -216,9 +217,7 @@ func AppendPeers(agents []PeerSpec, workspace string, peerIdleSec int) {
 	}
 	// agents is read by Description/Exec on tool-call goroutines: same lock.
 	sharedDelegate.peersMu.Lock()
-	for k, v := range indexed {
-		sharedDelegate.agents[k] = v
-	}
+	maps.Copy(sharedDelegate.agents, indexed)
 	sharedDelegate.peersMu.Unlock()
 	ext.RegisterTool(sharedDelegate)
 }
@@ -315,10 +314,7 @@ func (t *delegateTool) ensureReaper() {
 	stop := t.reaperStop
 	idle := t.peerIdle
 	go func() {
-		d := idle
-		if d > 15*time.Second {
-			d = 15 * time.Second
-		}
+		d := min(idle, 15*time.Second)
 		tick := time.NewTicker(d)
 		defer tick.Stop()
 		for {
@@ -352,12 +348,8 @@ func (t *delegateTool) Name() string    { return ToolName }
 func (t *delegateTool) Untrusted() bool { return true }
 func (t *delegateTool) Description() string {
 	t.peersMu.Lock()
-	names := make([]string, 0, len(t.agents))
-	for n := range t.agents {
-		names = append(names, n)
-	}
+	names := slices.Sorted(maps.Keys(t.agents))
 	t.peersMu.Unlock()
-	sort.Strings(names)
 	return "Delegate a task to a named peer agent over ACP (in other harnesses often called a subagent). " +
 		"Only call this when the user names a peer or explicitly asks to delegate — not because a task list looks parallelizable. " +
 		"Peers are configured under extensions.acp.peers (command = external ACP peer; model = native mow acp). " +

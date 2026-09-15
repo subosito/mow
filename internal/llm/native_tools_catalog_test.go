@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +29,7 @@ func TestNativeToolsFromCatalog(t *testing.T) {
 	defer srv.Close()
 
 	base := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL, APIKey: "k", Model: "searcher"}
-	if _, err := base.ListModels(context.Background()); err != nil {
+	if _, err := base.ListModels(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -38,7 +37,7 @@ func TestNativeToolsFromCatalog(t *testing.T) {
 		sentTools = nil
 		c := *base
 		c.Model = "searcher"
-		if _, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		if _, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(sentTools) != 1 {
@@ -54,7 +53,7 @@ func TestNativeToolsFromCatalog(t *testing.T) {
 		sentTools = nil
 		c := *base
 		c.Model = "plain"
-		if _, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		if _, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(sentTools) != 0 {
@@ -67,7 +66,7 @@ func TestNativeToolsFromCatalog(t *testing.T) {
 		c := *base
 		c.Model = "searcher"
 		c.NativeTools = []map[string]any{{"type": "x_search"}}
-		if _, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		if _, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(sentTools) != 1 {

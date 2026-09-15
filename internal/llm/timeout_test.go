@@ -67,7 +67,7 @@ func TestStreamSlowFirstByteSucceeds(t *testing.T) {
 
 	withTestFirstByte(bound, func() {
 		c := firstByteClient(t, srv.URL, bound)
-		req := newStreamReq(t, context.Background(), srv.URL+"/chat/completions")
+		req := newStreamReq(t, t.Context(), srv.URL+"/chat/completions")
 		res, err := c.doHTTPStream(req)
 		if err != nil {
 			t.Fatalf("slow first byte within bound should succeed: %v", err)
@@ -90,7 +90,7 @@ func TestStreamFirstByteTimeoutDiagnostic(t *testing.T) {
 
 	withTestFirstByte(bound, func() {
 		c := firstByteClient(t, srv.URL, bound)
-		req := newStreamReq(t, context.Background(), srv.URL+"/chat/completions")
+		req := newStreamReq(t, t.Context(), srv.URL+"/chat/completions")
 		start := time.Now()
 		_, err := c.doHTTPStream(req)
 		elapsed := time.Since(start)
@@ -124,7 +124,7 @@ func TestStreamFirstByteTimeoutNotRetried(t *testing.T) {
 
 	withTestFirstByte(bound, func() {
 		c := firstByteClient(t, srv.URL, bound)
-		req := newStreamReq(t, context.Background(), srv.URL+"/chat/completions")
+		req := newStreamReq(t, t.Context(), srv.URL+"/chat/completions")
 		_, _ = c.doHTTPStream(req)
 		if n := hits.Load(); n != 1 {
 			t.Fatalf("first-byte timeout must not retry: got %d hits, want 1", n)
@@ -149,7 +149,7 @@ func TestStreamCallerCancellationIsPrompt(t *testing.T) {
 		srv.Close()
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	c := firstByteClient(t, srv.URL, bound)
 	req := newStreamReq(t, ctx, srv.URL+"/chat/completions")
 
@@ -187,7 +187,7 @@ func TestCallTimeoutConfigurable(t *testing.T) {
 		CallTimeout: cap,
 	}
 	raw := []byte(`{"model":"test-model","messages":[]}`)
-	req, err := newJSONRequest(context.Background(), http.MethodPost, srv.URL+"/chat/completions", raw)
+	req, err := newJSONRequest(t.Context(), http.MethodPost, srv.URL+"/chat/completions", raw)
 	if err != nil {
 		t.Fatal(err)
 	}

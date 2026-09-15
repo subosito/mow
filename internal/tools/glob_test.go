@@ -97,7 +97,7 @@ func TestGlobToolRecursive(t *testing.T) {
 	tool := &globTool{p: p, noFd: true}
 	run := func(pattern string) string {
 		t.Helper()
-		out, err := tool.Exec(context.Background(),
+		out, err := tool.Exec(t.Context(),
 			json.RawMessage(`{"pattern":`+mustJSON(pattern)+`}`))
 		if err != nil {
 			t.Fatalf("glob %q: %v", pattern, err)
@@ -180,7 +180,7 @@ func TestGlobFdAndWalkAgree(t *testing.T) {
 	mk("node_modules/x.go", "package x")
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
 	walk := &globTool{p: p, noFd: true}
-	walkOut, err := walk.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.go"}`))
+	walkOut, err := walk.Exec(t.Context(), json.RawMessage(`{"pattern":"**/*.go"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestGlobFdAndWalkAgree(t *testing.T) {
 		t.Skip("fd not on PATH")
 	}
 	fd := &globTool{p: p}
-	fdOut, err := fd.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.go"}`))
+	fdOut, err := fd.Exec(t.Context(), json.RawMessage(`{"pattern":"**/*.go"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestGlobMissingFdFallsBackToWalk(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
 	gt := &globTool{p: p, fdBin: filepath.Join(root, "fd-not-installed")}
-	out, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.go"}`))
+	out, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":"**/*.go"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,14 +222,14 @@ func TestGlobMissingFdFallsBackToWalk(t *testing.T) {
 func TestGlobToolIndexHint(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	for i := 0; i < globIndexHint+5; i++ {
+	for i := range globIndexHint + 5 {
 		name := filepath.Join(root, "f"+strconv.Itoa(i)+".txt")
 		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
-	out, err := (&globTool{p: p}).Exec(context.Background(), json.RawMessage(`{"pattern":"*.txt"}`))
+	out, err := (&globTool{p: p}).Exec(t.Context(), json.RawMessage(`{"pattern":"*.txt"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestGlobRecursiveStaysInJail(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: root, MaxReadBytes: 1 << 20}
 	tool := &globTool{p: p}
-	out, err := tool.Exec(context.Background(),
+	out, err := tool.Exec(t.Context(),
 		json.RawMessage(`{"pattern":`+mustJSON(outside+"/**/*.go")+`}`))
 	if err == nil && strings.Contains(out, "secret.go") {
 		t.Fatalf("glob escaped the workspace jail: %q", out)
@@ -274,7 +274,7 @@ func TestGlobRecursiveExtraRoot(t *testing.T) {
 	}
 	p := &policy.Policy{Workspace: ws, ExtraRoots: []string{extra}, MaxReadBytes: 1 << 20}
 	tool := &globTool{p: p}
-	out, err := tool.Exec(context.Background(),
+	out, err := tool.Exec(t.Context(),
 		json.RawMessage(`{"pattern":`+mustJSON(filepath.Join(extra, "**", "*.rs"))+`}`))
 	if err != nil {
 		t.Fatal(err)
@@ -282,7 +282,7 @@ func TestGlobRecursiveExtraRoot(t *testing.T) {
 	if !strings.Contains(out, "foo.rs") {
 		t.Fatalf("extra-root ** glob missed foo.rs: %q", out)
 	}
-	rel, err := tool.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.rs"}`))
+	rel, err := tool.Exec(t.Context(), json.RawMessage(`{"pattern":"**/*.rs"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestGlobWalkHonoursCtxCancel(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := globWalk(ctx, root, filepath.Join(root, "**", "*.go")); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled walk must return ctx error, got %v", err)
@@ -323,7 +323,7 @@ func TestGlobWalkSymlinkedWorkspace(t *testing.T) {
 	// Workspace configured through the symlink: the walk must still find files.
 	p := &policy.Policy{Workspace: link, MaxReadBytes: 1 << 20}
 	gt := &globTool{p: p, noFd: true}
-	out, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.go"}`))
+	out, err := gt.Exec(t.Context(), json.RawMessage(`{"pattern":"**/*.go"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

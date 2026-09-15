@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/subosito/mow"
 	"strings"
 	"testing"
+
+	"github.com/subosito/mow"
 )
 
 func TestMCPExplorationClassification(t *testing.T) {
@@ -61,7 +62,7 @@ func TestMCPSearchContinuesWithFreshEvidenceThroughEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer eng.Close()
-	res, err := eng.Prompt(context.Background(), "investigate")
+	res, err := eng.Prompt(t.Context(), "investigate")
 	if err != nil || !warned || !strings.Contains(res.Text, "Findings collected") {
 		t.Fatalf("missing successful final answer: calls=%d result=%+v err=%v", calls, res, err)
 	}

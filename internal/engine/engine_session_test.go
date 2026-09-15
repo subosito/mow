@@ -18,7 +18,7 @@ func TestBeginSessionClearsNoSessionHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer eng.Close()
-	if _, err := eng.Prompt(context.Background(), "one"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "one"); err != nil {
 		t.Fatal(err)
 	}
 	if len(eng.Transcript()) == 0 {
@@ -51,7 +51,7 @@ func TestBeginSessionRotatesJSONL(t *testing.T) {
 	if first == "" {
 		t.Fatal("want session id")
 	}
-	if _, err := eng.Prompt(context.Background(), "one"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "one"); err != nil {
 		t.Fatal(err)
 	}
 	second, err := eng.BeginSession()

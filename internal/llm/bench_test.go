@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +25,7 @@ func benchStreamServer(b *testing.B, body string) *Client {
 func benchStreamBody(b *testing.B, chunks int, chunk string) string {
 	b.Helper()
 	var sb strings.Builder
-	for i := 0; i < chunks; i++ {
+	for range chunks {
 		fmt.Fprintf(&sb, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\n", chunk)
 	}
 	sb.WriteString("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
@@ -41,8 +40,8 @@ func BenchmarkStreamContentAssembly(b *testing.B) {
 	msgs := []Message{{Role: "user", Content: "hi"}}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		msg, err := c.ChatStreamHooks(context.Background(), msgs, nil, StreamHooks{})
+	for b.Loop() {
+		msg, err := c.ChatStreamHooks(b.Context(), msgs, nil, StreamHooks{})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -56,7 +55,7 @@ func BenchmarkStreamContentAssembly(b *testing.B) {
 func BenchmarkStreamToolCallAssembly(b *testing.B) {
 	var sb strings.Builder
 	const calls, perCall = 50, 40
-	for i := 0; i < calls*perCall; i++ {
+	for i := range calls * perCall {
 		idx := i % calls
 		fmt.Fprintf(&sb, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":%d,\"id\":\"call_%d\",\"function\":{\"name\":\"f%d\",\"arguments\":\"{\\\"k\\\":\\\"0123456789abcdef\\\"}\"}}]}}]}\n\n", idx, i, idx)
 	}
@@ -66,8 +65,8 @@ func BenchmarkStreamToolCallAssembly(b *testing.B) {
 	msgs := []Message{{Role: "user", Content: "x"}}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		msg, err := c.ChatStreamHooks(context.Background(), msgs, nil, StreamHooks{})
+	for b.Loop() {
+		msg, err := c.ChatStreamHooks(b.Context(), msgs, nil, StreamHooks{})
 		if err != nil {
 			b.Fatal(err)
 		}

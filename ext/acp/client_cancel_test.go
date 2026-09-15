@@ -61,7 +61,7 @@ func TestPromptCancelSendsSessionCancel(t *testing.T) {
 		}
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		_, _, _, err := c.Prompt(ctx, "sess-1", "do a long thing")

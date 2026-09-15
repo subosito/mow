@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -55,12 +55,7 @@ var skipDirNames = map[string]bool{
 
 // hasDoublestar reports whether pat contains a ** path segment.
 func hasDoublestar(pat string) bool {
-	for _, seg := range strings.Split(filepath.ToSlash(pat), "/") {
-		if seg == "**" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(filepath.ToSlash(pat), "/"), "**")
 }
 
 // lookupFd is exec.LookPath("fd"); tests may stub it.
@@ -131,7 +126,7 @@ func globFd(ctx context.Context, bin, root, pat string) ([]string, bool) {
 	}
 	waitErr := cmd.Wait()
 	if len(out) > 0 || ctx.Err() != nil {
-		sort.Strings(out)
+		slices.Sort(out)
 		if len(out) > globMaxMatches {
 			out = out[:globMaxMatches]
 		}
@@ -140,8 +135,7 @@ func globFd(ctx context.Context, bin, root, pat string) ([]string, bool) {
 	if waitErr == nil {
 		return out, true
 	}
-	var ee *exec.ExitError
-	if errors.As(waitErr, &ee) && ee.ExitCode() == 1 {
+	if ee, ok := errors.AsType[*exec.ExitError](waitErr); ok && ee.ExitCode() == 1 {
 		return out, true // fd: no matches
 	}
 	return nil, false
@@ -192,7 +186,7 @@ func globWalk(ctx context.Context, root, pat string) ([]string, error) {
 	if err != nil && err != filepath.SkipAll {
 		return nil, err
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out, nil
 }
 

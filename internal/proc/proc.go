@@ -1,7 +1,6 @@
 // Package proc manages long-lived background processes: start detached, record
-// a pid + logfile, check status, tail logs, and stop. Shared by ext/proc (the
-// general proc_* tools) and packs/goal (goal-scoped process
-// tools). Detach model: new session (Setsid) + asynchronous Wait so the process
+// a pid + logfile, check status, tail logs, and stop. Used by ext/proc
+// (proc_* tools). Detach model: new session (Setsid) + asynchronous Wait so the process
 // outlives the tool call while the parent still reaps it when it exits.
 package proc
 

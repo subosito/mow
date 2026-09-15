@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +29,7 @@ func TestNativeToolsReachTheWire(t *testing.T) {
 				Wire: wire, BaseURL: srv.URL, APIKey: "k", Model: "m",
 				NativeTools: []map[string]any{{"type": "web_search"}},
 			}
-			_, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+			_, err := c.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil)
 			if err != nil {
 				t.Fatalf("chat: %v", err)
 			}

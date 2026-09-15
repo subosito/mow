@@ -246,8 +246,8 @@ tools:
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Model ids are pack config now: config only has to carry the opaque
-	// extensions.media node through. packs/media owns decoding it.
+	// Model ids are extension config now: config only has to carry the opaque
+	// extensions.media node through. The media extension owns decoding it.
 	if _, ok := f.Extensions["media"]; !ok {
 		t.Fatalf("extensions.media missing: %#v", f.Extensions)
 	}

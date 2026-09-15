@@ -42,8 +42,8 @@ func TestEngineCompactShrinksTranscript(t *testing.T) {
 	// Build a long history of small turns (20 x 500 chars ≈ 10k of user
 	// content + ~10k system): older turns fall outside the pin window so the
 	// drop layer can trim them.
-	for i := 0; i < 20; i++ {
-		if _, err := eng.Prompt(context.Background(), strings.Repeat("x", 500)); err != nil {
+	for range 20 {
+		if _, err := eng.Prompt(t.Context(), strings.Repeat("x", 500)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -73,7 +73,7 @@ func TestEngineCompactShrinksTranscript(t *testing.T) {
 	// THE REAL IMPACT: the next prompt's history comes from e.prior, so a
 	// follow-up call must send fewer messages than the last seeding call.
 	lastSeed := sizes[len(sizes)-1]
-	if _, err := eng.Prompt(context.Background(), "after compact"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "after compact"); err != nil {
 		t.Fatal(err)
 	}
 	after := sizes[len(sizes)-1]
@@ -103,8 +103,8 @@ func TestEngineCompactRefreshesContextTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 20; i++ {
-		if _, err := eng.Prompt(context.Background(), strings.Repeat("x", 500)); err != nil {
+	for range 20 {
+		if _, err := eng.Prompt(t.Context(), strings.Repeat("x", 500)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -151,7 +151,7 @@ func TestEngineCompactEmitsStartThenEnd(t *testing.T) {
 			}
 		}
 	})
-	if _, err := eng.Prompt(context.Background(), strings.Repeat("x", 200)); err != nil {
+	if _, err := eng.Prompt(t.Context(), strings.Repeat("x", 200)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := eng.Compact(0); err != nil {
@@ -197,9 +197,9 @@ func TestEngineCompactZeroFreesHeadroom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		prompt := "please fix bug number " + strings.Repeat("x", 200)
-		if _, err := eng.Prompt(context.Background(), prompt); err != nil {
+		if _, err := eng.Prompt(t.Context(), prompt); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -240,8 +240,8 @@ func TestEngineCompactZeroWithLargeSoftBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 30; i++ {
-		if _, err := eng.Prompt(context.Background(), "work on feature "+strings.Repeat("y", 400)); err != nil {
+	for range 30 {
+		if _, err := eng.Prompt(t.Context(), "work on feature "+strings.Repeat("y", 400)); err != nil {
 			t.Fatal(err)
 		}
 	}

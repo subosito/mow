@@ -45,7 +45,7 @@ type ModelInfo struct {
 	// MaxOutputTokens is the gateway's generation cap when published (0 = unknown).
 	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
 	// Pricing is gateway-published token pricing (USD per 1M tokens when set).
-	Pricing ModelPricing `json:"pricing,omitempty"`
+	Pricing ModelPricing `json:"pricing"`
 	// NativeTools are provider-executed tools this model can run, as wire-shaped
 	// declarations the client merges into the request (e.g. [{"type":"web_search"}]).
 	//
@@ -54,22 +54,6 @@ type ModelInfo struct {
 	// and a client cannot declare a tool the model does not have. Empty on plain
 	// provider catalogs; local llm.native_tools still overrides.
 	NativeTools []map[string]any `json:"native_tools,omitempty"`
-}
-
-// SupportsNativeTool returns true if the model declares a native tool with the given type or name.
-func (m ModelInfo) SupportsNativeTool(toolType string) bool {
-	if toolType == "" {
-		return false
-	}
-	for _, tool := range m.NativeTools {
-		if t, ok := tool["type"].(string); ok && t == toolType {
-			return true
-		}
-		if n, ok := tool["name"].(string); ok && n == toolType {
-			return true
-		}
-	}
-	return false
 }
 
 // ModelPricing is the optional pricing object on GET /v1/models entries.
@@ -213,10 +197,7 @@ func preferredCatalogWire(wire string, wires []string) string {
 }
 
 func modelsURL(baseURL string) string {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
-		base = "https://api.openai.com/v1"
-	}
+	base := cmp.Or(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "https://api.openai.com/v1")
 	base = strings.TrimSuffix(base, "/chat/completions")
 	base = strings.TrimSuffix(base, "/messages")
 	return base + "/models"

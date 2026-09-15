@@ -41,7 +41,7 @@ func TestErrAgentDoneNotEmittedAsToolError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Prompt(context.Background(), "finish"); err != nil {
+	if _, err := eng.Prompt(t.Context(), "finish"); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()

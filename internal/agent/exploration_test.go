@@ -19,7 +19,7 @@ func exploreResult(body string) []llm.Message {
 func TestExplorationOverlappingReadsRemainAdvisory(t *testing.T) {
 	g := explorationGuard{workspace: "/repo"}
 	warned := false
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		hint := g.note([]llm.ToolCall{exploreCall("read", fmt.Sprintf(`{"path":"a","offset":%d}`, i))}, exploreResult("same evidence"))
 		warned = warned || hint != ""
 	}
@@ -29,7 +29,7 @@ func TestExplorationOverlappingReadsRemainAdvisory(t *testing.T) {
 }
 func TestExplorationNovelPagesAndChangedContent(t *testing.T) {
 	g := explorationGuard{}
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		c := exploreCall("read", fmt.Sprintf(`{"path":"a","offset":%d}`, i))
 		g.note([]llm.ToolCall{c}, exploreResult(fmt.Sprintf("new contents %d", i)))
 		if g.low != 0 {
@@ -41,7 +41,7 @@ func TestExplorationMissesAndProductiveReset(t *testing.T) {
 	for _, name := range []string{"grep", "glob"} {
 		t.Run(name, func(t *testing.T) {
 			g := explorationGuard{}
-			for i := 0; i < 2; i++ {
+			for i := range 2 {
 				g.note([]llm.ToolCall{exploreCall(name, fmt.Sprintf(`{"pattern":"missing%d"}`, i))}, exploreResult("(no matches)"))
 			}
 			if !g.warned {
@@ -60,7 +60,7 @@ func TestExplorationMissesAndProductiveReset(t *testing.T) {
 }
 func TestExplorationBashInventoryAndValidation(t *testing.T) {
 	g := explorationGuard{}
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		g.note([]llm.ToolCall{exploreCall("bash", `{"command":"git status"}`)}, exploreResult("unchanged"))
 	}
 	if !g.warned {

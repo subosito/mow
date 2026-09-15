@@ -87,7 +87,6 @@ func TestClientAnswersAgentRequests(t *testing.T) {
 		{"unknown/method", map[string]any{}, true, []string{"method not supported"}},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.method, func(t *testing.T) {
 			id := tc.method
 			req := request{JSONRPC: "2.0", ID: json.RawMessage(`"` + id + `"`), Method: tc.method, Params: mustJSON(tc.params)}
@@ -155,30 +154,6 @@ func TestClientAllowPermissionSelectsOption(t *testing.T) {
 	}
 	if strings.Contains(line, `"error"`) {
 		t.Fatalf("unexpected error: %s", line)
-	}
-}
-
-func TestSanitizeStderrTail(t *testing.T) {
-	in := "api_key=supersecret123\nnormal line\nBearer abc.def.ghi\nkey sk-proj-Ab12_cd34-EF56gh78 and sk-ant-api03-XYZxyz0123456789"
-	out := sanitizeStderrTail(in)
-	if strings.Contains(out, "supersecret123") || strings.Contains(out, "abc.def.ghi") {
-		t.Fatalf("secrets leaked: %q", out)
-	}
-	if strings.Contains(out, "Ab12_cd34") || strings.Contains(out, "XYZxyz0123456789") {
-		t.Fatalf("prefixed sk- keys leaked: %q", out)
-	}
-	if !strings.Contains(out, "normal line") {
-		t.Fatalf("lost benign line: %q", out)
-	}
-}
-
-func TestStderrRingCap(t *testing.T) {
-	r := newStderrRing(32)
-	if _, err := r.Write([]byte(strings.Repeat("a", 100))); err != nil {
-		t.Fatal(err)
-	}
-	if len(r.buf) > 32 {
-		t.Fatalf("len=%d cap=32", len(r.buf))
 	}
 }
 

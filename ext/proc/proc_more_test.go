@@ -1,7 +1,6 @@
 package proc
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -72,7 +71,7 @@ func TestToolMetadata(t *testing.T) {
 
 func TestToolsNeedEngineContext(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	for _, tc := range []struct {
 		name string
 		tool ext.Tool

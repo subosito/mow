@@ -20,33 +20,20 @@ type hostPeerPolicy struct {
 	provider      string
 }
 
-// peerHost is the mow.Engine surface used when building native peer argv.
-type peerHost interface {
-	AllowWrite() bool
-	AllowShell() bool
-	LLMProvider() string
-	Workspace() string
-	ExtraRoots() []string
-	ExtraRootsReadOnly() []string
-	WritableRoots() []string
-	ReadOnlyWorkspace() bool
-}
-
 func hostPolicyFromContext(ctx context.Context, fallbackWorkspace string) *hostPeerPolicy {
 	eng := mow.EngineFromContext(ctx)
 	if eng == nil {
 		return nil
 	}
-	h := peerHost(eng)
 	p := &hostPeerPolicy{
-		workspace:     strings.TrimSpace(h.Workspace()),
-		extraRoots:    append([]string(nil), h.ExtraRoots()...),
-		extraRootsRO:  append([]string(nil), h.ExtraRootsReadOnly()...),
-		writableRoots: append([]string(nil), h.WritableRoots()...),
-		readOnly:      h.ReadOnlyWorkspace(),
-		allowWrite:    h.AllowWrite(),
-		allowShell:    h.AllowShell(),
-		provider:      strings.TrimSpace(h.LLMProvider()),
+		workspace:     strings.TrimSpace(eng.Workspace()),
+		extraRoots:    append([]string(nil), eng.ExtraRoots()...),
+		extraRootsRO:  append([]string(nil), eng.ExtraRootsReadOnly()...),
+		writableRoots: append([]string(nil), eng.WritableRoots()...),
+		readOnly:      eng.ReadOnlyWorkspace(),
+		allowWrite:    eng.AllowWrite(),
+		allowShell:    eng.AllowShell(),
+		provider:      strings.TrimSpace(eng.LLMProvider()),
 	}
 	if p.workspace == "" {
 		p.workspace = strings.TrimSpace(fallbackWorkspace)

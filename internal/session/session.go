@@ -318,9 +318,8 @@ func repairToolCalls(msgs []llm.Message) []llm.Message {
 	return out
 }
 
-// LoadTranscript returns user/assistant turns for UI display (no tool dumps,
-// no system prompts). Uses the simple type=user/assistant events written each turn.
-// LoadTranscriptEvents preserves event timestamps for external UI resume.
+// LoadTranscriptEvents returns user/assistant turns for UI display (no tool
+// dumps, no system prompts), preserving event timestamps for host resume.
 func (s *Store) LoadTranscriptEvents() ([]Event, error) {
 	path, err := s.resolvedPath()
 	if err != nil {
@@ -334,7 +333,7 @@ func (s *Store) LoadTranscriptEvents() ([]Event, error) {
 		return nil, err
 	}
 	var turns []Event
-	for _, line := range splitLines(string(raw)) {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		var ev Event
 		if line == "" || json.Unmarshal([]byte(line), &ev) != nil {
 			continue
@@ -344,56 +343,6 @@ func (s *Store) LoadTranscriptEvents() ([]Event, error) {
 		}
 	}
 	return turns, nil
-}
-
-// LoadTranscript returns user/assistant turns for display. Host-facing:
-// TUI/host history views read sessions through this projection (no tool
-// dumps, no system prompts).
-func (s *Store) LoadTranscript() ([]llm.Message, error) {
-	path, err := s.resolvedPath()
-	if err != nil {
-		return nil, err
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var turns []llm.Message
-	for _, line := range splitLines(string(raw)) {
-		if line == "" {
-			continue
-		}
-		var ev Event
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			continue
-		}
-		// Prefer explicit transcript events; skip full message dumps.
-		if ev.Message != nil || len(ev.Messages) > 0 {
-			continue
-		}
-		if (ev.Role == "user" || ev.Role == "assistant") && strings.TrimSpace(ev.Content) != "" {
-			turns = append(turns, llm.Message{Role: ev.Role, Content: ev.Content})
-		}
-	}
-	return turns, nil
-}
-
-func splitLines(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		out = append(out, s[start:])
-	}
-	return out
 }
 
 // NewID returns a timestamp-based session id with a short random suffix

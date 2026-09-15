@@ -616,10 +616,7 @@ func (m *modelWaitMonitor) run(ctx context.Context) {
 			target += m.interval
 		}
 		ticks++
-		delay := time.Until(m.start.Add(target))
-		if delay < 0 {
-			delay = 0
-		}
+		delay := max(time.Until(m.start.Add(target)), 0)
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():

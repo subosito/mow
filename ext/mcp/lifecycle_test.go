@@ -212,11 +212,11 @@ func TestStdioCallCancelUnblocks(t *testing.T) {
 	bumpBeforeNewGen(t)
 	rc := &reconnectingClient{cfg: cfg}
 	defer rc.Close()
-	if err := rc.ensure(context.Background()); err != nil {
+	if err := rc.ensure(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	start := time.Now()
 	_, err := rc.callTool(ctx, "slow", json.RawMessage(`{}`))
@@ -233,11 +233,7 @@ func TestHTTPTransportConcurrentSession(t *testing.T) {
 
 	var sessionSet atomic.Int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method", http.StatusMethodNotAllowed)
-			return
-		}
+	mux.HandleFunc("POST /", func(w http.ResponseWriter, r *http.Request) {
 		if sid := r.Header.Get("Mcp-Session-Id"); sid == "sess-1" {
 			sessionSet.Add(1)
 		}
@@ -255,7 +251,7 @@ func TestHTTPTransportConcurrentSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tr.initialize(context.Background()); err != nil {
+	if err := tr.initialize(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -263,10 +259,10 @@ func TestHTTPTransportConcurrentSession(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(n)
 	errCh := make(chan error, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		go func() {
 			defer wg.Done()
-			_, err := tr.listTools(context.Background())
+			_, err := tr.listTools(t.Context())
 			errCh <- err
 		}()
 	}
@@ -296,7 +292,7 @@ func TestHTTPBodyBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tr.call(context.Background(), "tools/list", map[string]any{})
+	_, err = tr.call(t.Context(), "tools/list", map[string]any{})
 	if err == nil {
 		t.Fatal("expected bounded read error")
 	}

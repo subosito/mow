@@ -105,7 +105,7 @@ func (g *explorationGuard) note(calls []llm.ToolCall, results []llm.Message) str
 				g.lines[path] = seen
 			}
 			fresh, total := 0, 0
-			for _, line := range strings.Split(body, "\n") {
+			for line := range strings.SplitSeq(body, "\n") {
 				line = strings.TrimSpace(explorationLinePrefix.ReplaceAllString(line, ""))
 				if line == "" {
 					continue

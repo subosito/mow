@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -53,14 +52,14 @@ func TestHTTPTransportJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tr.initialize(context.Background()); err != nil {
+	if err := tr.initialize(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	tools, err := tr.listTools(context.Background())
+	tools, err := tr.listTools(t.Context())
 	if err != nil || len(tools) != 1 || tools[0].Name != "echo" {
 		t.Fatalf("%+v %v", tools, err)
 	}
-	out, err := tr.callTool(context.Background(), "echo", json.RawMessage(`{}`))
+	out, err := tr.callTool(t.Context(), "echo", json.RawMessage(`{}`))
 	if err != nil || out != "pong" {
 		t.Fatalf("%q %v", out, err)
 	}

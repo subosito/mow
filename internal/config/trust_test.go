@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -174,11 +175,8 @@ session:
 	// Relative skills-local under workspace should be kept (absolute under ws).
 	foundLocal := false
 	wantLocal := filepath.Join(ws, "skills-local")
-	for _, d := range f.Skills.Dirs {
-		if d == wantLocal {
-			foundLocal = true
-			break
-		}
+	if slices.Contains(f.Skills.Dirs, wantLocal) {
+		foundLocal = true
 	}
 	if !foundLocal {
 		t.Fatalf("in-tree project skill dir missing: dirs=%v want %q", f.Skills.Dirs, wantLocal)

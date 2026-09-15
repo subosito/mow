@@ -172,15 +172,6 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 	}
 }
 
-// frameUntrustedResult wraps external tool bodies when the tool opts in via
-// UntrustedSource (or is a known external builtin name).
-func frameUntrustedResult(tool Tool, name, out, nonce string) string {
-	if out == "" || !untrustedSource(tool, name) {
-		return out
-	}
-	return WrapUntrusted(nonce, name, out)
-}
-
 // untrustedSource reports whether name's results are external content that
 // must be framed before entering history.
 func untrustedSource(tool Tool, name string) bool {
@@ -221,10 +212,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 	var est, budget, target int
 	switch {
 	case opt.MaxContextChars > 0:
-		budget = opt.MaxContextChars
-		if budget > MaxContextCharsHardCap {
-			budget = MaxContextCharsHardCap
-		}
+		budget = min(opt.MaxContextChars, MaxContextCharsHardCap)
 		est = budgetChars(raw, ratio)
 		if est <= budget {
 			return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
@@ -239,10 +227,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 		est = raw
 		budget = int(float64(budgetTok) * clampRatio(ratio))
 		resumeTok := CompactResumeBudget(budgetTok)
-		target = int(float64(resumeTok) * clampRatio(ratio))
-		if target < 1 {
-			target = 1
-		}
+		target = max(int(float64(resumeTok)*clampRatio(ratio)), 1)
 	default:
 		return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
 	}

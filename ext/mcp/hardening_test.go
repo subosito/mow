@@ -38,13 +38,11 @@ func pipeClient(t *testing.T, reply func(id json.RawMessage, method string) any)
 			if json.Unmarshal(sc.Bytes(), &req) != nil || len(req.ID) == 0 {
 				continue
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				time.Sleep(5 * time.Millisecond)
 				raw, _ := json.Marshal(reply(req.ID, req.Method))
 				_, _ = outW.Write(append(raw, '\n'))
-			}()
+			})
 		}
 		wg.Wait()
 	}()
@@ -65,11 +63,9 @@ func TestCallConcurrentCallersGetOwnReply(t *testing.T) {
 	const n = 8
 	var wg sync.WaitGroup
 	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	for range n {
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			want := c.nextID.Load() // lower bound; the exact id is echoed back
 			raw, err := c.call(ctx, "tools/call", map[string]any{})
@@ -83,7 +79,7 @@ func TestCallConcurrentCallersGetOwnReply(t *testing.T) {
 			if err := json.Unmarshal(raw, &res); err != nil || res.Echo <= want {
 				errs <- fmt.Errorf("got %s (%v), want an id > %d", raw, err, want)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)
@@ -144,7 +140,7 @@ func TestReconnectingClientKeepsServerOnToolError(t *testing.T) {
 			fake, wrote := fakeStdio(t, frames)
 			rc := &reconnectingClient{cfg: helperConfig(t, "keep", ""), c: fake}
 			defer rc.Close()
-			_, err := rc.callTool(context.Background(), "echo", nil)
+			_, err := rc.callTool(t.Context(), "echo", nil)
 			if err == nil {
 				t.Fatal("expected the server's error")
 			}
@@ -164,7 +160,7 @@ func TestReconnectingClientRetriesOnEOF(t *testing.T) {
 	fake, _ := fakeStdio(t, "") // stdout at EOF: the process is gone
 	rc := &reconnectingClient{cfg: helperConfig(t, "eof", ""), c: fake}
 	defer rc.Close()
-	out, err := rc.callTool(context.Background(), "echo", nil)
+	out, err := rc.callTool(t.Context(), "echo", nil)
 	if err != nil || out != "hello from helper" {
 		t.Fatalf("out=%q err=%v", out, err)
 	}
@@ -176,16 +172,16 @@ func TestReconnectingClientRetriesOnEOF(t *testing.T) {
 func TestReconnectingClientEnsureAfterCloseFails(t *testing.T) {
 	setupMCPTest(t)
 	rc := &reconnectingClient{cfg: helperConfig(t, "closed", "")}
-	if err := rc.ensure(context.Background()); err != nil {
+	if err := rc.ensure(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	pid := rc.processPID()
 	_ = rc.Close()
 	waitPIDDead(t, pid, "Close left the helper alive")
-	if err := rc.ensure(context.Background()); err == nil || !strings.Contains(err.Error(), "closed") {
+	if err := rc.ensure(t.Context()); err == nil || !strings.Contains(err.Error(), "closed") {
 		t.Fatalf("ensure after Close = %v, want closed error", err)
 	}
-	if _, err := rc.callTool(context.Background(), "echo", nil); err == nil {
+	if _, err := rc.callTool(t.Context(), "echo", nil); err == nil {
 		t.Fatal("callTool resurrected a closed transport")
 	}
 	if rc.processPID() != 0 {
@@ -201,7 +197,7 @@ func hangAtConfig(t *testing.T, name, method string) ServerConfig {
 	return cfg
 }
 
-// initialize and tools/list ran with context.Background(): a silent server
+// initialize and tools/list ran with t.Context(): a silent server
 // pinned mow.New forever. They now share the tools/call deadline.
 func TestHandshakeHonorsCallTimeout(t *testing.T) {
 	setupMCPTest(t)
@@ -284,19 +280,6 @@ func TestRegisterServersCapsMetadataAndSkipsDuplicates(t *testing.T) {
 	for name := range byName {
 		if strings.Contains(name, "-") {
 			t.Fatalf("unsanitized tool name %q", name)
-		}
-	}
-}
-
-func TestSanitizeStderrTailRedactsAuthorizationBearer(t *testing.T) {
-	for _, in := range []string{
-		"Authorization: Bearer abc123def456",
-		"authorization=Bearer abc123def456",
-		"header Bearer abc123def456 sent",
-	} {
-		out := sanitizeStderrTail(in)
-		if strings.Contains(out, "abc123def456") {
-			t.Fatalf("%q leaked token: %q", in, out)
 		}
 	}
 }
@@ -415,7 +398,7 @@ func TestAuthCodeCallbackServerShutsDownAndToleratesRepeatHits(t *testing.T) {
 	)
 	ts := newTokenSource(AuthConfig{Type: "oauth2_auth_code", AuthorizeURL: "https://example.com/auth", TokenURL: "https://example.com/token", ClientID: "cid"})
 	ts.authURLFn = func(u string) { mu.Lock(); authURL = u; mu.Unlock() }
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
@@ -436,7 +419,7 @@ func TestAuthCodeCallbackServerShutsDownAndToleratesRepeatHits(t *testing.T) {
 		t.Fatal("no authorize URL")
 	}
 	hc := &http.Client{Timeout: 2 * time.Second}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		// The second hit either gets served (non-blocking send) or is refused
 		// because the first already finished the login; it must never hang.
 		res, err := hc.Get(redirect + "?state=wrong&code=x")
@@ -473,14 +456,12 @@ func TestQueuedCallDoesNotBurnTimeoutWaiting(t *testing.T) {
 	const n = 3 // 3 × 150ms serialized = 450ms > any single 250ms budget
 	var wg sync.WaitGroup
 	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := c.call(context.Background(), "tools/call", map[string]any{}); err != nil {
+	for range n {
+		wg.Go(func() {
+			if _, err := c.call(t.Context(), "tools/call", map[string]any{}); err != nil {
 				errs <- err
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

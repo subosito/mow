@@ -22,7 +22,7 @@ func BenchmarkSessionAppend(b *testing.B) {
 	s := &Store{Dir: b.TempDir(), ID: "bench"}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		if err := s.Append(benchEvent(i % 200)); err != nil {
 			b.Fatal(err)
 		}
@@ -32,14 +32,14 @@ func BenchmarkSessionAppend(b *testing.B) {
 // BenchmarkSessionLoadMessages: 200-turn session (200 user/assistant lines).
 func BenchmarkSessionLoadMessages(b *testing.B) {
 	s := &Store{Dir: b.TempDir(), ID: "bench"}
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		if err := s.Append(benchEvent(i)); err != nil {
 			b.Fatal(err)
 		}
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		msgs, err := s.LoadMessages()
 		if err != nil {
 			b.Fatal(err)
@@ -53,7 +53,7 @@ func BenchmarkSessionLoadMessages(b *testing.B) {
 // BenchmarkSessionLatestID: list/scan across 1000 session files.
 func BenchmarkSessionLatestID(b *testing.B) {
 	dir := b.TempDir()
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		s := &Store{Dir: dir, ID: string(rune('a'+i%26)) + string(rune('a'+(i/26)%26)) + string(rune('a'+(i/676)%26))}
 		if err := s.Append(benchEvent(i)); err != nil {
 			b.Fatal(err)
@@ -61,7 +61,7 @@ func BenchmarkSessionLatestID(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := LatestID(dir); err != nil {
 			b.Fatal(err)
 		}
