@@ -24,6 +24,10 @@ type File struct {
 	Session    SessionConfig        `yaml:"session"`
 	Skills     SkillsConfig         `yaml:"skills"`
 	Extensions map[string]yaml.Node `yaml:"extensions"`
+	// Warnings collects non-fatal load problems (a malformed trusted project
+	// .mow/config.yaml, a project overlay that fails normalize). The engine
+	// surfaces them through its logger; they never abort construction.
+	Warnings []string `yaml:"-"`
 }
 
 type LLMConfig struct {
@@ -182,6 +186,13 @@ type PolicyConfig struct {
 	// CLI: repeatable --extra-root PATH.
 	ExtraRoots         []string `yaml:"extra_roots"`
 	ExtraRootsReadOnly []string `yaml:"extra_roots_read_only"`
+	// EnvPassthrough names environment variables that may reach the shell
+	// (bash, proc_start) despite the credential scrub — exact names only, no
+	// globs. Use it for a key a build genuinely needs (e.g. a package
+	// registry token). User/host config and CLI only — stripped from project
+	// .mow/config, like extra_roots: a cloned workspace must not hand itself
+	// the operator's credentials.
+	EnvPassthrough []string `yaml:"env_passthrough"`
 }
 
 type SessionConfig struct {
@@ -219,17 +230,26 @@ func Load(paths ...string) (*File, error) {
 // config. Used by path-only extension setup (BeforeNew) so a hermetic Engine
 // that hands explicit ConfigPaths does not pull implicit global config.
 func LoadPaths(paths ...string) (*File, error) {
-	return loadConfig(false, "", paths...)
+	return loadConfig(false, "", "", paths...)
 }
 
 // LoadForEngine is the Engine construction entry: when loadUserConfig is true
 // it matches LoadWithProfile (CLI/host); when false it is hermetic like
 // LoadPaths plus an optional profile name is ignored (profiles are $MOW_HOME).
 func LoadForEngine(loadUserConfig bool, profile string, paths ...string) (*File, error) {
+	return LoadForEngineIn("", loadUserConfig, profile, paths...)
+}
+
+// LoadForEngineIn is LoadForEngine with the intended workspace fixed up front.
+// When workspace is non-empty it replaces the file/env `workspace` value
+// before trust is decided and the project .mow/config.yaml layer is merged,
+// so `--workspace other` (or a profile root) loads other's project config —
+// not the one under the process cwd. Empty keeps LoadForEngine behavior.
+func LoadForEngineIn(workspace string, loadUserConfig bool, profile string, paths ...string) (*File, error) {
 	if !loadUserConfig {
 		profile = ""
 	}
-	return loadConfig(loadUserConfig, profile, paths...)
+	return loadConfig(loadUserConfig, profile, workspace, paths...)
 }
 
 // LoadWithProfile is Load plus an optional workspace profile overlay.
@@ -255,7 +275,7 @@ func LoadForEngine(loadUserConfig bool, profile string, paths ...string) (*File,
 // writer — a profile extensions.acp fully replaces the global one rather than
 // deep-merging agent maps.
 func LoadWithProfile(profile string, paths ...string) (*File, error) {
-	return loadConfig(true, profile, paths...)
+	return loadConfig(true, profile, "", paths...)
 }
 
 // loadConfig is the shared merge pipeline.
@@ -263,8 +283,11 @@ func LoadWithProfile(profile string, paths ...string) (*File, error) {
 // loadUserConfig gates all $MOW_HOME-derived layers: global config.yaml,
 // named workspace profile overlay, and trusted project .mow/config.yaml.
 // Explicit paths and process env always apply (env/Options still win over
-// files). Hermetic embedding passes loadUserConfig=false.
-func loadConfig(loadUserConfig bool, profile string, paths ...string) (*File, error) {
+// files). Hermetic embedding passes loadUserConfig=false. A non-empty
+// workspace overrides the file/env value before the trusted project layer so
+// trust and .mow/config.yaml resolve against the directory the engine will
+// actually run in.
+func loadConfig(loadUserConfig bool, profile string, workspace string, paths ...string) (*File, error) {
 	f := defaults()
 	if loadUserConfig {
 		// Global user config first among files (lowest precedence after defaults).
@@ -300,12 +323,19 @@ func loadConfig(loadUserConfig bool, profile string, paths ...string) (*File, er
 	if err := f.normalize(); err != nil {
 		return nil, err
 	}
+	if ws := strings.TrimSpace(workspace); ws != "" {
+		f.Workspace = ws
+	}
 	// Project-local config only when loading user state and trusted
 	// (MOW_TRUST_PROJECT or the out-of-band trust list — see trust.go).
 	// Even then the merge is restricted: project files may never set
 	// credentials, endpoints, or power tools (mergeProjectFile).
 	if loadUserConfig && ProjectConfigAllowed(f.Workspace) {
-		_ = mergeProjectFile(f, filepath.Join(f.Workspace, ".mow", "config.yaml"))
+		// A broken project file is the project's problem, not a reason to
+		// refuse the user's own config: warn and keep the host layers.
+		if err := mergeProjectFile(f, filepath.Join(f.Workspace, ".mow", "config.yaml")); err != nil {
+			f.Warnings = append(f.Warnings, err.Error())
+		}
 		// re-apply env so env still wins
 		if v := strings.TrimSpace(os.Getenv("MOW_PROVIDER")); v != "" {
 			f.LLM.Provider = v
@@ -314,7 +344,9 @@ func loadConfig(loadUserConfig bool, profile string, paths ...string) (*File, er
 			return nil, err
 		}
 		applyEnv(f)
-		_ = f.normalize()
+		if err := f.normalize(); err != nil {
+			f.Warnings = append(f.Warnings, fmt.Sprintf("project config %s: %v", filepath.Join(f.Workspace, ".mow", "config.yaml"), err))
+		}
 	}
 	return f, nil
 }
@@ -380,11 +412,13 @@ func mergeFile(dst *File, path string) error {
 // mergeProjectFile merges a workspace-local config with a reduced privilege
 // set: a project file may tune policy knobs, benign tools, and extensions, but
 // never credentials, the LLM endpoint/wire, headers, media model routing,
-// session location, extra FS roots, spend ceilings (max_tokens, max_run_*,
-// prompt_cache, catalog prices), or power/media-write tools — a
-// trusted-but-hostile repo must not redirect the API key, flip the wire
-// (which changes credential preference), grant itself shell/write, or opt
-// into generate_* (those write under media/ without --allow-write).
+// ACP peer launching, the hashline read/edit protocol, session location,
+// extra FS roots, shell env passthrough, the model/effort/stream selection,
+// the skill selector, spend ceilings (max_tokens, max_run_*, max_turns,
+// prompt_cache, catalog prices), or power/media-write tools — a trusted-but-hostile repo
+// must not redirect the API key, flip the wire (which changes credential
+// preference), grant itself shell/write, or opt into generate_* (those write
+// under media/ without --allow-write).
 func mergeProjectFile(dst *File, path string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -414,6 +448,11 @@ func mergeProjectFile(dst *File, path string) error {
 	// rather than trusting the pack to re-check: a cloned workspace pointing
 	// them at an attacker endpoint would leak the host's API key.
 	delete(overlay.Extensions, "media")
+	// extensions.acp launches processes (peers[].command is an arbitrary
+	// argv) and passes flags through to them (extra_args can carry
+	// --extra-root / --base-url / --config), i.e. arbitrary exec plus
+	// jail/credential escalation beyond anything trust grants a project.
+	delete(overlay.Extensions, "acp")
 	// Native tools make the provider fetch/search on the request's behalf and
 	// bill it. That is a capability decision for the host/user, not something
 	// a cloned workspace may switch on.
@@ -429,10 +468,19 @@ func mergeProjectFile(dst *File, path string) error {
 	overlay.LLM.ContextWindow = 0
 	overlay.LLM.InputPrice = 0
 	overlay.LLM.OutputPrice = 0
+	// Model, effort, and streaming pick what the run costs and how it is
+	// billed — host/user spend decisions, same as max_tokens below. A cloned
+	// workspace must not silently move the run to an expensive model or tier.
+	overlay.LLM.Model = ""
+	overlay.LLM.Effort = ""
+	overlay.LLM.Stream = false
 	overlay.Session.Dir = ""
 	// Extra FS roots expand the jail — host/CLI only (not project-controlled).
 	overlay.Policy.ExtraRoots = nil
 	overlay.Policy.ExtraRootsReadOnly = nil
+	// Shell env passthrough hands named variables to bash/proc_start past the
+	// credential scrub — host/CLI only, same reasoning as extra_roots.
+	overlay.Policy.EnvPassthrough = nil
 	// Sandbox is a host/user trust decision: a cloned workspace must not be
 	// able to turn the jail off (policy.sandbox: none) — or on, which would
 	// silently break builds the operator never opted into.
@@ -442,6 +490,12 @@ func mergeProjectFile(dst *File, path string) error {
 	overlay.Policy.MaxRunTokens = 0
 	overlay.Policy.MaxRunUSD = 0
 	overlay.Policy.CompactSummary = false
+	// max_turns is a ceiling, so a project may only tighten it: a lower
+	// positive cap is fine, raising it — or -1 / unlimited, which removes the
+	// host's cap entirely — is not.
+	if !lowersTurnCap(overlay.Policy.MaxTurns, dst.Policy.MaxTurns) {
+		overlay.Policy.MaxTurns = 0
+	}
 
 	// tools.enable: project may only *add* safe tools; never replace the
 	// host list (which would drop user-granted power tools or sneak in
@@ -452,11 +506,16 @@ func mergeProjectFile(dst *File, path string) error {
 	// a power-tool grant is a host/user trust decision, not a project one.
 	overlay.Tools.Write = false
 	overlay.Tools.Shell = false
+	// tools.hashline switches the user's read/edit protocol — host/user only.
+	overlay.Tools.Hashline = false
 
 	// skills.dirs: project may only add dirs under the workspace (no
 	// absolute paths into $HOME/.ssh etc.). Union, do not replace.
 	projectSkills := overlay.Skills.Dirs
 	overlay.Skills.Dirs = nil
+	// skills.selector: off loads every configured skill (including host/user
+	// dirs the project does not own) into the prompt — a host/user decision.
+	overlay.Skills.Selector = nil
 	// skills.explicit is host/user-only: a project must not force-load skills
 	// from global/user dirs it does not own (it could name any folder there).
 	overlay.Skills.Explicit = nil
@@ -473,6 +532,16 @@ func mergeProjectFile(dst *File, path string) error {
 		dst.Skills.Dirs = mergeStringList(dst.Skills.Dirs, skillDirsUnder(ws, projectSkills))
 	}
 	return nil
+}
+
+// lowersTurnCap reports whether a project overlay's max_turns tightens the
+// host ceiling. Negative (unlimited) and 0 (absent) never do; a positive value
+// does when the host is unlimited or the value is smaller.
+func lowersTurnCap(overlay, host int) bool {
+	if overlay <= 0 {
+		return false
+	}
+	return host <= 0 || overlay < host
 }
 
 // dropProjectTools filters tools a project config must never enable:
@@ -614,6 +683,9 @@ func mergeOverlay(dst *File, overlay *File) {
 	// Bool flag: yaml false is indistinguishable from absent (default off).
 	if overlay.Policy.CompactSummary {
 		dst.Policy.CompactSummary = true
+	}
+	if len(overlay.Policy.EnvPassthrough) > 0 {
+		dst.Policy.EnvPassthrough = mergeStringList(dst.Policy.EnvPassthrough, overlay.Policy.EnvPassthrough)
 	}
 	if len(overlay.Policy.ExtraRoots) > 0 {
 		dst.Policy.ExtraRoots = mergeStringList(dst.Policy.ExtraRoots, overlay.Policy.ExtraRoots)

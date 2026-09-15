@@ -6,6 +6,8 @@
 #   OPENAI_BASE_URL / ANTHROPIC_BASE_URL / MOW_BASE_URL
 #   OPENAI_API_KEY  / ANTHROPIC_API_KEY  / MOW_API_KEY
 #   OPENAI_MODEL    / ANTHROPIC_MODEL    / MOW_MODEL
+#   MOW_EFFORT (reasoning effort; overrides llm.effort)
+#   MOW_PROVIDER (llm.providers name; overrides llm.provider)
 #   MOW_WIRE (openai-chat-completions | openai-responses | anthropic-messages)
 
 workspace: .
@@ -129,6 +131,8 @@ policy:
   # extra_roots:                  # PATH or PATH:ro (read-only)
   #   - /abs/shared:ro            # more FS trees for read/write/edit/glob/grep
   #   - /path/to/sibling-repo     # user/host config only (not project .mow/config)
+  # extra_roots_read_only:        # list form of the PATH:ro suffix; merged with
+  #   - /abs/reference-docs       # any :ro entries above (user/host config only)
   # CLI: --extra-root PATH (repeatable)
 
 # Opt-in OS jail for bash + proc_start (Linux bubblewrap). Default none =
@@ -151,13 +155,8 @@ skills:
 session:
   # dir: # default $MOW_HOME/sessions
 
-# TUI host config (mowi). Host $MOW_HOME only — not project .mow/.
-# mowi:
-#   mow_bin: mow                    # lean default; TUI spawn
-#   # mow_bin: customhost             # --mow-bin > $MOW_BIN > this > mow
-#   theme: default                  # alias: catppuccin-mocha
-#   mode: code                      # ask | code
-#   approvals: prompt               # prompt | always (skip overlay)
+# Host-UI settings (theme, key bindings, which mow binary to spawn) are not
+# read by mow — they live with the host that owns the UI.
 
 
 # Optional packs — config key extensions.<name>. Unused keys stay as yaml
