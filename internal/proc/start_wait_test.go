@@ -52,24 +52,26 @@ func TestStartDoesNotStallOnSilentProcess(t *testing.T) {
 	}
 }
 
-// A command that fails instantly must not make Start burn the whole settle
-// window waiting for output that never comes.
-//
-// Note this does not assert Alive==false: the child is spawned with
-// Process.Release(), so nobody reaps it and it lingers as a zombie that still
-// answers kill(pid, 0). Reporting exited-immediately is the caller's job
-// (proc.Start's Alive flag is best-effort here) — what matters for start
-// latency is that we return promptly instead of polling a corpse.
+// A command that fails instantly must be reaped and must not make Start burn
+// the whole settle window waiting for output that never comes.
 func TestStartReturnsQuicklyWhenProcessExits(t *testing.T) {
 	dir := t.TempDir()
 	ws := t.TempDir()
 	began := time.Now()
-	if _, err := Start(dir, "doomed", "exit 7", "", ws); err != nil {
+	info, err := Start(dir, "doomed", "exit 7", "", ws)
+	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = Stop(dir, "doomed") })
 	if elapsed := time.Since(began); elapsed > startSettleTimeout+time.Second {
 		t.Fatalf("exiting process took %v to report", elapsed)
+	}
+	deadline := time.Now().Add(time.Second)
+	for pidAlive(info.PID) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if pidAlive(info.PID) {
+		t.Fatalf("exited child pid %d was not reaped", info.PID)
 	}
 }
 

@@ -52,7 +52,6 @@ jobs:
         run: |
           go vet ./...
           go test -race ./...
-          (cd packs && go vet ./... && go test -race ./...)
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
@@ -61,20 +60,15 @@ jobs:
         run: |
           ver="${{ needs.check-version.outputs.version }}"
           mkdir -p dist
-          go build -trimpath \
+          go build -buildvcs=false -trimpath \
             -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
             -o "dist/mow-${{ matrix.goos }}-${{ matrix.goarch }}" \
             ./cmd/mow
-          go build -trimpath \
-            -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
-            -o "dist/custom-host-${{ matrix.goos }}-${{ matrix.goarch }}" \
-            ./cmd/custom-host
       - uses: actions/upload-artifact@v4
         with:
           name: mow-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             dist/mow-${{ matrix.goos }}-${{ matrix.goarch }}
-            dist/custom-host-${{ matrix.goos }}-${{ matrix.goarch }}
 
   publish:
     needs: [check-version, build]

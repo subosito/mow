@@ -17,6 +17,3 @@ result-*
 # go
 # (keep go.sum tracked once dependencies exist)
 
-# Python bytecode
-__pycache__/
-/mow

@@ -23,25 +23,14 @@ jobs:
       - name: Vet root
         run: go vet ./...
 
-      - name: Vet packs
-        run: cd packs && go vet ./...
-
       - name: Test root
         run: go test -race ./...
-
-      - name: Test packs
-        run: cd packs && go test -race ./...
 
       - name: Build binaries
         run: |
           ver="$(tr -d ' \n' < VERSION)"
-          go build -trimpath \
+          go build -buildvcs=false -trimpath \
             -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
             -o bin/mow ./cmd/mow
-          go build -trimpath \
-            -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
-            -o bin/custom-host ./cmd/custom-host
           ./bin/mow version
           ./bin/mow version | grep -F "mow $ver"
-          ./bin/custom-host version
-          ./bin/custom-host version | grep -F "mow $ver"

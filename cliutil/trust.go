@@ -10,7 +10,8 @@ import (
 )
 
 // TrustCommand runs the shared trust subcommand for a CLI host and returns an
-// os.Exit-style status code. prog is the display name ("mow" or "mowi").
+// os.Exit-style status code. prog is the display name shown in usage
+// ("mow", or whatever a TUI host calls itself).
 func TrustCommand(prog string, args []string) int {
 	prog = strings.TrimSpace(prog)
 	if prog == "" {

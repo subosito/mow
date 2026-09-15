@@ -22,7 +22,7 @@ Stack context: [architecture.md](architecture.md). Embedding in Go: [embedding.m
 
 - Not a multi-provider model gateway or credential broker (point at one HTTP endpoint).
 - Not a chat-channel product (hosts that need channels import mow or call its API).
-- Not a full IDE agent (goals/MCP live as packs or external hosts).
+- Not a full IDE application (review/ops/media workflows belong in external hosts).
 - Not ACP by default in the core library — ACP is the **`ext/acp` pack**.
 
 ---
@@ -43,7 +43,7 @@ mow run -p "Summarize this repo"
 ```text
 mow tty                  # optional line session (ext/tty)
 mow acp                  # ACP agent for host UIs (ext/acp)
-custom-host goal run --goal "…"  # multi-step outer loop (or --id NAME)
+# External applications can layer multi-step workflows over the Engine API.
 mow run -p "…"           # one-shot (ext/cli)
 ```
 
@@ -69,7 +69,7 @@ llm:
 
 Same binary; only config changes. Gateway is never required.
 
-### E. ACP (pack)
+### E. ACP (extension)
 
 ```text
 Editor ──stdio ACP──▶ mow acp ──▶ Engine
@@ -87,19 +87,14 @@ mow loop ──tool delegate──▶ peer ACP process
 | `mow` | `New`, `NewHarness`, `Engine`, `Run`, options/result types, `Tool`/`Message`/`ChatFunc`, `Engine.Extension` (`mow.go` re-exports `internal/engine/`) |
 | `ext` | Register tools, hooks, **CLI commands**, BeforeNew (registration only) |
 | `cliutil` | Shared CLI flags / `--long` help / `NewEngine` → `NewHarness` — **not** a pack |
-| `extcfg` | Decode `extensions.<name>` — shared by extensions and packs |
+| `extcfg` | Decode `extensions.<name>` for linked extensions |
 | `ext/cli` | Unix dispatcher (`Main`) + `run`, `trust`, `doctor`, `approvals`, version, help |
 | `ext/tty` | Optional line REPL (`mow tty`) |
 | `ext/acp` | ACP agent + extras + client + `delegate` + `mow acp` (does not import `ext/cli`) |
-| `packs/mcp` | MCP servers → tools (config opt-in) |
-| `packs/proc` / `packs/cmdhook` / `packs/focus` | Background proc tools, command hooks, explore guards |
-| `packs/media` | Media tool pack: `generate_*` / `understand_*` (`custom-host`, config-gated) |
+| `ext/mcp` | MCP servers → tools (config opt-in) |
+| `ext/proc` / `ext/cmdhook` | Background proc tools and command hooks |
 | `eval` | Eval/replay fixture library (`github.com/subosito/mow/eval`, root module) for `go test` hosts |
-| `packs/goal` | Outer multi-step goals + `mow goal` |
-| `packs/job` | Interval / cron jobs + `mow job` |
-| `packs/review` | `mow review` / `mow sec` advisory review |
-| `packs/ops` | Ops profiles, health, runbooks |
-| `cmd/mow` | Import list: `ext/cli.Main` + blank-import tty, acp, lean packs |
+| `cmd/mow` | Import list: `ext/cli.Main` + blank-imported core extensions |
 
 ### Internal
 
@@ -107,13 +102,13 @@ mow loop ──tool delegate──▶ peer ACP process
 |---------|----------------|
 | `internal/engine` | Engine construction, prompt/control, public re-export surface |
 | `internal/agent` | Loop: messages, tool calls, max turns, abort, compaction |
-| `internal/llm` | OpenAI + Anthropic chat; media HTTP (generate/understand) |
+| `internal/llm` | OpenAI + Anthropic chat HTTP |
 | `internal/tools` | Built-in FS/shell tools |
 | `internal/config` | yaml + env; `extensions` blobs |
 | `internal/policy` | Workspace jail, power-tool gates |
 | `internal/session` | JSONL persistence, resume |
 | `internal/contextload` | AGENTS.md / CLAUDE.md, skills, project trust |
-| `internal/proc` | Detached process implementation (shared by `packs/proc` and goal tools) |
+| `internal/proc` | Detached process implementation used by `ext/proc` |
 
 Do **not** import `internal/*` from outside the module’s own packages. Full
 module map: [architecture.md](architecture.md).
@@ -182,7 +177,7 @@ The guards described above (`max_turns`, the evidence/`ErrStuck` backstop,
 context cancel, and the identical-batch nudge) are engine mechanism and live in
 core. The *workflow* heuristics — re-read caps, inventory caps, the
 destructive-git block, and the explore-only nag — are not: they ship as the
-linked pack `packs/focus` and can be tuned under `extensions.focus` or dropped
+an optional external policy extension and can be tuned or omitted
 entirely by removing its blank import. See docs/extensions.md.
 
 **Hosts:** surface `StopStuck` distinctly from `StopMaxTurns`. They mean
@@ -233,7 +228,7 @@ reasoning**. Hosts must not render the wait state as "thinking".
 
 Compaction **trips on tokens vs `context_window`**. There is no client tokenizer: billed `input_tokens` from the last call is preferred, otherwise history chars ÷ a smoothed chars/token ratio (seeded at ~4, updated from provider usage so dense code does not under-count). It keeps the system message + **task anchors** (substantive user intents) + recent turns (aligned on a user boundary), stubs the middle (including which tools ran in the dropped span), and shrinks older tool bodies first. After a compact it aims at ~70% of the tripwire so the next tool batch has headroom.
 
-**PreCompact hooks** (`RegisterPreCompact` / `Options.OnPreCompact`) already run when history exceeds the budget: skip compaction, or supply a better `Summary` (event includes `Messages` on the public API). Use that for LLM distill if the default stub is not enough; anchors still pin user intents either way.
+**PreCompact hooks** (`RegisterPreCompact` / `Options.Hooks.OnPreCompact`) already run when history exceeds the budget: skip compaction, or supply a better `Summary` (event includes `Messages` on the public API). Use that for LLM distill if the default stub is not enough; anchors still pin user intents either way.
 
 **Hooks concurrency:** when `max_parallel_tools > 1`, PreTool/PostTool may run on multiple tools at once. Keep hooks non-blocking and concurrency-safe (the built-in event emitter is).
 
@@ -249,7 +244,7 @@ Compaction **trips on tokens vs `context_window`**. There is no client tokenizer
 | `llm.model` | Model id |
 | `llm.effort` | Reasoning intensity: `none` \| `low` \| `medium` \| `high` (optional body fields; never part of model id). An effort set here (or via `MOW_EFFORT`, `-effort`, `/effort`) is **pinned**: it survives model switches where the catalog allows it, and is always sent as-is. When effort instead comes from the catalog `default_effort` and that tier is `high`/`max`/`xhigh`, mow sends short mechanical prompts (≤120 runes, no complexity keyword like `debug`/`refactor`/`why does`) at `medium` — wire-only, so `Effort()`, the status line, and the session record still report the selected tier. Catalog lookup matches a single provider prefix either way (`gateway/gemini-x` ↔ `gemini-x`) so `default_effort` is adopted onto the client and sent as `reasoning_effort` |
 | `llm.wire` | `openai-chat-completions` (default) \| `openai-responses` \| `anthropic-messages`. If unset, Engine aligns to the **catalog preferred wire** for `llm.model` after `GET /v1/models` (e.g. `claude-sonnet-4` → `anthropic-messages`). Explicit `llm.wire` / `MOW_WIRE` is never overridden |
-| `llm.headers` | Optional extra headers |
+| `llm.headers` | Optional extra headers. Engine also sends `X-Mow-Actor` (default `mow`), `X-Mow-Component` (`turn.chat` / `turn.compact`), and `X-Mow-Session` (the JSONL session id). Omitted when `--no-session`. Gateways may treat these as labels; plain providers ignore them |
 | `llm.stream` | SSE content deltas (both wires) |
 | `llm.prompt_cache` | Provider prompt caching (default on). **Only effective on `anthropic-messages`**: mow sends `cache_control` on system / tools / last message so Anthropic bills repeated prefixes as cache reads (~90% cheaper input). On `openai-chat-completions` mow does not emit Anthropic cache breakpoints — a gateway **O2A** translator (`adapter:wire-translate-o2a`) typically shows `cache_read_tokens=0` and full input rates. Prefer native `anthropic-messages` for Claude. Set `false` only if a gateway rejects `cache_control` |
 | `llm.system_prefix` | Optional text segments prepended **before** the compiled system (each list item separate). For product identity / provider preambles. User config only — not project `.mow/config` |
@@ -261,7 +256,8 @@ Compaction **trips on tokens vs `context_window`**. There is no client tokenizer
 2. **Identity line** — only when **no** system_prefix applies to the active model: `You are mow, …`
 3. **Harness operating rules** (always) — workspace-agnostic; no second identity
 4. `~/.agents/AGENTS.md` (shared base) + `$MOW_HOME/AGENTS.md` (mow overlay) + `{dir}/.agents/AGENTS.md` then `AGENTS.md` / `CLAUDE.md` (walk, closer later)
-5. Skills + per-call `SystemAppend` (goal protocol, packs)
+   The ancestor walk is bounded: it stops at the nearest enclosing **git root** (a directory holding `.git`), or `$HOME` when there is none, and never goes above either — an unrelated parent checkout's `AGENTS.md` is not project instruction. A workspace outside both reads only its own files. Hermetic engines (`Options.LoadUserConfig=false`) do not walk at all: workspace files only.
+5. Skills + per-call `SystemAppend`
 
 **Skills** follow the Agent Skills layout (`<dir>/<name>/SKILL.md`, https://agentskills.io/specification). Optional YAML frontmatter (`name`, `description`, `disable-model-invocation`, …) is parsed; only the markdown body is injected. Spec `name` labels the system section when valid; otherwise the folder name. `disable-model-invocation: true` skips first-prompt selection (`--skill` / `/skills <name>` still load it). Skill dir precedence (search order, first name wins): `$MOW_HOME/skills` → profile → `skills.dirs` → trusted `workspace/.mow/skills` → trusted `workspace/.agents/skills` → `~/.agents/skills` → plugin `skills/`. Shared `~/.agents` fills gaps; a mow-owned folder of the same name wins. One level only (`<dir>/<name>/SKILL.md`), not a recursive catalog walk.
 
@@ -269,56 +265,11 @@ Agent Plugins (`plugin.json` or `.claude-plugin/plugin.json` + bundled `skills/`
 
 Selection: `skills.selector` (default on) loads only skills whose folder name appears (case-insensitive substring) in the first user prompt. `skills.selector: false` loads all. `skills.explicit` / `--skill <name>` (repeatable) loads named skills unconditionally regardless of the selector — they load at startup, before the first prompt. CLI `--skill` and config `skills.explicit` are merged; unknown names are silently ignored. Name precedence: CLI wins over config (both deduped, first-seen order). `skills.explicit` is host/user-only — a project config may not force-load skills from global/user dirs it does not own.
 
-Mid-session activation: `Engine.ActivateSkills(name...)` loads named skills into the live system prompt for subsequent turns without restarting, merging (deduping by name) with skills already loaded by the first-prompt selector or explicit config/CLI. Unknown names are returned, not errored. `Engine.AvailableSkills()` lists what can be loaded. In the TUI, `/skill` lists names and `/skill <name>...` activates immediately. Activation acquires the prompt mutex, does not mutate committed history, and preserves the selector and explicit skills.
+Mid-session activation: `Engine.ActivateSkills(name...)` loads named skills into the live system prompt for subsequent turns without restarting, merging (deduping by name) with skills already loaded by the first-prompt selector or explicit config/CLI. Unknown names are returned, not errored. `Engine.AvailableSkills()` lists what can be loaded. Activation acquires the prompt mutex, does not mutate committed history, and preserves the selector and explicit skills.
 
 When `skills.selector` is on, the lazy load happens on the first `Prompt` call (not at `Engine.New`); explicit skills merge with prompt-matched skills there. When the selector is off, all skills compile at `Engine.New`. Both compile into the same system segment after AGENTS.md.
 
 When prefix matches the model (e.g. Claude family → “You are Claude Code”), the “You are mow” line is **omitted** so the model does not see two identities. Prefix sets persona; harness rules still apply.
-
-**Media model ids** live in `extensions.media` (owned by `packs/media`), not under
-`llm`. The media tools still share `llm.base_url` / `llm.api_key` /
-`llm.headers` — only the per-modality model ids are pack config:
-
-```yaml
-extensions:
-  media:
-    generate:
-      image: gpt-image-1
-      speech: tts-1
-      speech_voice: alloy   # ElevenLabs needs a voice_id, not a display name
-      video: sora-2
-    understand:
-      image: gpt-5
-      voice: whisper-1
-      video: gemini-2.5
-```
-
-Because these share the host's chat credential, an untrusted project config
-cannot set them: `extensions.media` is dropped wholesale from project overlays.
-
-**Network timeouts:** `llm.first_byte_timeout_sec` (default `300`) bounds how
-long a streaming call waits for response headers/first byte — long-reasoning
-models can spend minutes thinking before the first SSE chunk. A full
-first-byte timeout is a hard, non-retried failure (it does not multiply
-across attempts) and the error names the bound and the knob.
-`llm.call_timeout_sec` (default `120`) caps one non-streaming attempt. Both
-are host/user config only — a project config cannot set them (same trust
-class as `llm.base_url`). A host-injected `Options.HTTPClient` takes
-precedence over both knobs: mow consults them only when building its own
-transport, so a custom client keeps its own timeout semantics.
-
-**Wire vs cost (Claude / Anthropic):** `--model claude-…` without an explicit wire used to stay on `openai-chat-completions`. Gateways often accept that and translate (O2A), but **prompt cache is not applied** on that path, so large sessions (100k+ input tokens every call) cost far more than native Anthropic with cache hits. Catalog auto-align (and `/model` via `SetModelWithWire`) select `anthropic-messages` when the catalog advertises it.
-
-No provider OAuth in mow. Streaming: `OnToken` / `OnEvent` / ACP `session/update` chunks.
-
-**Embedder overrides** (code, not config): `Options.HTTPClient` routes all
-LLM/media HTTP through your transport (proxy, timeouts, middleware);
-`Options.Logger` captures engine logs on your own `*slog.Logger`;
-`Options.Provider` swaps the backend entirely. See [embedding.md](embedding.md).
-
-Optional HTTP attribution labels: `X-Mow-Actor`, `X-Mow-Session`, `X-Mow-Component` (see [extensions.md](extensions.md)).
-
----
 
 ## 6. Built-in tools
 
@@ -327,7 +278,6 @@ Optional HTTP attribution labels: `X-Mow-Actor`, `X-Mow-Session`, `X-Mow-Compone
 | `read`, `glob`, `grep` | **Yes** | Secure defaults |
 | `write`, `edit` | **No** | `--allow-write` or config |
 | `bash` | **No** | `--allow-shell` or config. Unsandboxed unless `--sandbox=bwrap` |
-| `generate_*` / `understand_*` | **No** | `custom-host` + `packs/media` only. Model ids + names in `tools.enable`; generate writes under `media/` without `--allow-write` |
 
 ```yaml
 tools:
@@ -335,88 +285,7 @@ tools:
     - read
     - glob
     - grep
-    # media names need custom-host (packs/media) plus extensions.media.* model ids
-    # - generate_image
-    # - understand_image
 ```
-
-### Media tools (`generate_*` / `understand_*`) — end to end
-
-Media lives in the linked pack `packs/media`, the same category as `packs/mcp`
-and `packs/proc` — not a core builtin. The `custom-host` binary blank-imports it
-(`_ "github.com/subosito/mow/packs/media"` in `cmd/custom-host/main.go`); lean
-`mow` does not. A custom binary that omits the import simply has no media tools.
-
-A media tool appears only when **both** hold: its model id is set under
-`extensions.media.generate.*` / `extensions.media.understand.*`, **and** its name is in `tools.enable`.
-The pack registers each tool from config at `BeforeNew` time, so enabling
-`generate_image` before `extensions.media.generate.image` is set is a no-op — never a
-startup error. Media calls reuse the chat `base_url` + key, so `base_url`
-typically points at a gateway that routes each model by id (or use one
-provider's own ids).
-
-| Tool | Args | Endpoint | Output |
-|------|------|----------|--------|
-| `generate_image` | `prompt`, `path?`, `size?` | `POST /images/generations` | PNG under `media/image-<ts>.png` |
-| `generate_speech` | `text`, `path?`, `voice?` | `POST /audio/speech` | `media/speech-<ts>.mp3` |
-| `generate_video` | `prompt`, … | `POST /videos/generations` | `media/video-<ts>.*` |
-| `understand_image` | image `path`/`url` + question | vision chat | text (read-only) |
-| `understand_voice` | audio `path` | transcription | text (read-only) |
-| `understand_video` | video `path` | multimodal | text (read-only) |
-
-`understand_*` are read-only (usable in read-only prompts). `generate_*` write
-under `media/` **without** `--allow-write` — being in the enable list is the
-write consent for that folder.
-
-Same `$MOW_HOME/config.yaml` works for lean `mow` and `custom-host`. Unused
-`extensions.*` keys stay as yaml blobs. Media tools only appear in `custom-host`
-when the model id is set and the name is in `tools.enable`. Lean `mow` leaves
-those names off the tool list (`mow doctor` reports it).
-
-```yaml
-llm:
-  model: gpt-5-mini
-  base_url: https://api.openai.com/v1   # or a gateway that routes these models
-  api_key_env: OPENAI_API_KEY           # media reuses the chat endpoint + key
-tools:
-  enable:
-    - read
-    - glob
-    - grep
-    # - understand_image               # custom-host + extensions.media.understand.image
-    # - generate_image
-mowi:
-  # mow_bin: custom-host                # host yaml only; TUI spawn (not project .mow/)
-  # acp_command: [some-agent, --stdio]  # instead of mow_bin; exact argv
-  theme: default                 # alias: catppuccin-mocha
-  mode: code                     # ask | code
-  approvals: prompt              # prompt | always (skip overlay)
-extensions:
-  media:
-    understand:
-      image: gpt-5-mini
-    # generate:
-    #   image: gpt-image-1
-    #   speech: tts-1
-    #   speech_voice: alloy
-```
-
-Then just ask — the agent calls the tool; you don't invoke it directly:
-
-```bash
-mow run -p "Generate an image of a red bicycle on a beach and save it"
-#   → generate_image → media/image-….png
-mow run -p "Describe the image at diagram.png"
-#   → understand_image → text answer
-mow run -p "Transcribe recording.mp3 and summarize it"
-#   → understand_voice → transcript → summary
-```
-
-Confirm what's active with `mow doctor` or `mow run -p "list your available tools"`.
-A missing tool means this binary did not link `packs/media`, the model id isn't
-set, or the name isn't in `tools.enable`.
-
----
 
 ## 7. Config and trust
 
@@ -424,7 +293,7 @@ Load order: defaults → `$MOW_HOME/config.yaml` (default `~/.mow/config.yaml`) 
 
 `MOW_HOME` relocates the user data root (config, sessions, skills, global `AGENTS.md`). Default is `~/.mow`. Useful for tests/CI: `MOW_HOME=$(mktemp -d)`.
 
-Project trust: `mow trust` (stored out-of-band in `$MOW_HOME/trusted`) or env `MOW_TRUST_PROJECT=1` enables project config and `.mow/skills`. Trust is never read from inside the workspace — a cloned repo cannot grant itself trust. Even trusted, project config may not set `llm.base_url`, `llm.wire`, credentials, headers, media model ids (`extensions.media`), `session.dir`, `policy.extra_roots`, power tools (`write`/`edit`/`bash`), or media-write tools (`generate_*`). Project `tools.enable` only *adds* safe tools (never replaces the host list). Project `skills.dirs` entries outside the workspace are ignored.
+Project trust: `mow trust` (stored out-of-band in `$MOW_HOME/trusted`) or env `MOW_TRUST_PROJECT=1` enables project config and `.mow/skills`. Trust is never read from inside the workspace — a cloned repo cannot grant itself trust. Even trusted, project config may not set `llm.base_url`, `llm.wire`, credentials, headers, `session.dir`, `policy.extra_roots`, `policy.env_passthrough`, or power tools (`write`/`edit`/`bash`). Spend and prompt-shape decisions are host/user too: `llm.model`, `llm.effort`, `llm.stream`, and `skills.selector` are dropped from a project overlay, and `policy.max_turns` is accepted only when it *lowers* the host ceiling (a higher cap, or `-1` for unlimited, is ignored). Project `tools.enable` only *adds* safe tools (never replaces the host list). Project `skills.dirs` entries outside the workspace are ignored.
 
 **Supported env (slim set):**
 
@@ -437,10 +306,13 @@ Project trust: `mow trust` (stored out-of-band in `$MOW_HOME/trusted`) or env `M
 | `MOW_BASE_URL` / `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` | LLM endpoint |
 | `MOW_WIRE` | Wire id (optional) |
 | `MOW_TRUST_PROJECT` | Trust project `.mow/*` for this invocation (persistent: `mow trust`) |
+| `MOW_DEBUG_CACHE` | Debug knob: `1` logs prompt-cache prefix drift per turn (hash per message; only useful when chasing a cache-write bill) |
 
-Workspace, power tools, stream, media models → **yaml** and/or **CLI flags** (`--workspace`, `--allow-write`, `--stream`, …). MCP OAuth automation may use `MOW_MCP_AUTH_CODE` (pack-only).
+Workspace, power tools, and stream → **yaml** and/or **CLI flags** (`--workspace`, `--allow-write`, `--stream`, …). MCP OAuth automation may use `MOW_MCP_AUTH_CODE`.
 
-**Extra FS roots** (optional): paths outside the primary workspace that FS tools may still touch (same symlink jail rules).
+### Extra FS roots
+
+Optional: paths outside the primary workspace that FS tools may still touch (same symlink jail rules).
 
 > **Terminology.** One jail has exactly one **workspace** — the *main root*:
 > the default cwd for `bash`, where relative tool paths resolve, and where
@@ -507,6 +379,15 @@ session.
 > flag does not. Treat it like root-adjacent, not a sibling of
 > `--allow-write`.
 >
+> **Credential scrub.** `bash` and `proc_start` children never inherit mow's
+> own API keys: `MOW_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and any
+> variable ending in `_API_KEY` are removed from the child environment (the
+> `bwrap` path replaces the environment entirely). When a build genuinely
+> needs one — a package registry or CI token — name it exactly in
+> `policy.env_passthrough: [NPM_TOKEN, …]`. Exact names only, no globs; it is
+> host/user config (stripped from project `.mow/config`, like
+> `policy.extra_roots`).
+>
 > **Opt-in OS jail (`--sandbox`).** When you also pass `--sandbox` (or
 > explicitly `--sandbox=bwrap`; config: `policy.sandbox: bwrap`), both `bash`
 > and `proc_start` are wrapped in
@@ -559,11 +440,11 @@ completion from genuine mid-response cancellation when recording status 499.
 | Mode | Mechanism |
 |------|-----------|
 | Config-only | yaml, env, skills markdown |
-| Tool pack | `ext.RegisterTool` in `init` (blank-import) |
+| Tool extension | `ext.RegisterTool` in `init` (blank-import) |
 | Hooks | `RegisterPreTool` / `PostTool` / `UserPrompt` / `SessionStart` / `PreCompact` / `AfterTurn` / `Stop` |
-| CLI pack | `ext.RegisterCommand` + blank-import in `cmd/custom-host` (and `cmd/mow` for the lean set) |
-| Pre-New setup | `ext.RegisterBeforeNew` (e.g. register config-driven tools) |
-| Custom binary | `mow.New` + choose which packs to import |
+| CLI extension | `ext.RegisterCommand` + blank-import in the host binary |
+| Pre-New setup | `ext.RegisterBeforeNewContext` (register config-driven tools with resolved authority) |
+| Custom binary | `mow.New` + choose which extensions to import |
 
 **Tool parameter schemas are sanitized before they reach a provider.** Tools
 arriving from MCP servers, ACP peers, or integrators carry ordinary JSON
@@ -588,7 +469,7 @@ The pass is unconditional rather than gated on a provider id — mow cannot see
 what is behind an OpenAI-compatible base URL, and the endpoint that produced
 the error above presented itself as one.
 
-See [extensions.md](extensions.md) for ACP, media, and pack decisions.
+See [extensions.md](extensions.md) for ACP, MCP, and extension decisions.
 
 ---
 
@@ -636,7 +517,7 @@ writes a plain-text archive under the session dir:
 ```
 
 Archives are append-only Markdown snapshots of what left the live window —
-host/TUI material for review, not something the agent reads back. No search
+host presentation material, not something the agent reads back. No search
 tool ships with the spine: hosts that want pattern search over archives
 build it on the ext seam (a read-only tool resolving the session dir from
 the engine), and mow's own `Engine.Sessions()` listing covers resume.
@@ -646,4 +527,3 @@ the engine), and mow's own `Engine.Sessions()` listing covers resume.
 MCP tool results are external server text. The MCP pack marks every `mcp_*`
 tool with `Untrusted() bool` so the agent loop frames results in
 `<untrusted-output>` the same way as `bash` and `delegate`.
-

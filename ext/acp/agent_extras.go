@@ -13,7 +13,7 @@ import (
 const maxTranscriptRunes = 32 << 10
 
 // extraCapabilities is advertised under agentCapabilities.experimental so a
-// power client (mowi) can feature-detect without a second protocol. Generic
+// power client (the ACP host) can feature-detect without a second protocol. Generic
 // ACP clients ignore unknown capability keys.
 func extraCapabilities() map[string]any {
 	return map[string]any{

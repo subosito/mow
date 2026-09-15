@@ -98,29 +98,20 @@ func checkTools() Check {
 	if len(miss) == 0 {
 		return Check{Name: "tools", OK: true, Detail: strings.Join(cfg.Tools.Enable, ", ")}
 	}
-	return Check{Name: "tools", OK: false, Detail: tools.FormatUnregisteredEnable(miss, mediaPackLinked())}
+	return Check{Name: "tools", OK: false, Detail: tools.FormatUnregisteredEnable(miss)}
 }
 
 func registeredToolNames() []string {
 	names := append([]string(nil), tools.RegistryNames()...)
+	for _, feature := range ext.OptionalFeatures() {
+		names = append(names, feature.Tools...)
+	}
 	for _, t := range ext.ToolsForEngine(true) {
 		if t != nil {
 			names = append(names, t.Name())
 		}
 	}
-	if mediaPackLinked() {
-		names = append(names, tools.MediaEnableNames()...)
-	}
 	return names
-}
-
-func mediaPackLinked() bool {
-	for _, f := range ext.OptionalFeatures() {
-		if f.ID == "media" {
-			return true
-		}
-	}
-	return false
 }
 
 func hostBinary() string {

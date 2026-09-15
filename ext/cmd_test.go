@@ -2,6 +2,7 @@ package ext_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -185,6 +186,58 @@ func TestGenerationEngineRefs(t *testing.T) {
 	}
 }
 
+func TestBeginSetupFailureRollsBackGeneration(t *testing.T) {
+	ext.Reset()
+	t.Cleanup(ext.Reset)
+
+	ext.RegisterExtensionInstance("mcp", "existing", 2)
+	var released []int
+	ext.RegisterGenerationRelease(func(gen int) {
+		released = append(released, gen)
+	})
+	ext.RegisterBeforeNew(func(...string) error {
+		ext.RegisterTool(fakeTool("failed-tool"))
+		ext.RegisterPreTool(func(context.Context, ext.PreToolEvent) (ext.PreToolDecision, error) {
+			return ext.PreToolDecision{Deny: true}, nil
+		})
+		ext.RegisterExtensionInstance("mcp", "partial", 0)
+		return nil
+	})
+	ext.RegisterBeforeNew(func(...string) error { return fmt.Errorf("setup failed") })
+
+	if err := ext.BeforeNew(); err == nil || !strings.Contains(err.Error(), "setup failed") {
+		t.Fatalf("BeforeNew error = %v", err)
+	}
+	gen := ext.BeforeNewGeneration()
+	if len(released) != 1 || released[0] != gen {
+		t.Fatalf("released = %v, want [%d]", released, gen)
+	}
+	for _, tool := range ext.Tools() {
+		if tool.Name() == "failed-tool" {
+			t.Fatal("failed-generation tool remained registered")
+		}
+	}
+	for _, tool := range ext.ToolsForEngine(true) {
+		if tool.Name() == "failed-tool" {
+			t.Fatal("failed-generation tool leaked into a later host snapshot")
+		}
+	}
+	if n := len(ext.PreToolHooks()); n != 0 {
+		t.Fatalf("failed-generation hooks = %d, want 0", n)
+	}
+	instances := ext.ListExtensions(0)
+	if len(instances) != 1 || instances[0].Name != "mcp:existing" || instances[0].MinTurns != 2 {
+		t.Fatalf("extension instances after rollback = %+v", instances)
+	}
+}
+
+type fakeTool string
+
+func (f fakeTool) Name() string                                        { return string(f) }
+func (fakeTool) Description() string                                   { return "test" }
+func (fakeTool) Parameters() json.RawMessage                           { return json.RawMessage(`{"type":"object"}`) }
+func (fakeTool) Exec(context.Context, json.RawMessage) (string, error) { return "", nil }
+
 func TestResetPreservesGenerationRelease(t *testing.T) {
 	ext.Reset()
 	t.Cleanup(ext.Reset)
@@ -209,5 +262,20 @@ func TestResetPreservesGenerationRelease(t *testing.T) {
 	ext.ReleaseEngineGeneration(gen2)
 	if len(released) != 1 || released[0] != gen2 {
 		t.Fatalf("released=%v want [%d]", released, gen2)
+	}
+}
+
+func TestResetClearsAfterTurnDecisionHooks(t *testing.T) {
+	ext.Reset()
+	t.Cleanup(ext.Reset)
+	ext.RegisterAfterTurnDecision(func(context.Context, ext.AfterTurnEvent) (ext.AfterTurnDecision, error) {
+		return ext.AfterTurnDecision{}, nil
+	})
+	if n := len(ext.AfterTurnDecisionHooks()); n != 1 {
+		t.Fatalf("hooks=%d, want 1", n)
+	}
+	ext.Reset()
+	if n := len(ext.AfterTurnDecisionHooks()); n != 0 {
+		t.Fatalf("Reset left %d after-turn decision hook(s)", n)
 	}
 }

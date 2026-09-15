@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -139,29 +138,11 @@ func TestBashOutputIsBoundedWhileRunning(t *testing.T) {
 	}
 }
 
-// Bash output passes through as-is (byte-budgeted only); no line-based
-// clamping or command recognition — that policy belongs to packs/extensions.
+// Allowed bash output passes through as-is (byte-budgeted only).
 func TestBashOutputPassesThroughAsIs(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < 150; i++ {
-		name := filepath.Join(root, "f"+strconv.Itoa(i)+".txt")
-		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
 	p := &policy.Policy{Workspace: root, AllowShell: true}
 	reg := tools.Registry(p, []string{"bash"})
-	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"ls -1"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := strings.Count(out, "\n"); n < 149 {
-		t.Fatalf("ls of 150 files lost entries: %d lines", n)
-	}
-	if strings.Contains(out, "listing cap") {
-		t.Fatal("bash must not clamp listings")
-	}
-	// The byte budget still bounds total volume.
 	seq, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"seq 1 200"}`))
 	if err != nil {
 		t.Fatal(err)

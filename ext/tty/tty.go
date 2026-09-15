@@ -48,7 +48,7 @@ func runCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "mow tty: %v\n", err)
 		return 1
 	}
-	defer eng.Close() // tear down session-scoped resources (packs/proc procs) on exit
+	defer eng.Close() // tear down session-scoped resources (ext/proc procs) on exit
 	fmt.Fprintln(os.Stderr, "mow tty — line session (not the full TUI); empty line or /quit to exit; Ctrl+C aborts the current turn")
 	fmt.Fprintln(os.Stderr, "  /btw <question>  ask an aside without adding it to context")
 	fmt.Fprintln(os.Stderr, "  /model [id]      list models or switch (catalog wire when present)")

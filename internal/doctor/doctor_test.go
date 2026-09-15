@@ -5,7 +5,28 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/subosito/mow/ext"
 )
+
+func TestConditionalToolDiscoveryDoesNotRunSetup(t *testing.T) {
+	ext.Reset()
+	t.Cleanup(ext.Reset)
+	ext.RegisterOptionalFeature(ext.OptionalFeature{ID: "test", Tools: []string{"conditional_tool"}})
+	ext.RegisterBeforeNew(func(...string) error {
+		t.Fatal("doctor started extension")
+		return nil
+	})
+	t.Setenv("MOW_HOME", t.TempDir())
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(os.Getenv("MOW_HOME"), "config.yaml"), []byte("tools:\n  enable: [read, conditional_tool]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	text := Format(Run(ws))
+	if strings.Contains(text, "not registered") || !strings.Contains(text, "conditional_tool") {
+		t.Fatalf("conditional tool not discovered: %s", text)
+	}
+}
 
 func TestRunDoesNotNeedMCP(t *testing.T) {
 	home := t.TempDir()
@@ -41,9 +62,6 @@ func TestRunReportsUnregisteredEnable(t *testing.T) {
 	}
 	if !strings.Contains(text, "not registered") || !strings.Contains(text, "this binary") {
 		t.Fatalf("want unregistered-enable wording:\n%s", text)
-	}
-	if !strings.Contains(text, "packs/media") || !strings.Contains(text, "custom-host") {
-		t.Fatalf("want lean/custom-host hint:\n%s", text)
 	}
 	if !strings.Contains(text, "FAIL") {
 		t.Fatalf("want tools check FAIL:\n%s", text)

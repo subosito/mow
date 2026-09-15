@@ -15,6 +15,19 @@ import "github.com/subosito/mow"
 
 Everything here is on the public `mow` package. You never import `internal/*`.
 
+Extensions that attach engine-specific tools can use a `SessionStart` hook:
+`mow.EngineFromContext(ctx)` returns the constructed engine, and `AddTool`
+registers a tool on that instance. `ToolEnabled(name)` reads the resolved
+`tools.enable` list for tools that require explicit opt-in. Read-only custom
+tools must implement `ReadOnly() bool`.
+
+Use `Engine.ReadFile` and `Engine.WriteFile` for extension filesystem access.
+They retain the engine's jail, extra roots, read-only roots, and read limit;
+writes also require its write capability. `ProviderConnection()` returns a
+copy of resolved provider settings plus the configured HTTP client for
+extensions with separate provider requests. It contains credentials: do not
+log it or expose it to model tools.
+
 ---
 
 ## 1. The smallest embed
@@ -75,7 +88,7 @@ you reach for most:
 
 | Field | Why |
 |-------|-----|
-| `HTTPClient *http.Client` | Route every LLM/media call through your transport — proxy, custom timeout, retry/log middleware. Nil → default client (120s chat, 180s media). |
+| `HTTPClient *http.Client` | Route every LLM call through your transport — proxy, custom timeout, retry/log middleware. Nil → default client. |
 | `Logger *slog.Logger` | Capture engine logs (`run`/`tool`/`warn`) without touching the process-global `slog.Default()`. Pass a discarding handler to silence. |
 | `Provider Provider` | Swap the LLM backend entirely — see [§5](#5-a-custom-llm-backend). |
 | `Tools []Tool` | Engine-scoped custom tools; two engines in one process can run different toolsets. See [§4](#4-custom-tools). |
@@ -254,8 +267,8 @@ Order within a `Prompt`: `SessionStart` (once, in `New`) → `UserPrompt` →
 [`PreCompact`?] → LLM → `AfterTurn` → per tool (`PreTool` → `Exec` →
 `PostTool`) → `Stop`. Register more at runtime with `eng.AddPreTool` /
 `eng.AddPostTool` / etc., or globally (all engines) with `ext.RegisterPreTool`
-in an `init`. See [extensions.md § Hooks](extensions.md#hooks-lifecycle) for
-the full table.
+in an `init`. See [harness.md § 9 Extending](harness.md#9-extending) for
+the full hook list.
 
 > When `policy.max_parallel_tools > 1`, `PreTool`/`PostTool` can run on several
 > tools at once — keep hook bodies concurrency-safe.
@@ -311,7 +324,7 @@ model alone.
 you passed, or call `eng.Cancel()` — it fail-fasts mid tool-batch (siblings
 cancelled), and whatever soft results already finished still append to history
 in call order (`StopReason=cancelled`). The REPL wires this to Ctrl+C
-per-turn; a TUI wires it to Esc.
+per-turn; an interactive host can wire it to a cancel action.
 
 **Steering** is the softer sibling: `eng.Steer(text)` injects guidance into a
 turn that is already running, without losing the work done so far. The loop
@@ -340,7 +353,7 @@ boundaries, so several sent during one turn arrive together, in order.
 
 - [architecture.md](architecture.md) — public vs internal, endpoint model
 - [harness.md](harness.md) — loop, config, sessions, policy knobs
-- [extensions.md](extensions.md) — packs, hooks table, ACP, media, cmdhook
+- [extensions.md](extensions.md) — hooks, ACP, MCP, and cmdhook
 
 ## 10. Eval / replay fixtures
 
@@ -358,4 +371,3 @@ if !sr.OK { /* fail CI */ }
 ```
 
 See [extensions.md](extensions.md) § Eval / replay.
-

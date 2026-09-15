@@ -1,7 +1,7 @@
 // Package slash is the registration surface for interactive slash commands.
 //
 // A slash command is a host-side action a user types into an interactive
-// session (`mow tty`, the mowi TUI): it is not a tool the model can call and
+// session (`mow tty`, a TUI host): it is not a tool the model can call and
 // not a CLI subcommand. Packs register here in init, so the command exists in
 // every host exactly when the pack is linked — link `packs/review` and
 // `/review` and `/sec` appear; drop the blank import and they disappear from

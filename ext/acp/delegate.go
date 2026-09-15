@@ -426,7 +426,7 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	}
 	// Apply the running Engine's complete FS jail, not only the delegate
 	// registry's workspace. This is what makes --extra-root usable as an ACP
-	// cwd (for example, delegating from mow into an allowed sibling mowi repo).
+	// cwd (for example, delegating from mow into an allowed sibling repo).
 	// The fallback preserves registration-only tests/callers without an Engine
 	// in context. Relative cwd remains workspace-relative in both paths.
 	if eng := mow.EngineFromContext(ctx); eng != nil {

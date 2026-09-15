@@ -42,31 +42,24 @@ func runMow(t *testing.T, args ...string) (string, int) {
 	return "", -1
 }
 
-// The lean binary links acp, focus, proc, cmdhook, mcp — and must not
-// show the custom-host packs in help.
+// Stock mow links acp, tty, proc, cmdhook, mcp, goal and must not
+// show custom-host application packs (ops/review/job/media) in help.
 func TestLeanHelpListsLeanCommands(t *testing.T) {
 	output, code := runMow(t, "help")
 	if code != 0 {
 		t.Fatalf("exit code = %d\n%s", code, output)
 	}
-	for _, want := range []string{"mow acp", "mow mcp", "Packs (this binary):"} {
+	for _, want := range []string{"mow acp", "mow mcp", "mow goal", "Extensions (this binary):"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("lean help missing %q:\n%s", want, output)
 		}
 	}
-	if i := strings.Index(output, "Extensions (this binary):"); i >= 0 {
-		end := strings.Index(output[i:], "Packs (this binary):")
-		extHelp := output[i:]
-		if end > 0 {
-			extHelp = output[i : i+end]
-		}
-		if strings.Contains(extHelp, "mow mcp") {
-			t.Errorf("mow mcp must list under Packs, not Extensions:\n%s", extHelp)
-		}
+	if strings.Contains(output, "Packs (this binary):") {
+		t.Errorf("stock binary must not link application packs:\n%s", output)
 	}
-	for _, notWant := range []string{"mow goal", "mow ops", "mow review", "mow job", "mow media", "mow proc", "mow plugin"} {
+	for _, notWant := range []string{"mow ops", "mow review", "mow job", "mow media", "mow proc", "mow plugin"} {
 		if strings.Contains(output, notWant) {
-			t.Errorf("lean help unexpectedly lists %q:\n%s", notWant, output)
+			t.Errorf("help unexpectedly lists %q:\n%s", notWant, output)
 		}
 	}
 }
@@ -90,16 +83,13 @@ func TestDoctorReportsUnregisteredMediaTool(t *testing.T) {
 	if !strings.Contains(text, "not registered") || !strings.Contains(text, "this binary") {
 		t.Fatalf("want unregistered wording:\n%s", text)
 	}
-	if !strings.Contains(text, "packs/media") || !strings.Contains(text, "custom-host") {
-		t.Fatalf("want lean hint:\n%s", text)
-	}
 }
 
 // Full-pack command names stay reserved even when the pack is not linked:
 // `mow ops` on the lean binary must be an unknown command, not a free-form
 // prompt to the model.
 func TestLeanReservedFullPackTokens(t *testing.T) {
-	for _, tok := range []string{"ops", "goal", "review", "media", "job"} {
+	for _, tok := range []string{"ops", "review", "media", "job"} {
 		output, code := runMow(t, tok)
 		if code != 2 {
 			t.Errorf("%s: exit code = %d, want 2\n%s", tok, code, output)

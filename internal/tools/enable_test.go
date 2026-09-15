@@ -19,18 +19,11 @@ func TestUnknownEnable(t *testing.T) {
 }
 
 func TestFormatUnregisteredEnable(t *testing.T) {
-	one := FormatUnregisteredEnable([]string{"understand_image"}, false)
+	one := FormatUnregisteredEnable([]string{"understand_image"})
 	if !strings.Contains(one, "tools.enable lists understand_image, but it is not registered in this binary") {
 		t.Fatalf("wording: %q", one)
 	}
-	if !strings.Contains(one, "lean mow has no packs/media") || !strings.Contains(one, "custom-host") {
-		t.Fatalf("lean hint: %q", one)
-	}
-	full := FormatUnregisteredEnable([]string{"understand_image"}, true)
-	if strings.Contains(full, "lean mow") {
-		t.Fatalf("custom-host should not get the lean hint: %q", full)
-	}
-	many := FormatUnregisteredEnable([]string{"foo", "bar"}, false)
+	many := FormatUnregisteredEnable([]string{"foo", "bar"})
 	if !strings.Contains(many, "lists foo, bar, but they are not registered") {
 		t.Fatalf("plural: %q", many)
 	}

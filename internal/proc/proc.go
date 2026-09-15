@@ -1,8 +1,8 @@
 // Package proc manages long-lived background processes: start detached, record
-// a pid + logfile, check status, tail logs, and stop. Shared by packs/proc (the
+// a pid + logfile, check status, tail logs, and stop. Shared by ext/proc (the
 // general proc_* tools) and packs/goal (goal-scoped process
-// tools). Detach model: new session (Setsid) + Release so the parent never
-// waits — the process outlives the tool call and the agent loop continues.
+// tools). Detach model: new session (Setsid) + asynchronous Wait so the process
+// outlives the tool call while the parent still reaps it when it exits.
 package proc
 
 import (
@@ -51,7 +51,7 @@ func SanitizeID(id string) string {
 }
 
 // StoreDir is $MOW_HOME/proc/<workspace-hash> — per-project, so processes from
-// different repos do not collide. Shared by packs/proc tools and
+// different repos do not collide. Shared by ext/proc tools and
 // RPC status so the TUI lists the same store the agent started.
 func StoreDir(home, workspace string) string {
 	ws := strings.TrimSpace(workspace)
@@ -132,15 +132,16 @@ func StartEnv(dir, id, command, logName, workdir string, envAllow []string, box 
 		return Info{}, err
 	}
 	pid := c.Process.Pid
-	_ = c.Process.Release() // parent must not wait; process keeps the log fd
-	_ = logF.Close()
+	go func() { _ = c.Wait() }()
 	if err := writePID(dir, id, pid); err != nil {
 		// Nothing records this pid now, so nothing can Stop it later: take the
 		// whole session down (mirrors Stop), not just the leader.
 		_ = syscall.Kill(-pid, syscall.SIGTERM)
 		_ = syscall.Kill(pid, syscall.SIGTERM)
+		_ = logF.Close()
 		return Info{}, err
 	}
+	_ = logF.Close()
 	waitStarted(logPath, pid)
 	return Info{ID: id, PID: pid, Log: logPath, Alive: pidAlive(pid)}, nil
 }

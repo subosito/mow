@@ -107,8 +107,6 @@ tools:
   #
   # enable is the explicit override form for hosts (rarely needed):
   #   enable: [read, glob, grep, write, edit, bash]
-  # Media tools (generate_*/understand_*) are NOT listed here: linking
-  # packs/media + configuring extensions.media registers them automatically.
 
 policy:
   # max_turns: 200                # cap LLM round-trips per Prompt. Default: unlimited —
@@ -159,14 +157,9 @@ session:
 # read by mow — they live with the host that owns the UI.
 
 
-# Optional packs — config key extensions.<name>. Unused keys stay as yaml
-# blobs; lean mow ignores media/ops/job/review/goal.
+# Core extensions use config key extensions.<name>. Unused keys stay as yaml
+# blobs so external applications can decode their own sections.
 # extensions:
-#   media:                            # customhost (packs/media); ignored by lean mow
-#     understand:
-#       image: gpt-5-mini
-#     # generate:
-#     #   image: gpt-image-1
 #   mcp:
 #     mcpServers:
 #       context-mode:
@@ -187,37 +180,6 @@ session:
 #         # allow_shell: true
 #         # dir: /abs/path
 #         # extra_args: [--stream]
-#   job:
-#     schedules:
-#       - id: hourly
-#         every: 1h
-#         goal: fix-ci
-#   ops:                              # pack settings only (packs/ops)
-#     # root:                            # default $MOW_HOME/ops
-#     # log_max_lines: 200
-#     # log_max_bytes: 262144
-#     # Named profiles live under $MOW_HOME/ops/<name>/ (not in this file):
-#     #   config.yaml   services, actions, acp peers, model, every, prompt
-#     #   prompt.md     system instructions
-#     #   incidents/    durable tickets
-#     # Example profile config.yaml:
-#     #   every: 15m
-#     #   model: gpt-5-mini               # optional; or rely on $MOW_HOME/config.yaml
-#     #   services:
-#     #     - name: api
-#     #       logs: [/var/log/api/app.log]
-#     #       actions:
-#     #         status:  [systemctl, is-active, api.service]
-#     #         restart: [systemctl, restart, api.service]
-#     #       acp: api-peer
-#     #   acp:
-#     #     peers:
-#     #       - name: api-peer
-#     #         command: [mow, acp]
-#     #         dir: /path/to/api/repo
-#     # Then: mow ops run api-stack --once
-
-
 # Agent Plugin hooks: drop a folder under $MOW_HOME/plugins/<id> with
-# plugin.json and optional hooks/hooks.json. packs/cmdhook loads those
+# plugin.json and optional hooks/hooks.json. ext/cmdhook loads those
 # automatically (no extensions.cmdhook). Same trust bar as shell.

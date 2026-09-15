@@ -220,7 +220,7 @@ var (
 	tools            []toolEntry
 	commands         []Command
 	optionalFeatures []OptionalFeature
-	beforeNew        []func(configPaths ...string) error
+	beforeNew        []func(SetupContext) error
 	preTool          []hookEntry[PreToolFunc]
 	postTool         []hookEntry[PostToolFunc]
 	userPrompt       []hookEntry[UserPromptFunc]
@@ -279,6 +279,9 @@ type ExtensionStatus struct {
 type OptionalFeature struct {
 	ID     string
 	Events []string
+	// Tools advertises conditional tool names without starting the extension.
+	// It is discovery metadata, not authorization or live registration.
+	Tools []string
 }
 
 type turnKey struct{}
@@ -376,6 +379,36 @@ func filterHookSource[T any](in []hookEntry[T], source string) []hookEntry[T] {
 	return append([]hookEntry[T](nil), out...)
 }
 
+func filterHookGeneration[T any](in []hookEntry[T], gen int) []hookEntry[T] {
+	out := in[:0]
+	for _, e := range in {
+		if e.gen != gen {
+			out = append(out, e)
+		}
+	}
+	return append([]hookEntry[T](nil), out...)
+}
+
+func cloneExtensionInstances(in map[string]*ExtensionState) map[string]*ExtensionState {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]*ExtensionState, len(in))
+	for name, inst := range in {
+		if inst == nil {
+			out[name] = nil
+			continue
+		}
+		copy := *inst
+		if inst.Enabled != nil {
+			enabled := *inst.Enabled
+			copy.Enabled = &enabled
+		}
+		out[name] = &copy
+	}
+	return out
+}
+
 // SetExtensionEnabled sets explicit enabled/disabled state for extension(s) matching target.
 // Target can be full ("mcp:context-mode"), short name ("context-mode"), or kind ("mcp").
 func SetExtensionEnabled(target string, enabled bool) bool {
@@ -464,6 +497,9 @@ func ListExtensions(currentTurn int) []ExtensionStatus {
 // RegisterTool adds a tool available to integrators and the default registry merge.
 // Re-registering a name replaces the earlier tool — BeforeNew may run once per
 // Engine, and duplicate specs would otherwise reach the model.
+// Calls outside a BeforeNew setup callback are static initialization and must
+// complete before Engine construction; concurrent dynamic registration is not
+// supported.
 //
 // Tools registered while BeforeNew is running are tagged as config-sourced for
 // that generation so hermetic Engines can exclude leftovers from a prior host
@@ -879,6 +915,7 @@ func RegisterOptionalFeature(f OptionalFeature) {
 		events = append(events, event)
 	}
 	f.Events = events
+	f.Tools = append([]string(nil), f.Tools...)
 	mu.Lock()
 	defer mu.Unlock()
 	for i := range optionalFeatures {
@@ -897,6 +934,7 @@ func OptionalFeatures() []OptionalFeature {
 	out := append([]OptionalFeature(nil), optionalFeatures...)
 	for i := range out {
 		out[i].Events = append([]string(nil), out[i].Events...)
+		out[i].Tools = append([]string(nil), out[i].Tools...)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -905,6 +943,22 @@ func OptionalFeatures() []OptionalFeature {
 // RegisterBeforeNew runs before mow.New when building engines from CLI packs
 // (e.g. acp.RegisterFromConfig so tools exist in the registry).
 func RegisterBeforeNew(fn func(configPaths ...string) error) {
+	if fn == nil {
+		return
+	}
+	RegisterBeforeNewContext(func(ctx SetupContext) error { return fn(ctx.ConfigPaths...) })
+}
+
+// SetupContext carries host-resolved configuration boundaries to extensions.
+type SetupContext struct {
+	Workspace      string
+	LoadUserConfig bool
+	ConfigPaths    []string
+}
+
+// RegisterBeforeNewContext registers setup that needs the actual workspace and
+// loading policy instead of inferring them from filenames or process cwd.
+func RegisterBeforeNewContext(fn func(SetupContext) error) {
 	if fn == nil {
 		return
 	}
@@ -999,10 +1053,34 @@ func ReleaseEngineGeneration(gen int) {
 // Each call bumps the tool registration generation so ToolsForEngine can
 // isolate config-sourced tools per Engine construction.
 func BeforeNew(configPaths ...string) error {
+	release, err := BeginSetup(SetupContext{ConfigPaths: configPaths})
+	if release != nil {
+		release()
+	}
+	return err
+}
+
+var setupMu sync.Mutex
+
+// BeginSetup serializes registration until the caller has captured tools,
+// hooks and generation ownership. Release before running lifecycle callbacks.
+// Setup callbacks must not recursively construct another engine.
+func BeginSetup(ctx SetupContext) (release func(), err error) {
+	setupMu.Lock()
+	var once sync.Once
+	unlock := func() { once.Do(setupMu.Unlock) }
+	returned := false
+	defer func() {
+		if !returned {
+			unlock()
+		}
+	}()
 	mu.Lock()
 	beforeNewGen++
+	gen := beforeNewGen
 	beforeNewActive = true
-	fns := append([]func(configPaths ...string) error(nil), beforeNew...)
+	instancesBefore := cloneExtensionInstances(extInstances)
+	fns := append([]func(SetupContext) error(nil), beforeNew...)
 	mu.Unlock()
 	defer func() {
 		mu.Lock()
@@ -1011,11 +1089,42 @@ func BeforeNew(configPaths ...string) error {
 	}()
 	var first error
 	for _, fn := range fns {
-		if err := fn(configPaths...); err != nil && first == nil {
+		callCtx := ctx
+		callCtx.ConfigPaths = append([]string(nil), ctx.ConfigPaths...)
+		if err := fn(callCtx); err != nil && first == nil {
 			first = err
 		}
 	}
-	return first
+	if first != nil {
+		mu.Lock()
+		toolsOut := tools[:0]
+		for _, entry := range tools {
+			if entry.gen != gen {
+				toolsOut = append(toolsOut, entry)
+			}
+		}
+		tools = append([]toolEntry(nil), toolsOut...)
+		preTool = filterHookGeneration(preTool, gen)
+		postTool = filterHookGeneration(postTool, gen)
+		userPrompt = filterHookGeneration(userPrompt, gen)
+		sessStart = filterHookGeneration(sessStart, gen)
+		preCompact = filterHookGeneration(preCompact, gen)
+		preModel = filterHookGeneration(preModel, gen)
+		afterTurn = filterHookGeneration(afterTurn, gen)
+		afterTurnDecide = filterHookGeneration(afterTurnDecide, gen)
+		stop = filterHookGeneration(stop, gen)
+		sysSegments = filterHookGeneration(sysSegments, gen)
+		extInstances = instancesBefore
+		beforeNewActive = false
+		releaseFns := append([]func(int){}, generationRelease...)
+		mu.Unlock()
+		for _, fn := range releaseFns {
+			fn(gen)
+		}
+		return nil, first
+	}
+	returned = true
+	return unlock, nil
 }
 
 // Reset clears tool, hook, and command registrations (tests only).

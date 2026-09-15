@@ -19,7 +19,7 @@ func TestIsReadOnlyTool(t *testing.T) {
 		{"read", true},
 		{"glob", true},
 		{"grep", true},
-		{"understand_image", true},
+		{"understand_image", false}, // extension must declare ReadOnly explicitly
 		{"write", false},
 		{"edit", false},
 		{"bash", false},

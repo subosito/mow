@@ -18,8 +18,7 @@
             pname = "mow";
             inherit version;
             src = lib.cleanSource ./.;
-            # First `nix build` will fail and print the real hash — paste it here.
-            vendorHash = "sha256-1E3PywLh8UXMO9eAiIumGzoQ6MijuImOibkoFbZw9sk=";
+            vendorHash = "sha256-T0KmN00q6lGo8LHKiBdmSveSMSLykCWi1pxCqkqE1Rs=";
             subPackages = [ "cmd/mow" ];
             env.CGO_ENABLED = "0";
             env.GOWORK = "off";
@@ -35,29 +34,9 @@
               mainProgram = "mow";
             };
           };
-          customhost = pkgs.buildGoModule {
-            pname = "customhost";
-            inherit version;
-            src = lib.cleanSource ./.;
-            vendorHash = "sha256-1E3PywLh8UXMO9eAiIumGzoQ6MijuImOibkoFbZw9sk=";
-            subPackages = [ "cmd/customhost" ];
-            env.CGO_ENABLED = "0";
-            env.GOWORK = "off";
-            ldflags = [
-              "-s"
-              "-w"
-              "-X github.com/subosito/mow/internal/engine.Version=${version}"
-            ];
-            meta = {
-              description = "mow with workflow packs (goal, ops, review, media, …)";
-              homepage = "https://github.com/subosito/mow";
-              license = lib.licenses.mit;
-              mainProgram = "customhost";
-            };
-          };
         in
         {
-          inherit mow customhost;
+          inherit mow;
           default = mow;
         });
 

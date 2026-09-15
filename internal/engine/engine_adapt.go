@@ -347,9 +347,7 @@ func toPublicToolSpecs(in []llm.ToolSpec) []ToolSpec {
 
 func isBuiltin(name string) bool {
 	switch name {
-	case "read", "glob", "grep", "write", "edit", "bash",
-		"generate_image", "generate_speech", "generate_video",
-		"understand_image", "understand_voice", "understand_video":
+	case "read", "glob", "grep", "write", "edit", "bash":
 		return true
 	default:
 		return false
@@ -366,24 +364,12 @@ func unknownRegisteredEnable(enable []string, registered []agent.Tool) []string 
 	return tools.UnknownEnable(enable, names)
 }
 
-func mediaPackLinked() bool {
-	for _, f := range ext.OptionalFeatures() {
-		if f.ID == "media" {
-			return true
-		}
-	}
-	return false
-}
-
 // isReadOnlyTool reports whether a tool may run in a read-only prompt:
-// builtin read tools, understand_* (side-effect free), and ext tools that
-// declared ReadOnly() true at registration. generate_* writes media files and
-// is excluded.
+// builtin read tools and extensions that declare ReadOnly() true.
 func isReadOnlyTool(name string, extRO map[string]bool) bool {
 	n := strings.ToLower(strings.TrimSpace(name))
 	switch n {
-	case "read", "glob", "grep",
-		"understand_image", "understand_voice", "understand_video":
+	case "read", "glob", "grep":
 		return true
 	}
 	return extRO[n]

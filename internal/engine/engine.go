@@ -189,12 +189,6 @@ func New(opt Options) (*Engine, error) {
 		beforePaths = prependConfigPath(beforePaths, config.ConfigPath())
 	}
 	extGen := 0
-	if !opt.SkipExtensionSetup {
-		if err := ext.BeforeNew(beforePaths...); err != nil {
-			return nil, fmt.Errorf("extension init: %w", err)
-		}
-		extGen = ext.BeforeNewGeneration()
-	}
 	profileName := ""
 	if activeProfile != nil {
 		profileName = activeProfile.Name
@@ -255,6 +249,24 @@ func New(opt Options) (*Engine, error) {
 	cfg, err := config.LoadForEngineIn(workspace, opt.LoadUserConfig, profileName, opt.ConfigPaths...)
 	if err != nil {
 		return nil, err
+	}
+	releaseSetup := func() {}
+	generationOwned := false
+	if !opt.SkipExtensionSetup {
+		releaseSetup, err = ext.BeginSetup(ext.SetupContext{
+			Workspace: cfg.Workspace, LoadUserConfig: opt.LoadUserConfig, ConfigPaths: beforePaths,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("extension init: %w", err)
+		}
+		defer releaseSetup()
+		extGen = ext.BeforeNewGeneration()
+		ext.NoteEngineGeneration(extGen)
+		defer func() {
+			if !generationOwned {
+				ext.ReleaseEngineGeneration(extGen)
+			}
+		}()
 	}
 	for _, msg := range cfg.Warnings {
 		msg = "mow: " + msg
@@ -547,11 +559,17 @@ func New(opt Options) (*Engine, error) {
 		e.AddOnEvent(opt.OnEvent)
 	}
 	if extGen > 0 {
-		ext.NoteEngineGeneration(extGen)
 		gen := extGen
 		e.RegisterCleanup(func() { ext.ReleaseEngineGeneration(gen) })
+		generationOwned = true
 	}
-	var mediaClient *llm.MediaClient
+	releaseSetup()
+	constructed := false
+	defer func() {
+		if !constructed {
+			_ = e.Close()
+		}
+	}()
 	switch {
 	case opt.Provider != nil:
 		prov := opt.Provider
@@ -575,14 +593,6 @@ func New(opt Options) (*Engine, error) {
 			}
 			return toInternalMessage(out), nil
 		}
-		if key := cfg.ResolveAPIKey(); key != "" {
-			mediaClient = &llm.MediaClient{
-				BaseURL:      cfg.LLM.BaseURL,
-				APIKey:       key,
-				HTTP:         opt.HTTPClient,
-				ExtraHeaders: withActorHeaders(cfg.LLM.Headers, "mow"),
-			}
-		}
 	case opt.Chat != nil:
 		inner := adaptChat(opt.Chat)
 		e.chat = func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
@@ -597,14 +607,6 @@ func New(opt Options) (*Engine, error) {
 		}
 		if e.cfg != nil && strings.TrimSpace(opt.Model) != "" {
 			e.cfg.LLM.Model = strings.TrimSpace(opt.Model)
-		}
-		if key := cfg.ResolveAPIKey(); key != "" {
-			mediaClient = &llm.MediaClient{
-				BaseURL:      cfg.LLM.BaseURL,
-				APIKey:       key,
-				HTTP:         opt.HTTPClient,
-				ExtraHeaders: withActorHeaders(cfg.LLM.Headers, "mow"),
-			}
 		}
 	default:
 		if opt.DeferLLM {
@@ -640,7 +642,6 @@ func New(opt Options) (*Engine, error) {
 		}
 		e.client = client
 		e.wireExplicit = cfg.LLM.WireExplicit
-		mediaClient = llm.FromClient(client)
 		if client.ExtraHeaders[llm.HeaderComponent] == "" {
 			client.ExtraHeaders[llm.HeaderComponent] = "turn.chat"
 		}
@@ -700,17 +701,6 @@ func New(opt Options) (*Engine, error) {
 		final = append(final, t)
 	}
 	e.tools = final
-	// Enable names that never landed in the registry (wrong binary, or a
-	// pack that did not RegisterTool) stay a no-op — warn so the operator
-	// is not stuck with a silent missing tool.
-	if miss := unknownRegisteredEnable(enabled, toolList); len(miss) > 0 {
-		msg := "mow: " + tools.FormatUnregisteredEnable(miss, mediaPackLinked())
-		if opt.Logger != nil {
-			opt.Logger.Warn(msg)
-		} else {
-			fmt.Fprintln(os.Stderr, msg)
-		}
-	}
 	// Per-engine nonce for untrusted-output framing (bash/MCP/delegate).
 	nb := make([]byte, 8)
 	if _, err := rand.Read(nb); err == nil {
@@ -834,21 +824,13 @@ func New(opt Options) (*Engine, error) {
 				e.log().Warn("mow: session runtime append failed (resume may use default policy)", "err", aerr)
 			}
 		}
-		if mediaClient != nil && sid != "" {
-			if mediaClient.ExtraHeaders == nil {
-				mediaClient.ExtraHeaders = map[string]string{}
-			}
-			if mediaClient.ExtraHeaders[llm.HeaderSession] == "" {
-				mediaClient.ExtraHeaders[llm.HeaderSession] = sid
-			}
-		}
 	}
 
 	for _, fn := range e.life.onSessionStart {
 		if fn == nil {
 			continue
 		}
-		d, err := fn(context.Background(), SessionStartEvent{
+		d, err := fn(ContextWithEngine(context.Background(), e), SessionStartEvent{
 			Workspace: e.cfg.Workspace,
 			SessionID: e.sid,
 			Model:     e.cfg.LLM.Model,
@@ -866,6 +848,16 @@ func New(opt Options) (*Engine, error) {
 		}
 	}
 
+	// Lifecycle extensions can register engine-scoped tools during setup.
+	if miss := unknownRegisteredEnable(enabled, e.tools); len(miss) > 0 {
+		msg := "mow: " + tools.FormatUnregisteredEnable(miss)
+		if opt.Logger != nil {
+			opt.Logger.Warn(msg)
+		} else {
+			fmt.Fprintln(os.Stderr, msg)
+		}
+	}
+
 	// Fail closed on an unenforceable spend ceiling. policy.max_run_usd on a
 	// model with no published price cannot fire; starting anyway would hand
 	// the operator a limit that silently never triggers, which is worse than
@@ -874,6 +866,7 @@ func New(opt Options) (*Engine, error) {
 		return nil, err
 	}
 
+	constructed = true
 	return e, nil
 }
 
@@ -894,6 +887,11 @@ func (e *Engine) AddTool(t Tool) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	adapted := adaptTool(t)
+	if e.readOnlyExt == nil {
+		e.readOnlyExt = map[string]bool{}
+	}
+	ro, ok := any(t).(interface{ ReadOnly() bool })
+	e.readOnlyExt[name] = ok && ro.ReadOnly()
 	for idx, existing := range e.tools {
 		if strings.EqualFold(existing.Name(), name) {
 			e.tools[idx] = adapted
@@ -901,9 +899,6 @@ func (e *Engine) AddTool(t Tool) error {
 		}
 	}
 	e.tools = append(e.tools, adapted)
-	if ro, ok := any(t).(interface{ ReadOnly() bool }); ok && ro.ReadOnly() {
-		e.readOnlyExt[name] = true
-	}
 	return nil
 }
 

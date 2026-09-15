@@ -586,7 +586,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			switch ev.Type {
 			case mow.EventDelegateChunk:
 				// A nested delegate's answer is NOT this agent's reply.
-				// Forward as an extra update so mowi /peers can paint it
+				// Forward as an extra update so the ACP host's /peers view can paint it
 				// without committing it as the host answer.
 				agent := strings.TrimSpace(ev.Agent)
 				line := strings.TrimSpace(ev.Delta)

@@ -1,12 +1,11 @@
 # mow
 
-**Minimal, secure-by-default agentic harness** (Go). The **library is the product API**; protocol extensions and workflow packs are detachable modules. The Rust `mowi` sibling project is the TUI host over `mow acp`.
+**Minimal, secure-by-default agentic harness** (Go). The **library is the product API**; protocol extensions are detachable modules. External hosts can drive it over `mow acp`.
 
 ```text
 Embedder / tests ──┐
 ext/cli (run) ─────┼──▶  mow.Engine  ──▶  LLM HTTP (any compatible endpoint)
-ext/tty · ext/acp ─┘     (lean: cli · tty · acp · focus · proc · mcp
-                         full: + goal · review · ops · media · …)
+ext/tty · ext/acp ─┘     (core: cli · tty · acp · proc · cmdhook · mcp · goal)
 ```
 
 **Why mow:** the core module has two runtime dependencies (pty, yaml) — no SDK,
@@ -62,7 +61,6 @@ devenv shell -- just build    # → bin/mow (embeds VERSION)
 
 # Or with plain Go:
 go build -o bin/mow ./cmd/mow
-go build -o bin/custom-host ./cmd/custom-host
 
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_API_KEY=sk-…
@@ -75,22 +73,15 @@ export OPENAI_MODEL=gpt-5-mini
 ./bin/mow models                                  # catalog: id, wire, efforts
 ./bin/mow tty                                     # optional ext/tty
 ./bin/mow acp                                     # ext/acp — ACP agent + extras
+./bin/mow goal new --id fix-ci --goal "Make CI green"   # ext/goal
 ./bin/mow help                                # linked commands, dynamically
-
-# custom-host links the workflow packs on top of mow:
-./bin/custom-host goal run --goal "Make CI green"   # packs/goal — multi-step
-./bin/custom-host review                            # packs/review — advisory review
-./bin/custom-host sec --format sarif                # advisory security review / SARIF
-./bin/custom-host job                               # packs/job — interval jobs
-./bin/custom-host ops list                          # packs/ops — fleet ops
 
 ```
 
-**Pack-owned subcommands:** stock binaries blank-import linked packs. Remove an
+**Extension-owned subcommands:** the stock binary blank-imports linked extensions. Remove an
 import (for example `_ "github.com/subosito/mow/ext/acp"`) and its tools and
-subcommand disappear from that binary and help. `bin/mow` is the lean stock
-binary (acp, tty, focus, proc, cmdhook, mcp); `bin/custom-host` adds the
-workflow packs (goal, job, ops, review, media).
+subcommand disappear from that binary and help. Optional application workflows
+live in the separate [custom-host project](https://github.com/subosito/mow).
 
 Secure default tools: **read**, **glob**, **grep**. Power tools need
 `--allow-write` / `--allow-shell`. `--allow-shell` is the trust cliff:
@@ -115,29 +106,27 @@ containment.
 
 ## Modules and layout
 
-Three Go modules (`go.work` wires them for local dev). Full public/internal map:
+One Go module. Full public/internal map:
 [docs/architecture.md](docs/architecture.md).
 
 | Path / module | Role |
 |---|---|
 | `mow.go` + `internal/` | Public API re-export and implementation |
-| `ext/` + `cliutil/` + `extcfg/` | Stock surfaces (cli, tty, acp), CLI helpers, extension config decode |
-| `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job |
-| `cmd/mow/` | Lean host: `ext/cli.Main` + tty, acp, focus, proc, cmdhook, mcp |
-| `cmd/custom-host/` | Full host (lean set + goal, job, ops, review, media) |
+| `ext/` + `cliutil/` + `extcfg/` | Core extensions (cli, tty, acp, proc, cmdhook, mcp), CLI helpers, config decode |
+| `cmd/mow/` | Stock host: `ext/cli.Main` plus linked core extensions |
 
 ## Pick extensions when embedding
 
 ```go
 import (
     "github.com/subosito/mow"
-    _ "github.com/subosito/mow/packs/mcp"     // optional MCP client + mow mcp
-    _ "github.com/subosito/mow/packs/ops"     // optional domain pack
+    _ "github.com/subosito/mow/ext/mcp" // optional MCP client + mow mcp
 )
 ```
 
 Import only `github.com/subosito/mow` for the Engine library. Add individual
-`ext/*` or `packs/*` imports as needed.
+`ext/*` imports as needed. Application packs are maintained by
+[custom-host](https://github.com/subosito/mow).
 
 Config: `extensions.<pack>` (see `internal/config/mow.yaml.example`).
 Docs: [docs/extensions.md](docs/extensions.md).
@@ -150,12 +139,11 @@ Docs: [docs/extensions.md](docs/extensions.md).
 | [docs/architecture.md](docs/architecture.md) | Public/internal and module boundaries |
 | [docs/embedding.md](docs/embedding.md) | Embed in Go: options, events, custom tools/providers, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config |
-| [docs/review.md](docs/review.md) | Shared review workflow, `--reviewer` / `--verifier`, scope, formats, CI |
-| [docs/sec.md](docs/sec.md) | Read-only security review and evidence model |
-| [packs/*/README.md](packs/), [ext/*/README.md](ext/) | Per-pack / per-extension one-pagers |
-| [docs/extensions.md](docs/extensions.md) | Core extensions, optional packs, ACP, MCP, media |
+| [docs/acp.md](docs/acp.md) | `mow acp` + extras |
+| [docs/workspace-profiles.md](docs/workspace-profiles.md) | Named workspace sets: roots, overlay, skills, plugins |
+| [ext/*/README.md](ext/) | Per-extension one-pagers |
+| [docs/extensions.md](docs/extensions.md) | Core extensions, ACP, and MCP |
 
 ## License
 
 MIT
-T

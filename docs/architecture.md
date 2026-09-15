@@ -6,7 +6,7 @@
 ## One-liner
 
 **mow** is a secure-by-default Go agent harness: tool loop + sessions + config,
-extended by detachable protocol extensions, workflow packs, and telemetry.
+extended by detachable protocol extensions and telemetry.
 External host UIs can drive the harness over `mow acp`.
 
 LLM access is plain OpenAI-compatible or Anthropic-compatible HTTP. No gateway,
@@ -17,19 +17,18 @@ broker, host UI, or sibling repository is required for `mow.Engine`.
 1. **Library first** — public API is `github.com/subosito/mow` (`New` / `NewHarness` / `Engine` / `Run`).
 2. **Thin public root** — `mow.go` re-exports the API; implementation and behavior tests live in `internal/engine/`.
 3. **Minimal core module** — no OpenTelemetry or UI dependencies enter a library-only embed.
-4. **Detachable features** — core extensions live in `ext/`; optional/domain packs live in `packs/`.
-5. **Packs own commands** — `ext.RegisterCommand`; blank import controls what a binary ships.
+4. **Detachable features** — core extensions live in `ext/`; application workflows can live in external modules.
+5. **Extensions own commands** — `ext.RegisterCommand`; blank import controls what a binary ships.
 6. **Secure by default** — read-only default tools, path jail, explicit write/shell trust.
 
 ## Modules
 
 | Module | Path | Role |
 |---|---|---|
-| `github.com/subosito/mow` | root | Public API, `internal/engine`, registration, core extensions, `cmd/mow`, `cmd/custom-host` |
-| `github.com/subosito/mow/packs` | `packs/` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job |
+| `github.com/subosito/mow` | root | Public API, `internal/engine`, registration, core extensions, `cmd/mow` |
 
-`go.work` wires the two Go modules for local development. Import direction is
-one-way: the packs module depends on the root public API, never the reverse.
+External applications depend on the root public API; the root module never
+depends on an application module.
 
 ## Public vs internal
 
@@ -39,8 +38,7 @@ one-way: the packs module depends on the root public API, never the reverse.
 |---|---|
 | `github.com/subosito/mow` | Thin aliases/wrappers: `Engine`, `Run`, options, events, hooks, providers |
 | `github.com/subosito/mow/ext` | Registration API: tools, lifecycle hooks, commands, `BeforeNew` |
-| `github.com/subosito/mow/ext/<name>` | Stock Engine surfaces: acp, cli, tty (privileged; may import internal/) |
-| `github.com/subosito/mow/packs/<name>` | Optional packs: focus, proc, cmdhook, mcp, media, goal, review, ops, job |
+| `github.com/subosito/mow/ext/<name>` | Core Engine surfaces: acp, cli, tty, proc, cmdhook, mcp, goal (privileged; may import internal/) |
 | `github.com/subosito/mow/cliutil` | CLI flags → Engine |
 | `github.com/subosito/mow/extcfg` | Decode `extensions.<name>` |
 
@@ -63,7 +61,7 @@ behavior, the root public package re-exports a narrow API (for example
 `mow.Proc*`, `mow.MediaClient`).
 
 ```text
-Embedder / cmd/mow / packs
+Embedder / cmd/mow / external applications
                   │
                   ▼
         mow.go (public aliases/wrappers)
@@ -75,7 +73,7 @@ Embedder / cmd/mow / packs
         LLM HTTP (compatible endpoint)
 ```
 
-## Extensions and packs
+## Extensions
 
 ### Core extensions (`ext/`, root module)
 
@@ -86,33 +84,24 @@ a profile switch.
 - `ext/cli`: unix dispatcher (`cli.Main`) + `run`, `trust`, `doctor`, `approvals`, version, help. Uses `mow.NewHarness`.
 - `ext/tty`: optional line REPL (`mow tty`). Does not import `ext/acp`.
 - `ext/acp`: ACP agent + extras + peer delegation (`delegate`). Must not import `ext/cli`.
+- `ext/proc`: detached process tools (`proc_start` / `status` / `stop`; no CLI).
+- `ext/cmdhook`: command hooks from host-owned Agent Plugins.
+- `ext/mcp`: MCP client tools (config-gated) + `mow mcp` stdio server.
+- `ext/goal`: durable outer loop over Prompt (checklist, worktrees, parallel steps).
 
-### Optional packs (`packs/` module)
-
-One-pagers live next to the code (`packs/<name>/README.md`, `ext/<name>/README.md`).
-Lean `cmd/mow` links the first four; `cmd/custom-host` adds the rest.
-
-- `packs/mcp`: MCP client tools (config-gated) + `mow mcp` stdio server
-- `packs/proc`: detached process tools (`proc_start` / `status` / `stop`; no CLI)
-- `packs/cmdhook`: command hooks from host-owned Agent Plugins
-- `packs/focus`: explore-guard hooks (no CLI)
-- `packs/media`: generate/understand tools (config-gated)
-- `packs/goal`: durable outer-loop goals
-- `packs/review`: code/security review workflows
-- `packs/ops`: ops profiles, logs, actions, incidents, runbooks
-- `packs/job`: interval/cron jobs (depends on goal); ops depends on job
+Application workflows (review, job, ops, media) are maintained separately in
+[custom-host](https://github.com/subosito/mow).
 
 ## Binaries
 
 | Binary | Source | Ships |
 |---|---|---|
-| `mow` | `cmd/mow` | Import list: `ext/cli` + `ext/tty` + `ext/acp` + focus, proc, cmdhook, mcp |
-| `custom-host` | `cmd/custom-host` | Lean set plus goal, job, ops, review, media |
+| `mow` | `cmd/mow` | Import list: `ext/cli`, `ext/tty`, `ext/acp`, `ext/proc`, `ext/cmdhook`, `ext/mcp`, `ext/goal` |
 
 Composition lives in `cmd/` (blank imports + `ext/cli.Main`). Host UIs spawn
 `mow acp`; they do not need `run` or `tty`. The Engine library requires neither.
 
-External host UIs own presentation; pack commands and tools remain registered
+External host UIs own presentation; extension commands and tools remain registered
 in the mow host that is on `PATH`.
 
 ## Catalog behavior

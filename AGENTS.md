@@ -1,6 +1,6 @@
 # AGENTS.md — working in the mow repo
 
-mow is a **standalone** Go workspace (root + `packs/`): OpenAI/Anthropic-compatible HTTP. No gateway or sibling repo is required to build, test, or run. The Rust **mowi** TUI is external and drives `mow acp` — never import TUI deps into the root module or `internal/engine`.
+mow is a **standalone** Go module: OpenAI/Anthropic-compatible HTTP. No gateway or sibling repo is required to build, test, or run. External hosts can drive `mow acp`; never import UI deps into the root module or `internal/engine`.
 
 ## Build, test, run
 
@@ -9,11 +9,11 @@ Requires **Go 1.26.4+** (`go.mod`). Prefer `devenv shell` (`GOTOOLCHAIN=local`).
 ```bash
 devenv shell -- just verify    # vet + go test -race + build — gate before commit
 devenv shell -- just verify-ci # same, no credentials, empty MOW_HOME
-devenv shell -- just build     # → bin/mow (lean) + bin/custom-host
+devenv shell -- just build     # → bin/mow
 devenv shell -- just test      # fast inner loop (no race)
 ```
 
-`just verify` matches `.github/workflows/ci.yml`. Race is part of the gate. Adding a CI step means adding it to `verify` too. **Before push: `just verify-ci`** — a developer `~/.mow` and API key make Engine tests pass locally and fail on CI. Packs that construct an Engine need `TestMain` pinning `MOW_HOME`, `MOW_API_KEY`, `MOW_MODEL` (`testutil.RunWithProvider`; see `packs/job`).
+`just verify` matches `.github/workflows/ci.yml`. Race is part of the gate. Adding a CI step means adding it to `verify` too. **Before push: `just verify-ci`** — a developer `~/.mow` and API key make Engine tests pass locally and fail on CI. Extensions that construct an Engine need `TestMain` pinning `MOW_HOME`, `MOW_API_KEY`, and `MOW_MODEL` with `testutil.RunWithProvider`.
 
 A test may not assume anything is listening on a port. Use `httptest.NewServer`. Format with `gofmt`. No Make/npm scripts.
 
@@ -34,21 +34,18 @@ Source of truth: [docs/architecture.md](docs/architecture.md).
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
 | `extcfg/` | Decode `extensions.<name>` |
 | `testutil/` | Shared tests (pin `$MOW_HOME`) |
-| `ext/` | Registration + core extensions: acp, cli, tty |
-| `packs/` | Optional module `github.com/subosito/mow/packs` |
+| `ext/` | Registration + core extensions: acp, cli, tty, proc, cmdhook, mcp, goal |
 | `internal/` | Implementation — **not** an integrator import |
-| `cmd/mow/` | Lean host |
-| `cmd/custom-host/` | Full host |
+| `cmd/mow/` | Stock host |
 | `ext/cli/` | Unix CLI skeleton (run, trust, doctor, …) |
 | `ext/tty/` | Optional line REPL |
 
 If integrators need something in `internal/`, re-export — do not tell them to import `internal/`.
 
-## Packs
+## Extensions
 
-- Lean (`cmd/mow`): acp, cli, tty, focus, proc, cmdhook, mcp.
-- Full adds goal, job, ops, review, media. Both call `ext/cli.Main`.
-- Core extensions in `ext/` (root module); optional packs in `packs/` (`go.work` for local dev).
+- Stock `cmd/mow`: acp, cli, tty, proc, cmdhook, mcp, goal.
+- Application workflows (review, job, ops, media) live in external modules such as `external application modules`.
 - Remove import → subcommand/tools gone. Config: `extensions.<name>` via `Engine.Extension` or `extcfg.DecodeSection`. MCP only if configured.
 
 ## Conventions
@@ -83,7 +80,9 @@ Non-trivial change: `devenv shell -- just verify` before commit. Docs/fixtures a
 
 - Default tools: **read, glob, grep**. Write/shell need `--allow-write` / `--allow-shell` or config.
 - FS tools are path-jailed (`policy.extra_roots` / `--extra-root` expand the jail — host/CLI only; fixed at `mow.New`). **`bash` is not path-jailed**; `--allow-shell` is the trust decision. See [docs/harness.md](docs/harness.md) § Extra FS roots.
-- Workspace trust is out-of-band (`$MOW_HOME/trusted`, `mow trust`) — never a marker in the repo. Project config may not set credentials, `llm.base_url`, headers, `session.dir`, power tools, or `extra_roots`.
+- Workspace trust is out-of-band (`$MOW_HOME/trusted`, `mow trust`) — never a marker in the repo. Project config may not set credentials, `llm.base_url`, headers, `session.dir`, power tools, `extra_roots`, or `env_passthrough`; nor `llm.model`/`effort`/`stream`, `skills.selector`, or a `max_turns` that raises the host ceiling.
+- Instruction files (`AGENTS.md`/`CLAUDE.md`) are read from the workspace up to the enclosing git root (else `$HOME`) — never above; hermetic engines (`LoadUserConfig=false`) read the workspace only.
+- Shell children (`bash`, `proc_start`) never inherit `*_API_KEY`; `policy.env_passthrough` (host/CLI only) is the exact-name opt-out.
 - No secrets in logs. Config under `$MOW_HOME` (default `~/.mow`). Optional `X-Mow-*` labels (ignored by plain providers).
 
 ## Gotchas
@@ -99,6 +98,6 @@ Non-trivial change: `devenv shell -- just verify` before commit. Docs/fixtures a
 | [docs/architecture.md](docs/architecture.md) | Public/internal, LLM endpoint |
 | [docs/embedding.md](docs/embedding.md) | Embed in Go: options, events, tools, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config, sessions |
-| [docs/extensions.md](docs/extensions.md) | Packs, ACP, media, MCP |
+| [docs/extensions.md](docs/extensions.md) | Core extensions, ACP, MCP |
 | [docs/acp.md](docs/acp.md) | `mow acp` + extras |
-| [docs/review.md](docs/review.md) | `custom-host review` / `sec`: two-pass, flags, schema, exit codes |
+| [docs/workspace-profiles.md](docs/workspace-profiles.md) | `$MOW_HOME/workspaces/<name>/`: roots, overlay, skills, plugins |

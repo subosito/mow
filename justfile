@@ -3,42 +3,36 @@ default:
 
 # Commit gate — mirrors .github/workflows/ci.yml (vet + race test + build).
 # Keep these steps in sync with CI so failures surface locally, not on push.
-verify: vet test-race build
+verify: vet test-race build version-check
 
-# Fast inner-loop tests (no race detector). Covers the root module and packs/.
+# Fast inner-loop tests (no race detector).
 test:
     go test ./...
-    cd packs && go test ./...
 
 # What CI actually runs. The race detector catches unsynchronized test
 # helpers that plain `go test` happily lets through.
 test-race:
     go test -race ./...
-    cd packs && go test -race ./...
 
 vet:
     go vet ./...
-    cd packs && go vet ./...
 
-build: build-mow build-customhost
+build: build-mow
 
 build-mow:
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p bin
     ver="$(tr -d ' \n' < VERSION)"
-    go build -trimpath \
+    go build -buildvcs=false -trimpath \
       -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
       -o bin/mow ./cmd/mow
 
-build-customhost:
+version-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p bin
     ver="$(tr -d ' \n' < VERSION)"
-    go build -trimpath \
-      -ldflags "-s -w -X github.com/subosito/mow/internal/engine.Version=${ver}" \
-      -o bin/customhost ./cmd/customhost
+    ./bin/mow version | grep -F "mow $ver"
 
 
 # Closest local approximation of a CI run: no developer credentials and an
@@ -62,10 +56,6 @@ verify-ci:
         -u MOW_MODEL -u OPENAI_MODEL -u ANTHROPIC_MODEL \
         MOW_HOME="$tmp/.mow" HOME="$tmp" \
         go test -race -count=1 ./...
-    env -u MOW_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
-        -u MOW_MODEL -u OPENAI_MODEL -u ANTHROPIC_MODEL \
-        MOW_HOME="$tmp/.mow" HOME="$tmp" \
-        bash -c 'cd packs && go vet ./... && go test -race -count=1 ./...'
     just build-mow
-    just build-customhost
+    just version-check
     echo "→ verify-ci ok"

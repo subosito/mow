@@ -16,10 +16,8 @@ integrate against; the CLI and every pack are thin shells over it. So:
 - Implementation detail → `internal/*`. If an integrator ends up needing it,
   re-export it deliberately rather than leaking the internal path.
 - A frontend, protocol, or heavy optional feature → a **core extension** under
-  `ext/` or an **optional pack** under `packs/` (blank-imported into
-  `cmd/mow` and/or `cmd/custom-host`),
-  or an external host that imports mow. The Rust `mowi` sibling project is the
-  interactive TUI and drives `mow acp`.
+  `ext/`, or an external host that imports mow. Application workflows belong
+  in an external module such as [custom-host](https://github.com/subosito/mow).
 
 Read [docs/architecture.md](docs/architecture.md) once for the public/internal
 line, then [docs/embedding.md](docs/embedding.md) to see the API from an
@@ -34,11 +32,10 @@ Requires **Go 1.26.4+** (pinned in `go.mod`). `devenv shell` sets
 strings use `mow.Version` — do not hardcode the number.
 
 ```bash
-devenv shell -- just verify   # go test ./... + go vet — the gate before every commit
-devenv shell -- just build    # → bin/mow (lean) + bin/custom-host
-devenv shell -- go test -race ./...   # run when touching the loop, hooks, or sessions
+devenv shell -- just verify   # go vet + go test -race + build — the gate before every commit
+devenv shell -- just build    # → bin/mow
 # Plain Go, no devenv/nix:
-go test ./... && go vet ./...
+go vet ./... && go test -race ./...
 ```
 
 No separate lint step; format with `gofmt`. Don't invent Make/npm scripts.
@@ -55,9 +52,8 @@ Layout and module boundaries: [docs/architecture.md](docs/architecture.md)
 | A built-in tool or the path jail | `internal/tools/`, `internal/policy/` |
 | Config, env, trust | `internal/config/`, `internal/contextload/` |
 | An LLM wire | `internal/llm/` |
-| A core extension (acp) | `ext/<name>/` |
-| An optional pack (focus, mcp, proc, goal, review, ops, job, media) | `packs/<name>/` |
-| Interactive TUI | Rust `mowi` sibling project over `mow acp` |
+| A core extension (acp, cli, tty, proc, cmdhook, mcp, goal) | `ext/<name>/` |
+| An application workflow | External module using the public `mow` API |
 
 Engine construction is `internal/engine/engine.go` (`New`); prompt/model/control
 split across `engine_prompt.go`, `engine_model.go`, `engine_control.go`,

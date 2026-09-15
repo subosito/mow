@@ -720,6 +720,9 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if strings.TrimSpace(a.Command) == "" {
 		return "", fmt.Errorf("command required")
 	}
+	if msg := bashRefuse(a.Command); msg != "" {
+		return msg, nil
+	}
 	timeout := 300 * time.Second
 	if t.p != nil && t.p.BashTimeoutSec > 0 {
 		timeout = time.Duration(t.p.BashTimeoutSec) * time.Second

@@ -30,7 +30,7 @@ Stock `cmd/mow` links `ext/cli` plus `ext/acp`, `ext/tty`, and the lean pack set
 | CLI | `version`, `help` |
 | Slash | `doctor`, `trace`, `approvals` (for tty / host UIs) |
 
-Core commands register with `ext.RegisterCommand` (`Layer: "ext"`) but appear under **Core** in top-level help. Linked `ext/` surfaces (tty, acp) show in **Extensions**; `packs/` commands (mcp, goal, …) show in **Packs**.
+Core commands register with `ext.RegisterCommand` (`Layer: "ext"`) but appear under **Core** in top-level help. Linked `ext/` surfaces (tty, acp, mcp) show in **Extensions**; external application commands (goal, review, etc.) show in **Packs**.
 
 No-args on a TTY runs `ext.DefaultInteractiveCommand` when one is registered; otherwise usage is printed.
 
