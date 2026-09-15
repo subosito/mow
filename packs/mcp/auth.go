@@ -110,7 +110,11 @@ type tokenSource struct {
 	mu     sync.Mutex
 	token  string
 	expiry time.Time
-	client *http.Client
+	// refresh is the refresh_token from the last grant, if the server issued
+	// one. On expiry (or a 401 forcing expiry) it is tried before re-running
+	// the interactive device/browser login inside a tool call.
+	refresh string
+	client  *http.Client
 	// authURLFn overrides printing the authorize URL to stderr (tests).
 	authURLFn func(string)
 }
@@ -204,23 +208,73 @@ func (t *tokenSource) accessToken(ctx context.Context) (string, error) {
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return "", fmt.Errorf("mcp auth: token endpoint %d: %s", res.StatusCode, safeOAuthErrorBody(body))
 	}
-	var tok struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-		TokenType   string `json:"token_type"`
-	}
+	var tok tokenResponse
 	if err := json.Unmarshal(body, &tok); err != nil {
 		return "", err
 	}
 	if tok.AccessToken == "" {
 		return "", fmt.Errorf("mcp auth: empty access_token")
 	}
+	t.store(tok)
+	return t.token, nil
+}
+
+// tokenResponse is the RFC 6749 §5.1 token endpoint success body.
+type tokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"`
+	TokenType    string `json:"token_type"`
+	Error        string `json:"error"`
+}
+
+// store records a fresh grant. Caller holds t.mu. A rotated refresh_token
+// replaces the old one; an omitted one keeps it (RFC 6749 §6).
+func (t *tokenSource) store(tok tokenResponse) {
 	t.token = tok.AccessToken
+	if tok.RefreshToken != "" {
+		t.refresh = tok.RefreshToken
+	}
 	if tok.ExpiresIn <= 0 {
 		tok.ExpiresIn = 3600
 	}
 	t.expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
-	return t.token, nil
+}
+
+// tryRefresh exchanges the stored refresh_token for a new access token.
+// Caller holds t.mu. ok=false (with the refresh token dropped) means the
+// caller should fall back to the interactive login.
+func (t *tokenSource) tryRefresh(ctx context.Context, tokenURL, clientID string) (string, bool) {
+	if t.refresh == "" {
+		return "", false
+	}
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", t.refresh)
+	form.Set("client_id", clientID)
+	if t.cfg.ClientSecret != "" {
+		form.Set("client_secret", t.cfg.ClientSecret)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res, err := t.client.Do(req)
+	if err != nil {
+		return "", false
+	}
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	res.Body.Close()
+	var tok tokenResponse
+	if res.StatusCode < 200 || res.StatusCode >= 300 || json.Unmarshal(body, &tok) != nil || tok.AccessToken == "" {
+		// invalid_grant (revoked/expired) or anything unexpected: forget the
+		// token so the next expiry does not retry a dead refresh forever.
+		t.refresh = ""
+		return "", false
+	}
+	t.store(tok)
+	return t.token, true
 }
 
 // deviceAccessToken implements RFC 8628 device authorization grant (CLI-friendly).
@@ -236,6 +290,9 @@ func (t *tokenSource) deviceAccessToken(ctx context.Context) (string, error) {
 	clientID := strings.TrimSpace(t.cfg.ClientID)
 	if deviceURL == "" || tokenURL == "" || clientID == "" {
 		return "", fmt.Errorf("mcp auth: device_auth_url, token_url, and client_id required for oauth2_device_code")
+	}
+	if tok, ok := t.tryRefresh(ctx, tokenURL, clientID); ok {
+		return tok, nil
 	}
 
 	form := url.Values{}
@@ -314,18 +371,10 @@ func (t *tokenSource) deviceAccessToken(ctx context.Context) (string, error) {
 		tbody, _ := io.ReadAll(io.LimitReader(tres.Body, 1<<20))
 		tres.Body.Close()
 
-		var tok struct {
-			AccessToken string `json:"access_token"`
-			ExpiresIn   int    `json:"expires_in"`
-			Error       string `json:"error"`
-		}
+		var tok tokenResponse
 		_ = json.Unmarshal(tbody, &tok)
 		if tres.StatusCode >= 200 && tres.StatusCode < 300 && tok.AccessToken != "" {
-			t.token = tok.AccessToken
-			if tok.ExpiresIn <= 0 {
-				tok.ExpiresIn = 3600
-			}
-			t.expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
+			t.store(tok)
 			return t.token, nil
 		}
 		switch tok.Error {
@@ -364,6 +413,9 @@ func (t *tokenSource) authCodeAccessToken(ctx context.Context) (string, error) {
 	if authURL == "" || tokenURL == "" || clientID == "" {
 		return "", fmt.Errorf("mcp auth: authorize_url, token_url, and client_id required for oauth2_auth_code")
 	}
+	if tok, ok := t.tryRefresh(ctx, tokenURL, clientID); ok {
+		return tok, nil
+	}
 
 	// Test/automation: inject code without browser (redirect_uri must match token exchange).
 	if code := strings.TrimSpace(os.Getenv("MOW_MCP_AUTH_CODE")); code != "" {
@@ -398,30 +450,44 @@ func (t *tokenSource) authCodeAccessToken(ctx context.Context) (string, error) {
 
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
+	// Only the first outcome matters; a second hit on /callback must not
+	// block its handler goroutine forever on a full channel.
+	fail := func(err error) {
+		select {
+		case errCh <- err:
+		default:
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("state") != state {
 			http.Error(w, "state mismatch", http.StatusBadRequest)
-			errCh <- fmt.Errorf("mcp auth: state mismatch")
+			fail(fmt.Errorf("mcp auth: state mismatch"))
 			return
 		}
 		if e := r.URL.Query().Get("error"); e != "" {
 			http.Error(w, e, http.StatusBadRequest)
-			errCh <- fmt.Errorf("mcp auth: %s", e)
+			fail(fmt.Errorf("mcp auth: %s", e))
 			return
 		}
 		c := r.URL.Query().Get("code")
 		if c == "" {
 			http.Error(w, "missing code", http.StatusBadRequest)
-			errCh <- fmt.Errorf("mcp auth: missing code")
+			fail(fmt.Errorf("mcp auth: missing code"))
 			return
 		}
 		_, _ = io.WriteString(w, "mow: login complete — you can close this tab.")
-		codeCh <- c
+		select {
+		case codeCh <- c:
+		default:
+		}
 	})
-	go func() {
-		srv := &http.Server{Handler: mux}
-		_ = srv.Serve(ln)
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
 	}()
 
 	q := url.Values{}
@@ -486,21 +552,14 @@ func (t *tokenSource) exchangeAuthCode(ctx context.Context, code, redirect, clie
 	if tres.StatusCode < 200 || tres.StatusCode >= 300 {
 		return "", fmt.Errorf("mcp auth: token endpoint %d: %s", tres.StatusCode, safeOAuthErrorBody(tbody))
 	}
-	var tok struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
+	var tok tokenResponse
 	if err := json.Unmarshal(tbody, &tok); err != nil {
 		return "", err
 	}
 	if tok.AccessToken == "" {
 		return "", fmt.Errorf("mcp auth: empty access_token")
 	}
-	t.token = tok.AccessToken
-	if tok.ExpiresIn <= 0 {
-		tok.ExpiresIn = 3600
-	}
-	t.expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
+	t.store(tok)
 	return t.token, nil
 }
 

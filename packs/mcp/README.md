@@ -25,8 +25,10 @@ Host-owned Agent Plugins (`$MOW_HOME/plugins`, workspace profile `plugins/`)
 that declare `mcpServers` in `plugin.json` (or `.claude-plugin/plugin.json`)
 are started automatically. YAML / `mcp.json` of the same server name wins so a
 plugin is not spawned twice. Project `.mow/plugins` is skills-only — MCP does
-not auto-start from the workspace. `${CLAUDE_PLUGIN_ROOT}` is expanded.
-When unset, plugin MCP also sets `CLAUDE_CONFIG_DIR` to `$MOW_HOME`.
+not auto-start from the workspace. `${CLAUDE_PLUGIN_ROOT}` is expanded and
+exported to the server (the plugin folder). Unless the process or the plugin's
+`env` already sets it, plugin MCP also sets `CLAUDE_CONFIG_DIR=$MOW_HOME` so
+Claude-style servers keep state under mow rather than `~/.claude`.
 
 ## Config (`extensions.mcp`)
 

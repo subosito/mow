@@ -6,7 +6,8 @@
 //  3. trusted workspace-root mcp.json (the ecosystem file next to the repo)
 //
 // Both the standard mcpServers map and a servers list are accepted.
-// On tools/call failure, the client restarts the server once and retries.
+// On a tools/call transport failure (dead pipe/process), the client restarts
+// the server once and retries; tool and JSON-RPC errors are returned as-is.
 // Project .mow/mcp.json is not read — keep MCP in extensions.mcp or root mcp.json.
 package mcp
 
@@ -24,7 +25,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -113,6 +116,9 @@ func init() {
 }
 
 func registerAll(configPaths ...string) error {
+	// Instances are re-registered below for this BeforeNew generation; a stale
+	// entry from a prior host setup must not survive (cmdhook does the same).
+	ext.ClearExtensionKind("mcp")
 	var c Config
 	ok, err := extcfg.DecodeSection("mcp", configPaths, &c)
 	if err != nil {
@@ -310,6 +316,10 @@ func workspaceRootFromConfigPaths(configPaths []string) string {
 func RegisterServers(servers []ServerConfig) error {
 	gen := ext.BeforeNewGeneration()
 	var registered []string
+	// seenTools detects two servers (or one server, after sanitize) mapping to
+	// the same tool name; the later one is skipped instead of silently
+	// replacing the first in ext.RegisterTool.
+	seenTools := map[string]string{}
 	for _, s := range servers {
 		name := s.Name
 		if name == "" {
@@ -334,15 +344,21 @@ func RegisterServers(servers []ServerConfig) error {
 			rollbackTransports(registered)
 			return fmt.Errorf("mcp %s: %w", name, err)
 		}
-		// initialize for HTTP too
+		// initialize for HTTP too. Both handshake calls get the same deadline
+		// as tools/call: a server that never answers must not pin mow.New.
 		if ht, ok := tr.(*httpTransport); ok {
-			if err := ht.initialize(context.Background()); err != nil {
+			initCtx, cancel := withCallTimeout(context.Background(), s.callTimeout())
+			err := ht.initialize(initCtx)
+			cancel()
+			if err != nil {
 				_ = tr.Close()
 				rollbackTransports(registered)
 				return fmt.Errorf("mcp %s init: %w", name, err)
 			}
 		}
-		tools, err := tr.listTools(context.Background())
+		listCtx, cancel := withCallTimeout(context.Background(), s.callTimeout())
+		tools, err := tr.listTools(listCtx)
+		cancel()
 		if err != nil {
 			_ = tr.Close()
 			rollbackTransports(registered)
@@ -353,14 +369,26 @@ func RegisterServers(servers []ServerConfig) error {
 		ext.RegisterExtensionInstance("mcp", name, s.MinTurns)
 		n := 0
 		for _, t := range tools {
-			ext.RegisterTool(&mcpTool{
+			// Server metadata is untrusted: cap what reaches the model.
+			if len(t.InputSchema) > maxToolSchemaBytes {
+				fmt.Fprintf(os.Stderr, "mcp: %s: skipping tool %q: inputSchema exceeds %d bytes\n", name, t.Name, maxToolSchemaBytes)
+				continue
+			}
+			mt := &mcpTool{
 				client:   tr,
 				prefix:   name,
 				name:     t.Name,
-				desc:     t.Description,
+				desc:     truncateBytes(t.Description, maxToolDescBytes),
 				schema:   t.InputSchema,
 				readOnly: t.Annotations.ReadOnlyHint,
-			})
+			}
+			toolName := mt.Name()
+			if first, dup := seenTools[toolName]; dup {
+				fmt.Fprintf(os.Stderr, "mcp: %s: skipping tool %q: name %s already registered by %q\n", name, t.Name, toolName, first)
+				continue
+			}
+			seenTools[toolName] = name
+			ext.RegisterTool(mt)
 			n++
 		}
 		fmt.Fprintf(os.Stderr, "mcp: registered %d tool(s) from %q\n", n, name)
@@ -392,16 +420,20 @@ type toolInfo struct {
 	} `json:"annotations"`
 }
 
-// reconnectingClient restarts the stdio process after a failed call.
+// reconnectingClient restarts the stdio process after a transport failure.
 type reconnectingClient struct {
-	cfg ServerConfig
-	mu  sync.Mutex
-	c   *client
+	cfg    ServerConfig
+	mu     sync.Mutex
+	c      *client
+	closed bool // set by Close; ensure must not resurrect a retired transport
 }
 
 func (r *reconnectingClient) ensure(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closed {
+		return fmt.Errorf("mcp: %s: transport closed", r.cfg.Name)
+	}
 	if r.c != nil {
 		return nil
 	}
@@ -449,9 +481,7 @@ func (r *reconnectingClient) callTool(ctx context.Context, name string, args jso
 	if c == nil {
 		return "", fmt.Errorf("mcp: %s: client unavailable (server restarting)", name)
 	}
-	callCtx, cancel := withCallTimeout(ctx, r.cfg.callTimeout())
-	defer cancel()
-	out, err := c.callTool(callCtx, name, args)
+	out, err := c.callTool(ctx, name, args)
 	if err == nil {
 		return out, nil
 	}
@@ -459,7 +489,12 @@ func (r *reconnectingClient) callTool(ctx context.Context, name string, args jso
 		r.reset()
 		return "", err
 	}
-	// reconnect once
+	// A tool result with isError or a JSON-RPC error is the server's answer,
+	// not a broken pipe: restarting would drop server state and re-run a
+	// possibly non-idempotent tool. Only transport failures reconnect once.
+	if !isTransportErr(err) {
+		return "", err
+	}
 	r.reset()
 	if err2 := r.ensure(ctx); err2 != nil {
 		return "", fmt.Errorf("%v (reconnect: %v)", err, err2)
@@ -470,14 +505,28 @@ func (r *reconnectingClient) callTool(ctx context.Context, name string, args jso
 	if c == nil {
 		return "", fmt.Errorf("mcp: %s: client unavailable after reconnect", name)
 	}
-	retryCtx, retryCancel := withCallTimeout(ctx, r.cfg.callTimeout())
-	defer retryCancel()
-	return c.callTool(retryCtx, name, args)
+	return c.callTool(ctx, name, args)
 }
 
 func (r *reconnectingClient) Close() error {
+	r.mu.Lock()
+	r.closed = true
+	r.mu.Unlock()
 	r.reset()
 	return nil
+}
+
+// isTransportErr reports whether err means the stdio pipe or process is gone
+// (as opposed to the server answering with an error).
+func isTransportErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var exitErr *exec.ExitError
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, io.ErrClosedPipe) || errors.Is(err, os.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) || errors.Is(err, errLineExceeds) ||
+		errors.As(err, &exitErr)
 }
 
 // processPID is the OS pid captured at cmd.Start, or 0 if no client is live.
@@ -496,7 +545,10 @@ type client struct {
 	stdin     io.WriteCloser
 	stdout    *bufio.Reader
 	stderr    *stderrRing
-	mu        sync.Mutex
+	mu        sync.Mutex // guards stdin writes
+	semOnce   sync.Once
+	callSem   chan struct{} // capacity 1: one request/response exchange on stdout at a time
+	callTO    time.Duration // per-exchange timeout, applied after the semaphore is acquired
 	nextID    atomic.Int64
 	closeOnce sync.Once
 	closeErr  error
@@ -526,8 +578,10 @@ func startServer(s ServerConfig) (*client, error) {
 	if cmd.Process != nil {
 		pid = cmd.Process.Pid
 	}
-	c := &client{cmd: cmd, pid: pid, stdin: stdin, stdout: bufio.NewReader(stdout), stderr: errOut}
-	_, err = c.call(context.Background(), "initialize", map[string]any{
+	c := &client{cmd: cmd, pid: pid, stdin: stdin, stdout: bufio.NewReader(stdout), stderr: errOut, callTO: s.callTimeout()}
+	initCtx, cancel := withCallTimeout(context.Background(), s.callTimeout())
+	defer cancel()
+	_, err = c.call(initCtx, "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "mow", "version": mow.Version},
@@ -603,11 +657,35 @@ func (c *client) callTool(ctx context.Context, name string, args json.RawMessage
 	return out, nil
 }
 
+// sem returns the one-slot exchange semaphore, created on first use so
+// test fixtures can build a client literal without initialising it.
+func (c *client) sem() chan struct{} {
+	c.semOnce.Do(func() { c.callSem = make(chan struct{}, 1) })
+	return c.callSem
+}
+
 func (c *client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	id := c.nextID.Add(1)
 	req := map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}
 	raw, _ := json.Marshal(req)
 	raw = append(raw, '\n')
+
+	// One exchange at a time: parallel tool batches share this stdout reader,
+	// and two concurrent readers would each consume the other's reply. The
+	// per-call timeout starts only once this call owns the reader, so a
+	// queued sibling does not burn its budget waiting behind a slow call.
+	sem := c.sem()
+	select {
+	case sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-sem }()
+	if c.callTO > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = withCallTimeout(ctx, c.callTO)
+		defer cancel()
+	}
 
 	c.mu.Lock()
 	_, err := c.stdin.Write(raw)
@@ -651,20 +729,43 @@ func (c *client) readLine(ctx context.Context) ([]byte, error) {
 	}
 	ch := make(chan lineResult, 1)
 	go func() {
-		line, err := c.stdout.ReadBytes('\n')
+		line, err := readBoundedLine(c.stdout, maxStdioLineBytes)
 		ch <- lineResult{line: line, err: err}
 	}()
 	select {
 	case <-ctx.Done():
 		c.interrupt()
-		<-ch // wait for ReadBytes to unblock after process kill
+		<-ch // wait for the read to unblock after process kill
 		return nil, ctx.Err()
 	case r := <-ch:
-		if len(r.line) > maxStdioLineBytes {
+		if errors.Is(r.err, errLineExceeds) {
 			c.interrupt()
-			return nil, fmt.Errorf("mcp: stdout line exceeds %d bytes", maxStdioLineBytes)
+			return nil, fmt.Errorf("mcp: stdout %w", r.err)
 		}
 		return r.line, r.err
+	}
+}
+
+// errLineExceeds is returned (wrapped with the cap) by readBoundedLine.
+var errLineExceeds = errors.New("line exceeds")
+
+// readBoundedLine reads one '\n'-terminated line, failing as soon as the
+// accumulated bytes pass max. ReadBytes would buffer the entire line first,
+// so the cap would not bound memory against a misbehaving peer.
+func readBoundedLine(r *bufio.Reader, max int) ([]byte, error) {
+	var line []byte
+	for {
+		frag, err := r.ReadSlice('\n')
+		if len(line)+len(frag) > max {
+			return nil, fmt.Errorf("%w %d bytes", errLineExceeds, max)
+		}
+		line = append(line, frag...)
+		if err == nil {
+			return line, nil
+		}
+		if err != bufio.ErrBufferFull {
+			return line, err
+		}
 	}
 }
 
@@ -784,7 +885,7 @@ func (t *mcpTool) ReadOnly() bool { return t.readOnly }
 func (t *mcpTool) Untrusted() bool { return true }
 
 func (t *mcpTool) Name() string {
-	return "mcp_" + t.prefix + "_" + sanitize(t.name)
+	return "mcp_" + sanitize(t.prefix) + "_" + sanitize(t.name)
 }
 func (t *mcpTool) Description() string {
 	return fmt.Sprintf("[mcp:%s] %s", t.prefix, t.desc)
@@ -804,6 +905,17 @@ func (t *mcpTool) Exec(ctx context.Context, args json.RawMessage) (string, error
 		return "", fmt.Errorf("mcp %s: tools/call timed out", t.prefix)
 	}
 	return out, err
+}
+
+// truncateBytes clamps s to n bytes on a rune boundary, marking the cut.
+func truncateBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
 }
 
 func sanitize(s string) string {

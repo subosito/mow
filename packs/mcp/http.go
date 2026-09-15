@@ -146,11 +146,11 @@ func (h *httpTransport) callTool(ctx context.Context, name string, args json.Raw
 	return out, nil
 }
 
-func (h *httpTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	id := h.nextID.Add(1)
-	body, _ := json.Marshal(map[string]any{
-		"jsonrpc": "2.0", "id": id, "method": method, "params": params,
-	})
+// newRequest builds a POST for one JSON-RPC body: the fixed headers, the
+// configured extra headers, the negotiated session id, and auth. Every caller
+// (call, its 401 retry, notify) must send the same set — the retry silently
+// dropping one is exactly the kind of drift that copies invite.
+func (h *httpTransport) newRequest(ctx context.Context, body []byte) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -166,6 +166,18 @@ func (h *httpTransport) call(ctx context.Context, method string, params any) (js
 	}
 	h.mu.Unlock()
 	if err := h.auth.apply(req); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (h *httpTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	id := h.nextID.Add(1)
+	body, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": id, "method": method, "params": params,
+	})
+	req, err := h.newRequest(ctx, body)
+	if err != nil {
 		return nil, err
 	}
 	res, err := h.client.Do(req)
@@ -184,21 +196,8 @@ func (h *httpTransport) call(ctx context.Context, method string, params any) (js
 		h.auth.mu.Lock()
 		h.auth.expiry = time.Time{} // force refresh
 		h.auth.mu.Unlock()
-		req2, err := http.NewRequestWithContext(ctx, http.MethodPost, h.url, bytes.NewReader(body))
+		req2, err := h.newRequest(ctx, body)
 		if err != nil {
-			return nil, err
-		}
-		req2.Header.Set("Content-Type", "application/json")
-		req2.Header.Set("Accept", "application/json, text/event-stream")
-		for k, v := range h.headers {
-			req2.Header.Set(k, v)
-		}
-		h.mu.Lock()
-		if h.session != "" {
-			req2.Header.Set("Mcp-Session-Id", h.session)
-		}
-		h.mu.Unlock()
-		if err := h.auth.apply(req2); err != nil {
 			return nil, err
 		}
 		res, err = h.client.Do(req2)
@@ -243,21 +242,8 @@ func (h *httpTransport) notify(ctx context.Context, method string, params any) e
 	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "method": method, "params": params,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.url, bytes.NewReader(body))
+	req, err := h.newRequest(ctx, body)
 	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	for k, v := range h.headers {
-		req.Header.Set(k, v)
-	}
-	h.mu.Lock()
-	if h.session != "" {
-		req.Header.Set("Mcp-Session-Id", h.session)
-	}
-	h.mu.Unlock()
-	if err := h.auth.apply(req); err != nil {
 		return err
 	}
 	res, err := h.client.Do(req)

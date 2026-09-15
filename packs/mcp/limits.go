@@ -6,4 +6,6 @@ const (
 	maxHTTPBodyBytes   = 8 << 20  // JSON or SSE aggregate response body
 	maxToolOutputBytes = 2 << 20  // tools/call text returned to the agent
 	maxStderrRetain    = 16 << 10 // per-server stderr ring (matches ACP peer cap)
+	maxToolDescBytes   = 2 << 10  // untrusted tool description forwarded to the model
+	maxToolSchemaBytes = 64 << 10 // untrusted inputSchema; larger tools are skipped
 )

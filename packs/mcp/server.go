@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -108,15 +109,15 @@ func readServeLine(ctx context.Context, r *bufio.Reader) ([]byte, error) {
 	}
 	ch := make(chan lineResult, 1)
 	go func() {
-		line, err := r.ReadBytes('\n')
+		line, err := readBoundedLine(r, maxStdioLineBytes)
 		ch <- lineResult{line: line, err: err}
 	}()
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case res := <-ch:
-		if len(res.line) > maxStdioLineBytes {
-			return nil, fmt.Errorf("request line exceeds %d bytes", maxStdioLineBytes)
+		if errors.Is(res.err, errLineExceeds) {
+			return nil, fmt.Errorf("request %w", res.err)
 		}
 		return res.line, res.err
 	}

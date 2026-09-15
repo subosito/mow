@@ -32,6 +32,9 @@ func TestHelperProcess(t *testing.T) {
 	case "hang_call":
 		runHelperHangCall()
 		return
+	case "hang_at":
+		runHelperHangAt(os.Getenv("MCP_HANG_AT"))
+		return
 	}
 
 	sc := bufio.NewScanner(os.Stdin)
@@ -147,6 +150,37 @@ func runHelperHangCall() {
 			})
 		case "tools/call":
 			select {}
+		}
+	}
+}
+
+// runHelperHangAt answers the handshake until the named method arrives, then
+// never replies (a server that hangs during initialize or tools/list).
+func runHelperHangAt(method string) {
+	sc := bufio.NewScanner(os.Stdin)
+	for sc.Scan() {
+		line := sc.Bytes()
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if json.Unmarshal(line, &req) != nil || len(req.ID) == 0 {
+			continue
+		}
+		if req.Method == method {
+			select {}
+		}
+		switch req.Method {
+		case "initialize":
+			writeHelperJSON(map[string]any{
+				"jsonrpc": "2.0", "id": req.ID,
+				"result": map[string]any{"protocolVersion": "2024-11-05"},
+			})
+		case "tools/list":
+			writeHelperJSON(map[string]any{
+				"jsonrpc": "2.0", "id": req.ID,
+				"result": map[string]any{"tools": []any{}},
+			})
 		}
 	}
 }
