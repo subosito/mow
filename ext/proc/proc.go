@@ -63,7 +63,7 @@ type startTool struct{}
 
 func (startTool) Name() string { return "proc_start" }
 func (startTool) Description() string {
-	return "Start a long-lived process in the background (dev server, watcher, mock) and keep working while it runs — this returns a pid immediately; the process is detached. Args: id (short name), command (shell), log (optional filename), keep (bool: survive session exit; default false = auto-killed on exit). Manage with proc_status / proc_stop. Requires --allow-shell. Same jail as bash when --sandbox=bwrap is on (bubblewrap; network still ON). Do NOT use bare `bash &` for servers: the bash tool kills its process group when it returns."
+	return "Start a long-lived process in the background (dev server, watcher, mock) and keep working while it runs — this returns a pid immediately; the process is detached. Args: id (short name), command (shell), log (optional filename), keep (bool: survive session exit; default false = auto-killed on exit). Manage with proc_status / proc_stop. Requires --allow-shell. Same Fence sandbox as bash when --sandbox is enabled; outbound network is denied. Do NOT use bare `bash &` for servers: the bash tool kills its process group when it returns."
 }
 func (startTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"command":{"type":"string"},"log":{"type":"string"},"keep":{"type":"boolean"}},"required":["id","command"]}`)

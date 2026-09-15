@@ -277,7 +277,7 @@ When prefix matches the model (e.g. Claude family → “You are Claude Code”)
 |------|----------|--------|
 | `read`, `glob`, `grep` | **Yes** | Secure defaults |
 | `write`, `edit` | **No** | `--allow-write` or config |
-| `bash` | **No** | `--allow-shell` or config. Unsandboxed unless `--sandbox=bwrap` |
+| `bash` | **No** | `--allow-shell` or config. Unsandboxed unless `--sandbox` |
 
 ```yaml
 tools:
@@ -382,24 +382,18 @@ session.
 > **Credential scrub.** `bash` and `proc_start` children never inherit mow's
 > own API keys: `MOW_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and any
 > variable ending in `_API_KEY` are removed from the child environment (the
-> `bwrap` path replaces the environment entirely). When a build genuinely
+> Fence path uses a strict environment allowlist). When a build genuinely
 > needs one — a package registry or CI token — name it exactly in
 > `policy.env_passthrough: [NPM_TOKEN, …]`. Exact names only, no globs; it is
 > host/user config (stripped from project `.mow/config`, like
 > `policy.extra_roots`).
 >
-> **Opt-in OS jail (`--sandbox`).** When you also pass `--sandbox` (or
-> explicitly `--sandbox=bwrap`; config: `policy.sandbox: bwrap`), both `bash`
-> and `proc_start` are wrapped in
-> [bubblewrap](https://github.com/containers/bubblewrap) on Linux. The
-> workspace and extra roots are bound the same way as the FS jail (`:ro` →
-> `--ro-bind`); `$HOME` is **not** bound unless it is one of those roots. A
-> missing `bwrap` binary is a hard error — mow never silently falls back to a
-> raw shell. This is a **filesystem/home jail, not a VM and not malware
-> containment**: network stays on (no `--unshare-net`), so `curl | sh` still
-> works. macOS has no backend, so the flag is not registered there at all.
-> Default remains unsandboxed (`none`). For stronger containment, run all of
-> mow in a container with the filesystem restricted at the OS level.
+> **Opt-in OS jail (`--sandbox`).** Both `bash` and `proc_start` use
+> Fence on Linux and macOS (config: `policy.sandbox: fence`). Install Fence
+> first; missing required isolation is a hard error, never an unsandboxed
+> fallback. Mow supplies workspace/extra-root permissions and denies outbound
+> network access. Default remains unsandboxed (`none`). See the Fence section
+> below for policy scope and limitations.
 
 An extra root grants the **same** permissions as the workspace: if `--allow-write`
 is on, files under an extra root are writable too. There is currently no
@@ -527,3 +521,34 @@ the engine), and mow's own `Engine.Sessions()` listing covers resume.
 MCP tool results are external server text. The MCP pack marks every `mcp_*`
 tool with `Untrusted() bool` so the agent loop frames results in
 `<untrusted-output>` the same way as `bash` and `delegate`.
+
+### Fence shell sandbox
+
+`--allow-shell --sandbox=fence` (or host `policy.sandbox: fence`) wraps both
+`bash` and `proc_start` using an installed Fence CLI. Bare `--sandbox` selects
+Fence on Linux and macOS. Native file tools retain their existing path jail;
+MCP servers and the engine itself are outside this shell backend.
+
+Mow generates the Fence policy from its workspace and extra roots, including
+read-only restrictions. Repository and user Fence policies are not loaded.
+Network is denied, including outbound localhost; domain allowlists and port
+exposure are not configurable in this initial backend. Missing Fence, missing
+Linux bubblewrap, or a failed network-namespace probe is an error. Mow will not
+accept Fence's proxy-only network fallback. macOS uses Fence's Seatbelt backend.
+
+System toolchain paths remain readable. Environment forwarding uses a
+small runtime allowlist, so `env_passthrough` does not widen it. Fence's
+mandatory filesystem protections still apply. Command-name deny rules are
+not enabled: on systems with multicall utilities those rules can disable
+unrelated commands. This does not provide resource limits or hostile-code
+containment. Root paths containing glob metacharacters are rejected; read-only
+parents cannot be widened by writable child roots under Fence's deny precedence.
+
+The adapter supplies settings through an inherited descriptor, without writing
+persistent policy files. Integration was exercised with Fence 0.1.67 on Linux.
+Run `MOW_TEST_FENCE=1 devenv shell -- go test -count=1 ./internal/sandbox -run TestFence`
+to include live filesystem, network, and child-cleanup checks. macOS enforcement
+requires separate validation on a macOS host.
+
+The former `bwrap`/`bubblewrap` backend values are rejected with migration guidance.
+Use `--sandbox`, `--sandbox=fence`, or `policy.sandbox: fence` instead.

@@ -689,10 +689,9 @@ func (t *bashTool) Name() string    { return "bash" }
 func (t *bashTool) Untrusted() bool { return true }
 func (t *bashTool) Description() string {
 	jail := "Not path-jailed: the process runs as you and can leave the workspace. "
-	if t.p.SandboxEnabled() {
-		jail = "Sandboxed (bubblewrap): only the workspace and configured extra " +
-			"roots are visible/writable — $HOME and the rest of the filesystem " +
-			"are not. Network is still ON. "
+	if t.p.SandboxEnabled() && t.p.Sandbox == sandbox.ModeFence {
+		jail = "Sandboxed (Fence): workspace and configured roots follow host read/write permissions; outbound network is denied. "
+
 	}
 	return "Run a shell command with cwd=workspace (default timeout 300s). " +
 		"Requires --allow-shell. " + jail + "Args: command, optional timeout_sec for slow " +
@@ -750,18 +749,18 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	// Do not use CommandContext's auto-kill alone — Wait after kill must not block forever.
 	cmd := exec.Command("bash", "-lc", a.Command)
 	cmd.Dir = t.p.Workspace
-	// Never hand the agent's own credentials to the shell; the bwrap path
+	// Never hand the agent's own credentials to the shell; the Fence path
 	// below replaces the whole environment anyway.
 	cmd.Env = sandbox.ScrubEnv(os.Environ(), t.p.EnvPassthrough...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// Opt-in OS jail (policy.sandbox / --sandbox=bwrap). Identity by default;
-	// when enabled it rewrites argv to `bwrap ... -- bash -lc <command>` and
+	// Opt-in OS jail (policy.sandbox / --sandbox=fence). Identity by default;
+	// when enabled it rewrites argv to `fence ... -- bash -lc <command>` and
 	// keeps the process group above intact so the timeout kill still works.
 	// A configured-but-unavailable sandbox is a hard error: never fall back to
 	// an unsandboxed shell.
 	if be, err := t.p.SandboxBackend(); err != nil {
 		return "", err
-	} else if wrapped, err := sandbox.WithNewSession(be, true).Wrap(cmd); err != nil {
+	} else if wrapped, err := be.Wrap(cmd); err != nil {
 		return "", err
 	} else {
 		cmd = wrapped

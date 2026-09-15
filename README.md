@@ -87,10 +87,11 @@ live in the separate [custom-host project](https://github.com/subosito/mow).
 Secure default tools: **read**, **glob**, **grep**. Power tools need
 `--allow-write` / `--allow-shell`. `--allow-shell` is the trust cliff:
 `bash` / `proc_start` are **not** path-jailed (they run as you). File
-tools stay in the workspace jail. Opt-in `--sandbox=bwrap` (config
-`policy.sandbox: bwrap`) wraps both shell entry points in bubblewrap on
-Linux — a filesystem/home jail, not a VM; network stays on; a missing
-`bwrap` is a hard error. Project `.mow` config/skills load only after
+tools stay in the workspace jail. Opt-in `--sandbox` (config
+`policy.sandbox: fence`) wraps both shell entry points using Fence on Linux
+and macOS. Fence is required; missing required isolation is a hard error.
+Outbound network is denied. This is not a VM or hostile-code containment.
+Project `.mow` config/skills load only after
 `mow trust` (stored out-of-band under `$MOW_HOME`, so a cloned repo cannot trust
 itself), and never set credentials, endpoints, or power tools.
 
@@ -99,7 +100,7 @@ itself), and never set credentials, endpoints, or power tools.
 Linux and macOS. The engine relies on Unix process semantics
 (process-group kill for `bash`/`proc_start`, advisory `flock` on session
 files), and its strongest security guarantees are OS-specific: openat2
-`RESOLVE_BENEATH` and the bwrap `--sandbox` on Linux 5.6+, `fcntl
+`RESOLVE_BENEATH` on Linux 5.6+, `fcntl
 F_GETPATH` fd verification on macOS. Windows is intentionally unsupported
 (the build fails on purpose-relevant syscalls). On kernels without openat2
 the path jail falls back to check-then-verify — documented, not TOCTOU

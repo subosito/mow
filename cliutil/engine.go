@@ -28,9 +28,8 @@ type EngineFlags struct {
 	DisallowShell bool
 	DisallowWrite bool
 	ReadOnly      bool
-	// Sandbox is --sandbox: bwrap when the flag is present (bare form), else
-	// empty (= none). Linux only — the flag is not registered off-Linux since
-	// no sandbox backend exists there. An invalid value always errors.
+	// Sandbox is --sandbox: fence when the flag is present (bare form), else
+	// empty (= none). Fence is also available on macOS. Invalid values error.
 	Sandbox string
 	// MaxTurns is the parsed --max-turns value. Only applied when MaxTurnsSet
 	// (omit flag → config default; --max-turns 0 → unlimited).
@@ -55,10 +54,9 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.StringVar(&f.BaseURL, "base-url", "", "LLM base URL")
 	fs.Var((*stringList)(&f.SystemPrefix), "system-prefix", "system prompt prefix (repeatable)")
 	fs.BoolVar(&f.AllowShell, "allow-shell", false, "enable bash/proc (not path-jailed; see --sandbox)")
-	// Linux only: off-Linux there is no sandbox backend, so the flag is not
-	// registered at all (hidden), and --sandbox is an "unknown flag" error.
-	if runtime.GOOS == "linux" {
-		fs.Var(&sandboxFlagValue{f: f}, "sandbox", "wrap bash/proc in a bubblewrap jail (host fs read-only, workspace rw, network on; --sandbox=none disables)")
+	// Fence supports macOS as well as Linux.
+	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
+		fs.Var(&sandboxFlagValue{f: f}, "sandbox", "sandbox bash/proc using Fence (Linux/macOS; requires fence, network denied; --sandbox=none disables)")
 	}
 	fs.BoolVar(&f.AllowWrite, "allow-write", false, "enable write/edit")
 	fs.BoolVar(&f.DisallowShell, "disallow-shell", false, "disable bash even when enabled in config")
@@ -73,8 +71,8 @@ func (f *EngineFlags) Bind(fs *flag.FlagSet) {
 	fs.Var((*stringList)(&f.Skills), "skill", "load a named skill unconditionally regardless of selector (repeatable; use `/skill` in the TUI to list or activate)")
 }
 
-// sandboxFlagValue makes --sandbox bool-style: bare "--sandbox" means bwrap,
-// and an explicit value ("--sandbox none|bwrap") still parses. IsBoolFlag
+// sandboxFlagValue makes --sandbox bool-style: bare "--sandbox" means fence,
+// and an explicit value ("--sandbox=none|fence") still parses. IsBoolFlag
 // keeps the flag package from demanding an argument for the bare form.
 type sandboxFlagValue struct{ f *EngineFlags }
 
@@ -90,7 +88,7 @@ func (s *sandboxFlagValue) Set(v string) error {
 	// literal "true" for the bare bool-style form; both mean "opt in".
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "", "true":
-		s.f.Sandbox = "bwrap"
+		s.f.Sandbox = "fence"
 	case "false":
 		s.f.Sandbox = "none"
 	default:
@@ -234,12 +232,9 @@ func (f *EngineFlags) Validate() error {
 	// --sandbox is validated even without --allow-shell so a typo never passes
 	// silently; the jail itself is a no-op until a shell exists (nothing to
 	// jail), so the combination is allowed rather than rejected.
-	mode, err := sandbox.ParseMode(f.Sandbox)
+	_, err := sandbox.ParseMode(f.Sandbox)
 	if err != nil {
 		return fmt.Errorf("--sandbox: %w", err)
-	}
-	if mode == sandbox.ModeBwrap && runtime.GOOS != "linux" {
-		return fmt.Errorf("--sandbox=bwrap is Linux-only (this is %s); omit the flag or use none", runtime.GOOS)
 	}
 	return nil
 }

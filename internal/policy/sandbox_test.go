@@ -1,7 +1,10 @@
 package policy
 
 import (
+	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,7 +36,7 @@ func TestSandboxBackendDefaultIsNone(t *testing.T) {
 // Without a shell there is nothing to jail, so the mode is inert rather than
 // an error — an operator can leave --sandbox in a wrapper script safely.
 func TestSandboxIgnoredWithoutShell(t *testing.T) {
-	p := &Policy{Workspace: t.TempDir(), AllowShell: false, Sandbox: sandbox.ModeBwrap}
+	p := &Policy{Workspace: t.TempDir(), AllowShell: false, Sandbox: sandbox.ModeFence}
 	be, err := p.SandboxBackend()
 	if err != nil {
 		t.Fatalf("sandbox without allow-shell should be inert, got %v", err)
@@ -61,16 +64,27 @@ func TestSandboxUnknownModeErrors(t *testing.T) {
 }
 
 func TestSandboxBackendCarriesJailRoots(t *testing.T) {
-	if _, err := exec.LookPath("bwrap"); err != nil {
-		t.Skip("bwrap not installed")
+	dir := t.TempDir()
+	shell, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatal(err)
 	}
+	for _, name := range []string{"fence", "bash"} {
+		if err := os.Symlink(shell, filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bwrap"), []byte("#!"+shell+"\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
 	ws := t.TempDir()
 	ro := t.TempDir()
 	p := &Policy{
 		Workspace:          ws,
 		ExtraRootsReadOnly: []string{ro},
 		AllowShell:         true,
-		Sandbox:            sandbox.ModeBwrap,
+		Sandbox:            sandbox.ModeFence,
 	}
 	be, err := p.SandboxBackend()
 	if err != nil {
@@ -79,15 +93,20 @@ func TestSandboxBackendCarriesJailRoots(t *testing.T) {
 	if !p.SandboxEnabled() {
 		t.Error("SandboxEnabled should be true")
 	}
-	bw, ok := be.(*sandbox.Bwrap)
-	if !ok {
-		t.Fatalf("backend = %T, want *sandbox.Bwrap", be)
+	cmd, err := be.Wrap(exec.Command("bash", "-c", "true"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	args := strings.Join(bw.Args(), " ")
-	if !strings.Contains(args, "--bind "+ws) {
-		t.Errorf("workspace not bound rw: %s", args)
+	var cfg struct {
+		FS struct {
+			Write []string `json:"allowWrite"`
+			Deny  []string `json:"denyWrite"`
+		} `json:"filesystem"`
 	}
-	if !strings.Contains(args, "--ro-bind "+ro) {
-		t.Errorf("read-only extra root not passed through as --ro-bind: %s", args)
+	if err := json.Unmarshal([]byte(cmd.Args[6]), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(cfg.FS.Write, "") != ws || strings.Join(cfg.FS.Deny, "") != ro {
+		t.Fatalf("lost roots: %+v", cfg)
 	}
 }

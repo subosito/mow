@@ -45,13 +45,13 @@ type Policy struct {
 	AllowShell bool
 	// Sandbox is the opt-in OS jail for shell execution (bash + proc_start).
 	// Empty / "none" = today's behavior: --allow-shell runs an unsandboxed
-	// `bash -lc` as the user. "bwrap" wraps both shell entry points in
-	// bubblewrap (Linux only). Ignored entirely when AllowShell is false —
+	// `bash -lc` as the user. "fence" wraps both shell entry points in
+	// Fence (Linux/macOS). Ignored entirely when AllowShell is false —
 	// there is no shell to jail. Carried on the policy so tools never re-read
 	// flags or config.
 	Sandbox sandbox.Mode
 	// sandboxOnce/backend memoize the resolved backend: building it does a
-	// LookPath and (for bwrap) validates the platform, and every bash call
+	// LookPath and (for Fence) validates the platform, and every bash call
 	// would otherwise repeat that.
 	sandboxOnce sync.Once
 	sandboxBE   sandbox.Backend

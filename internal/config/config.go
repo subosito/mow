@@ -150,11 +150,10 @@ type PolicyConfig struct {
 	MaxBashTimeoutSec int `yaml:"max_bash_timeout_sec"`
 	// Sandbox opts shell execution (the bash tool and proc_start) into an OS
 	// jail. "" / "none" (default) keeps today's behavior: --allow-shell runs
-	// an unsandboxed `bash -lc` as you. "bwrap" wraps both entry points in
-	// bubblewrap (Linux only, requires the `bwrap` binary).
+	// an unsandboxed `bash -lc` as you. "fence" wraps both entry points on
+	// Linux/macOS with generated root permissions and no outbound network.
 	//
-	// It is a filesystem/home jail, not malware containment: network stays on,
-	// so `curl | sh` still works. CLI --sandbox overrides this.
+	// Fence is required. CLI --sandbox overrides this.
 	Sandbox      string `yaml:"sandbox"`
 	MaxReadBytes int    `yaml:"max_read_bytes"`
 	// MaxToolResultChars caps each tool result stored in history (default 24k).

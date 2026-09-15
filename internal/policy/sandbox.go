@@ -10,7 +10,7 @@ import (
 // and reused. Sandbox mode is only meaningful when a shell exists, so it is
 // ignored (identity backend) when AllowShell is false.
 //
-// An unavailable backend (bwrap missing, wrong OS) is an error, not a silent
+// An unavailable backend (Fence missing, wrong OS) is an error, not a silent
 // fallback: an operator who asked for a jail must never get a raw shell.
 func (p *Policy) SandboxBackend() (sandbox.Backend, error) {
 	if p == nil {
@@ -23,10 +23,12 @@ func (p *Policy) SandboxBackend() (sandbox.Backend, error) {
 		}
 		spec := sandbox.Spec{Workspace: p.Workspace}
 		roots, err := p.jailRoots()
-		if err == nil {
-			for _, r := range roots {
-				spec.Roots = append(spec.Roots, sandbox.Root{Path: r.Path, ReadOnly: r.ReadOnly})
-			}
+		if err != nil {
+			p.sandboxErr = err
+			return
+		}
+		for _, r := range roots {
+			spec.Roots = append(spec.Roots, sandbox.Root{Path: r.Path, ReadOnly: r.ReadOnly})
 		}
 		p.sandboxBE, p.sandboxErr = sandbox.New(p.Sandbox, spec)
 	})

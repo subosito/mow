@@ -12,14 +12,14 @@ import (
 	"github.com/subosito/mow/internal/sandbox"
 )
 
-// bwrapBackend returns a usable bwrap backend for ws, or nil when bubblewrap
+// fenceBackend returns a usable Fence backend for ws, or nil when Fence
 // is missing or unusable here (no unprivileged user namespaces).
-func bwrapBackend(t *testing.T, ws string) sandbox.Backend {
+func fenceBackend(t *testing.T, ws string) sandbox.Backend {
 	t.Helper()
-	if _, err := exec.LookPath("bwrap"); err != nil {
+	if _, err := exec.LookPath("fence"); err != nil {
 		return nil
 	}
-	be, err := sandbox.New(sandbox.ModeBwrap, sandbox.Spec{Workspace: ws})
+	be, err := sandbox.New(sandbox.ModeFence, sandbox.Spec{Workspace: ws})
 	if err != nil {
 		return nil
 	}
@@ -48,11 +48,11 @@ func TestStartNilBackendIsUnsandboxed(t *testing.T) {
 	}
 }
 
-func TestStartUnderBwrap(t *testing.T) {
+func TestStartUnderFence(t *testing.T) {
 	ws := t.TempDir()
-	be := bwrapBackend(t, ws)
+	be := fenceBackend(t, ws)
 	if be == nil {
-		t.Skip("bwrap not available/usable")
+		t.Skip("Fence not available/usable")
 	}
 	dir := filepath.Join(ws, "store")
 
@@ -114,11 +114,11 @@ func reaped(pid int) bool {
 	return s[i+2] == 'Z'
 }
 
-func TestStartUnderBwrapJailsFilesystem(t *testing.T) {
+func TestStartUnderFenceJailsFilesystem(t *testing.T) {
 	ws := t.TempDir()
-	be := bwrapBackend(t, ws)
+	be := fenceBackend(t, ws)
 	if be == nil {
-		t.Skip("bwrap not available/usable")
+		t.Skip("Fence not available/usable")
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -162,4 +162,4 @@ func TestStartSandboxErrorIsNotSilentFallback(t *testing.T) {
 type failBackend struct{}
 
 func (failBackend) Wrap(*exec.Cmd) (*exec.Cmd, error) { return nil, os.ErrPermission }
-func (failBackend) Mode() sandbox.Mode                { return sandbox.ModeBwrap }
+func (failBackend) Mode() sandbox.Mode                { return sandbox.ModeFence }

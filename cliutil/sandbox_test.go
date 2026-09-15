@@ -33,37 +33,37 @@ func TestSandboxFlagDefaultsToNone(t *testing.T) {
 }
 
 func TestSandboxFlagAccepted(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("flag not registered off linux")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("flag not registered on unsupported OS")
 	}
-	f, err := parseSandbox(t, "--allow-shell", "--sandbox=bwrap")
+	f, err := parseSandbox(t, "--allow-shell", "--sandbox=fence")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := f.Options().Sandbox; got != "bwrap" {
-		t.Errorf("Options().Sandbox = %q, want bwrap", got)
+	if got := f.Options().Sandbox; got != "fence" {
+		t.Errorf("Options().Sandbox = %q, want fence", got)
 	}
 }
 
-// Bare --sandbox (bool-style) opts in without spelling out bwrap.
-func TestSandboxFlagBareMeansBwrap(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("flag not registered off linux")
+// Bare --sandbox (bool-style) opts in without spelling out fence.
+func TestSandboxFlagBareMeansFence(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("flag not registered on unsupported OS")
 	}
 	f, err := parseSandbox(t, "--allow-shell", "--sandbox")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := f.Options().Sandbox; got != "bwrap" {
-		t.Errorf("Options().Sandbox = %q, want bwrap", got)
+	if got := f.Options().Sandbox; got != "fence" {
+		t.Errorf("Options().Sandbox = %q, want fence", got)
 	}
 }
 
 // Explicit opt-out uses the =form (bool-flag parsing: "--sandbox none" would
 // mean bare --sandbox plus a positional "none").
 func TestSandboxFlagExplicitDisable(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("flag not registered off linux")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("flag not registered on unsupported OS")
 	}
 	for _, args := range [][]string{
 		{"--allow-shell", "--sandbox=none"},
@@ -81,10 +81,10 @@ func TestSandboxFlagExplicitDisable(t *testing.T) {
 
 // A typo must never degrade into an unsandboxed shell.
 func TestSandboxUnknownValueRejected(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("flag not registered off linux")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("flag not registered on unsupported OS")
 	}
-	for _, v := range []string{"bwrapp", "docker", "landlock", "yes"} {
+	for _, v := range []string{"bwrap", "bubblewrap", "fencep", "docker", "landlock", "yes"} {
 		if _, err := parseSandbox(t, "--allow-shell", "--sandbox="+v); err == nil {
 			t.Errorf("--sandbox=%s: want error", v)
 		}
@@ -94,8 +94,8 @@ func TestSandboxUnknownValueRejected(t *testing.T) {
 // Documented choice: --sandbox without --allow-shell is allowed and inert
 // (nothing to jail), but the value is still validated.
 func TestSandboxWithoutAllowShellIsAllowed(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("flag not registered off linux")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("flag not registered on unsupported OS")
 	}
 	if _, err := parseSandbox(t, "--sandbox"); err != nil {
 		t.Errorf("--sandbox without --allow-shell should be accepted: %v", err)
@@ -106,24 +106,23 @@ func TestSandboxWithoutAllowShellIsAllowed(t *testing.T) {
 }
 
 func TestSandboxNoneIsExplicitlyValid(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("flag not registered off linux")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("flag not registered on unsupported OS")
 	}
 	if _, err := parseSandbox(t, "--allow-shell", "--sandbox=none"); err != nil {
 		t.Errorf("--sandbox=none should be valid: %v", err)
 	}
 }
 
-// Off-Linux the flag is not registered at all, so --sandbox is an
-// "unknown flag" parse error — never a silent unsandboxed shell.
-func TestSandboxBwrapRejectedOffLinux(t *testing.T) {
-	if runtime.GOOS == "linux" {
-		t.Skip("linux advertises bwrap")
+func TestSandboxFenceFlag(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("unsupported OS")
 	}
-	if _, err := parseSandbox(t, "--allow-shell", "--sandbox=bwrap"); err == nil {
-		t.Fatal("--sandbox=bwrap must error off linux")
+	f, err := parseSandbox(t, "--allow-shell", "--sandbox=fence")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := parseSandbox(t, "--allow-shell", "--sandbox"); err == nil {
-		t.Fatal("bare --sandbox must error off linux")
+	if f.Options().Sandbox != "fence" {
+		t.Fatalf("lost fence backend: %q", f.Options().Sandbox)
 	}
 }

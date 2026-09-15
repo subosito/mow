@@ -1173,7 +1173,7 @@ func applySessionPolicy(opt *Options, rt session.Runtime) {
 	}
 }
 
-// SandboxMode reports the configured shell sandbox ("none" or "bwrap").
+// SandboxMode reports the configured shell sandbox ("none" or "fence").
 func (e *Engine) SandboxMode() string {
 	if e == nil || e.pol == nil || !e.pol.SandboxEnabled() {
 		return string(sandbox.ModeNone)

@@ -305,7 +305,7 @@ func TestProjectOverlayCannotSetSandbox(t *testing.T) {
 	host := writeYAML(t, t.TempDir(), "user.yaml", `
 workspace: `+ws+`
 policy:
-  sandbox: bwrap
+  sandbox: fence
 `)
 	project := `
 policy:
@@ -318,8 +318,8 @@ policy:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Policy.Sandbox != "bwrap" {
-		t.Fatalf("project changed sandbox: %q, want host's bwrap preserved", f.Policy.Sandbox)
+	if f.Policy.Sandbox != "fence" {
+		t.Fatalf("project changed sandbox: %q, want host's fence preserved", f.Policy.Sandbox)
 	}
 }
 
