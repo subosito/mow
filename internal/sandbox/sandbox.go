@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -55,8 +56,9 @@ type Root struct {
 	ReadOnly bool
 }
 
-// Spec describes what the jail must expose: the workspace (always read-write)
-// plus the path-jail extra roots, mirroring internal/policy.
+// Spec describes what the jail must expose: the workspace plus the path-jail
+// extra roots, mirroring internal/policy. A Roots entry for the workspace
+// itself carries its ReadOnly flag (policy --read-only).
 type Spec struct {
 	Workspace string
 	Roots     []Root
@@ -113,9 +115,11 @@ func (None) Mode() Mode { return ModeNone }
 type Bwrap struct {
 	// Bin is the resolved bwrap path.
 	Bin string
-	// Workspace is bound read-write and becomes the working directory.
+	// Workspace is always bound (read-write unless a Roots entry marks it
+	// read-only) and is the default working directory.
 	Workspace string
-	// Roots are extra path-jail roots (read-only ones bound --ro-bind).
+	// Roots are the path-jail roots (read-only ones bound --ro-bind); may
+	// repeat Workspace to carry its read-only flag.
 	Roots []Root
 	// NewSession adds --new-session (setsid inside the jail). Safe for the
 	// bash tool; proc_start already calls setsid itself and tracks the pid, so
@@ -140,10 +144,10 @@ var systemROBinds = []string{
 	"/etc/localtime",
 	"/etc/passwd",
 	"/etc/group",
-	"/nix/store",              // NixOS: /bin and /usr are mostly symlinks into here
-	"/nix/var",                // profiles, gc roots
-	"/run/current-system",     // NixOS system-path (bash, git, coreutils)
-	"/run/wrappers",           // NixOS setuid wrappers (rarely needed; skip if missing)
+	"/nix/store",          // NixOS: /bin and /usr are mostly symlinks into here
+	"/nix/var",            // profiles, gc roots
+	"/run/current-system", // NixOS system-path (bash, git, coreutils)
+	"/run/wrappers",       // NixOS setuid wrappers (rarely needed; skip if missing)
 }
 
 // envAllowlist is passed through after --clearenv when set in the parent.
@@ -168,12 +172,94 @@ var envAllowlist = []string{
 	"RUSTUP_HOME",
 }
 
+// credentialEnv lists environment variables that must never reach a child
+// shell. Suffix "_API_KEY" is dropped as well (see ScrubEnv).
+var credentialEnv = map[string]bool{
+	"MOW_API_KEY":       true,
+	"OPENAI_API_KEY":    true,
+	"ANTHROPIC_API_KEY": true,
+}
+
+// ScrubEnv returns env without the agent's own credentials: the exact names
+// in credentialEnv plus any variable ending in _API_KEY. Used by the
+// unsandboxed bash tool and proc_start so a child cannot read the key mow
+// itself authenticates with; the bwrap path clears the environment entirely.
+func ScrubEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if credentialEnv[k] || strings.HasSuffix(k, "_API_KEY") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 // Mode reports "bwrap".
 func (b *Bwrap) Mode() Mode { return ModeBwrap }
 
-// Args returns the bwrap argv prefix (everything up to and including "--").
-// Exposed for tests and for `mow doctor`-style reporting.
-func (b *Bwrap) Args() []string {
+// binds returns the directories to expose, deduplicated by cleaned path and
+// sorted so a parent is always bound before a child: bwrap applies binds in
+// argv order, so a child bound first would be hidden by its parent's later
+// mount, and the read-only/read-write choice of the more specific root would
+// be lost. Read-only wins on duplicates, mirroring policy.
+func (b *Bwrap) binds() []Root {
+	idx := map[string]int{}
+	var out []Root
+	add := func(p string, ro bool) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		p = filepath.Clean(p)
+		if p != b.Workspace && !exists(p) {
+			return
+		}
+		if i, ok := idx[p]; ok {
+			out[i].ReadOnly = out[i].ReadOnly || ro
+			return
+		}
+		idx[p] = len(out)
+		out = append(out, Root{Path: p, ReadOnly: ro})
+	}
+	add(b.Workspace, false)
+	for _, r := range b.Roots {
+		add(r.Path, r.ReadOnly)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+// chdirFor returns the in-jail working directory: cmd.Dir when it lies under
+// a bound root (a proc_start workdir), else the workspace.
+func (b *Bwrap) chdirFor(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return b.Workspace
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	dir = filepath.Clean(dir)
+	sep := string(filepath.Separator)
+	for _, r := range b.binds() {
+		if dir == r.Path || strings.HasPrefix(dir, r.Path+sep) {
+			return dir
+		}
+	}
+	return b.Workspace
+}
+
+// Args returns the bwrap argv prefix (everything up to and including "--")
+// with the workspace as working directory. Exposed for tests and for
+// `mow doctor`-style reporting.
+func (b *Bwrap) Args() []string { return b.args(b.Workspace) }
+
+func (b *Bwrap) args(chdir string) []string {
 	args := []string{
 		"--die-with-parent",
 		"--unshare-pid",
@@ -201,28 +287,17 @@ func (b *Bwrap) Args() []string {
 	// /run/current-system makes bwrap `Can't mkdir /run/current-system/sw/bin`.
 	// /nix/store, /run/current-system, /usr, and /bin already cover FHS and Nix.
 	// Absolute argv[0] (absArgv) is enough once those parents are mounted.
-	// Workspace read-write, then the extra roots. $HOME is NOT bound unless it
-	// happens to be one of these — that is the whole point of the jail.
-	args = append(args, "--bind", b.Workspace, b.Workspace)
-	for _, r := range b.Roots {
-		p := strings.TrimSpace(r.Path)
-		if p == "" {
-			continue
-		}
-		if abs, err := filepath.Abs(p); err == nil {
-			p = abs
-		}
-		p = filepath.Clean(p)
-		if p == b.Workspace || !exists(p) {
-			continue
-		}
+	// Workspace and extra roots, parents first (see binds). $HOME is NOT
+	// bound unless it happens to be one of these — that is the whole point of
+	// the jail.
+	for _, r := range b.binds() {
 		flag := "--bind"
 		if r.ReadOnly {
 			flag = "--ro-bind"
 		}
-		args = append(args, flag, p, p)
+		args = append(args, flag, r.Path, r.Path)
 	}
-	args = append(args, "--chdir", b.Workspace, "--clearenv")
+	args = append(args, "--chdir", chdir, "--clearenv")
 	for _, k := range envAllowlist {
 		if v, ok := os.LookupEnv(k); ok && v != "" {
 			args = append(args, "--setenv", k, v)
@@ -231,7 +306,9 @@ func (b *Bwrap) Args() []string {
 	return append(args, "--")
 }
 
-// Wrap rewrites cmd to run under bwrap, preserving IO, Dir, and SysProcAttr.
+// Wrap rewrites cmd to run under bwrap, preserving IO and SysProcAttr. cmd.Dir
+// is honoured (as --chdir) when it lies under a bound root; otherwise the
+// working directory falls back to the workspace.
 func (b *Bwrap) Wrap(cmd *exec.Cmd) (*exec.Cmd, error) {
 	if cmd == nil {
 		return nil, fmt.Errorf("sandbox: nil command")
@@ -239,9 +316,10 @@ func (b *Bwrap) Wrap(cmd *exec.Cmd) (*exec.Cmd, error) {
 	if b == nil || strings.TrimSpace(b.Bin) == "" {
 		return nil, fmt.Errorf("sandbox: bwrap backend not initialized")
 	}
-	argv := append(b.Args(), absArgv(cmd.Args)...)
+	dir := b.chdirFor(cmd.Dir)
+	argv := append(b.args(dir), absArgv(cmd.Args)...)
 	out := exec.Command(b.Bin, argv...)
-	out.Dir = b.Workspace
+	out.Dir = dir
 	out.Stdin = cmd.Stdin
 	out.Stdout = cmd.Stdout
 	out.Stderr = cmd.Stderr

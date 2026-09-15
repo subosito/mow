@@ -102,6 +102,9 @@ func Start(dir, id, command, logName, workdir string, box ...sandbox.Backend) (I
 	if strings.TrimSpace(workdir) != "" {
 		c.Dir = workdir
 	}
+	// Never hand the agent's own credentials to a child; bwrap replaces the
+	// whole environment anyway.
+	c.Env = sandbox.ScrubEnv(os.Environ())
 	c.Stdout = logF
 	c.Stderr = logF
 	c.Stdin = nil
@@ -125,6 +128,9 @@ func Start(dir, id, command, logName, workdir string, box ...sandbox.Backend) (I
 	_ = c.Process.Release() // parent must not wait; process keeps the log fd
 	_ = logF.Close()
 	if err := writePID(dir, id, pid); err != nil {
+		// Nothing records this pid now, so nothing can Stop it later: take the
+		// whole session down (mirrors Stop), not just the leader.
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
 		_ = syscall.Kill(pid, syscall.SIGTERM)
 		return Info{}, err
 	}
@@ -203,13 +209,18 @@ func List(dir string) ([]Info, error) {
 // Stop SIGTERMs then (if still alive) SIGKILLs the process group for id
 // (Setsid session leader) and removes its pid file. Falls back to the single
 // PID if the group signal fails.
+//
+// A pid file only proves a process once had that pid. Start used Setsid, so
+// the process we launched is its own session leader; a live pid that is not
+// (the number was recycled by an unrelated process) is treated as a stale
+// record — the file is removed and nothing is signalled.
 func Stop(dir, id string) (Info, error) {
 	id = SanitizeID(id)
 	pid, err := readPID(dir, id)
 	if err != nil {
 		return Info{}, fmt.Errorf("id %q not found", id)
 	}
-	alive := pidAlive(pid)
+	alive := pidAlive(pid) && ownsSession(pid)
 	if alive {
 		// Process was started with Setsid: negative PID targets the session/group.
 		_ = syscall.Kill(-pid, syscall.SIGTERM)
@@ -303,4 +314,12 @@ func pidAlive(pid int) bool {
 		return false
 	}
 	return syscall.Kill(pid, 0) == nil
+}
+
+// ownsSession reports whether pid is a session leader (what Start's Setsid
+// guarantees for the processes we record).
+func ownsSession(pid int) bool {
+	// getsid(2) has no syscall-package wrapper; the raw call returns the sid.
+	sid, _, errno := syscall.RawSyscall(syscall.SYS_GETSID, uintptr(pid), 0, 0)
+	return errno == 0 && int(sid) == pid
 }

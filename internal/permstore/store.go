@@ -62,6 +62,21 @@ func KeyID(tool, args string) string {
 	return hex.EncodeToString(sum[:6])
 }
 
+// withFileLock runs fn holding the cross-process lock for workspace's rules
+// file. mu alone only serializes goroutines in this process.
+func withFileLock(workspace string, fn func() error) error {
+	path := storePath(workspace)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	lf, err := lockFile(path + ".lock")
+	if err != nil {
+		return err
+	}
+	defer unlockFile(lf)
+	return fn()
+}
+
 // Load returns remembered rules for workspace (empty if none).
 func Load(workspace string) ([]Rule, error) {
 	mu.Lock()
@@ -98,11 +113,25 @@ func saveLocked(workspace string, rules []Rule) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
+	// Per-writer temp: a fixed path+".tmp" is shared by every process, so two
+	// concurrent saves interleave their bytes into one file and both rename it.
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	name := tmp.Name()
+	defer func() { _ = os.Remove(name) }()
+	if _, err := tmp.Write(append(b, '\n')); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(name, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
 }
 
 // Remember upserts an allow/deny for exact (tool, args).
@@ -117,24 +146,27 @@ func Remember(workspace, tool, args string, decision Decision) (Rule, error) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	rules, err := loadLocked(workspace)
-	if err != nil {
-		return Rule{}, err
-	}
 	id := KeyID(tool, args)
 	rule := Rule{ID: id, Tool: tool, Args: args, Decision: decision, CreatedAt: time.Now().UTC()}
-	replaced := false
-	for i, existing := range rules {
-		if existing.ID == id {
-			rules[i] = rule
-			replaced = true
-			break
+	err := withFileLock(workspace, func() error {
+		rules, err := loadLocked(workspace)
+		if err != nil {
+			return err
 		}
-	}
-	if !replaced {
-		rules = append(rules, rule)
-	}
-	if err := saveLocked(workspace, rules); err != nil {
+		replaced := false
+		for i, existing := range rules {
+			if existing.ID == id {
+				rules[i] = rule
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			rules = append(rules, rule)
+		}
+		return saveLocked(workspace, rules)
+	})
+	if err != nil {
 		return Rule{}, err
 	}
 	return rule, nil
@@ -148,22 +180,28 @@ func Revoke(workspace, id string) (ok bool, err error) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	rules, err := loadLocked(workspace)
+	err = withFileLock(workspace, func() error {
+		rules, lerr := loadLocked(workspace)
+		if lerr != nil {
+			return lerr
+		}
+		out := rules[:0]
+		for _, r := range rules {
+			if r.ID == id {
+				ok = true
+				continue
+			}
+			out = append(out, r)
+		}
+		if !ok {
+			return nil
+		}
+		return saveLocked(workspace, out)
+	})
 	if err != nil {
 		return false, err
 	}
-	out := rules[:0]
-	for _, r := range rules {
-		if r.ID == id {
-			ok = true
-			continue
-		}
-		out = append(out, r)
-	}
-	if !ok {
-		return false, nil
-	}
-	return true, saveLocked(workspace, out)
+	return ok, nil
 }
 
 // Lookup returns a remembered decision for exact (tool, args).

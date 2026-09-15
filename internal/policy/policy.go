@@ -280,13 +280,16 @@ func (p *Policy) jailRoots() ([]JailRoot, error) {
 		if p.ReadOnly && !writableSet[canonical] {
 			ro = true
 		}
-		if idx, ok := seen[abs]; ok {
+		// Dedupe on the canonical path: two spellings of one directory
+		// (symlink vs. target) are one root, and the matcher below compares
+		// resolved paths anyway.
+		if idx, ok := seen[canonical]; ok {
 			if ro {
 				out[idx].ReadOnly = true // Read-only restriction wins on duplicate
 			}
 			return nil
 		}
-		seen[abs] = len(out)
+		seen[canonical] = len(out)
 		out = append(out, JailRoot{Path: abs, ReadOnly: ro})
 		return nil
 	}
@@ -311,7 +314,8 @@ const maxSymlinkDepth = 40
 
 // resolveSymlinks is EvalSymlinks that also handles not-yet-existing paths:
 // the nearest existing ancestor is resolved and the remainder re-appended, and
-// a dangling symlink component is followed manually.
+// a dangling symlink component is followed manually. depth counts symlinks
+// followed, not path components: a deep not-yet-existing path is not a loop.
 func resolveSymlinks(path string, depth int) (string, error) {
 	if depth > maxSymlinkDepth {
 		return "", fmt.Errorf("too many symlinks resolving %q", path)
@@ -323,7 +327,7 @@ func resolveSymlinks(path string, depth int) (string, error) {
 	if dir == path { // filesystem root
 		return path, nil
 	}
-	rdir, err := resolveSymlinks(dir, depth+1)
+	rdir, err := resolveSymlinks(dir, depth)
 	if err != nil {
 		return "", err
 	}

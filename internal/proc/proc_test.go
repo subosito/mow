@@ -1,6 +1,8 @@
 package proc
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -61,4 +63,52 @@ func TestStartStatusTailStop(t *testing.T) {
 	}
 	_, _ = Stop(dir, "dup")
 	_ = a
+}
+
+func TestStopTreatsRecycledPIDAsStale(t *testing.T) {
+	// The test binary itself is alive but (normally) not a session leader —
+	// exactly what a recycled pid looks like. Stop must not signal it.
+	self := os.Getpid()
+	if ownsSession(self) {
+		t.Skip("test process is a session leader; cannot model a recycled pid")
+	}
+	dir := t.TempDir()
+	if err := writePID(dir, "stale", self); err != nil {
+		t.Fatal(err)
+	}
+	info, err := Stop(dir, "stale")
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if info.Alive {
+		t.Fatalf("stale pid must report not running: %+v", info)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stale.pid")); !os.IsNotExist(err) {
+		t.Fatalf("stale pid file must be removed, stat err=%v", err)
+	}
+}
+
+func TestStartScrubsCredentialEnv(t *testing.T) {
+	t.Setenv("MOW_API_KEY", "super-secret")
+	t.Setenv("SOME_VENDOR_API_KEY", "also-secret")
+	t.Setenv("PLAIN_VAR", "visible")
+	dir := t.TempDir()
+	if _, err := Start(dir, "env", "env", "", ""); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	var out string
+	for {
+		out, _ = Tail(dir, "env", 0)
+		if strings.Contains(out, "PLAIN_VAR=visible") || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !strings.Contains(out, "PLAIN_VAR=visible") {
+		t.Fatalf("ordinary env must reach the child: %q", out)
+	}
+	if strings.Contains(out, "super-secret") || strings.Contains(out, "also-secret") {
+		t.Fatalf("credentials leaked into child env: %q", out)
+	}
 }

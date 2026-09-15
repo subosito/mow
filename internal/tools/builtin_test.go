@@ -1,6 +1,7 @@
 package tools_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -504,5 +505,90 @@ func TestBashKillsBackgroundChildOnReturn(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("background child survived bash return")
+	}
+}
+
+func TestReadRefusesOverlongLine(t *testing.T) {
+	root := t.TempDir()
+	// One line over the per-line cap (a minified blob) must be refused with a
+	// clear message rather than buffered whole; a normal file beside it still reads.
+	blob := strings.Repeat("x", (1<<20)+1) + "\n"
+	if err := os.WriteFile(filepath.Join(root, "min.js"), []byte(blob), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ok.txt"), []byte("fine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: root, MaxReadBytes: 4 << 20}
+	reg := tools.Registry(p, []string{"read"})
+	_, err := reg[0].Exec(context.Background(), json.RawMessage(`{"path":"min.js"}`))
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("want over-long line refusal, got %v", err)
+	}
+	if out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"path":"ok.txt"}`)); err != nil || !strings.Contains(out, "fine") {
+		t.Fatalf("normal read broken: %q %v", out, err)
+	}
+}
+
+func TestWriteAndEditCapOldContent(t *testing.T) {
+	root := t.TempDir()
+	big := bytes.Repeat([]byte("y"), (8<<20)+1)
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: root, AllowWrite: true}
+	reg := tools.Registry(p, []string{"write", "edit"})
+	byName := map[string]int{}
+	for i, tl := range reg {
+		byName[tl.Name()] = i
+	}
+	// edit refuses the oversized file outright.
+	_, err := reg[byName["edit"]].Exec(context.Background(), json.RawMessage(`{"path":"big.txt","old_string":"y","new_string":"z"}`))
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("edit must refuse oversized file, got %v", err)
+	}
+	// write still succeeds but skips the diff instead of loading 8 MiB.
+	out, err := reg[byName["write"]].Exec(context.Background(), json.RawMessage(`{"path":"big.txt","content":"small\n"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "diff omitted") {
+		t.Fatalf("want diff-omitted note, got %q", out)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "big.txt")); string(got) != "small\n" {
+		t.Fatalf("content not written: %d bytes", len(got))
+	}
+}
+
+func TestBashCancelledContextIsNotATimeout(t *testing.T) {
+	root := t.TempDir()
+	p := &policy.Policy{Workspace: root, AllowShell: true}
+	reg := tools.Registry(p, []string{"bash"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	out, err := reg[0].Exec(ctx, json.RawMessage(`{"command":"sleep 30"}`))
+	if err != nil {
+		t.Fatalf("cancel must soft-return: %v", err)
+	}
+	if !strings.Contains(out, "cancelled") || strings.Contains(out, "timed out") {
+		t.Fatalf("want cancellation message, got %q", out)
+	}
+}
+
+func TestBashScrubsCredentialEnv(t *testing.T) {
+	t.Setenv("MOW_API_KEY", "super-secret")
+	t.Setenv("PLAIN_VAR", "visible")
+	root := t.TempDir()
+	p := &policy.Policy{Workspace: root, AllowShell: true}
+	reg := tools.Registry(p, []string{"bash"})
+	out, err := reg[0].Exec(context.Background(), json.RawMessage(`{"command":"env"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "PLAIN_VAR=visible") {
+		t.Fatalf("ordinary env must reach the child: %q", out)
+	}
+	if strings.Contains(out, "super-secret") {
+		t.Fatalf("MOW_API_KEY leaked into bash: %q", out)
 	}
 }

@@ -5,7 +5,10 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/subosito/mow/internal/policy"
 )
@@ -92,5 +95,30 @@ func TestWriteFileJailedKernelCreate(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(ws, "new", "nested.txt"))
 	if err != nil || string(b) != "data" {
 		t.Fatalf("readback b=%q err=%v", b, err)
+	}
+}
+
+func TestOpenJailedRejectsFIFO(t *testing.T) {
+	ws := t.TempDir()
+	fifo := filepath.Join(ws, "pipe")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := &policy.Policy{Workspace: ws}
+	done := make(chan error, 1)
+	go func() {
+		f, _, err := openJailed(p, "pipe", os.O_RDONLY, 0)
+		if f != nil {
+			f.Close()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Fatalf("want not-a-regular-file error, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("open of a FIFO must not block")
 	}
 }

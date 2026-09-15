@@ -147,13 +147,9 @@ func globFd(ctx context.Context, bin, root, pat string) ([]string, bool) {
 	return nil, false
 }
 
-// globRecursive walks root and returns paths matching pat (an absolute
-// pattern). Results are sorted for stable output.
-func globRecursive(root, pat string) ([]string, error) {
-	return globWalk(root, pat)
-}
-
-func globWalk(root, pat string) ([]string, error) {
+// globWalk walks root and returns paths matching pat (an absolute pattern).
+// Results are sorted for stable output; a cancelled ctx aborts the walk.
+func globWalk(ctx context.Context, root, pat string) ([]string, error) {
 	pat = filepath.ToSlash(pat)
 	// Anchor the walk at the deepest literal prefix so `internal/**/x.go`
 	// does not walk the whole workspace.
@@ -163,6 +159,9 @@ func globWalk(root, pat string) ([]string, error) {
 	var out []string
 	seen := 0
 	err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
 			// Unreadable subtree: skip it rather than failing the whole glob.
 			if d != nil && d.IsDir() {

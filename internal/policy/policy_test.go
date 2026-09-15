@@ -3,6 +3,7 @@ package policy_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/subosito/mow/internal/policy"
@@ -213,5 +214,39 @@ func TestResolvePathRejectsFilesystemRoot(t *testing.T) {
 		// ok.txt fails because extra root / fails jailRoots entirely —
 		// that is acceptable (misconfiguration fails closed).
 		t.Logf("with extra_roots=/: ResolvePath in-ws: %v", err)
+	}
+}
+
+func TestResolvePathDeepNewPathIsNotASymlinkLoop(t *testing.T) {
+	root := t.TempDir()
+	p := &policy.Policy{Workspace: root}
+	// More not-yet-existing components than the symlink follow budget: only
+	// actual link follows may count toward "too many symlinks".
+	deep := strings.Repeat("d/", 60) + "fresh.txt"
+	if _, err := p.ResolvePath(deep); err != nil {
+		t.Fatalf("deep new path must resolve: %v", err)
+	}
+}
+
+func TestJailRootsDedupeOnCanonicalPath(t *testing.T) {
+	ws := t.TempDir()
+	base := t.TempDir()
+	link := filepath.Join(base, "ws-link")
+	if err := os.Symlink(ws, link); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(ws, "f.txt"), []byte("x"), 0o644)
+
+	// The workspace listed again via a symlink spelling as read-only: one
+	// root, and the read-only restriction wins for both spellings.
+	p := &policy.Policy{Workspace: ws, ExtraRootsReadOnly: []string{link}, AllowWrite: true}
+	if _, err := p.ResolvePathFor("f.txt", true); err == nil {
+		t.Fatal("read-only alias of the workspace must make the workspace read-only")
+	}
+	if _, err := p.ResolvePathFor(filepath.Join(link, "f.txt"), true); err == nil {
+		t.Fatal("write through the read-only alias must be denied")
+	}
+	if _, err := p.ResolvePathFor("f.txt", false); err != nil {
+		t.Fatalf("read must still work: %v", err)
 	}
 }

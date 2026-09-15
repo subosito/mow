@@ -64,8 +64,10 @@ func openatBeneath(rootFD uintptr, rel string, flag int, perm os.FileMode) (f *o
 	if err != nil {
 		return nil, true, err
 	}
+	// os.OpenFile always adds O_CLOEXEC; match it so the jailed fd is not
+	// inherited by children spawned via the bash / proc tools.
 	how := openHow{
-		Flags:   uint64(flag),
+		Flags:   uint64(flag | syscall.O_CLOEXEC),
 		Mode:    uint64(perm.Perm()),
 		Resolve: resolveBeneath,
 	}

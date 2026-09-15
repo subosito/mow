@@ -351,3 +351,97 @@ func TestBwrapIntegrationReadOnlyRoot(t *testing.T) {
 		t.Fatalf("write into a --ro-bind root must fail, got %q", out)
 	}
 }
+
+func TestScrubEnv(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"empty", nil, []string{}},
+		{"keeps ordinary vars", []string{"PATH=/bin", "HOME=/h"}, []string{"PATH=/bin", "HOME=/h"}},
+		{"drops exact names", []string{"MOW_API_KEY=a", "OPENAI_API_KEY=b", "ANTHROPIC_API_KEY=c", "TERM=xterm"}, []string{"TERM=xterm"}},
+		{"drops any _API_KEY suffix", []string{"GEMINI_API_KEY=x", "FOO=1"}, []string{"FOO=1"}},
+		{"keeps other secrets-looking vars", []string{"AWS_SECRET_ACCESS_KEY=k", "GITHUB_TOKEN=t"}, []string{"AWS_SECRET_ACCESS_KEY=k", "GITHUB_TOKEN=t"}},
+		{"value containing the name is untouched", []string{"NOTE=MOW_API_KEY=see-docs"}, []string{"NOTE=MOW_API_KEY=see-docs"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ScrubEnv(tc.in)
+			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Fatalf("ScrubEnv(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWrapReadOnlyWorkspaceUsesRoBind(t *testing.T) {
+	ws := t.TempDir()
+	args := argsFor(t, ws, []Root{{Path: ws, ReadOnly: true}})
+	if !hasPair(args, "--ro-bind", ws, ws) {
+		t.Fatalf("read-only workspace must be --ro-bind: %v", args)
+	}
+	if hasPair(args, "--bind", ws, ws) {
+		t.Fatalf("read-only workspace must not also be bound rw: %v", args)
+	}
+}
+
+func TestWrapBindsParentsBeforeChildren(t *testing.T) {
+	parent := t.TempDir()
+	child := filepath.Join(parent, "child")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ws := t.TempDir()
+	// Child listed first: a naive argv order would let the parent's later
+	// mount hide the child's rw bind.
+	args := argsFor(t, ws, []Root{{Path: child}, {Path: parent, ReadOnly: true}})
+	idx := func(flag, p string) int {
+		for i := 0; i+2 < len(args); i++ {
+			if args[i] == flag && args[i+1] == p {
+				return i
+			}
+		}
+		return -1
+	}
+	pi, ci := idx("--ro-bind", parent), idx("--bind", child)
+	if pi < 0 || ci < 0 {
+		t.Fatalf("missing binds (parent=%d child=%d): %v", pi, ci, args)
+	}
+	if pi > ci {
+		t.Fatalf("parent must be bound before child: %v", args)
+	}
+}
+
+func TestWrapChdirHonoursDirUnderBoundRoot(t *testing.T) {
+	ws := t.TempDir()
+	sub := filepath.Join(ws, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	b := &Bwrap{Bin: "/usr/bin/bwrap", Workspace: ws}
+	cases := []struct {
+		name, dir, want string
+	}{
+		{"empty falls back to workspace", "", ws},
+		{"subdir of workspace is kept", sub, sub},
+		{"outside every root falls back", outside, ws},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := exec.Command("bash", "-lc", "pwd")
+			in.Dir = tc.dir
+			out, err := b.Wrap(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasPair(out.Args, "--chdir", tc.want, "--clearenv") {
+				t.Fatalf("--chdir %q not found: %v", tc.want, out.Args)
+			}
+			if out.Dir != tc.want {
+				t.Fatalf("Dir = %q, want %q", out.Dir, tc.want)
+			}
+		})
+	}
+}

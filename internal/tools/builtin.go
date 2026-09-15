@@ -104,9 +104,30 @@ const defaultReadLines = 2000
 // sniffBytes is the prefix inspected for NULs before a read is treated as text.
 const sniffBytes = 8192
 
-// maxReadLineBytes is one Scanner token. A minified one-line blob larger than
-// this is refused as binary rather than loaded into the session.
+// maxReadLineBytes bounds one line for read (and one Scanner token for
+// grep). A minified one-line blob larger than this is refused rather than
+// loaded into the session.
 const maxReadLineBytes = 1 << 20
+
+// errLineTooLong is returned by readLineBounded for a line over its cap.
+var errLineTooLong = errors.New("line too long")
+
+// readLineBounded is ReadString('\n') that gives up once a single line
+// (newline included) exceeds max bytes instead of buffering it whole.
+func readLineBounded(br *bufio.Reader, max int) (string, error) {
+	var sb strings.Builder
+	for {
+		frag, err := br.ReadSlice('\n')
+		sb.Write(frag)
+		if sb.Len() > max {
+			return "", errLineTooLong
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return sb.String(), err
+	}
+}
 
 func (t *readTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
@@ -221,10 +242,13 @@ func renderReadFrom(r io.Reader, offset, limit int, hashline bool, byteLim int, 
 	more := false
 	byteCut := false
 	for {
-		line, err := br.ReadString('\n')
+		line, err := readLineBounded(br, maxReadLineBytes)
 		if len(line) == 0 && err != nil {
 			if errors.Is(err, io.EOF) {
 				break
+			}
+			if errors.Is(err, errLineTooLong) {
+				return "", fmt.Errorf("read %s: line %d exceeds %d bytes (minified or binary blob); refusing to load it as text", name, n+1, maxReadLineBytes)
 			}
 			return "", err
 		}
@@ -318,7 +342,6 @@ func renderReadFrom(r io.Reader, offset, limit int, hashline bool, byteLim int, 
 	}
 	switch {
 	case more && !byteCut:
-		fmt.Fprintf(&b, "")
 		body += fmt.Sprintf("\n…(showing lines %d-%d; continue with offset=%d)", start, end, end+1)
 	case byteCut:
 		body += fmt.Sprintf("\n…(truncated at the %d-byte read cap; continue with offset=%d)", byteLim, end+1)
@@ -365,6 +388,11 @@ func (t *globTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		pat = "*"
 	}
 	root := t.p.Workspace
+	// Walk the canonical directory: with a symlink component in the configured
+	// workspace path, the walk (and fd) would otherwise find nothing.
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
 	full := pat
 	if !filepath.IsAbs(pat) {
 		full = filepath.Join(root, pat)
@@ -429,7 +457,7 @@ func (t *globTool) globRecursive(ctx context.Context, root, pat string) ([]strin
 			}
 		}
 	}
-	return globWalk(root, pat)
+	return globWalk(ctx, root, pat)
 }
 
 type writeTool struct{ p *policy.Policy }
@@ -456,11 +484,14 @@ func (t *writeTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 	if hasReadPagingBanner(a.Content) {
 		return "", fmt.Errorf("write: content looks like a paged read (contains a truncation banner) — re-read the whole file or omit the …(showing lines…) footer")
 	}
-	// Probe prior content via jailed open (missing file → create).
+	// Probe prior content via jailed open (missing file → create). The old
+	// content only feeds the diff, so a huge file is not loaded at all.
 	var old []byte
 	created := false
-	if _, b, err := readFileJailed(t.p, a.Path); err == nil {
+	diffOmitted := false
+	if _, b, big, err := readFileJailedCapped(t.p, a.Path, maxEditBytes); err == nil {
 		old = b
+		diffOmitted = big
 	} else if os.IsNotExist(err) {
 		created = true
 	} else {
@@ -473,10 +504,13 @@ func (t *writeTool) Exec(ctx context.Context, args json.RawMessage) (string, err
 	}
 	// Display the path relative to the WORKSPACE (not the raw input): a file
 	// inside the workspace shows "internal/tools/x.go", an extra-root file
-	// shows "../mowi/…" — never a wrong "../mow" when cwd is mow.
+	// shows "../sibling/…" — never a wrong "../mow" when cwd is mow.
 	rel := workspaceRel(t.p.Workspace, path)
 	if created {
 		return formatCreateDiff(rel, a.Content), nil
+	}
+	if diffOmitted {
+		return fmt.Sprintf("wrote %s\n(diff omitted: previous content larger than %d bytes)", rel, maxEditBytes), nil
 	}
 	return formatReplaceDiff(rel, string(old), a.Content), nil
 }
@@ -507,12 +541,15 @@ func (t *editTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	path, data, err := readFileJailed(t.p, a.Path)
+	path, data, big, err := readFileJailedCapped(t.p, a.Path, maxEditBytes)
 	if err != nil {
 		return "", err
 	}
+	if big {
+		return "", fmt.Errorf("edit %s: file exceeds %d bytes; too large for the edit tool", a.Path, maxEditBytes)
+	}
 	// Workspace-relative display (same rationale as write): in-workspace files
-	// never print "../mow", extra-root files print "../mowi/…".
+	// never print "../mow", extra-root files print "../sibling/…".
 	rel := workspaceRel(t.p.Workspace, path)
 	orig := string(data)
 	s := orig
@@ -710,6 +747,9 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	// Do not use CommandContext's auto-kill alone — Wait after kill must not block forever.
 	cmd := exec.Command("bash", "-lc", a.Command)
 	cmd.Dir = t.p.Workspace
+	// Never hand the agent's own credentials to the shell; the bwrap path
+	// below replaces the whole environment anyway.
+	cmd.Env = sandbox.ScrubEnv(os.Environ())
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Opt-in OS jail (policy.sandbox / --sandbox=bwrap). Identity by default;
 	// when enabled it rewrites argv to `bwrap ... -- bash -lc <command>` and
@@ -761,6 +801,12 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	out := buf.String()
 	elapsed := time.Since(started)
 	if err != nil {
+		if errors.Is(cctx.Err(), context.Canceled) {
+			// The caller's context went away (interrupt, abandoned turn) — not
+			// our timer. Blaming the timeout would send the model to retry bigger.
+			return out + fmt.Sprintf("\nerror: bash cancelled after %s (the call was interrupted; this is not a timeout).",
+				elapsed.Round(time.Millisecond)), nil
+		}
 		if cctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
 			// Output captured before the kill is kept: a timeout that returns
 			// nothing is a dead end and the model just retries it bigger.

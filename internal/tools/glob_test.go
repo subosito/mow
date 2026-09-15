@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -296,4 +297,37 @@ func mustJSON(s string) string {
 		panic(err)
 	}
 	return string(b)
+}
+
+func TestGlobWalkHonoursCtxCancel(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := globWalk(ctx, root, filepath.Join(root, "**", "*.go")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled walk must return ctx error, got %v", err)
+	}
+}
+
+func TestGlobWalkSymlinkedWorkspace(t *testing.T) {
+	real := t.TempDir()
+	if err := os.WriteFile(filepath.Join(real, "a.go"), []byte("package a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "ws")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	// Workspace configured through the symlink: the walk must still find files.
+	p := &policy.Policy{Workspace: link, MaxReadBytes: 1 << 20}
+	gt := &globTool{p: p, noFd: true}
+	out, err := gt.Exec(context.Background(), json.RawMessage(`{"pattern":"**/*.go"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "a.go") {
+		t.Fatalf("symlinked workspace must glob: %q", out)
+	}
 }
