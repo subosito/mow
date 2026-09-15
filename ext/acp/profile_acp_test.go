@@ -252,7 +252,7 @@ func TestEngineProfileCapturesAcpDelegateModel(t *testing.T) {
 }
 
 // TestEngineScopedDelegateIsolatesPeers constructs two Engines and binds each
-// via RegisterFromEngine so peer maps cannot cross-contaminate.
+// its own engine-scoped delegateTool so peer maps cannot cross-contaminate.
 func TestEngineScopedDelegateIsolatesPeers(t *testing.T) {
 	resetSharedDelegate(t)
 	home := t.TempDir()
@@ -294,8 +294,8 @@ func TestEngineScopedDelegateIsolatesPeers(t *testing.T) {
 	}
 }
 
-// captureDelegateViaEngine builds an Engine for the profile and returns the
-// engine-scoped delegateTool installed by RegisterFromEngine.
+// captureDelegateViaEngine builds an Engine for the profile and returns an
+// engine-scoped delegateTool built from its extensions.acp section.
 func captureDelegateViaEngine(t *testing.T, profile string) *delegateTool {
 	t.Helper()
 	eng, err := mow.New(mow.Options{

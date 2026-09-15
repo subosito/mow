@@ -152,10 +152,13 @@ func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (stri
 
 const maxPromptRefBytes = 100_000
 
-var promptFileRefRE = regexp.MustCompile(`@([A-Za-z0-9._/\-]+)`)
+// A ref starts the text or follows whitespace, so user@example.com and
+// Python-style @decorators are not file references.
+var promptFileRefRE = regexp.MustCompile(`(?:^|\s)@([A-Za-z0-9._/\-]+)`)
 
-// expandPromptFileRefs resolves jail-safe @path references on session/prompt.
-// does. Missing, denied, and directory refs stay unexpanded.
+// expandPromptFileRefs resolves jail-safe @path references on session/prompt
+// the way an editor's "@file" mention does. Missing, denied, and directory
+// refs stay unexpanded.
 func expandPromptFileRefs(eng *mow.Engine, text string) string {
 	if eng == nil || !strings.Contains(text, "@") {
 		return text

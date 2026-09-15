@@ -159,10 +159,13 @@ func TestClientAllowPermissionSelectsOption(t *testing.T) {
 }
 
 func TestSanitizeStderrTail(t *testing.T) {
-	in := "api_key=supersecret123\nnormal line\nBearer abc.def.ghi"
+	in := "api_key=supersecret123\nnormal line\nBearer abc.def.ghi\nkey sk-proj-Ab12_cd34-EF56gh78 and sk-ant-api03-XYZxyz0123456789"
 	out := sanitizeStderrTail(in)
 	if strings.Contains(out, "supersecret123") || strings.Contains(out, "abc.def.ghi") {
 		t.Fatalf("secrets leaked: %q", out)
+	}
+	if strings.Contains(out, "Ab12_cd34") || strings.Contains(out, "XYZxyz0123456789") {
+		t.Fatalf("prefixed sk- keys leaked: %q", out)
 	}
 	if !strings.Contains(out, "normal line") {
 		t.Fatalf("lost benign line: %q", out)

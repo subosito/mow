@@ -136,9 +136,6 @@ func TestProfileAgentsAreScopedPerEngineWithoutCapabilityEscalation(t *testing.T
 		t.Fatal(err)
 	}
 	defer first.Close()
-	if err := RegisterFromEngine(first); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := first.Prompt(context.Background(), "inspect"); err != nil {
 		t.Fatal(err)
 	}
@@ -162,9 +159,6 @@ func TestProfileAgentsAreScopedPerEngineWithoutCapabilityEscalation(t *testing.T
 		t.Fatal(err)
 	}
 	defer second.Close()
-	if err := RegisterFromEngine(second); err != nil {
-		t.Fatal(err)
-	}
 	toolTwo := captureDelegateViaEngineConfig(t, second)
 	hostTwo := hostPolicyFromContext(mow.ContextWithEngine(context.Background(), second), workspaceB)
 	cmdTwo := peerCommand(toolTwo.agents["peer-two"], hostTwo, workspaceB)

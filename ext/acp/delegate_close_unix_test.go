@@ -82,8 +82,8 @@ func TestPromptEndDropsEnginePeer(t *testing.T) {
 	assertProcessGone(t, child, "peer child after Prompt")
 }
 
-// TestEngineCloseKillsPooledPeer is the RegisterFromEngine path: cleanup
-// registered on the Engine must kill the tree when the session ends.
+// TestEngineCloseKillsPooledPeer: a delegateTool cleanup registered on the
+// Engine must kill the tree when the session ends.
 func TestEngineCloseKillsPooledPeer(t *testing.T) {
 	eng, err := mow.New(mow.Options{
 		Workspace: t.TempDir(),

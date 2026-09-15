@@ -113,4 +113,14 @@ func TestExpandPromptFileRefsJailSafe(t *testing.T) {
 	if strings.Contains(escaped, "---") {
 		t.Fatalf("escaped jail: %q", escaped)
 	}
+	// An email or decorator is not a file mention even when the file exists.
+	if err := os.WriteFile(filepath.Join(ws, "example.com"), []byte("leak"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := expandPromptFileRefs(eng, "mail user@example.com today"); got != "mail user@example.com today" {
+		t.Fatalf("email expanded: %q", got)
+	}
+	if got := expandPromptFileRefs(eng, "@note.txt first"); !strings.Contains(got, "hello-ref") {
+		t.Fatalf("leading ref not expanded: %q", got)
+	}
 }

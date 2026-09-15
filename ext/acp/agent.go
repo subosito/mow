@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -92,6 +93,8 @@ type agentServer struct {
 	// freshAfterClose: next session/new must BeginSession (not rebind JSONL).
 	freshAfterClose bool
 	sessionSeq      atomic.Int64
+	// wg tracks handler goroutines; serve waits for them after stdin ends.
+	wg sync.WaitGroup
 }
 
 // acpSession is ACP mode/approvals for the bound session.
@@ -100,19 +103,95 @@ type acpSession struct {
 	approvals string // ApprovalPrompt | ApprovalAlways
 }
 
+// maxLineBytes caps one stdin JSON-RPC line (base64 media rides in prompts).
+const maxLineBytes = 8 << 20
+
+// stdinLine is one line from the editor, or the read error that ended stdin.
+type stdinLine struct {
+	text    string
+	tooLong bool // line exceeded maxLineBytes and was discarded
+	err     error
+}
+
+// readLines feeds stdin lines to out until EOF, a read error, or ctx is done.
+// An over-long line is reported (and dropped) instead of ending the stream.
+func readLines(ctx context.Context, in io.Reader, out chan<- stdinLine) {
+	defer close(out)
+	send := func(l stdinLine) bool {
+		select {
+		case out <- l:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	br := bufio.NewReaderSize(in, 64*1024)
+	for {
+		var line []byte
+		tooLong := false
+		for {
+			chunk, err := br.ReadSlice('\n')
+			if !tooLong {
+				line = append(line, chunk...)
+				if len(line) > maxLineBytes {
+					tooLong, line = true, nil
+				}
+			}
+			if err == bufio.ErrBufferFull {
+				continue
+			}
+			if err != nil {
+				// EOF (possibly after a partial last line) or a read error.
+				if (tooLong || len(line) > 0) && !send(stdinLine{text: string(line), tooLong: tooLong}) {
+					return
+				}
+				if err != io.EOF {
+					send(stdinLine{err: err})
+				}
+				return
+			}
+			break
+		}
+		if !send(stdinLine{text: string(line), tooLong: tooLong}) {
+			return
+		}
+	}
+}
+
 func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 	a.sessions = map[string]*acpSession{}
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	sc := bufio.NewScanner(in)
-	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
+	// Every handler runs under this ctx so stdin EOF / SIGINT cancels in-flight
+	// prompts before wg.Wait (defers run LIFO): no turn keeps running against a
+	// closed editor, and no late write hits a closed stdout.
+	ctx, cancel := context.WithCancel(ctx)
+	defer a.wg.Wait()
+	defer cancel()
+	lines := make(chan stdinLine)
+	go readLines(ctx, in, lines)
+	for {
+		var ln stdinLine
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case l, ok := <-lines:
+			if !ok {
+				return nil
+			}
+			ln = l
+		}
+		if ln.err != nil {
+			return ln.err
+		}
+		if ln.tooLong {
+			a.write(response{
+				JSONRPC: "2.0",
+				Error:   &rpcError{Code: errInvalid, Message: fmt.Sprintf("line exceeds %d bytes", maxLineBytes)},
+			})
 			continue
 		}
-		if err := ctx.Err(); err != nil {
-			return err
+		line := strings.TrimSpace(ln.text)
+		if line == "" {
+			continue
 		}
 		var msg map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
@@ -145,9 +224,9 @@ func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 			// (and other traffic) is still read while they are in flight.
 			// compact rewrites in-memory history and can take long enough that
 			// a blocked stdin read looks like a dead agent to the TUI.
-			wg.Add(1)
+			a.wg.Add(1)
 			go func(req request) {
-				defer wg.Done()
+				defer a.wg.Done()
 				defer func() {
 					if rec := recover(); rec != nil {
 						a.write(response{
@@ -162,7 +241,6 @@ func (a *agentServer) serve(ctx context.Context, in io.Reader) error {
 			a.handleRequest(ctx, req)
 		}
 	}
-	return sc.Err()
 }
 
 func (a *agentServer) handleNotification(n notification) {
@@ -173,6 +251,10 @@ func (a *agentServer) handleNotification(n notification) {
 		_ = json.Unmarshal(n.Params, &p)
 		a.mu.Lock()
 		if cancel, ok := a.cancels[p.SessionID]; ok && cancel != nil {
+			// This is the only normal path that interrupts an active model HTTP
+			// stream mid-turn. Emit the session and source before cancellation so
+			// a gateway 499 can be correlated to an explicit ACP client action.
+			slog.Info("cancel active prompt", "session", p.SessionID, "cause", "acp_session_cancel")
 			cancel()
 		}
 		a.mu.Unlock()
@@ -391,6 +473,13 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		}
 		ctx, cancel := context.WithCancel(parent)
 		a.mu.Lock()
+		if a.cancels[p.SessionID] != nil {
+			// A second prompt would clobber cancels/activeSID/SetOnToken.
+			a.mu.Unlock()
+			cancel()
+			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: "prompt already in flight for session"}})
+			return
+		}
 		a.cancels[p.SessionID] = cancel
 		a.activeSID = p.SessionID
 		mode := ModeCode
@@ -398,17 +487,26 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			mode = s.mode
 		}
 		a.mu.Unlock()
-		defer func() {
-			cancel()
-			a.mu.Lock()
-			delete(a.cancels, p.SessionID)
-			if a.activeSID == p.SessionID {
-				a.activeSID = ""
-			}
-			a.mu.Unlock()
-		}()
+		var cleanupOnce sync.Once
+		cleanup := func() {
+			cleanupOnce.Do(func() {
+				cancel()
+				a.mu.Lock()
+				delete(a.cancels, p.SessionID)
+				if a.activeSID == p.SessionID {
+					a.activeSID = ""
+				}
+				a.mu.Unlock()
+			})
+		}
+		defer cleanup()
 
 		if body, exclusiveBusy, ok := a.trySlash(ctx, p.SessionID, text); ok {
+			// Release the per-session in-flight slot before publishing the final
+			// response. ACP clients may issue the next prompt immediately after
+			// reading it; deferring cleanup until this goroutine returns races that
+			// next request and spuriously reports "prompt already in flight".
+			cleanup()
 			if exclusiveBusy {
 				a.write(response{
 					JSONRPC: "2.0", ID: req.ID,
@@ -560,8 +658,12 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		res, err := a.eng.PromptWith(ctx, text, popt)
 		unsub()
 		a.eng.SetOnToken(nil)
+		// Release the slot before any terminal response lets a client start
+		// another prompt. Save cancellation first: cleanup cancels ctx too.
+		cancelled := ctx.Err() != nil
+		cleanup()
 		if err != nil {
-			if ctx.Err() != nil {
+			if cancelled {
 				a.write(response{
 					JSONRPC: "2.0", ID: req.ID,
 					Result: map[string]any{"stopReason": "cancelled"},
@@ -653,9 +755,15 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			mode = s.mode
 		}
 		a.mu.Unlock()
-		opts := a.sessionConfigOptions(parent, mode)
-		a.notifyConfigOptions(sid, opts)
-		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
+		// Mode is applied; the catalog round trip for configOptions runs off
+		// the read loop so a slow gateway does not stall session/cancel.
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			opts := a.sessionConfigOptions(parent, mode)
+			a.notifyConfigOptions(sid, opts)
+			a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
+		}()
 	case "session/set_config_option", "session/setConfigOption":
 		var p struct {
 			SessionID string `json:"sessionId"`
@@ -738,12 +846,17 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			mode = s.mode
 		}
 		a.mu.Unlock()
-		opts := a.sessionConfigOptions(parent, mode)
-		if opts == nil {
-			opts = []map[string]any{}
-		}
-		a.notifyConfigOptions(sid, opts)
-		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"configOptions": opts}})
+		// Option is applied; the catalog round trip runs off the read loop.
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			opts := a.sessionConfigOptions(parent, mode)
+			if opts == nil {
+				opts = []map[string]any{}
+			}
+			a.notifyConfigOptions(sid, opts)
+			a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"configOptions": opts}})
+		}()
 	case "terminal/kill":
 		var p struct {
 			TerminalID string `json:"terminalId"`
@@ -816,10 +929,6 @@ func (a *agentServer) emitSessionUpdate(sid string, update map[string]any) {
 			"update":    update,
 		}),
 	})
-}
-
-func (a *agentServer) jailPath(p string) (full string, err error) {
-	return resolveInWorkspace(a.eng.Workspace(), p)
 }
 
 // resolveInWorkspace joins p to workspace ws, resolves symlinks, and ensures

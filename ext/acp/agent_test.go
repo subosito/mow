@@ -664,3 +664,187 @@ func TestAgentPromptForwardsModelRetryAndScrubsRefused(t *testing.T) {
 	cancel()
 	_ = aw.Close()
 }
+
+// A cancelled ctx must stop serve even while the editor holds stdin open and
+// idle (SIGINT/SIGTERM in mow acp): otherwise eng.Close never runs.
+func TestAgentStopsOnContextCancelWithIdleStdin(t *testing.T) {
+	eng, err := mow.New(mow.Options{NoSession: true, Chat: stubChatOK})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ar, aw := io.Pipe()
+	defer aw.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: io.Discard}) }()
+	cancel()
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Fatalf("err=%v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Agent did not return after ctx cancel with idle stdin")
+	}
+}
+
+// stdin EOF must cancel an in-flight prompt and return promptly, not wait for
+// the whole turn and then write to a closed stdout.
+func TestAgentStdinEOFCancelsInflightPrompt(t *testing.T) {
+	chatStarted := make(chan struct{}, 1)
+	chatCancelled := make(chan struct{}, 1)
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			chatStarted <- struct{}{}
+			<-ctx.Done()
+			chatCancelled <- struct{}{}
+			return mow.Message{}, ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
+		_ = cw.Close()
+	}()
+	cl := newPipeClient(cr, aw)
+	go cl.readLoop()
+	if err := cl.callOK(ctx, "initialize", map[string]any{"protocolVersion": 1}); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	sid, err := cl.sessionNew(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("session/new: %v", err)
+	}
+	go func() { _, _, _ = cl.prompt(ctx, sid, "hang") }()
+	select {
+	case <-chatStarted:
+	case <-ctx.Done():
+		t.Fatal("prompt never reached Chat")
+	}
+	_ = aw.Close() // editor went away
+	select {
+	case <-chatCancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stdin EOF did not cancel the in-flight prompt")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Agent err=%v, want nil on EOF", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Agent did not return after stdin EOF")
+	}
+}
+
+// Two session/prompt for the same session would corrupt cancels/activeSID and
+// the engine token sink; the second must be refused with -32600.
+func TestAgentRejectsSecondPromptInFlight(t *testing.T) {
+	chatStarted := make(chan struct{}, 1)
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			chatStarted <- struct{}{}
+			<-ctx.Done()
+			return mow.Message{}, ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	go func() {
+		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
+		_ = cw.Close()
+	}()
+	cl := newPipeClient(cr, aw)
+	go cl.readLoop()
+	if err := cl.callOK(ctx, "initialize", map[string]any{"protocolVersion": 1}); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	sid, err := cl.sessionNew(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("session/new: %v", err)
+	}
+	first := make(chan error, 1)
+	go func() {
+		_, _, err := cl.prompt(ctx, sid, "hang")
+		first <- err
+	}()
+	<-chatStarted
+	_, _, err = cl.prompt(ctx, sid, "again")
+	if err == nil || !strings.Contains(err.Error(), "-32600") || !strings.Contains(err.Error(), "already in flight") {
+		t.Fatalf("second prompt err=%v, want -32600 already in flight", err)
+	}
+	_ = cl.notify("session/cancel", map[string]any{"sessionId": sid})
+	if err := <-first; err != nil {
+		t.Fatalf("first prompt: %v", err)
+	}
+	cancel()
+	_ = aw.Close()
+}
+
+// An over-long stdin line (e.g. a huge base64 image) must be answered with an
+// error and skipped — not end serve and exit the agent.
+func TestAgentOverlongLineKeepsServing(t *testing.T) {
+	eng, err := mow.New(mow.Options{NoSession: true, Chat: stubChatOK})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	go func() {
+		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
+		_ = cw.Close()
+	}()
+	var raw lockedBuffer
+	cl := newPipeClient(io.TeeReader(cr, &raw), aw)
+	go cl.readLoop()
+	big := append([]byte(`{"jsonrpc":"2.0","id":"x","method":"session/prompt","params":"`), strings.Repeat("a", 8<<20+1)...)
+	big = append(big, []byte("\"}\n")...)
+	if _, err := aw.Write(big); err != nil {
+		t.Fatal(err)
+	}
+	if err := cl.callOK(ctx, "initialize", map[string]any{"protocolVersion": 1}); err != nil {
+		t.Fatalf("initialize after over-long line: %v", err)
+	}
+	if got := raw.String(); !strings.Contains(got, "line exceeds") || !strings.Contains(got, "-32600") {
+		t.Fatalf("no -32600 line-too-long reply on the wire:\n%s", got)
+	}
+	cancel()
+	_ = aw.Close()
+}
+
+func stubChatOK(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+	return mow.Message{Role: "assistant", Content: "ok"}, nil
+}
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}

@@ -70,8 +70,11 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 	if len(c.Command) == 0 {
 		return "", fmt.Errorf("acp client: empty command")
 	}
-	if c.started && c.SessionID != "" {
-		return c.SessionID, nil
+	c.procMu.Lock()
+	started, sid := c.started, c.SessionID
+	c.procMu.Unlock()
+	if started && sid != "" {
+		return sid, nil
 	}
 	if err := c.startProcess(); err != nil {
 		return "", appendStderrHint(fmt.Errorf("acp client start: %w", err), c.stderrTail())
@@ -110,7 +113,9 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 		_ = c.Close()
 		return "", appendStderrHint(fmt.Errorf("acp session/new: bad result %s", string(res)), c.stderrTail())
 	}
+	c.procMu.Lock()
 	c.SessionID = out.SessionID
+	c.procMu.Unlock()
 	return out.SessionID, nil
 }
 
@@ -225,8 +230,8 @@ func (c *Client) Close() error {
 	exited := c.exited
 	c.cmd = nil
 	c.exited = nil
-	c.procMu.Unlock()
 	c.SessionID = ""
+	c.procMu.Unlock()
 	c.encMu.Lock()
 	if c.stdin != nil {
 		_ = c.stdin.Close()
@@ -331,9 +336,10 @@ func (c *Client) call(ctx context.Context, method string, params any, onCancel .
 				fn()
 			}
 		}
-		// Give the peer a short window to acknowledge cancel (session/prompt
-		// result or error). Then surface the context error so the tool loop
-		// can drop a hung peer.
+		// The owner is explicit in the error returned below: DeadlineExceeded
+		// means delegate timeout; Canceled means parent/user/session abort. The
+		// peer also logs the corresponding session/cancel before stopping its
+		// model stream, allowing correlation with the gateway's 499 record.
 		timer := time.NewTimer(cancelGrace)
 		defer timer.Stop()
 		select {
@@ -394,6 +400,25 @@ func (c *Client) stderrTail() string {
 func (c *Client) readLoop() {
 	sc := bufio.NewScanner(c.stdout)
 	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
+	// When the loop ends (peer closed stdout, or a line over the buffer cap)
+	// nothing will ever answer the in-flight calls: fail them now instead of
+	// letting each hang until its timeout.
+	defer func() {
+		msg := "peer process exited (stdout closed)"
+		if err := sc.Err(); err != nil {
+			msg = "peer stdout read: " + err.Error()
+		}
+		c.pendMu.Lock()
+		pending := c.pending
+		c.pending = nil
+		c.pendMu.Unlock()
+		for _, ch := range pending {
+			select {
+			case ch <- response{Error: &rpcError{Code: errInternal, Message: msg}}:
+			default:
+			}
+		}
+	}()
 	for sc.Scan() {
 		line := sc.Text()
 		kind, req, resp, ok := parseIncomingLine(line)

@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strings"
 
+	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/ext"
 )
@@ -38,8 +39,16 @@ func runCmd(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	ef.Stream = true
-	eng, err := ef.NewEngineCLI()
+	if err := ef.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "mow acp: %v\n", err)
+		return 2
+	}
+	// Plain Options, not OptionsCLI: tokens and tool progress go to the editor
+	// over ACP, so the stderr printers would only duplicate them into its log.
+	cliutil.EnableVerbose(ef.Verbose)
+	opt := ef.Options()
+	opt.Stream = true
+	eng, err := mow.New(opt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mow acp: %v\n", err)
 		return 1

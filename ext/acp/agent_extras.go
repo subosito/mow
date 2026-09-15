@@ -195,14 +195,17 @@ func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 		return true
 	case "status":
 		st := a.eng.Status()
+		a.mu.Lock()
+		pendingPerm := len(a.pending)
+		a.mu.Unlock()
 		out := map[string]any{
 			"busy":               st.Busy,
 			"allow_write":        st.AllowWrite,
 			"allow_shell":        st.AllowShell,
 			"ask_mode":           a.askMode(),
 			"mode":               a.sessionMode(),
-			"pending_perm":       len(a.pending),
-			"pending_permission": len(a.pending),
+			"pending_perm":       pendingPerm,
+			"pending_permission": pendingPerm,
 		}
 		if st.RunID != "" {
 			out["run_id"] = st.RunID

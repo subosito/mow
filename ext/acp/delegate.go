@@ -106,9 +106,7 @@ func init() {
 //
 // Each call builds a fresh tool from the effective config (replace, not merge)
 // so a profile's extensions.acp fully replaces a previous Engine's peers and
-// does not accumulate into a process-global agent map. Prefer
-// RegisterFromEngine after New when engine-scoped isolation is required
-// (concurrent Engines in one process).
+// does not accumulate into a process-global agent map.
 func RegisterFromConfig(configPaths ...string) error {
 	// Path-only load: defaults + the handed paths + env. No implicit
 	// $MOW_HOME/config.yaml — the host (engine.New with LoadUserConfig) must
@@ -126,39 +124,6 @@ func RegisterFromConfig(configPaths ...string) error {
 		return err
 	}
 	return replaceSharedAgents(agents, cfg.Workspace, c.PeerIdleSec)
-}
-
-// RegisterFromEngine is like RegisterFromConfig using an already-built engine's
-// extension section. The tool is engine-scoped (AddTool) so concurrent Engines
-// do not share peer state. Prefer this when an Engine already exists; use
-// RegisterFromConfig only from BeforeNew path-only hooks.
-func RegisterFromEngine(eng *mow.Engine) error {
-	if eng == nil {
-		return fmt.Errorf("acp: nil engine")
-	}
-	var c Config
-	if err := eng.Extension("acp", &c); err != nil {
-		return err
-	}
-	agents, err := resolvePeers(c)
-	if err != nil {
-		return err
-	}
-	indexed := indexPeers(agents)
-	if len(indexed) == 0 {
-		return nil
-	}
-	tool := newDelegateTool(indexed, eng.Workspace(), peerIdleDuration(c.PeerIdleSec))
-	if err := eng.AddTool(tool); err != nil {
-		return err
-	}
-	eng.AddOnEvent(func(ev mow.Event) {
-		if ev.Type == mow.EventRunEnd {
-			tool.dropPeers()
-		}
-	})
-	eng.RegisterCleanup(func() { tool.closeAll() })
-	return nil
 }
 
 func dropSharedPeers() {
@@ -234,8 +199,8 @@ func releaseSharedPeers(gen int) {
 // registration. Empty list is a no-op. peerIdleSec: 0 = default, -1 = no idle
 // drop; only applied when the shared tool is first created.
 //
-// Prefer RegisterFromConfig / RegisterFromEngine for full config-driven
-// registration — those replace rather than accumulate.
+// Prefer RegisterFromConfig for full config-driven registration — it replaces
+// rather than accumulates.
 func AppendPeers(agents []PeerSpec, workspace string, peerIdleSec int) {
 	indexed := indexPeers(agents)
 	if len(indexed) == 0 {
@@ -249,9 +214,12 @@ func AppendPeers(agents []PeerSpec, workspace string, peerIdleSec int) {
 	} else if sharedDelegate.workspace == "" && strings.TrimSpace(workspace) != "" {
 		sharedDelegate.workspace = strings.TrimSpace(workspace)
 	}
+	// agents is read by Description/Exec on tool-call goroutines: same lock.
+	sharedDelegate.peersMu.Lock()
 	for k, v := range indexed {
 		sharedDelegate.agents[k] = v
 	}
+	sharedDelegate.peersMu.Unlock()
 	ext.RegisterTool(sharedDelegate)
 }
 
@@ -302,6 +270,7 @@ type peerSlot struct {
 }
 
 type delegateTool struct {
+	// agents is guarded by peersMu once the tool is shared (AppendPeers).
 	agents    map[string]PeerSpec
 	workspace string
 	peerIdle  time.Duration // 0 = no idle eviction
@@ -382,10 +351,12 @@ func (t *delegateTool) stopReaper() {
 func (t *delegateTool) Name() string    { return ToolName }
 func (t *delegateTool) Untrusted() bool { return true }
 func (t *delegateTool) Description() string {
+	t.peersMu.Lock()
 	names := make([]string, 0, len(t.agents))
 	for n := range t.agents {
 		names = append(names, n)
 	}
+	t.peersMu.Unlock()
 	sort.Strings(names)
 	return "Delegate a task to a named peer agent over ACP (in other harnesses often called a subagent). " +
 		"Only call this when the user names a peer or explicitly asks to delegate — not because a task list looks parallelizable. " +
@@ -434,7 +405,9 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	if agentName == "" {
 		return "", fmt.Errorf("delegate: agent (or subagent) is required")
 	}
+	t.peersMu.Lock()
 	spec, ok := t.agents[strings.ToLower(agentName)]
+	t.peersMu.Unlock()
 	if !ok {
 		return "", fmt.Errorf("delegate: unknown agent %q (configure extensions.acp.peers; \"subagent\" means the same thing)", agentName)
 	}

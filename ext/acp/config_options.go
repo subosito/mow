@@ -28,9 +28,9 @@ func (a *agentServer) sessionConfigOptions(ctx context.Context, mode string) []m
 	if a == nil || a.eng == nil {
 		return nil
 	}
-	// Refresh catalog so efforts match the gateway (best-effort).
-	_, _ = a.eng.ListModels(ctx)
 	out := []map[string]any{modeConfigOption(mode), approvalsConfigOption(a.sessionApprovals())}
+	// modelConfigOption's bounded listModels also refreshes catalog efforts
+	// for effortConfigOption below (one round trip, not two).
 	if opt := a.modelConfigOption(ctx); opt != nil {
 		out = append(out, opt)
 	}

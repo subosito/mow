@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -128,10 +129,14 @@ func (a *agentServer) handleSessionClose(req request) {
 		return
 	}
 	if cancel, ok := a.cancels[sid]; ok && cancel != nil {
+		slog.Info("cancel active prompt", "session", sid, "cause", "acp_session_close")
 		cancel()
 		delete(a.cancels, sid)
 	}
 	delete(a.sessions, sid)
+	// "Allow/reject always for this session" ends with the session.
+	a.alwaysAllow = map[string]bool{}
+	a.alwaysReject = map[string]bool{}
 	if a.boundSID == sid {
 		a.boundSID = ""
 		a.freshAfterClose = true
@@ -169,13 +174,19 @@ func (a *agentServer) bind(sid string) string {
 }
 
 func (a *agentServer) writeSessionOpen(parent context.Context, req request, sid, mode string) {
-	result := map[string]any{
-		"sessionId": sid,
-		"modes":     modeState(mode),
-	}
-	if opts := a.sessionConfigOptions(parent, mode); len(opts) > 0 {
-		result["configOptions"] = opts
-	}
-	a.write(response{JSONRPC: "2.0", ID: req.ID, Result: result})
-	a.advertiseCommands(sid)
+	// The session is already bound; the configOptions catalog round trip runs
+	// off the read loop so a slow gateway does not stall session/cancel.
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		result := map[string]any{
+			"sessionId": sid,
+			"modes":     modeState(mode),
+		}
+		if opts := a.sessionConfigOptions(parent, mode); len(opts) > 0 {
+			result["configOptions"] = opts
+		}
+		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: result})
+		a.advertiseCommands(sid)
+	}()
 }
