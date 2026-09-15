@@ -307,6 +307,10 @@ func (c *Client) chatOpenAIResponses(ctx context.Context, messages []Message, to
 	if status < 200 || status >= 300 {
 		return Message{}, fmt.Errorf("llm: HTTP %d: %s", status, truncate(string(respBody), 300))
 	}
+	// status "failed" with no error body is still a failure, not an empty answer.
+	if parsed.Status == "failed" {
+		return Message{}, fmt.Errorf("llm: response failed")
+	}
 	return messageFromResponses(parsed), nil
 }
 
@@ -350,7 +354,8 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 	if err != nil {
 		return Message{}, err
 	}
-	defer res.Body.Close()
+	complete := false
+	defer func() { finishStream(ctx, res.Body, complete) }()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 		return Message{}, fmt.Errorf("llm: HTTP %d: %s", res.StatusCode, truncate(string(b), 300))
@@ -365,10 +370,14 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 	var content strings.Builder
 
 	streamBody := &idleReader{r: res.Body, idle: streamIdleTimeout, ctx: ctx}
+	defer streamBody.abandon()
 	sc := bufio.NewScanner(streamBody)
 	sc.Buffer(make([]byte, 0, 64*1024), 2<<20)
 	var eventName string
 	activity := onceActivity(hooks.OnActivity)
+	// terminal: a response.completed / response.incomplete envelope arrived.
+	// A clean EOF before one is a dropped connection, not an empty answer.
+	terminal := false
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
@@ -393,19 +402,30 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 		// request — they arrive when the stream opens, before the model has
 		// produced anything, so they are not activity. Later frames (output
 		// items, deltas, completed, error) are real upstream work.
-		if activity != nil {
-			switch resolveSSEType(eventName, data) {
-			case "", "response.created", "response.in_progress":
-			default:
+		switch resolveSSEType(eventName, data) {
+		case "", "response.created", "response.in_progress":
+		case "response.completed", "response.incomplete":
+			terminal = true
+			fallthrough
+		default:
+			if activity != nil {
 				activity()
 			}
 		}
 		if err := applyResponsesSSE(data, eventName, &msg, &content, toolsByIdx, itemToIdx, hooks); err != nil {
 			return Message{}, err
 		}
+		// Stop parsing at the terminal frame; cleanup briefly drains to HTTP EOF.
+		if terminal {
+			complete = true
+			break
+		}
 	}
 	if err := sc.Err(); err != nil {
 		return Message{}, err
+	}
+	if !terminal {
+		return Message{}, errStreamIncomplete
 	}
 
 	msg.Content = content.String()
@@ -643,6 +663,21 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 
 	case "response.incomplete":
 		msg.StopReason = "max_tokens"
+
+	case "response.failed":
+		// {"type":"response.failed","response":{"status":"failed","error":{...}}}
+		var ev struct {
+			Response struct {
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			} `json:"response"`
+		}
+		_ = json.Unmarshal([]byte(data), &ev)
+		if ev.Response.Error != nil && ev.Response.Error.Message != "" {
+			return fmt.Errorf("llm: %s", ev.Response.Error.Message)
+		}
+		return fmt.Errorf("llm: response failed")
 	}
 	return nil
 }

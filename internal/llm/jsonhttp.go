@@ -73,6 +73,10 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 		}
 
 		status, body, hdr, err := doJSONAttempt(hc, req, capPerAttempt)
+		// g is the generic attempt ordinal: connection-refused retries have
+		// their own budget and must not eat (or overshoot) this one, so the
+		// comparisons below stay exact after a refused window.
+		g := attempt - refused
 		if err != nil {
 			lastErr = err
 			if req.Context().Err() != nil {
@@ -90,27 +94,27 @@ func (c *Client) doJSON(req *http.Request) (int, []byte, error) {
 				notifyRetry(c.OnRetry, RetryInfo{Attempt: refused, Delay: wait, Kind: RetryKindUnavailable})
 				continue
 			}
-			if attempt == maxHTTPAttempts {
+			if g >= maxHTTPAttempts {
 				return 0, nil, hostSafeTransport(err)
 			}
-			wait = retryDelay(attempt, nil)
-			notifyRetry(c.OnRetry, RetryInfo{Attempt: attempt, Delay: wait, Kind: RetryKindNetwork})
+			wait = retryDelay(g, nil)
+			notifyRetry(c.OnRetry, RetryInfo{Attempt: g, Delay: wait, Kind: RetryKindNetwork})
 			continue
 		}
 		lastStatus, lastBody = status, body
 
-		if attempt < maxHTTPAttempts {
+		if g < maxHTTPAttempts {
 			if retryableStatus(status) {
 				lastErr = fmt.Errorf("llm: HTTP %d", status)
-				wait = retryDelay(attempt, &http.Response{Header: hdr})
-				notifyRetry(c.OnRetry, RetryInfo{Attempt: attempt, Delay: wait, Status: status, Kind: RetryKindBusy})
+				wait = retryDelay(g, &http.Response{Header: hdr})
+				notifyRetry(c.OnRetry, RetryInfo{Attempt: g, Delay: wait, Status: status, Kind: RetryKindBusy})
 				continue
 			}
 			// HTTP 200 + {"error": ...}: overload dressed as success.
 			if msg, ok := transientBodyError(status, body); ok {
 				lastErr = fmt.Errorf("llm: %s", msg)
-				wait = retryDelay(attempt, &http.Response{Header: hdr})
-				notifyRetry(c.OnRetry, RetryInfo{Attempt: attempt, Delay: wait, Kind: RetryKindBusy})
+				wait = retryDelay(g, &http.Response{Header: hdr})
+				notifyRetry(c.OnRetry, RetryInfo{Attempt: g, Delay: wait, Kind: RetryKindBusy})
 				continue
 			}
 		}

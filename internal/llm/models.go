@@ -217,11 +217,7 @@ func modelsURL(baseURL string) string {
 	if base == "" {
 		base = "https://api.openai.com/v1"
 	}
-	if strings.HasSuffix(base, "/chat/completions") {
-		base = strings.TrimSuffix(base, "/chat/completions")
-	}
-	if strings.HasSuffix(base, "/messages") {
-		base = strings.TrimSuffix(base, "/messages")
-	}
+	base = strings.TrimSuffix(base, "/chat/completions")
+	base = strings.TrimSuffix(base, "/messages")
 	return base + "/models"
 }

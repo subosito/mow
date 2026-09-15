@@ -380,6 +380,13 @@ func (c *Client) chatOpenAI(ctx context.Context, messages []Message, tools []Too
 	if err != nil {
 		return Message{}, err
 	}
+	return parseChatCompletion(status, respBody)
+}
+
+// parseChatCompletion decodes a non-streamed chat-completions body. Shared by
+// the JSON path and the SSE path's fallback for gateways that ignore
+// stream=true and answer with a plain completion.
+func parseChatCompletion(status int, respBody []byte) (Message, error) {
 	var parsed ChatResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return Message{}, fmt.Errorf("llm: decode: %w (status %d body %s)", err, status, truncate(string(respBody), 200))

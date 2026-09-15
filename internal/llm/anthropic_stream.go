@@ -12,7 +12,10 @@ import (
 )
 
 type anthToolAcc struct {
-	id, name, args string
+	id, name string
+	// args accumulates streamed input_json_delta fragments; `args += delta`
+	// per SSE event is O(n^2) copying for a large tool call.
+	args strings.Builder
 }
 
 // chatAnthropicStream is the SSE path for anthropic-messages (any host on that wire).
@@ -57,10 +60,8 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 		return Message{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", c.APIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
+	c.setAnthropicAuth(req)
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
@@ -69,7 +70,8 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 	if err != nil {
 		return Message{}, err
 	}
-	defer res.Body.Close()
+	complete := false
+	defer func() { finishStream(ctx, res.Body, complete) }()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 		return Message{}, fmt.Errorf("llm: anthropic HTTP %d: %s", res.StatusCode, truncate(string(b), 300))
@@ -77,11 +79,21 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 
 	msg := Message{Role: "assistant"}
 	toolsByIdx := map[int]*anthToolAcc{}
+	// Text deltas accumulate here and are flushed to msg.Content after the
+	// stream: `msg.Content += delta` per event is O(n^2) copying.
+	var content strings.Builder
 
-	sc := bufio.NewScanner(res.Body)
+	// Stream HTTP client has Timeout:0 so long generations work; without an
+	// idle bound a silent upstream hangs forever.
+	streamBody := &idleReader{r: res.Body, idle: streamIdleTimeout, ctx: ctx}
+	defer streamBody.abandon()
+	sc := bufio.NewScanner(streamBody)
 	sc.Buffer(make([]byte, 0, 64*1024), 2<<20)
 	var eventName string
 	activity := onceActivity(hooks.OnActivity)
+	// terminal: message_stop (or a message_delta carrying stop_reason)
+	// arrived. A clean EOF before that is a dropped connection.
+	terminal := false
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
@@ -105,20 +117,33 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 		// ping keepalives arrive while the model is still silent — counting
 		// one would end the wait state on a lie. message_start and everything
 		// after it are real upstream work.
-		if activity != nil {
-			switch resolveSSEType(eventName, data) {
-			case "", "ping":
-			default:
+		switch resolveSSEType(eventName, data) {
+		case "", "ping":
+		case "message_stop":
+			terminal = true
+			fallthrough
+		default:
+			if activity != nil {
 				activity()
 			}
 		}
-		if err := applyAnthropicSSE(data, eventName, &msg, toolsByIdx, hooks); err != nil {
+		if err := applyAnthropicSSE(data, eventName, &msg, &content, toolsByIdx, hooks); err != nil {
 			return Message{}, err
+		}
+		// Stop parsing at message_stop. Cleanup allows a bounded HTTP tail,
+		// never an indefinite wait for a gateway that keeps the stream open.
+		if terminal {
+			complete = true
+			break
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return Message{}, err
 	}
+	if !terminal && msg.StopReason == "" {
+		return Message{}, errStreamIncomplete
+	}
+	msg.Content = content.String()
 	// Keys are Anthropic content-block indices shared with text blocks, so they
 	// are not contiguous from 0 — iterate the actual keys in order.
 	idxs := make([]int, 0, len(toolsByIdx))
@@ -136,14 +161,14 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 			Type: "function",
 			Function: FunctionCall{
 				Name:      a.name,
-				Arguments: a.args,
+				Arguments: a.args.String(),
 			},
 		})
 	}
 	return msg, nil
 }
 
-func applyAnthropicSSE(data, event string, msg *Message, toolsByIdx map[int]*anthToolAcc, hooks StreamHooks) error {
+func applyAnthropicSSE(data, event string, msg *Message, content *strings.Builder, toolsByIdx map[int]*anthToolAcc, hooks StreamHooks) error {
 	var base struct {
 		Type string `json:"type"`
 	}
@@ -206,7 +231,7 @@ func applyAnthropicSSE(data, event string, msg *Message, toolsByIdx map[int]*ant
 		switch ev.Delta.Type {
 		case "text_delta":
 			if ev.Delta.Text != "" {
-				msg.Content += ev.Delta.Text
+				content.WriteString(ev.Delta.Text)
 				if hooks.OnContent != nil {
 					hooks.OnContent(ev.Delta.Text)
 				}
@@ -222,7 +247,7 @@ func applyAnthropicSSE(data, event string, msg *Message, toolsByIdx map[int]*ant
 			}
 		case "input_json_delta":
 			if a := toolsByIdx[ev.Index]; a != nil {
-				a.args += ev.Delta.PartialJSON
+				a.args.WriteString(ev.Delta.PartialJSON)
 			}
 		}
 	case "message_start":
@@ -277,6 +302,15 @@ func applyAnthropicSSE(data, event string, msg *Message, toolsByIdx map[int]*ant
 		}
 	}
 	return nil
+}
+
+// setAnthropicAuth sets the credential headers for the anthropic-messages
+// wire: x-api-key + anthropic-version for native Anthropic hosts, plus a
+// Bearer token for gateways that authenticate every wire the OpenAI way.
+func (c *Client) setAnthropicAuth(req *http.Request) {
+	req.Header.Set("x-api-key", c.APIKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 }
 
 func anthropicMessagesURL(baseURL string) string {

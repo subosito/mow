@@ -203,25 +203,25 @@ func TestCallTimeoutConfigurable(t *testing.T) {
 	}
 }
 
-// TestIsHeaderTimeoutClassifier proves the classifier distinguishes a genuine
-// caller deadline (context.DeadlineExceeded — must NOT be classified as a
-// first-byte timeout) from a transport net.Error timeout whose message names
-// response headers.
-func TestIsHeaderTimeoutClassifier(t *testing.T) {
-	if isHeaderTimeout(context.DeadlineExceeded) {
+// TestResponseHeaderTimedOutClassifier proves the classifier distinguishes a
+// genuine caller deadline (context.DeadlineExceeded — must NOT be classified
+// as a first-byte timeout) from a transport net.Error timeout whose message
+// names response headers.
+func TestResponseHeaderTimedOutClassifier(t *testing.T) {
+	if responseHeaderTimedOut(context.DeadlineExceeded) {
 		t.Fatal("caller deadline must not be classified as first-byte timeout")
 	}
-	if isHeaderTimeout(nil) {
+	if responseHeaderTimedOut(nil) {
 		t.Fatal("nil must not be a header timeout")
 	}
 	// A synthetic net.Error that reports Timeout() and names response headers.
 	he := &headerTimeoutErr{}
-	if !isHeaderTimeout(he) {
+	if !responseHeaderTimedOut(he) {
 		t.Fatal("net.Error timeout naming response headers should be a first-byte timeout")
 	}
 	// A non-header net.Error timeout must not match.
 	ne := &nonHeaderTimeoutErr{}
-	if isHeaderTimeout(ne) {
+	if responseHeaderTimedOut(ne) {
 		t.Fatal("non-header net.Error timeout must not be a first-byte timeout")
 	}
 }

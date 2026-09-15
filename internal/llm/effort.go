@@ -320,22 +320,24 @@ func (c *Client) requestModel() string {
 }
 
 // finalizeChatBody injects effort body fields and ensures lean model id.
+//
+// The wires build their bodies from c.requestModel() — the same plan.Model —
+// so the common case (no effort fields, no native tools) needs no decode:
+// the map round-trip below only runs when there is something to inject.
 func (c *Client) finalizeChatBody(raw []byte) ([]byte, error) {
 	if c == nil || len(raw) == 0 {
 		return raw, nil
 	}
 	plan := ResolveEffort(c.Model, c.Wire, c.Effort, c.modelEfforts())
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return raw, err
-	}
-	cur, _ := m["model"].(string)
-	needModel := plan.Model != "" && plan.Model != cur
 	needBody := plan.ReasoningEffort != "" || plan.ThinkingBudget != nil
 	native := c.activeNativeTools()
 	needTools := len(native) > 0
-	if !needModel && !needBody && !needTools {
+	if !needBody && !needTools {
 		return raw, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw, err
 	}
 	if needTools {
 		// chat-completions is mixed: raw OpenAI gpt drops web_search silently,

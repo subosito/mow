@@ -26,14 +26,7 @@ func (c *Client) activeNativeTools() []map[string]any {
 
 // catalogNativeTools returns GET /models native_tools for the active model, if any.
 func (c *Client) catalogNativeTools() []map[string]any {
-	if c == nil || len(c.CatalogModels) == 0 {
-		return nil
-	}
-	id := strings.TrimSpace(StripEffortTiers(c.Model))
-	if info, ok := c.CatalogModels[strings.ToLower(id)]; ok && len(info.NativeTools) > 0 {
-		return info.NativeTools
-	}
-	if info, ok := c.CatalogModels[id]; ok && len(info.NativeTools) > 0 {
+	if info, ok := c.catalogInfo(c.Model); ok && len(info.NativeTools) > 0 {
 		return info.NativeTools
 	}
 	return nil

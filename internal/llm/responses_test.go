@@ -3,11 +3,13 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeWireResponsesAlias(t *testing.T) {
@@ -276,11 +278,58 @@ func TestResponsesStreamActivitySilentOnEnvelopesOnlyStream(t *testing.T) {
 	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
 		OnActivity: func() { activityN++ },
 	})
-	if err != nil {
-		t.Fatal(err)
+	// The connection dropped before response.completed: a failed call, not
+	// an empty answer.
+	if !errors.Is(err, errStreamIncomplete) {
+		t.Fatalf("err=%v want errStreamIncomplete", err)
 	}
 	if activityN != 0 {
 		t.Fatalf("OnActivity fired %d times on an envelopes-only stream, want 0", activityN)
+	}
+}
+
+func TestResponsesStreamFailedEnvelope(t *testing.T) {
+	// response.failed carries the error inside the response envelope. It must
+	// surface as an error, never as a successful empty message.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.created\n"+`data: {"type":"response.created","response":{"status":"in_progress"}}`+"\n\n")
+		_, _ = io.WriteString(w, "event: response.failed\n"+`data: {"type":"response.failed","response":{"status":"failed","error":{"code":"server_error","message":"upstream exploded"}}}`+"\n\n")
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
+	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err == nil || !strings.Contains(err.Error(), "upstream exploded") {
+		t.Fatalf("err=%v want the provider's failure message", err)
+	}
+}
+
+func TestResponsesStreamFailsOnEOFBeforeCompleted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.output_text.delta\n"+`data: {"type":"response.output_text.delta","delta":"Hi"}`+"\n\n")
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
+	_, err := c.ChatWithStream(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if !errors.Is(err, errStreamIncomplete) {
+		t.Fatalf("err=%v want errStreamIncomplete", err)
+	}
+}
+
+func TestChatOpenAIResponsesNonStreamStatusFailed(t *testing.T) {
+	// status "failed" with no error object is still a failure.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"r1","status":"failed","output":[]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
+	_, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "x"}}, nil)
+	if err == nil {
+		t.Fatal("status failed must be an error")
 	}
 }
 
@@ -508,5 +557,37 @@ func TestResponsesURL(t *testing.T) {
 	}
 	if got := responsesURL("http://gw/v1/responses"); got != "http://gw/v1/responses" {
 		t.Fatalf("full=%q", got)
+	}
+}
+
+func TestResponsesStreamReturnsAtCompletedWithoutEOF(t *testing.T) {
+	// response.completed is the final frame; a connection the gateway keeps
+	// open afterwards must not delay the turn.
+	const body = "" +
+		"event: response.output_text.delta\n" +
+		"data: {\"type\":\"response.output_text.delta\",\"item_id\":\"i\",\"output_index\":0,\"delta\":\"ok\"}\n\n" +
+		"event: response.completed\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	msg, err := c.ChatWithStream(ctx, []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if msg.Content != "ok" {
+		t.Fatalf("content=%q", msg.Content)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("stream waited %s for EOF after response.completed", d)
 	}
 }

@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -73,5 +74,29 @@ func TestIdleReaderCancel(t *testing.T) {
 	}()
 	if _, err := ir.Read(make([]byte, 16)); err != context.Canceled {
 		t.Fatalf("want context.Canceled, got %v", err)
+	}
+}
+
+func TestIdleReaderPumpExitsAfterAbandon(t *testing.T) {
+	// After an idle timeout the caller abandons the reader. Once the upstream
+	// Read finally returns (body closed), the pump goroutine must exit rather
+	// than park forever waiting for a request that will never come.
+	br := &blockingReader{block: make(chan struct{})}
+	r := &idleReader{r: br, idle: 20 * time.Millisecond, ctx: context.Background()}
+	base := runtime.NumGoroutine()
+	if _, err := r.Read(make([]byte, 8)); err == nil {
+		t.Fatal("expected idle timeout")
+	}
+	close(br.block) // upstream Read returns EOF now
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > base && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if n := runtime.NumGoroutine(); n > base {
+		t.Fatalf("pump goroutine leaked: %d goroutines, baseline %d", n, base)
+	}
+	// A Read after abandon is a stable error, not a hang or a double close.
+	if _, err := r.Read(make([]byte, 8)); err == nil {
+		t.Fatal("abandoned reader must keep failing")
 	}
 }

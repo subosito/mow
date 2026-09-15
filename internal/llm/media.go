@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path"
 	"path/filepath"
 	"strings"
@@ -185,7 +186,7 @@ func (m *MediaClient) finishVideoResult(ctx context.Context, out VideoResult) (V
 		out.Bytes, out.URL = data, url
 	}
 	if len(out.Bytes) == 0 && out.URL != "" {
-		data, err := fetchURL(ctx, out.URL)
+		data, err := m.fetchURL(ctx, out.URL)
 		if err != nil {
 			return out, err
 		}
@@ -204,7 +205,7 @@ func (m *MediaClient) getVideo(ctx context.Context, model, id string) (json.RawM
 	}
 	u := m.endpoint("/videos/" + path.Base(id))
 	if strings.TrimSpace(model) != "" {
-		u += "?model=" + urlQueryEscape(model)
+		u += "?model=" + url.QueryEscape(model)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -224,11 +225,6 @@ func (m *MediaClient) getVideo(ctx context.Context, model, id string) (json.RawM
 		return nil, fmt.Errorf("llm: HTTP %d: %s", res.StatusCode, truncate(string(body), 400))
 	}
 	return json.RawMessage(append([]byte(nil), body...)), nil
-}
-
-func urlQueryEscape(s string) string {
-	// minimal escape for model ids
-	return strings.ReplaceAll(strings.ReplaceAll(s, " ", "%20"), "+", "%2B")
 }
 
 func parseVideoJob(raw json.RawMessage) (id, status string) {
@@ -314,12 +310,14 @@ func extractVideoMedia(raw json.RawMessage) (data []byte, url string, ok bool) {
 	return nil, "", false
 }
 
-func fetchURL(ctx context.Context, rawURL string) ([]byte, error) {
+// fetchURL downloads a provider-returned media URL with the client's own HTTP
+// client (proxy, timeouts), not http.DefaultClient.
+func (m *MediaClient) fetchURL(ctx context.Context, rawURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := m.httpClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -380,12 +378,8 @@ func (m *MediaClient) Transcribe(ctx context.Context, model, filename string, da
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+m.APIKey)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	for k, v := range m.ExtraHeaders {
-		req.Header.Set(k, v)
-	}
-	req.Header.Set(HeaderComponent, "tool.understand_voice")
+	m.setHeaders(req, "tool.understand_voice")
+	req.Header.Set("Content-Type", w.FormDataContentType()) // multipart, not JSON
 
 	res, err := m.httpClient().Do(req)
 	if err != nil {
@@ -532,9 +526,7 @@ func (m *MediaClient) endpoint(suffix string) string {
 		base = "https://api.openai.com/v1"
 	}
 	// Accept both …/v1 and …/v1/chat/completions style base.
-	if strings.HasSuffix(base, "/chat/completions") {
-		base = strings.TrimSuffix(base, "/chat/completions")
-	}
+	base = strings.TrimSuffix(base, "/chat/completions")
 	// Non-/v1 bases (e.g. Anthropic host root): leave as-is; media routes still need
 	// an OpenAI-shaped /v1 if the operator wants generate_*/understand_* tools.
 	if !strings.HasPrefix(suffix, "/") {

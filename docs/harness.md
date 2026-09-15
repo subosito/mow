@@ -545,6 +545,13 @@ Embedders build a session picker with **`Engine.Sessions()`** → `[]SessionInfo
 
 **LLM HTTP:** chat/stream requests retry up to 3 times on 429 / 5xx / transient network errors (honours `Retry-After` when present).
 
+After a streaming completion event, mow allows up to 250 ms and 64 KiB of
+trailing HTTP data before closing the body. This gives gateways time to finish
+normally instead of observing an immediate client reset after a successful
+answer. Cancellation skips or interrupts that cleanup; a lingering connection
+cannot keep the turn open indefinitely. Gateways should distinguish protocol
+completion from genuine mid-response cancellation when recording status 499.
+
 ---
 
 ## 9. Extending

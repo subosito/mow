@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -100,10 +101,10 @@ func (i *idleReader) Read(p []byte) (int, error) {
 	defer timer.Stop()
 	select {
 	case <-i.ctxDone():
-		i.done = true
+		i.abandon()
 		return 0, i.ctxErr()
 	case <-timer.C:
-		i.done = true
+		i.abandon()
 		return 0, fmt.Errorf("llm: stream idle timeout after %s (no data from upstream)", i.idleDur())
 	case res := <-i.pump:
 		if res.n > 0 {
@@ -124,10 +125,32 @@ func (i *idleReader) Read(p []byte) (int, error) {
 	}
 }
 
-// run pumps one Read per request from Read; it stops as soon as a read fails
-// or the caller abandons it (want is never signalled again).
+// abandon marks the pump unusable after a timeout/cancel and closes want so
+// the pump goroutine exits instead of parking forever on the next request.
+// Read never reaches the channels again once done is set, so want is closed
+// exactly once.
+func (i *idleReader) abandon() {
+	if i.done {
+		return
+	}
+	i.done = true
+	if i.want != nil {
+		close(i.want)
+	}
+}
+
+// run pumps one Read per request from Read; it stops as soon as a read fails,
+// the caller abandons it (want closed), or the parent ctx ends.
 func (i *idleReader) run() {
-	for range i.want {
+	for {
+		select {
+		case _, ok := <-i.want:
+			if !ok {
+				return
+			}
+		case <-i.ctxDone():
+			return
+		}
 		n, err := i.r.Read(i.buf)
 		i.pump <- pumpResult{n, err}
 		if err != nil {
@@ -135,6 +158,13 @@ func (i *idleReader) run() {
 		}
 	}
 }
+
+// errStreamIncomplete is returned when an SSE body ends cleanly before the
+// wire's terminal frame: the connection was dropped mid-generation, and an
+// empty or partial message must not be mistaken for a finished answer.
+// The text is user-facing (surfaced via ACP/CLI as-is): it states the cause,
+// that nothing was persisted, and the next step.
+var errStreamIncomplete = errors.New("llm: provider closed the stream before the reply finished (connection dropped mid-generation; nothing was saved — retry the turn, and check the gateway if it repeats)")
 
 // DeltaFn is called with content token deltas during streaming (may be empty for tool-only chunks).
 type DeltaFn func(delta string)
@@ -309,7 +339,8 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	if err != nil {
 		return Message{}, err
 	}
-	defer res.Body.Close()
+	complete := false
+	defer func() { finishStream(ctx, res.Body, complete) }()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 		return Message{}, fmt.Errorf("llm: HTTP %d: %s", res.StatusCode, truncate(string(b), 300))
@@ -325,11 +356,35 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		args                 strings.Builder
 	}
 	toolsAcc := map[int]*acc{}
+	activity := onceActivity(hooks.OnActivity)
 
 	// Stream HTTP client has Timeout:0 so long generations work; without an idle
 	// bound a silent upstream hangs forever (UI stuck on the last → tool line).
 	streamBody := &idleReader{r: res.Body, idle: streamIdleTimeout, ctx: ctx}
-	sc := bufio.NewScanner(streamBody)
+	defer streamBody.abandon()
+	br := bufio.NewReader(streamBody)
+	// A gateway that ignores stream=true answers with one JSON completion
+	// object. SSE never starts with '{' (frames begin with data:/event:/:),
+	// so decode that body as a plain completion instead of scanning it for
+	// frames that never come and failing as an incomplete stream.
+	if head, _ := br.Peek(16); len(bytes.TrimLeft(head, " \t\r\n")) > 0 && bytes.TrimLeft(head, " \t\r\n")[0] == '{' {
+		b, err := io.ReadAll(io.LimitReader(br, jsonBodyLimit))
+		if err != nil {
+			return Message{}, err
+		}
+		msg, err := parseChatCompletion(res.StatusCode, b)
+		if err != nil {
+			return Message{}, err
+		}
+		if activity != nil {
+			activity()
+		}
+		if msg.Content != "" && hooks.OnContent != nil {
+			hooks.OnContent(msg.Content)
+		}
+		return msg, nil
+	}
+	sc := bufio.NewScanner(br)
 	sc.Buffer(make([]byte, 0, 64*1024), 2<<20)
 	// chunk is reused across deltas (reset before each decode) so a long stream
 	// does not allocate one decode struct per SSE line. dec/decBuf reuse the
@@ -338,7 +393,9 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	var chunk streamChunk
 	decBuf := new(bytes.Reader)
 	dec := json.NewDecoder(decBuf)
-	activity := onceActivity(hooks.OnActivity)
+	// terminal: the stream reached [DONE] or a finish_reason. A clean EOF
+	// before either is a dropped connection, not an empty answer.
+	terminal := false
 	for sc.Scan() {
 		// Bytes (not Text) avoids a string copy per line; the slice is only
 		// valid until the next Scan, and json.Unmarshal copies what it keeps.
@@ -351,6 +408,8 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		}
 		data := bytes.TrimSpace(line[len("data:"):])
 		if string(data) == "[DONE]" {
+			terminal = true
+			complete = true
 			break
 		}
 		chunk.reset()
@@ -384,6 +443,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 		}
 		if fr := chunk.Choices[0].FinishReason; fr != "" {
 			msg.StopReason = fr
+			terminal = true
 		}
 		d := chunk.Choices[0].Delta
 		if d.Content != "" {
@@ -426,6 +486,9 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	if err := sc.Err(); err != nil {
 		return Message{}, err
 	}
+	if !terminal {
+		return Message{}, errStreamIncomplete
+	}
 	msg.Content = content.String()
 	// Order tool calls by index. Some gateways send non-contiguous indices (or
 	// start above 0), so iterate the actual keys in order — never 0..len-1.
@@ -447,12 +510,9 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 			args = "{}"
 		}
 		// A provider that hits its output limit mid-tool-call streams partial
-		// JSON ({"path": "fo). The tool layer would report a confusing parse
-		// failure with no hint that the provider truncated it — surface the
-		// real cause instead and drop the broken call.
-		if msg.StopReason == "length" && !json.Valid([]byte(args)) {
-			return Message{}, fmt.Errorf("llm: provider truncated tool call %s (%s) at output limit; arguments are incomplete JSON", a.name, a.id)
-		}
+		// JSON ({"path": "fo). Keep the call as-is: StopReason "length" makes
+		// msg.Truncated() true and the agent loop answers the batch with a
+		// repair error and lets the model re-issue, as on the other wires.
 		msg.ToolCalls = append(msg.ToolCalls, ToolCall{
 			ID:               a.id,
 			Type:             "function",

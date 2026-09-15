@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -199,8 +200,9 @@ func TestChatStreamHooksFinishReasonLength(t *testing.T) {
 
 func TestChatStreamHooksTruncatedToolCallJSON(t *testing.T) {
 	// Output limit hit mid-tool-call: the arguments stream is partial JSON
-	// ({"path": "fo). Passing that to the tool layer would surface a confusing
-	// parse error — the stream must report the provider truncation instead.
+	// ({"path": "fo). The stream keeps the message with StopReason "length"
+	// so the agent loop's Truncated() branch answers the batch with a repair
+	// error and lets the model re-issue — same as the non-stream wires.
 	const body = "" +
 		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\": \\\"fo\"}}]}}]}\n\n" +
 		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
@@ -212,12 +214,54 @@ func TestChatStreamHooksTruncatedToolCallJSON(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
-	_, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
-	if err == nil {
-		t.Fatal("expected provider truncation error")
+	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "truncated tool call") || !strings.Contains(err.Error(), "read") {
-		t.Fatalf("unexpected error: %v", err)
+	if !msg.Truncated() || len(msg.ToolCalls) != 1 || msg.ToolCalls[0].Function.Name != "read" {
+		t.Fatalf("want truncated message with the partial call kept: stop=%q calls=%+v", msg.StopReason, msg.ToolCalls)
+	}
+}
+
+func TestChatStreamHooksFailsOnEOFBeforeDone(t *testing.T) {
+	// Content arrived, then the connection dropped before finish_reason or
+	// [DONE]. A partial reply must not be returned as a finished answer.
+	const body = "data: {\"choices\":[{\"delta\":{\"content\":\"par\"}}]}\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
+	_, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if !errors.Is(err, errStreamIncomplete) {
+		t.Fatalf("err=%v want errStreamIncomplete", err)
+	}
+	// The message is user-facing: it must say what happened, that nothing
+	// was persisted, and what to do next — not just "stream ended".
+	for _, want := range []string{"before the reply finished", "nothing was saved", "retry"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err=%q must explain the drop and the next step (want %q)", err, want)
+		}
+	}
+}
+
+func TestChatStreamHooksFinishReasonWithoutDoneIsComplete(t *testing.T) {
+	// Some gateways omit [DONE]; a finish_reason already marks completion.
+	const body = "" +
+		"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
+	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err != nil || msg.Content != "ok" {
+		t.Fatalf("msg=%+v err=%v", msg, err)
 	}
 }
 
@@ -353,10 +397,10 @@ func TestUsageParsedAcrossPaths(t *testing.T) {
 
 	t.Run("anthropic stream message_start plus delta", func(t *testing.T) {
 		msg := Message{Role: "assistant"}
-		if err := applyAnthropicSSE(`{"type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":1}}}`, "message_start", &msg, map[int]*anthToolAcc{}, StreamHooks{}); err != nil {
+		if err := applyAnthropicSSE(`{"type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":1}}}`, "message_start", &msg, new(strings.Builder), map[int]*anthToolAcc{}, StreamHooks{}); err != nil {
 			t.Fatal(err)
 		}
-		if err := applyAnthropicSSE(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}`, "message_delta", &msg, map[int]*anthToolAcc{}, StreamHooks{}); err != nil {
+		if err := applyAnthropicSSE(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}`, "message_delta", &msg, new(strings.Builder), map[int]*anthToolAcc{}, StreamHooks{}); err != nil {
 			t.Fatal(err)
 		}
 		if msg.Usage.InputTokens != 12 || msg.Usage.OutputTokens != 9 {
@@ -462,5 +506,26 @@ func TestAppendSnapshotDeltaReplacesGrowingPrefix(t *testing.T) {
 	}
 	if got := buf.String(); got != "Hi there. Next" {
 		t.Fatalf("after incremental buf = %q", got)
+	}
+}
+
+func TestChatStreamHooksAcceptsPlainCompletionBody(t *testing.T) {
+	// A gateway that ignores stream=true answers with one JSON completion.
+	// That is a finished answer, not an incomplete stream.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"plain ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client()}
+	var got strings.Builder
+	msg, err := c.ChatStreamHooks(context.Background(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+		OnContent: func(d string) { got.WriteString(d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Content != "plain ok" || got.String() != "plain ok" || msg.StopReason != "stop" || msg.Usage.InputTokens != 2 {
+		t.Fatalf("msg=%+v delta=%q", msg, got.String())
 	}
 }

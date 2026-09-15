@@ -75,8 +75,7 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 		return Message{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", c.APIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
+	c.setAnthropicAuth(req)
 	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}

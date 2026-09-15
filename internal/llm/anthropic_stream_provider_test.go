@@ -31,7 +31,7 @@ data: {"delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`,
 		lines := strings.SplitN(ev, "\n", 2)
 		name := strings.TrimPrefix(lines[0], "event: ")
 		data := strings.TrimPrefix(lines[1], "data: ")
-		if err := applyAnthropicSSE(data, name, &msg, toolsByIdx, StreamHooks{}); err != nil {
+		if err := applyAnthropicSSE(data, name, &msg, new(strings.Builder), toolsByIdx, StreamHooks{}); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}

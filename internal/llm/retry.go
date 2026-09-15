@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -141,8 +142,10 @@ func (c *Client) callTimeout() time.Duration {
 	return defaultCallTimeout
 }
 
-// doHTTPStream retries a replayable request using a long-lived client when
-// c.HTTP is nil.
+// doHTTPStream retries a replayable request. When c.HTTP is nil it uses a
+// shared stream client (one per first-byte timeout, built lazily and kept for
+// the process lifetime so connections are pooled across calls instead of a
+// fresh Transport per request).
 // Timeout is 0 for the overall body (streams can run for minutes) but dial and
 // response-header waits are bounded so a silent gateway cannot freeze forever.
 // The response-header (first-byte) bound is c.FirstByteTimeout (default
@@ -151,9 +154,25 @@ func (c *Client) callTimeout() time.Duration {
 func (c *Client) doHTTPStream(req *http.Request) (*http.Response, error) {
 	hc := c.HTTP
 	if hc == nil {
-		hc = streamHTTPClient(c.firstByteTimeout())
+		hc = sharedStreamClient(c.firstByteTimeout())
 	}
 	return doWithRetry(hc, req, maxHTTPAttempts, c.OnRetry)
+}
+
+// streamClients caches stream clients by first-byte timeout. Client is copied
+// by value (the engine clones it per model switch), so the cache cannot live
+// on Client itself.
+var streamClients sync.Map // time.Duration -> *http.Client
+
+func sharedStreamClient(firstByte time.Duration) *http.Client {
+	if firstByte <= 0 {
+		firstByte = defaultFirstByteTimeout
+	}
+	if hc, ok := streamClients.Load(firstByte); ok {
+		return hc.(*http.Client)
+	}
+	hc, _ := streamClients.LoadOrStore(firstByte, streamHTTPClient(firstByte))
+	return hc.(*http.Client)
 }
 
 // streamHTTPClient: no overall Timeout (SSE can be long); bound connect +
@@ -208,24 +227,21 @@ func doWithRetry(hc *http.Client, req *http.Request, attempts int, onRetry func(
 			wait = 0
 		}
 		res, err := hc.Do(req)
+		// g is the generic attempt index: connection-refused retries have their
+		// own budget below and must not eat (or overshoot) this one.
+		g := i - refused
 		if err != nil {
-			// ResponseHeaderTimeout is a complete first-byte wait, not a short
-			// transient attempt. Return one actionable diagnostic instead of
-			// multiplying a five-minute bound across generic retries.
-			if responseHeaderTimedOut(err) {
-				return nil, fmt.Errorf("llm: timed out after %s waiting for response headers/first byte (configure llm.first_byte_timeout_sec to allow more pre-first-byte think time): %w", headerTimeoutBound(hc), err)
-			}
-			if !retryableNetErr(err) {
-				return nil, err
-			}
 			// A first-byte timeout (ResponseHeaderTimeout) is a hard,
 			// non-retried failure: the model spent the whole budget thinking
 			// before emitting a byte, and retrying would just wait the same
 			// span again — multiplying a 5-minute think into 15. Return a
 			// diagnostic error that names the bound and the configured
 			// duration without leaking the request URL or credentials.
-			if isHeaderTimeout(err) {
-				return nil, fmt.Errorf("llm: timed out after %s waiting for response headers/first byte (configure llm.first_byte_timeout_sec to allow more pre-first-byte think time)", headerTimeoutBound(hc))
+			if responseHeaderTimedOut(err) {
+				return nil, fmt.Errorf("llm: timed out after %s waiting for response headers/first byte (configure llm.first_byte_timeout_sec to allow more pre-first-byte think time): %w", headerTimeoutBound(hc), err)
+			}
+			if !retryableNetErr(err) {
+				return nil, err
 			}
 			// Connection refused = upstream down/restarting: survive the bounce
 			// with a much longer window than generic transients (the generic
@@ -239,16 +255,16 @@ func doWithRetry(hc *http.Client, req *http.Request, attempts int, onRetry func(
 				notifyRetry(onRetry, RetryInfo{Attempt: refused, Delay: wait, Kind: RetryKindUnavailable})
 				continue
 			}
-			if i == attempts-1 {
+			if g >= attempts-1 {
 				return nil, hostSafeTransport(err)
 			}
-			wait = retryDelay(i+1, nil)
-			notifyRetry(onRetry, RetryInfo{Attempt: i + 1, Delay: wait, Kind: RetryKindNetwork})
+			wait = retryDelay(g+1, nil)
+			notifyRetry(onRetry, RetryInfo{Attempt: g + 1, Delay: wait, Kind: RetryKindNetwork})
 			continue
 		}
-		if retryableStatus(res.StatusCode) && i < attempts-1 {
-			wait = retryDelay(i+1, res)
-			notifyRetry(onRetry, RetryInfo{Attempt: i + 1, Delay: wait, Status: res.StatusCode, Kind: RetryKindBusy})
+		if retryableStatus(res.StatusCode) && g < attempts-1 {
+			wait = retryDelay(g+1, res)
+			notifyRetry(onRetry, RetryInfo{Attempt: g + 1, Delay: wait, Status: res.StatusCode, Kind: RetryKindBusy})
 			_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 1<<20))
 			res.Body.Close()
 			continue
@@ -257,30 +273,11 @@ func doWithRetry(hc *http.Client, req *http.Request, attempts int, onRetry func(
 	}
 }
 
-// isHeaderTimeout reports whether err is a ResponseHeaderTimeout firing. On
-// HTTP/1 the transport wraps it as a net.Error whose Timeout() is true; on
-// HTTP/2 (x/net) it surfaces as a context deadline or a response-header
-// timeout error string. We match conservatively so a genuine caller deadline
-// (context.DeadlineExceeded) is NOT treated as a first-byte timeout — those
-// are already classified as non-retryable by retryableNetErr.
-func isHeaderTimeout(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	if ne, ok := errors.AsType[net.Error](err); ok && ne.Timeout() {
-		s := err.Error()
-		if strings.Contains(s, "response header") || strings.Contains(s, "timeout awaiting response") {
-			return true
-		}
-	}
-	return false
-}
-
-// headerTimeoutBound returns the configured ResponseHeaderTimeout on the
-// client's transport, or the default when it cannot be read.
+// responseHeaderTimedOut reports whether err is a ResponseHeaderTimeout
+// firing. Both HTTP/1 and HTTP/2 transports carry net/http's exact "timeout
+// awaiting response headers" text, so the string is the one reliable signal;
+// a genuine caller deadline (context.DeadlineExceeded) never matches it and
+// stays non-retryable via retryableNetErr.
 func responseHeaderTimedOut(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
@@ -288,6 +285,8 @@ func responseHeaderTimedOut(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "timeout awaiting response headers")
 }
 
+// headerTimeoutBound returns the configured ResponseHeaderTimeout on the
+// client's transport, or the default when it cannot be read.
 func headerTimeoutBound(hc *http.Client) time.Duration {
 	if hc != nil {
 		if t, ok := hc.Transport.(*http.Transport); ok && t != nil {
@@ -342,7 +341,7 @@ func hostSafeTransport(err error) error {
 	if errors.As(err, &already) {
 		return err
 	}
-	if responseHeaderTimedOut(err) || isHeaderTimeout(err) {
+	if responseHeaderTimedOut(err) {
 		return err
 	}
 	s := err.Error()
