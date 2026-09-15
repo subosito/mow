@@ -71,7 +71,8 @@ export OPENAI_MODEL=gpt-5-mini
 
 ./bin/mow run -p "Reply with exactly: hi"         # ext/cli
 ./bin/mow models                                  # catalog: id, wire, efforts
-./bin/mow tty                                     # optional ext/tty
+./bin/mow                                         # interactive session (ext/tty)
+./bin/mow tty                                     # explicit interactive session
 ./bin/mow acp                                     # ext/acp — ACP agent + extras
 ./bin/mow goal new --id fix-ci --goal "Make CI green"   # ext/goal
 ./bin/mow help                                # linked commands, dynamically

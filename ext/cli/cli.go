@@ -153,7 +153,7 @@ func reservedCLIToken(name string) bool {
 		return false
 	}
 	switch n {
-	case "run", "tty", "trust", "doctor", "approvals", "models", "version", "help",
+	case "run", "chat", "tty", "trust", "doctor", "approvals", "models", "version", "help",
 		"rpc", "ops", "repl", "acp", "goal", "review", "sec", "job", "proc",
 		"mcp", "media", "focus", "plugin":
 		return true

@@ -49,7 +49,7 @@ func TestLeanHelpListsLeanCommands(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d\n%s", code, output)
 	}
-	for _, want := range []string{"mow acp", "mow mcp", "mow goal", "Extensions (this binary):"} {
+	for _, want := range []string{"mow acp", "mow mcp", "mow tty", "mow goal", "Extensions (this binary):"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("lean help missing %q:\n%s", want, output)
 		}
@@ -57,10 +57,21 @@ func TestLeanHelpListsLeanCommands(t *testing.T) {
 	if strings.Contains(output, "Packs (this binary):") {
 		t.Errorf("stock binary must not link application packs:\n%s", output)
 	}
-	for _, notWant := range []string{"mow ops", "mow review", "mow job", "mow media", "mow proc", "mow plugin"} {
+	for _, notWant := range []string{"mow ops", "mow review", "mow job", "mow media", "mow proc", "mow plugin", "mow chat"} {
 		if strings.Contains(output, notWant) {
 			t.Errorf("help unexpectedly lists %q:\n%s", notWant, output)
 		}
+	}
+}
+
+func TestTTYWithoutChatAlias(t *testing.T) {
+	output, code := runMow(t, "tty", "help")
+	if code != 0 || !strings.Contains(output, "mow tty") {
+		t.Fatalf("tty help: code=%d %s", code, output)
+	}
+	output, code = runMow(t, "chat")
+	if code != 2 || !strings.Contains(output, `unknown command "chat"`) {
+		t.Fatalf("old command must not run or become a prompt: code=%d %s", code, output)
 	}
 }
 

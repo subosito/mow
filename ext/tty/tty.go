@@ -2,10 +2,10 @@
 package tty
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/reeflective/readline"
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/ext"
@@ -21,10 +22,11 @@ import (
 
 func init() {
 	ext.RegisterCommand(ext.Command{
-		Name:    "tty",
-		Summary: "interactive line session",
-		Layer:   "ext",
-		Run:     runCmd,
+		Name:               "tty",
+		Summary:            "interactive conversation",
+		Layer:              "ext",
+		DefaultInteractive: true,
+		Run:                runCmd,
 	})
 }
 
@@ -36,6 +38,8 @@ func runCmd(args []string) int {
 	fs := cliutil.NewFlagSet("tty")
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
+	interactive := interactiveTerminal()
+	ef.Stream = interactive
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -43,35 +47,72 @@ func runCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "mow tty: %v\n", err)
 		return 2
 	}
-	eng, err := mow.NewHarness(ef.OptionsCLI())
+	output := newRenderer(os.Stdout, os.Stderr, interactive, colorEnabled(), ef.Verbose)
+	opt := ef.Options()
+	cliutil.EnableVerbose(ef.Verbose)
+	opt.OnEvent = output.event
+	if ef.Stream {
+		opt.OnToken = output.token
+	}
+	eng, err := mow.NewHarness(opt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mow tty: %v\n", err)
 		return 1
 	}
 	defer eng.Close() // tear down session-scoped resources (ext/proc procs) on exit
-	fmt.Fprintln(os.Stderr, "mow tty — line session (not the full TUI); empty line or /quit to exit; Ctrl+C aborts the current turn")
-	fmt.Fprintln(os.Stderr, "  /btw <question>  ask an aside without adding it to context")
-	fmt.Fprintln(os.Stderr, "  /model [id]      list models or switch (catalog wire when present)")
-	if ef.Stream {
-		fmt.Fprintln(os.Stderr, "(token stream on stderr via --stream)")
+	if interactive {
+		permissions := "read only"
+		if eng.AllowWrite() {
+			permissions = "write enabled"
+		}
+		if eng.AllowShell() {
+			permissions += ", shell enabled"
+		}
+		fmt.Fprintf(os.Stderr, "\nmow tty  %s\n%s  [%s]\n\n", safeText(eng.Model()), safeText(eng.Workspace()), permissions)
 	}
 	// --continue / --session use the same Options path as mow run; surface that here.
 	printSession(eng, ef)
-	sc := bufio.NewScanner(os.Stdin)
-	// Pasted prompts can be long; the 64 KB default would end the REPL silently.
-	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
+	input := newInput(os.Stdin, interactive)
+	defer input.close()
+	ctx, terminate := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer terminate()
+	// Input is cancellable too, including while the editor has the terminal raw.
+	inputDone := make(chan struct{})
+	defer close(inputDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			input.close()
+		case <-inputDone:
+		}
+	}()
 	for {
-		fmt.Fprint(os.Stderr, "mow> ")
-		if !sc.Scan() {
+		line, readErr := input.read()
+		if ctx.Err() != nil {
+			return 143
+		}
+		if errors.Is(readErr, readline.ErrInterrupt) {
+			continue
+		}
+		if errors.Is(readErr, io.EOF) {
 			break
 		}
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || line == "/quit" || line == "/exit" {
+		if readErr != nil {
+			fmt.Fprintf(os.Stderr, "mow tty: input: %v\n", readErr)
+			return 1
+		}
+		line = strings.TrimSpace(line)
+		if line == "/quit" || line == "/exit" {
 			break
 		}
+		if line == "" {
+			continue
+		}
+		pctx, stop := signal.NotifyContext(ctx, syscall.SIGINT)
 		// Slash meta-commands (not sent to the model).
 		if strings.HasPrefix(line, "/") {
-			if handled, err := handleSlash(context.Background(), eng, line); handled {
+			if handled, err := handleSlash(pctx, eng, line); handled {
+				stop()
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "mow: %v\n", err)
 				}
@@ -81,24 +122,23 @@ func runCmd(args []string) int {
 		// /btw <text>: an aside answered against context but not persisted, so it
 		// never re-enters a later prompt. Handy for a quick side question.
 		btw := false
-		if rest, ok := strings.CutPrefix(line, "/btw"); ok {
-			line = strings.TrimSpace(rest)
+		if fields := strings.Fields(line); fields[0] == "/btw" {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "/btw"))
 			if line == "" {
+				stop()
 				fmt.Fprintln(os.Stderr, "usage: /btw <question>  (aside — not added to context)")
 				continue
 			}
 			btw = true
 			fmt.Fprintln(os.Stderr, "(btw — this exchange won't be kept in context)")
 		}
-		if ef.Stream {
-			fmt.Fprint(os.Stderr, "\n")
-		}
 		// Surface approximate input cost when context is already large.
 		cliutil.PrintPromptCostEstimate(eng)
 		// Per-prompt cancel: first Ctrl+C aborts this turn only; session stays up.
-		pctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		output.begin()
 		res, err := eng.PromptWith(pctx, line, mow.PromptOpts{Ephemeral: btw})
 		stop()
+		output.finish(res.Text)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				fmt.Fprintln(os.Stderr, "mow: cancelled")
@@ -106,15 +146,9 @@ func runCmd(args []string) int {
 				fmt.Fprintf(os.Stderr, "mow: %v\n", err)
 			}
 		}
-		if res.Text != "" {
-			if ef.Stream {
-				fmt.Fprint(os.Stderr, "\n")
-			}
-			fmt.Println(res.Text)
+		if ctx.Err() != nil {
+			return 143
 		}
-	}
-	if err := sc.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "mow tty: stdin: %v\n", err)
 	}
 	printSessionExit(eng, ef)
 	return 0
@@ -164,9 +198,8 @@ func runSlash(ctx context.Context, eng *mow.Engine, c slash.Command, parts []str
 		Args:      parts[1:],
 		Engine:    eng,
 		Workspace: ws,
-		// A plain terminal is exactly where ANSI belongs; the TUI is the one
-		// that turns this off.
-		Color: true,
+		// Respect redirection and NO_COLOR for extension-owned rendering too.
+		Color: colorEnabled(),
 	}
 	res, err := c.Run(ctx, req)
 	if err != nil {
@@ -312,6 +345,12 @@ func printSession(eng *mow.Engine, ef cliutil.EngineFlags) {
 	tr := eng.Transcript()
 	if wantResume && len(tr) > 0 {
 		fmt.Fprintf(os.Stderr, "session=%s resumed (%d message(s))\n", sid, len(tr))
+		if !interactiveTerminal() {
+			return
+		}
+		if len(tr) > 6 {
+			tr = tr[len(tr)-6:]
+		}
 		for _, m := range tr {
 			role := m.Role
 			if role == "" {
@@ -323,7 +362,7 @@ func printSession(eng *mow.Engine, ef cliutil.EngineFlags) {
 				r := []rune(text)
 				text = string(r[:max-1]) + "…"
 			}
-			fmt.Fprintf(os.Stderr, "  %s: %s\n", role, text)
+			fmt.Fprintf(os.Stderr, "  %s: %s\n", safeText(role), safeText(text))
 		}
 		return
 	}
@@ -346,7 +385,6 @@ func printSessionExit(eng *mow.Engine, ef cliutil.EngineFlags) {
 	}
 	fmt.Fprintf(os.Stderr, "session=%s\n", sid)
 	fmt.Fprintf(os.Stderr, "resume: mow tty --session %s\n", sid)
-	fmt.Fprintf(os.Stderr, "        mow tty --continue\n")
 }
 
 func printUsage() {
@@ -356,11 +394,16 @@ func printUsage() {
 
   /model [id]     list or switch models
   /btw <q>        aside (not kept in context)
-  /quit           exit (empty line also exits)
-  Ctrl+C          cancel current turn
+  /quit           exit
+  Ctrl+C          cancel the turn or clear input
+  Ctrl+D          exit at an empty prompt
+  Ctrl+J          insert a newline
+  Tab             complete slash commands
+  Up / Ctrl+R     recall or search this session's input history
 
 Flags: same as mow run.
-  --stream --continue --session ID
+  --stream=false  disable streaming (on by default in a terminal)
+  --continue --session ID
 
 `)
 }

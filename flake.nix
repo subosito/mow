@@ -18,7 +18,7 @@
             pname = "mow";
             inherit version;
             src = lib.cleanSource ./.;
-            vendorHash = "sha256-T0KmN00q6lGo8LHKiBdmSveSMSLykCWi1pxCqkqE1Rs=";
+            vendorHash = "sha256-+oRUoXaLcc8P62eDB7T5tvImZf7rOa0ab5x19ShYWPw=";
             subPackages = [ "cmd/mow" ];
             env.CGO_ENABLED = "0";
             env.GOWORK = "off";
