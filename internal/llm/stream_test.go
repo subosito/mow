@@ -238,9 +238,9 @@ func TestChatStreamHooksFailsOnEOFBeforeDone(t *testing.T) {
 	if !errors.Is(err, errStreamIncomplete) {
 		t.Fatalf("err=%v want errStreamIncomplete", err)
 	}
-	// The message is user-facing: it must say what happened, that nothing
-	// was persisted, and what to do next — not just "stream ended".
-	for _, want := range []string{"before the reply finished", "nothing was saved", "retry"} {
+	// Explain uncertainty and preserve the distinction between the partial
+	// reply and earlier persisted tool work. Diagnostics contain counts only.
+	for _, want := range []string{"before completion was confirmed", "earlier tool work may be saved", "retry", "frames=1", "content_bytes=3"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("err=%q must explain the drop and the next step (want %q)", err, want)
 		}

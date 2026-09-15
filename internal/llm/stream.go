@@ -161,12 +161,10 @@ func (i *idleReader) run() {
 	}
 }
 
-// errStreamIncomplete is returned when an SSE body ends cleanly before the
-// wire's terminal frame: the connection was dropped mid-generation, and an
-// empty or partial message must not be mistaken for a finished answer.
-// The text is user-facing (surfaced via ACP/CLI as-is): it states the cause,
-// that nothing was persisted, and the next step.
-var errStreamIncomplete = errors.New("llm: provider closed the stream before the reply finished (connection dropped mid-generation; nothing was saved — retry the turn, and check the gateway if it repeats)")
+// errStreamIncomplete means EOF arrived without a recognized completion signal.
+// It does not establish whether the provider stopped generating or a gateway
+// omitted the terminal frame. Earlier turns and tool effects may already persist.
+var errStreamIncomplete = errors.New("llm: stream ended before completion was confirmed (partial reply not committed; earlier tool work may be saved — retry to continue, and check provider/gateway logs if it repeats)")
 
 // DeltaFn is called with content token deltas during streaming (may be empty for tool-only chunks).
 type DeltaFn func(delta string)
@@ -394,6 +392,8 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	// terminal: the stream reached [DONE] or a finish_reason. A clean EOF
 	// before either is a dropped connection, not an empty answer.
 	terminal := false
+	frames, malformed := 0, 0
+	started := time.Now()
 	for sc.Scan() {
 		// Bytes (not Text) avoids a string copy per line; the slice is only
 		// valid until the next Scan, and json.Unmarshal copies what it keeps.
@@ -410,9 +410,11 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 			complete = true
 			break
 		}
+		frames++
 		chunk.reset()
 		decBuf.Reset(data)
 		if err := dec.Decode(&chunk); err != nil {
+			malformed++
 			// Re-sync the decoder: a malformed line must not poison later ones.
 			dec = json.NewDecoder(decBuf)
 			continue
@@ -481,12 +483,20 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 			}
 		}
 	}
-	if err := sc.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return Message{}, err
 	}
 	if !terminal {
-		return Message{}, errStreamIncomplete
+		if err := sc.Err(); err != nil {
+			return Message{}, err
+		}
+		// Counts only: never include prompt text, tool arguments, or headers.
+		return Message{}, fmt.Errorf("%w [wire=chat-completions frames=%d malformed=%d content_bytes=%d tool_calls=%d elapsed=%s]",
+			errStreamIncomplete, frames, malformed, content.Len(), len(toolsAcc), time.Since(started).Round(time.Millisecond))
 	}
+	// A finish_reason confirms generation completed even if the optional
+	// usage/[DONE] tail is cut short by a transport error. Keep collected usage.
+	complete = true
 	msg.Content = content.String()
 	// Order tool calls by index. Some gateways send non-contiguous indices (or
 	// start above 0), so iterate the actual keys in order — never 0..len-1.
