@@ -73,3 +73,31 @@ func TestBundleIsRedacted(t *testing.T) {
 		t.Fatalf("not a trace file:\n%s", body)
 	}
 }
+
+func TestCheckConfigParsesYAML(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	cases := []struct {
+		name string
+		body string
+		ok   bool
+	}{
+		{"valid yaml", "llm:\n  model: m\n", true},
+		{"invalid yaml", "llm: [not: closed\n", false},
+		{"empty", "  \n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			c := checkConfig(home)
+			if c.OK != tc.ok {
+				t.Fatalf("ok=%v want %v (%s)", c.OK, tc.ok, c.Detail)
+			}
+			if !tc.ok && strings.Contains(c.Detail, "closed") {
+				t.Fatalf("detail echoes file content: %s", c.Detail)
+			}
+		})
+	}
+}

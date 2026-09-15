@@ -1,10 +1,12 @@
 package contextload
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestLoadHierarchy(t *testing.T) {
@@ -13,6 +15,11 @@ func TestLoadHierarchy(t *testing.T) {
 	tmpDir := t.TempDir()
 	subDir := filepath.Join(tmpDir, "child", "subchild")
 	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// The walk stops at the enclosing git root, so mark tmpDir as one.
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -237,5 +244,146 @@ func TestProjectTrustedHelper(t *testing.T) {
 	// Non-trusted directory
 	if ProjectTrusted(t.TempDir()) {
 		t.Error("expected temp dir to not be trusted by default")
+	}
+}
+
+func TestReadFileCappedTruncatesLargeFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cases := []struct {
+		name  string
+		body  []byte
+		trunc bool
+	}{
+		{"small", []byte("# rules\n"), false},
+		{"exactly cap", bytes.Repeat([]byte("a"), maxContextFileBytes), false},
+		{"over cap", bytes.Repeat([]byte("a"), maxContextFileBytes+10), true},
+		// A multibyte rune straddling the cap must not leave a torn byte.
+		{"multibyte at cap", append(bytes.Repeat([]byte("a"), maxContextFileBytes-1), []byte("é…")...), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "_"))
+			if err := os.WriteFile(path, tc.body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := readFileCapped(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !utf8.Valid(got) {
+				t.Fatal("result is not valid UTF-8")
+			}
+			if has := bytes.HasSuffix(got, []byte(truncatedMarker)); has != tc.trunc {
+				t.Fatalf("truncated=%v want %v (len=%d)", has, tc.trunc, len(got))
+			}
+			if !tc.trunc && !bytes.Equal(got, tc.body) {
+				t.Fatal("small file altered")
+			}
+			if tc.trunc && len(got) > maxContextFileBytes+len(truncatedMarker) {
+				t.Fatalf("len=%d exceeds cap", len(got))
+			}
+		})
+	}
+	// The AGENTS.md loader and the skill collector both go through the cap.
+	ws := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(filepath.Join(ws, ".mow", "skills", "big"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	big := bytes.Repeat([]byte("x"), maxContextFileBytes+1)
+	if err := os.WriteFile(filepath.Join(ws, "AGENTS.md"), big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".mow", "skills", "big", "SKILL.md"), append([]byte("---\nname: big\n---\n"), big...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := readTrimmed(filepath.Join(ws, "AGENTS.md")); !strings.HasSuffix(got, strings.TrimSpace(truncatedMarker)) {
+		t.Fatal("AGENTS.md not truncated")
+	}
+	if got := LoadSkills([]string{filepath.Join(ws, ".mow", "skills")}); !strings.Contains(got, "[truncated") {
+		t.Fatal("SKILL.md not truncated")
+	}
+}
+
+func TestLoadStopsAtGitRoot(t *testing.T) {
+	t.Parallel()
+
+	outside := t.TempDir()
+	repo := filepath.Join(outside, "repo")
+	sub := filepath.Join(repo, "pkg")
+	if err := os.MkdirAll(filepath.Join(sub, "x"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(outside, "AGENTS.md"), []byte("# Outside instructions\n"), 0600)
+	_ = os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("# Repo instructions\n"), 0600)
+	_ = os.WriteFile(filepath.Join(sub, "AGENTS.md"), []byte("# Pkg instructions\n"), 0600)
+
+	res, err := Load(sub)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if strings.Contains(res, "Outside instructions") {
+		t.Errorf("walked above the git root:\n%s", res)
+	}
+	if !strings.Contains(res, "Repo instructions") || !strings.Contains(res, "Pkg instructions") {
+		t.Errorf("missing repo/workspace instructions:\n%s", res)
+	}
+}
+
+func TestLoadStopsAtHomeWithoutGitRoot(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "home")
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("MOW_HOME", filepath.Join(home, ".mow"))
+
+	ws := filepath.Join(home, "work", "proj")
+	if err := os.MkdirAll(ws, 0755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(base, "AGENTS.md"), []byte("# Above home\n"), 0600)
+	_ = os.WriteFile(filepath.Join(home, "AGENTS.md"), []byte("# Home instructions\n"), 0600)
+	_ = os.WriteFile(filepath.Join(ws, "AGENTS.md"), []byte("# Proj instructions\n"), 0600)
+
+	res, err := Load(ws)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if strings.Contains(res, "Above home") {
+		t.Errorf("walked above $HOME:\n%s", res)
+	}
+	if !strings.Contains(res, "Home instructions") || !strings.Contains(res, "Proj instructions") {
+		t.Errorf("missing home/workspace instructions:\n%s", res)
+	}
+}
+
+func TestLoadHermeticStopsAtWorkspace(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	ws := filepath.Join(repo, "sub")
+	if err := os.MkdirAll(ws, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("# Parent instructions\n"), 0600)
+	_ = os.WriteFile(filepath.Join(ws, "AGENTS.md"), []byte("# Workspace instructions\n"), 0600)
+
+	res, err := LoadHermetic(ws)
+	if err != nil {
+		t.Fatalf("LoadHermetic: %v", err)
+	}
+	if strings.Contains(res, "Parent instructions") {
+		t.Errorf("hermetic load walked to the parent:\n%s", res)
+	}
+	if !strings.Contains(res, "Workspace instructions") {
+		t.Errorf("missing workspace instructions:\n%s", res)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/subosito/mow/internal/config"
 	"github.com/subosito/mow/internal/proc"
 	"github.com/subosito/mow/internal/tools"
+	"gopkg.in/yaml.v3"
 )
 
 // Check is one diagnostic row.
@@ -73,15 +74,15 @@ func checkConfig(home string) Check {
 		}
 		return Check{Name: "config", OK: false, Detail: err.Error()}
 	}
-	var raw any
-	if err := json.Unmarshal(b, &raw); err != nil {
-		// yaml, not json — try a light presence check only
-		if len(strings.TrimSpace(string(b))) == 0 {
-			return Check{Name: "config", OK: false, Detail: path + " is empty"}
-		}
-		return Check{Name: "config", OK: true, Detail: fmt.Sprintf("%s (%d B)", path, len(b))}
+	if len(strings.TrimSpace(string(b))) == 0 {
+		return Check{Name: "config", OK: false, Detail: path + " is empty"}
 	}
-	return Check{Name: "config", OK: true, Detail: path}
+	var f config.File
+	if err := yaml.Unmarshal(b, &f); err != nil {
+		// Report the failure without echoing file content (it may hold keys).
+		return Check{Name: "config", OK: false, Detail: fmt.Sprintf("%s: invalid yaml: %v", path, err)}
+	}
+	return Check{Name: "config", OK: true, Detail: fmt.Sprintf("%s (%d B)", path, len(b))}
 }
 
 func checkTools() Check {

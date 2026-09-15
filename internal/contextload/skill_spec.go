@@ -66,10 +66,7 @@ func parseSkillMarkdown(folder, raw string) SkillInfo {
 }
 
 func splitFrontmatter(raw string) (front, body string, ok bool) {
-	s := raw
-	if strings.HasPrefix(s, "\ufeff") {
-		s = strings.TrimPrefix(s, "\ufeff")
-	}
+	s := strings.TrimPrefix(raw, "\ufeff")
 	if !strings.HasPrefix(s, "---") {
 		return "", raw, false
 	}

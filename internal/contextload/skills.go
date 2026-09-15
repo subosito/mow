@@ -144,7 +144,7 @@ func collectSkills(dirs []string, keep skillFilter) []SkillInfo {
 			if !ok {
 				continue
 			}
-			raw, err := os.ReadFile(path)
+			raw, err := readFileCapped(path)
 			if err != nil {
 				continue
 			}

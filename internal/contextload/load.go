@@ -2,14 +2,17 @@
 package contextload
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/subosito/mow/internal/config"
 )
 
-// Load walks from workspace up to root collecting instruction files, then
+// Load walks from workspace up to the enclosing boundary (see stopDir)
+// collecting instruction files, then
 // prepends optional global layers when includeGlobal is true:
 // ~/.agents/AGENTS.md (shared base) then $MOW_HOME/AGENTS.md (mow overlay).
 func Load(workspace string) (string, error) {
@@ -19,7 +22,9 @@ func Load(workspace string) (string, error) {
 // LoadHermetic is Load without global home files (~/.agents/AGENTS.md and
 // $MOW_HOME/AGENTS.md). Used by hermetic Engine construction
 // (Options.LoadUserConfig=false) so embedding never pulls operator-home
-// instructions. Workspace-chain files still load (project files).
+// instructions. The workspace's own files still load; the ancestor walk stops
+// at the workspace so an embedding host never inherits a parent directory's
+// AGENTS.md.
 func LoadHermetic(workspace string) (string, error) {
 	return loadAgents(workspace, false)
 }
@@ -52,6 +57,7 @@ func loadAgents(workspace string, includeGlobal bool, extraPaths ...string) (str
 	if err != nil {
 		return "", err
 	}
+	stop := stopDir(dir, includeGlobal)
 	var layers [][]string
 	for {
 		var layer []string
@@ -68,7 +74,7 @@ func loadAgents(workspace string, includeGlobal bool, extraPaths ...string) (str
 			layers = append(layers, layer)
 		}
 		parent := filepath.Dir(dir)
-		if parent == dir {
+		if parent == dir || dir == stop {
 			break
 		}
 		dir = parent
@@ -80,12 +86,78 @@ func loadAgents(workspace string, includeGlobal bool, extraPaths ...string) (str
 	return strings.Join(parts, "\n\n"), nil
 }
 
+// stopDir returns the highest directory the instruction walk may read.
+// Ancestors above it are someone else's context: walking to / picked up an
+// AGENTS.md from an unrelated parent checkout, $HOME, or even /, and fed it to
+// the model as project instructions.
+//
+// Hermetic engines (LoadUserConfig=false) stay in the workspace itself.
+// Otherwise the boundary is the nearest enclosing git root (a directory with
+// a .git entry) — the repo the workspace belongs to — and $HOME when there is
+// none. Never above either: a workspace outside both stops at itself.
+func stopDir(workspace string, includeGlobal bool) string {
+	if !includeGlobal {
+		return workspace
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		if abs, err := filepath.Abs(home); err == nil {
+			home = abs
+		}
+	}
+	for dir := workspace; ; {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		if home != "" && dir == home {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Outside $HOME with no git root above: keep to the workspace.
+			return workspace
+		}
+		dir = parent
+	}
+}
+
 func readTrimmed(path string) string {
-	b, err := os.ReadFile(path)
+	b, err := readFileCapped(path)
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+// maxContextFileBytes caps one instruction or skill file. These files go into
+// the system prompt verbatim; an oversized (or accidentally binary) file must
+// not swallow the context window.
+const maxContextFileBytes = 256 << 10
+
+// truncatedMarker is appended so the model (and the operator reading the
+// prompt) can see the file was cut rather than silently shortened.
+const truncatedMarker = "\n\n[truncated: file exceeds 256 KiB]"
+
+// readFileCapped reads at most maxContextFileBytes of path, appending
+// truncatedMarker when the file is larger. The cut lands on a rune boundary.
+func readFileCapped(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxContextFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) <= maxContextFileBytes {
+		return b, nil
+	}
+	b = b[:maxContextFileBytes]
+	for len(b) > 0 && !utf8.Valid(b[max(0, len(b)-utf8.UTFMax):]) {
+		b = b[:len(b)-1]
+	}
+	return append(b, truncatedMarker...), nil
 }
 
 // ProjectTrusted reports whether the workspace has opted into project-local
