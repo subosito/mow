@@ -35,6 +35,9 @@ func TestSyncEffortToModelDropsPinnedEffortWhenUnsupported(t *testing.T) {
 	if c.Effort != "medium" {
 		t.Fatalf("unsupported pinned effort = %q, want default medium", c.Effort)
 	}
+	if c.EffortPinned {
+		t.Fatal("catalog fallback must not remain pinned")
+	}
 }
 
 func TestSyncEffortToModelNoCatalogEffortsClearsLeftover(t *testing.T) {
@@ -45,6 +48,9 @@ func TestSyncEffortToModelNoCatalogEffortsClearsLeftover(t *testing.T) {
 	c.SyncEffortToModel("model-b")
 	if c.Effort != "" {
 		t.Fatalf("effort = %q, want empty when catalog has no efforts", c.Effort)
+	}
+	if c.EffortPinned {
+		t.Fatal("catalog fallback must not remain pinned")
 	}
 }
 

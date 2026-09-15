@@ -782,6 +782,11 @@ func New(opt Options) (*Engine, error) {
 				if norm != "" {
 					if e.client != nil {
 						e.client.Effort = norm
+						// A resumed tier is an operator choice: pin it so a later
+						// catalog refresh (ListModels → SyncEffortToModel) keeps it
+						// when the model allows it instead of snapping back to
+						// default_effort mid-session.
+						e.client.EffortPinned = true
 					}
 					if e.cfg != nil {
 						e.cfg.LLM.Effort = norm

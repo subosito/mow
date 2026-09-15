@@ -82,11 +82,11 @@ func (e *Engine) SetModel(id string) error {
 	if strings.TrimSpace(e.client.Effort) == "" && eff != "" {
 		e.client.Effort = eff
 		e.client.EffortPinned = true
-	} else if eff == "" {
-		// A catalog pick (kimi-k3, not kimi-k3-high) should take that
-		// model's default_effort, not keep grok's leftover "high" as pinned.
-		e.client.EffortPinned = false
 	}
+	// A lean catalog pick never clears an explicit pin: SyncEffortToModel
+	// below keeps a pinned tier the new model allows and adopts the new
+	// default_effort otherwise, so /effort and resumed session effort survive
+	// model switches instead of snapping back to default mid-session.
 	// Align effort with catalog efforts for this model (default_effort when needed).
 	e.client.SyncEffortToModel(id)
 	if e.cfg != nil {
@@ -465,10 +465,10 @@ func (e *Engine) applyAutoEffort(text string) (restore func()) {
 	}
 	e.mu.Lock()
 	// An explicit operator choice is never second-guessed. EffortPinned is
-	// set by SetEffort (/effort, config llm.effort, MOW_EFFORT) and cleared
-	// when a catalog model pick supplies the tier via default_effort. So the
-	// downshift only ever applies to a tier mow chose on the user's behalf,
-	// not to one the user asked for.
+	// set by SetEffort (/effort, config llm.effort, MOW_EFFORT) and by session
+	// resume, and survives lean model picks when the new model allows the
+	// tier. So the downshift only ever applies to a tier mow chose on the
+	// user's behalf, not to one the user asked for.
 	if e.client != nil && e.client.EffortPinned {
 		e.mu.Unlock()
 		return noop

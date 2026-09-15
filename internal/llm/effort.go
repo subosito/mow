@@ -434,6 +434,8 @@ func (c *Client) SyncEffortToModel(model string) {
 		// claude-opus). A failed / empty GET /models must not blank
 		// a real configured effort.
 		if _, ok := c.CatalogEntry(model); ok {
+			// Catalog-derived, not the operator's original choice.
+			c.EffortPinned = false
 			if def != "" {
 				c.Effort = def
 				return
@@ -457,6 +459,10 @@ func (c *Client) SyncEffortToModel(model string) {
 	if c.EffortPinned && allows(cur) {
 		return
 	}
+	// Once an explicit tier is not valid for this model, any value selected
+	// below is catalog-derived rather than the operator's original choice.
+	// Do not carry a stale pin into the next model switch.
+	c.EffortPinned = false
 	if def != "" {
 		c.Effort = def
 		return
