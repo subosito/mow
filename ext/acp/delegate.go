@@ -443,6 +443,12 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	cmd := peerCommand(spec, host, dir)
 	perm := effectivePermissionMode(spec)
 	key := peerKey(spec.Name, dir, cmd, perm)
+	// Fail fast on a native peer naming a model the catalog never advertised:
+	// without this a typo spawns a peer that can never succeed, and the call
+	// looks "ok" (running…) until the full timeout expires.
+	if err := validateNativePeerModel(pctx, spec); err != nil {
+		return "", err
+	}
 	slot, err := t.getOrStart(pctx, spec, dir, host, cmd, perm, key)
 	if err != nil {
 		return "", err
@@ -581,6 +587,42 @@ func delegatePromptError(agent string, timeoutSec int, alive bool, err error) er
 		msg += ": " + err.Error()
 	}
 	return errors.New(msg)
+}
+
+// validateNativePeerModel rejects a native peer whose model is not in the
+// host catalog, before a process is spawned. External command peers are
+// untouched (mow does not rewrite their argv). Validation is best-effort:
+// an unavailable catalog, or a single-entry fallback list from a Chat/Provider
+// inject (which only echoes the current model), skips the check and lets the
+// peer itself fail fast.
+func validateNativePeerModel(ctx context.Context, spec PeerSpec) error {
+	model := strings.TrimSpace(spec.Model)
+	if model == "" {
+		return nil
+	}
+	eng := mow.EngineFromContext(ctx)
+	if eng == nil {
+		return nil
+	}
+	// A peer with its own provider uses a different catalog from the host.
+	// Without a public cross-provider catalog API, rejecting against the
+	// host's rows would turn valid peer models into false failures.
+	if provider := strings.TrimSpace(spec.Provider); provider != "" &&
+		!strings.EqualFold(provider, strings.TrimSpace(eng.LLMProvider())) {
+		return nil
+	}
+	list, err := eng.ListModels(ctx)
+	if err != nil || len(list) == 0 {
+		return nil
+	}
+	chat := mow.FilterChatModels(list)
+	if len(chat) == 0 {
+		return nil
+	}
+	if _, ok := matchCatalogModel(chat, model); !ok {
+		return fmt.Errorf("delegate: unknown model %q for agent %q (not in the chat catalog; check extensions.acp.peers)", model, spec.Name)
+	}
+	return nil
 }
 
 func (t *delegateTool) getOrStart(ctx context.Context, spec PeerSpec, dir string, host *hostPeerPolicy, cmd []string, perm, key string) (*peerSlot, error) {

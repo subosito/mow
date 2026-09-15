@@ -138,6 +138,70 @@ func effortInList(effort string, list []string) bool {
 	return false
 }
 
+// matchCatalogModel resolves a model value against a loaded catalog.
+// Exact (case-insensitive) ids win; a legacy tier suffix (…-low|medium|high)
+// or a single provider prefix (cs/model ↔ model) still matches so picker
+// pastes keep working. The second result is false when the catalog is loaded
+// but names no such model — callers reject that fast instead of letting a
+// typo hang the next prompt until timeout.
+func matchCatalogModel(list []mow.ModelInfo, value string) (mow.ModelInfo, bool) {
+	value = strings.TrimSpace(value)
+	for _, m := range list {
+		if strings.EqualFold(strings.TrimSpace(m.ID), value) {
+			return m, true
+		}
+	}
+	// Preserve an explicit provider prefix while removing a legacy effort
+	// suffix. Only fall back to a prefix-insensitive match afterward.
+	base := stripEffortTier(value)
+	if m, ok := uniqueCatalogModel(list, func(id string) bool {
+		return strings.EqualFold(stripEffortTier(id), base)
+	}); ok {
+		return m, true
+	}
+	bare := stripProviderPrefix(base)
+	return uniqueCatalogModel(list, func(id string) bool {
+		return strings.EqualFold(stripProviderPrefix(stripEffortTier(id)), bare)
+	})
+}
+
+// uniqueCatalogModel refuses an ambiguous prefix-insensitive match. Exact
+// provider-qualified values are handled before this helper.
+func uniqueCatalogModel(list []mow.ModelInfo, match func(string) bool) (mow.ModelInfo, bool) {
+	var found mow.ModelInfo
+	ok := false
+	for _, m := range list {
+		if !match(strings.TrimSpace(m.ID)) {
+			continue
+		}
+		if ok {
+			return mow.ModelInfo{}, false
+		}
+		found, ok = m, true
+	}
+	return found, ok
+}
+
+// stripEffortTier removes a trailing -low|-medium|-high tier from a model id.
+func stripEffortTier(id string) string {
+	lower := strings.ToLower(strings.TrimSpace(id))
+	for _, tier := range []string{"-low", "-medium", "-high"} {
+		if strings.HasSuffix(lower, tier) {
+			return strings.TrimSpace(id[:len(id)-len(tier)])
+		}
+	}
+	return strings.TrimSpace(id)
+}
+
+// stripProviderPrefix drops a single leading provider prefix (cs/model → model).
+func stripProviderPrefix(id string) string {
+	id = strings.TrimSpace(id)
+	if i := strings.IndexByte(id, '/'); i > 0 && i < len(id)-1 {
+		return id[i+1:]
+	}
+	return id
+}
+
 func modeConfigOption(current string) map[string]any {
 	if current != ModeAsk && current != ModeCode {
 		current = ModeCode
@@ -304,14 +368,13 @@ func (a *agentServer) applyModelConfig(ctx context.Context, value string) error 
 		return ctx.Err()
 	}
 	wire := ""
-	if err == nil {
-		for _, m := range list {
-			if strings.EqualFold(m.ID, value) {
-				value = m.ID
-				wire = m.Wire
-				break
-			}
+	if err == nil && len(list) > 0 {
+		m, ok := matchCatalogModel(list, value)
+		if !ok {
+			return fmt.Errorf("unknown model %q (not in the catalog)", strings.TrimSpace(value))
 		}
+		value = m.ID
+		wire = m.Wire
 	}
 	if err := a.eng.SetModelWithWire(value, wire); err != nil {
 		// Custom Provider may implement ModelSwitcher but not live wire switch.

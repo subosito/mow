@@ -64,3 +64,22 @@ func TestCallFailsWhenPeerExits(t *testing.T) {
 		t.Fatalf("call hung too long after peer exit: %v", time.Since(start))
 	}
 }
+
+func TestStartFailsWhenPeerNeverSpeaksACP(t *testing.T) {
+	c := &Client{Command: []string{"sleep", "60"}}
+	defer func() { _ = c.Close() }()
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := c.Start(ctx)
+	if err == nil {
+		t.Fatal("expected handshake error when peer never speaks ACP")
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Fatalf("Start hung too long: %v", time.Since(start))
+	}
+	if c.Alive() {
+		t.Fatal("dead handshake must close the peer")
+	}
+}

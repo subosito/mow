@@ -86,7 +86,10 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 		return "", appendStderrHint(fmt.Errorf("acp client start: %w", err), c.stderrTail())
 	}
 
-	_, err = c.call(ctx, "initialize", map[string]any{
+	hctx, hcancel := handshakeContext(ctx)
+	defer hcancel()
+
+	_, err = c.call(hctx, "initialize", map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"clientInfo": map[string]any{
 			"name": "mow", "version": mow.Version,
@@ -104,7 +107,7 @@ func (c *Client) Start(ctx context.Context) (sessionID string, err error) {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	res, err := c.call(ctx, "session/new", map[string]any{
+	res, err := c.call(hctx, "session/new", map[string]any{
 		"cwd":        cwd,
 		"mcpServers": []any{},
 	})
@@ -201,6 +204,21 @@ func (c *Client) startProcess() error {
 		c.readLoop()
 	}()
 	return nil
+}
+
+// handshakeTimeout caps initialize + session/new so a peer that never speaks
+// ACP (typo model, wedged binary) fails instead of looking "ok" until the
+// full delegate timeout.
+const handshakeTimeout = 30 * time.Second
+
+func handshakeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= handshakeTimeout {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, handshakeTimeout)
 }
 
 // cancelGrace is how long we wait after session/cancel for the peer to finish
