@@ -3,12 +3,14 @@ package goal
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"text/tabwriter"
+	"unicode/utf8"
 
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/ext"
@@ -113,6 +115,18 @@ func cmdRun(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	// The default budget applies to new goals only; a resume keeps its
+	// stored max_steps unless --max-steps was passed explicitly.
+	maxStepsSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "max-steps" {
+			maxStepsSet = true
+		}
+	})
+	raise := 0
+	if maxStepsSet {
+		raise = *maxSteps
+	}
 
 	// Tool progress + stream/verbose same as mow run/repl.
 	eng, err := ef.NewEngineCLI()
@@ -139,10 +153,10 @@ func cmdRun(args []string) int {
 		// Human gate: answer a blocked goal's escalation and resume the run.
 		st, err = r.ResumeAnswer(ctx, *id, *answer)
 	case strings.TrimSpace(*goalText) != "":
-		st, err = r.RunSpec(ctx, Spec{ID: *id, Goal: *goalText, MaxSteps: *maxSteps})
+		st, err = r.RunSpec(ctx, Spec{ID: *id, Goal: *goalText, MaxSteps: raise})
 	case strings.TrimSpace(*id) != "":
 		// --max-steps N raises the stored budget when N is larger (continue past 16/16).
-		st, err = r.RunRaise(ctx, *id, *maxSteps)
+		st, err = r.RunRaise(ctx, *id, raise)
 	default:
 		fmt.Fprintln(os.Stderr, "mow goal run: need --id, --goal, or --answer")
 		return 2
@@ -204,8 +218,8 @@ func cmdList(args []string) int {
 	fmt.Fprintln(tw, "ID\tSTATUS\tSTEP\tUPDATED\tGOAL")
 	for _, st := range list {
 		g := st.Goal
-		if len(g) > 48 {
-			g = g[:45] + "…"
+		if utf8.RuneCountInString(g) > 48 {
+			g = truncateRunes(g, 45)
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%d/%d\t%s\t%s\n",
 			st.ID, st.Status, st.Step, st.MaxSteps,

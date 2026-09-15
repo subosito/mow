@@ -3,6 +3,7 @@ package goal
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -68,6 +69,13 @@ func TestIsTransientLLM(t *testing.T) {
 	}
 	if isTransientLLM(fmt.Errorf("llm: HTTP 400: bad request")) {
 		t.Fatal("400 should not be transient")
+	}
+	// "eof" as a token, not as a substring of ordinary words.
+	if !isTransientLLM(fmt.Errorf("llm: read: unexpected EOF")) || !isTransientLLM(fmt.Errorf("llm: %w", io.EOF)) {
+		t.Fatal("EOF should be transient")
+	}
+	if isTransientLLM(fmt.Errorf("llm: HTTP 400: invalid schema: missing field thereof")) {
+		t.Fatal("'thereof' must not match eof")
 	}
 }
 

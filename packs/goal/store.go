@@ -215,6 +215,12 @@ func (s *Store) Reset(id string) (State, error) {
 	st.SessionID = ""
 	st.LastReply = ""
 	st.CurrentItem = ""
+	st.StartedAt = time.Time{}
+	st.InputTokens = 0
+	st.OutputTokens = 0
+	st.RetryCount = 0
+	st.Partial = ""
+	st.Question = ""
 	for i := range st.Plan.Items {
 		st.Plan.Items[i].Status = ItemPending
 		st.Plan.Items[i].Note = ""

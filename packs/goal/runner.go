@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/subosito/mow"
@@ -156,11 +158,15 @@ func (r *Runner) ResumeAnswer(ctx context.Context, id, answer string) (State, er
 }
 
 // RunSpec creates (or resumes incomplete) then runs.
-// On resume, MaxSteps is the max of stored and spec.MaxSteps so CLI can raise the budget.
+// On resume, MaxSteps is the max of stored and spec.MaxSteps so CLI can raise
+// the budget; spec.MaxSteps <= 0 means "not requested" and never raises a
+// stored budget (the default only applies to new goals). A Blocked goal needs
+// ResumeAnswer; a Done goal is started fresh (use Store.Reset to keep history).
 func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 	if r == nil || r.Engine == nil {
 		return State{}, fmt.Errorf("goal: nil engine")
 	}
+	requestedMaxSteps := spec.MaxSteps
 	spec, err := NormalizeSpec(spec)
 	if err != nil {
 		return State{}, err
@@ -177,14 +183,26 @@ func (r *Runner) RunSpec(ctx context.Context, spec Spec) (State, error) {
 		MaxDurationMs:  spec.MaxDuration.Milliseconds(),
 	}
 	if prev, err := r.store().Load(spec.ID); err == nil {
-		if prev.Status == StatusRunning || prev.Status == StatusPending || prev.Status == StatusFailed {
+		switch prev.Status {
+		case StatusBlocked:
+			return prev, fmt.Errorf("goal %s is blocked: %s (resume with --answer)", prev.ID, strings.TrimSpace(prev.Question))
+		case StatusRunning, StatusPending, StatusFailed, StatusPartial:
 			if strings.TrimSpace(prev.Goal) == "" {
 				prev.Goal = spec.Goal
 			}
 			if strings.TrimSpace(prev.Workspace) == "" {
 				prev.Workspace = r.workspace()
 			}
-			prev = applyMaxStepsRaise(prev, spec.MaxSteps)
+			if prev.Status == StatusPartial {
+				// Resume from where the partial stop left off; the loop
+				// re-checks step/token/clock budgets on entry.
+				prev.Status = StatusPending
+				prev.Partial = ""
+				prev.Error = ""
+			}
+			if requestedMaxSteps > 0 {
+				prev = applyMaxStepsRaise(prev, spec.MaxSteps)
+			}
 			if spec.ParallelMax > 0 {
 				prev.ParallelMax = spec.ParallelMax
 			}
@@ -287,9 +305,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 	st.Status = StatusRunning
 	st.Error = ""
 	setRunOwner(&st)
-	if st.StartedAt.IsZero() {
-		st.StartedAt = time.Now().UTC()
-	}
+	// StartedAt is the current run's clock: a day-later resume must not
+	// trip MaxDuration on its first step.
+	st.StartedAt = time.Now().UTC()
 	if st.SessionID == "" && r.Engine != nil {
 		st.SessionID = r.Engine.SessionID()
 	}
@@ -511,6 +529,7 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		case OutcomeDone:
 			st.Status = StatusDone
 			st.Error = ""
+			st.RetryCount = 0
 			_ = r.store().Save(st)
 			r.fire(Event{Kind: EventDone, State: st, Text: "goal complete"})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "done", Status: st.Status, Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan), Outcome: string(OutcomeDone)})
@@ -527,7 +546,8 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error, Outcome: string(OutcomeFailed)})
 			return st, fmt.Errorf("goal failed: %s", st.Error)
 		default:
-			// continue
+			// continue — progress breaks the retry_same streak.
+			st.RetryCount = 0
 			_ = r.store().Save(st)
 			r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d", st.Step, st.MaxSteps)})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "step", Status: st.Status, Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan), Outcome: string(OutcomeContinue)})
@@ -566,10 +586,7 @@ func PartialSummaryFor(st State) string {
 	}
 	line := fmt.Sprintf("done %d/%d items, %d missing", done, done+missing, missing)
 	if best != "" {
-		if len(best) > 80 {
-			best = best[:80] + "…"
-		}
-		line += " — best: " + best
+		line += " — best: " + truncateRunes(best, 80)
 	}
 	return line
 }
@@ -611,11 +628,30 @@ func isTransientLLM(err error) bool {
 		"http 429", "http 502", "http 503", "http 504", "http 500",
 		"upstream error", "bad gateway", "service unavailable", "gateway timeout",
 		"too many requests", "connection reset", "connection refused",
-		"tls handshake timeout", "i/o timeout", "eof",
+		"tls handshake timeout", "i/o timeout", "unexpected eof",
 	} {
 		if strings.Contains(s, p) {
 			return true
 		}
+	}
+	// A bare "EOF" is matched as a token, not a substring: "eof" occurs
+	// inside ordinary words (e.g. "thereof") and model text.
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || hasWord(s, "eof")
+}
+
+// hasWord reports whether w occurs in s delimited by non-letters.
+func hasWord(s, w string) bool {
+	for i := strings.Index(s, w); i >= 0; {
+		before := i == 0 || !unicode.IsLetter(rune(s[i-1]))
+		after := i+len(w) == len(s) || !unicode.IsLetter(rune(s[i+len(w)]))
+		if before && after {
+			return true
+		}
+		j := strings.Index(s[i+1:], w)
+		if j < 0 {
+			return false
+		}
+		i += 1 + j
 	}
 	return false
 }
@@ -659,8 +695,12 @@ func pickSummary(reportSummary string, eng *mow.Engine, finalText string) string
 }
 
 func (r *Runner) fire(e Event) {
+	if r == nil {
+		emit(e, nil)
+		return
+	}
 	emit(e, r.OnEvent)
-	if r == nil || r.Engine == nil {
+	if r.Engine == nil {
 		return
 	}
 	var eventType mow.EventType

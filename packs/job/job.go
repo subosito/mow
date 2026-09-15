@@ -358,8 +358,16 @@ func (d *Daemon) fire(ctx context.Context, j Job) {
 	if g := strings.TrimSpace(j.Goal); g != "" {
 		store := d.goalStore()
 		if prev, err := store.Load(g); err == nil {
-			switch prev.Status {
-			case goal.StatusDone:
+			switch {
+			case prev.Status == goal.StatusBlocked:
+				status = "blocked"
+				d.log(fmt.Sprintf("job %s skip: goal %s is blocked (resume with --answer)", j.ID, g))
+				return
+			case prev.Status == goal.StatusDone, prev.Status == goal.StatusPartial,
+				prev.Status == goal.StatusFailed, prev.MaxSteps > 0 && prev.Step >= prev.MaxSteps:
+				// A recurring job re-runs finished goals: Done, but also a
+				// Partial/Failed one or a goal at its step ceiling, which
+				// would otherwise re-error on every tick forever.
 				// Store.Reset also restores plan items; a hand-rolled
 				// Status=pending write left checklists marked done.
 				if _, err := store.Reset(g); err != nil {
@@ -367,10 +375,6 @@ func (d *Daemon) fire(ctx context.Context, j Job) {
 					return
 				}
 				d.log(fmt.Sprintf("job %s goal %s reset for re-run", j.ID, g))
-			case goal.StatusBlocked:
-				status = "blocked"
-				d.log(fmt.Sprintf("job %s skip: goal %s is blocked (resume with --answer)", j.ID, g))
-				return
 			}
 		} else if !os.IsNotExist(err) {
 			tickErr = err.Error()

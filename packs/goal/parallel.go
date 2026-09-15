@@ -2,9 +2,12 @@ package goal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/subosito/mow"
 )
 
 // MaxParallelWidth caps Spec.ParallelMax: more concurrent engines than this
@@ -93,23 +96,25 @@ func (r *Runner) runParallelStep(ctx context.Context, exec *Executor, st State, 
 	for i, item := range items {
 		wg.Go(func() {
 			out[i].Item = item
-			eng, err := r.EngineFactory()
-			if err != nil {
-				out[i].Err = fmt.Errorf("goal: parallel engine: %w", err)
-				cancel()
-				return
-			}
-			defer eng.Close()
-			// Each sub-step gets its own Executor+Engine; RunStep builds its
-			// own finishSignal and stores it in its own derived context, so
-			// the signal is per-goroutine (never shared across sub-steps).
-			sub := &Executor{Engine: eng, StoreDir: exec.StoreDir}
 			var res StepResult
+			var err error
 			if isWorktreeItem(item) {
 				// Worktree items bring their own engine (rooted in the
-				// checkout), so the factory engine above is unused here.
-				res, err = r.runWorktreeItem(runCtx, sub, st, item)
+				// checkout); the fallback path needs only StoreDir.
+				res, err = r.runWorktreeItem(runCtx, &Executor{StoreDir: exec.StoreDir}, st, item)
 			} else {
+				var eng *mow.Engine
+				eng, err = r.EngineFactory()
+				if err != nil {
+					out[i].Err = fmt.Errorf("goal: parallel engine: %w", err)
+					cancel()
+					return
+				}
+				defer eng.Close()
+				// Each sub-step gets its own Executor+Engine; RunStep builds
+				// its own finishSignal and stores it in its own derived
+				// context, so the signal is per-goroutine (never shared).
+				sub := &Executor{Engine: eng, StoreDir: exec.StoreDir}
 				res, err = sub.RunStep(runCtx, subState(st, item))
 			}
 			out[i].Res, out[i].Err = res, err
@@ -130,13 +135,23 @@ type parallelOutcome struct {
 	Err  error
 }
 
+// firstParallelErr returns the root cause: the first error that is not a
+// context.Canceled — siblings are cancelled once one item fails, so their
+// Canceled errors would otherwise mask it in item order.
 func firstParallelErr(subs []parallelOutcome) error {
+	var first error
 	for _, s := range subs {
-		if s.Err != nil {
+		if s.Err == nil {
+			continue
+		}
+		if first == nil {
+			first = s.Err
+		}
+		if !errors.Is(s.Err, context.Canceled) {
 			return s.Err
 		}
 	}
-	return nil
+	return first
 }
 
 // joinParallel merges sub-step results into the parent step result:

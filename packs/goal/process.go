@@ -49,6 +49,19 @@ func ProcessTools() []mow.Tool {
 	return []mow.Tool{procStartTool{}, procStatusTool{}, procStopTool{}}
 }
 
+// requireShell resolves the engine and enforces --allow-shell: a goal
+// background process is arbitrary shell, same trust decision as bash.
+func requireShell(ctx context.Context) (*mow.Engine, error) {
+	eng := mow.EngineFromContext(ctx)
+	if eng == nil {
+		return nil, errors.New("error: goal_process_start needs the engine context")
+	}
+	if !eng.AllowShell() {
+		return nil, errors.New("error: goal_process_start requires --allow-shell (it runs shell commands)")
+	}
+	return eng, nil
+}
+
 type procStartTool struct{}
 
 func (procStartTool) Name() string { return "goal_process_start" }
@@ -65,13 +78,23 @@ func (procStartTool) Exec(ctx context.Context, args json.RawMessage) (string, er
 	if !ok {
 		return "goal_process_start ignored (no active goal)", nil
 	}
+	// Same trust bar as bash / proc_start: the command runs under a shell,
+	// so --allow-shell is the decision, and the sandbox (when on) applies.
+	eng, err := requireShell(ctx)
+	if err != nil {
+		return err.Error(), nil
+	}
 	var a struct {
 		ID, Command, Log string
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	info, err := mow.ProcStart(procDir(scope.Root, scope.GoalID), a.ID, a.Command, a.Log, "")
+	box, err := eng.ShellSandbox()
+	if err != nil {
+		return "error: " + err.Error(), nil
+	}
+	info, err := mow.ProcStart(procDir(scope.Root, scope.GoalID), a.ID, a.Command, a.Log, eng.Workspace(), box)
 	if errors.Is(err, mow.ProcErrAlreadyRunning) {
 		return fmt.Sprintf("already running id=%s pid=%d", info.ID, info.PID), nil
 	}

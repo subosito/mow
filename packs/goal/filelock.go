@@ -121,10 +121,6 @@ func writeLockOwner(f *os.File) error {
 	return f.Sync()
 }
 
-// staleLockMaxAge is how old a lock file may be before !unix platforms may
-// reclaim it when PID liveness cannot be probed portably.
-const staleLockMaxAge = 72 * time.Hour
-
 // maxLockMetaBytes bounds PID/host metadata reads so a planted lock file
 // cannot be ReadFile'd unbounded during stale reclaim.
 const maxLockMetaBytes = 4096
@@ -188,17 +184,4 @@ func parseLockHost(s string) string {
 		}
 	}
 	return ""
-}
-
-func parseLockTime(s string) (time.Time, bool) {
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "ats=") {
-			t, err := time.Parse(time.RFC3339, strings.TrimSpace(strings.TrimPrefix(line, "ats=")))
-			if err == nil {
-				return t, true
-			}
-		}
-	}
-	return time.Time{}, false
 }

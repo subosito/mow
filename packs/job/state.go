@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/subosito/mow"
 )
@@ -173,8 +174,8 @@ func FormatTick(st TickState) string {
 	if st.LastError != "" && st.LastStatus != "ok" {
 		b.WriteByte(' ')
 		err := st.LastError
-		if len(err) > 40 {
-			err = err[:40] + "…"
+		if utf8.RuneCountInString(err) > 40 {
+			err = string([]rune(err)[:40]) + "…"
 		}
 		b.WriteString(err)
 	}

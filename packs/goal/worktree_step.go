@@ -113,6 +113,19 @@ func (r *Runner) runWorktreeItem(ctx context.Context, exec *Executor, st State, 
 func (r *Runner) fallbackStep(ctx context.Context, exec *Executor, st State, item PlanItem, why string) (StepResult, error) {
 	note := "worktree isolation skipped (" + why + ")"
 	r.fire(Event{Kind: EventStep, State: st, Text: note})
+	if exec.Engine == nil {
+		// Parallel callers defer the engine until it is actually needed:
+		// a worktree item that isolates never uses this one.
+		if r.EngineFactory == nil {
+			return StepResult{}, fmt.Errorf("goal: no engine for fallback step %q", item.ID)
+		}
+		eng, err := r.EngineFactory()
+		if err != nil {
+			return StepResult{}, fmt.Errorf("goal: parallel engine: %w", err)
+		}
+		defer eng.Close()
+		exec = &Executor{Engine: eng, StoreDir: exec.StoreDir}
+	}
 	res, err := exec.RunStep(ctx, subState(st, item))
 	res.Plan = mergeSubPlan(st.Plan, res.Plan, item)
 	if err != nil {

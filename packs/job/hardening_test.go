@@ -267,3 +267,43 @@ func TestCmdCheckDuplicateIDs(t *testing.T) {
 		t.Fatalf("duplicate ids should fail check, code=%d", code)
 	}
 }
+
+// A recurring job whose goal ended Partial (or at its step ceiling) must be
+// reset like a Done one, or every tick re-errors on the same exhausted goal.
+func TestFireResetsPartialAndCappedGoals(t *testing.T) {
+	for name, prev := range map[string]goal.State{
+		"partial": {Status: goal.StatusPartial, Partial: "done 1/2", Step: 3, MaxSteps: 8},
+		"failed":  {Status: goal.StatusFailed, Error: "model reported failure", Step: 3, MaxSteps: 8},
+		"capped":  {Status: goal.StatusPending, Step: 8, MaxSteps: 8},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := &goal.Store{Dir: t.TempDir()}
+			prev.ID, prev.Goal = "goal-x", "do task"
+			if err := store.Save(prev); err != nil {
+				t.Fatal(err)
+			}
+			var chats atomic.Int32
+			d := &Daemon{
+				GoalStore: store,
+				NewEngine: func() (*mow.Engine, error) {
+					return mow.New(mow.Options{
+						NoSession: true,
+						Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+							chats.Add(1)
+							return mow.Message{Role: "assistant", Content: "done\nGOAL_DONE"}, nil
+						},
+					})
+				},
+				OnLog: func(string) {},
+			}
+			d.fire(context.Background(), Job{ID: "j", Goal: "goal-x"})
+			got, err := store.Load("goal-x")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if chats.Load() == 0 || got.Status != goal.StatusDone || got.Step != 1 {
+				t.Fatalf("goal not reset and re-run: chats=%d state=%+v", chats.Load(), got)
+			}
+		})
+	}
+}
