@@ -61,3 +61,16 @@ and write/shell flags. A profile may only **narrow** those; it must not grant
 write, shell, roots, credentials, or a different workspace. Peer pool reuse is
 keyed by agent + cwd + argv so a capability change cannot reuse a more
 privileged process.
+
+
+Plugin activation remains automatic on discovery. Plugin manifests choose
+automatic skills with `default-skills` or `always`; other skills stay available
+for explicit activation. In mowi, `/skills`, `/plugins`, and `/mcps` show status.
+
+Each plugin skill can be invoked as `/skill-name` or `/plugin-id:skill-name`.
+Plugins may also provide `commands/*.md` (optional YAML description frontmatter)
+or `commands/*.toml` (`description` and `prompt` strings). A command matching
+a skill name activates that skill before running its prompt. `$ARGUMENTS`
+is replaced with the invocation arguments; otherwise arguments are appended.
+Templates are prompt text: shell interpolation and command-file permission
+directives are not executed. Invalid command files are skipped.

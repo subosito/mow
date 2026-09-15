@@ -40,6 +40,7 @@ type CompactReport = engine.CompactReport
 type SessionInfo = engine.SessionInfo
 type SkillInfo = engine.SkillInfo
 type PluginInfo = engine.PluginInfo
+type PluginCommand = engine.PluginCommand
 type PluginMCPServer = engine.PluginMCPServer
 
 type EventType = engine.EventType

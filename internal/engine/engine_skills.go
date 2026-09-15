@@ -155,7 +155,9 @@ func (e *Engine) ActivateSkills(names ...string) (activated, unknown []string) {
 	// already-loaded skill is a no-op for the prompt.
 	e.skillsText = mergeSkillText(e.skillsText, loaded)
 	e.sys = e.recomposeSystemLocked()
-	e.skillsLoaded = true
+	// Preserve the first-prompt selector and plugin defaults when activation
+	// happens before the first prompt. Keep manual selections in that merge.
+	e.explicitSkills = mergeSkillNames(e.explicitSkills, activated)
 	sort.Strings(activated)
 	return activated, unknown
 }
@@ -187,4 +189,36 @@ func (e *Engine) AvailablePlugins() []PluginInfo {
 		return nil
 	}
 	return contextload.ListPlugins(e.pluginRoots)
+}
+
+// SkillStatuses distinguishes available skills from loaded or scheduled defaults.
+func (e *Engine) SkillStatuses() map[string]string {
+	infos := e.AvailableSkillInfos()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	loaded := map[string]bool{}
+	for _, line := range strings.Split(e.skillsText, "\n") {
+		if strings.HasPrefix(line, "## skill: ") {
+			loaded[strings.ToLower(strings.TrimPrefix(line, "## skill: "))] = true
+		}
+	}
+	defaults := map[string]bool{}
+	for _, name := range e.explicitSkills {
+		defaults[strings.ToLower(name)] = true
+	}
+	out := map[string]string{}
+	for _, info := range infos {
+		state := "available"
+		if info.DisableModelInvocation {
+			state = "manual"
+		}
+		if !e.skillsLoaded && (!e.skillSelect || defaults[strings.ToLower(info.Folder)] || defaults[strings.ToLower(info.Name)]) {
+			state = "enabled (next prompt)"
+		}
+		if loaded[strings.ToLower(info.Name)] || loaded[strings.ToLower(info.Folder)] {
+			state = "loaded"
+		}
+		out[info.Folder] = state
+	}
+	return out
 }

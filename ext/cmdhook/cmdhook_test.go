@@ -172,6 +172,7 @@ func TestContextModeRealHook(t *testing.T) {
 }
 
 func TestHostPluginHooksDiscoversInstalledPlugin(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	home := t.TempDir()
 	t.Setenv("MOW_HOME", home)
 	dir := filepath.Join(home, "plugins", "context-mode")

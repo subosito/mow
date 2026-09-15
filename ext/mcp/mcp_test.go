@@ -86,7 +86,7 @@ func TestMergePluginMCPServersYAMLWinsOnName(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"name":"context-mode","mcpServers":{"context-mode":{"command":"node","args":["start.mjs"]}}}`
+	manifest := `{"name":"context-mode","mcpServers":{"context-mode":{"command":"node","args":["start.mjs"],"prompt":"Use semantic search.\nThen read source."}}}`
 	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +102,9 @@ func TestMergePluginMCPServersYAMLWinsOnName(t *testing.T) {
 	got = mergePluginMCPServers(nil, []string{userCfg})
 	if len(got) != 1 || got[0].Name != "context-mode" || got[0].Command != "node" {
 		t.Fatalf("plugin should fill empty yaml: %+v", got)
+	}
+	if got[0].Prompt != "Use semantic search.\nThen read source." {
+		t.Fatalf("plugin prompt lost: %q", got[0].Prompt)
 	}
 	if got[0].Env["CLAUDE_PLUGIN_ROOT"] == "" {
 		t.Fatal("plugin root env missing")

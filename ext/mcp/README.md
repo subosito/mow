@@ -23,7 +23,8 @@ No slash commands. Client instances register with `min_turns` (dormant until tha
 
 Host-owned Agent Plugins (`$MOW_HOME/plugins`, workspace profile `plugins/`)
 that declare `mcpServers` in `plugin.json` (or `.claude-plugin/plugin.json`)
-are started automatically. YAML / `mcp.json` of the same server name wins so a
+are started automatically. Plugin server entries can include `prompt` guidance alongside the transport.
+YAML / `mcp.json` of the same server name wins so a
 plugin is not spawned twice. Project `.mow/plugins` is skills-only — MCP does
 not auto-start from the workspace. `${CLAUDE_PLUGIN_ROOT}` is expanded and
 exported to the server (the plugin folder). Unless the process or the plugin's
@@ -51,6 +52,9 @@ extensions:
         # timeout_sec: 30  # tools/call bound; omit = 30s; -1 = wait until turn cancel
       remote:
         url: https://mcp.example/mcp
+        prompt: |
+          Use this server for conceptual workspace searches.
+          Prefer grep for exact symbols and strings.
         insecure: false
         headers: {}
         auth:
@@ -70,7 +74,14 @@ extensions:
     #     command: npx
 ```
 
-Per-server keys: `name`, `command`, `args`, `env`, `url`, `insecure`, `headers`, `auth`, `min_turns`, `timeout_sec`. Stdio uses `command`; streamable HTTP uses `url`. `timeout_sec` bounds one `tools/call` (default 30s). Set `-1` to wait until the turn is cancelled. A silent stdio server otherwise pins the turn.
+Per-server keys: `name`, `command`, `args`, `env`, `url`, `insecure`, `headers`, `auth`, `min_turns`, `timeout_sec`, `prompt`. Stdio uses `command`; streamable HTTP uses `url`. `timeout_sec` bounds one `tools/call` (default 30s). Set `-1` to wait until the turn is cancelled. A silent stdio server otherwise pins the turn.
+
+`prompt` is optional operator-authored guidance, appended to the system prompt
+for each request while the server is active. It uses the same `min_turns` and
+enabled-state checks as the server tools. Blank prompts add nothing. Replacing
+a server replaces its guidance; failed setup does not leave guidance behind.
+The text is additive and is not saved into conversation history. It does not
+replace tool descriptions or automatically adopt server-provided instructions.
 
 ## Docs
 

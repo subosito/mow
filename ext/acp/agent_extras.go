@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/subosito/mow"
+	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/slash"
 )
 
@@ -22,6 +23,7 @@ func extraCapabilities() map[string]any {
 		"rewind":     true,
 		"skill":      true,
 		"plugin":     true,
+		"mcp":        true,
 		"transcript": true,
 		"status":     true,
 		"context":    true,
@@ -34,7 +36,7 @@ func extraCapabilities() map[string]any {
 func extraMethodNames() []string {
 	return []string{
 		"steer", "compact", "rewind",
-		"skill.list", "skill.activate", "plugin.list",
+		"skill.list", "skill.activate", "plugin.list", "mcp.list",
 		"transcript", "status", "context", "proc.list",
 		"ping", "slash",
 	}
@@ -97,6 +99,7 @@ func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 		return true
 	case "skill.list":
 		infos := a.eng.AvailableSkillInfos()
+		states := a.eng.SkillStatuses()
 		names := make([]string, 0, len(infos))
 		detail := make([]map[string]any, 0, len(infos))
 		for _, info := range infos {
@@ -105,6 +108,7 @@ func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 				"id":     info.Folder,
 				"name":   info.Name,
 				"folder": info.Folder,
+				"status": states[info.Folder],
 			}
 			if info.Description != "" {
 				row["description"] = info.Description
@@ -152,9 +156,11 @@ func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 		for _, p := range plugins {
 			names = append(names, p.ID)
 			row := map[string]any{
-				"id":      p.ID,
-				"name":    p.Name,
-				"version": p.Version,
+				"id":             p.ID,
+				"name":           p.Name,
+				"version":        p.Version,
+				"status":         "enabled",
+				"default_skills": p.DefaultSkills,
 			}
 			if p.Description != "" {
 				row["description"] = p.Description
@@ -171,6 +177,16 @@ func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 			JSONRPC: "2.0", ID: req.ID,
 			Result: map[string]any{"plugins": names, "items": items},
 		})
+		return true
+	case "mcp.list":
+		items := make([]map[string]any, 0)
+		for _, state := range ext.ListExtensions(0) {
+			if state.Kind != "mcp" {
+				continue
+			}
+			items = append(items, map[string]any{"id": strings.TrimPrefix(state.Name, "mcp:"), "status": state.Status, "active": state.Active, "min_turns": state.MinTurns})
+		}
+		a.write(response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"items": items}})
 		return true
 	case "transcript":
 		turns := a.eng.Transcript()

@@ -58,6 +58,7 @@ type PluginMCPServer struct {
 	Args    []string
 	Env     map[string]string
 	URL     string
+	Prompt  string
 }
 
 type pluginJSON struct {
@@ -76,6 +77,7 @@ type pluginMCPServer struct {
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env"`
 	URL     string            `json:"url"`
+	Prompt  string            `json:"prompt"`
 }
 
 // jsonStringSlice accepts a JSON string or array of strings.
@@ -125,7 +127,17 @@ func ListPlugins(roots []string) []PluginInfo {
 		}
 		var folders []string
 		for _, e := range entries {
-			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			if strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			isDir := e.IsDir()
+			// Host package managers commonly install plugins as directory
+			// symlinks. Stat follows the target; dangling/file links are skipped.
+			if e.Type()&os.ModeSymlink != 0 {
+				info, err := os.Stat(filepath.Join(root, e.Name()))
+				isDir = err == nil && info.IsDir()
+			}
+			if isDir {
 				folders = append(folders, e.Name())
 			}
 		}
@@ -262,6 +274,7 @@ func parsePluginMCPServers(raw map[string]pluginMCPServer, pluginRoot string) []
 			Args:    args,
 			Env:     env,
 			URL:     strings.TrimSpace(e.URL),
+			Prompt:  e.Prompt,
 		})
 	}
 	return out

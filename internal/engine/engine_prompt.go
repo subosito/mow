@@ -32,6 +32,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 
 	e.promptMu.Lock()
 	defer e.promptMu.Unlock()
+	text = e.preparePluginCommand(text)
 
 	// Cancellable run context + stable id for hosts/orchestrators. Registered
 	// before setup (deferred client construction can spend seconds on the

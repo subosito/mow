@@ -57,6 +57,18 @@ func (a *agentServer) advertiseCommands(sessionID string) {
 		return
 	}
 	cmds := availableCommands()
+	seen := map[string]bool{}
+	for _, c := range cmds {
+		seen[c["name"].(string)] = true
+	}
+	for _, c := range a.eng.PluginCommands() {
+		name := "/" + c.Name
+		if _, exists := slash.Lookup(name); exists || seen[name] {
+			continue
+		}
+		seen[name] = true
+		cmds = append(cmds, map[string]any{"name": name, "description": c.Description, "exclusive": false, "prompt": true})
+	}
 	if len(cmds) == 0 {
 		return
 	}

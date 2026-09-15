@@ -172,3 +172,26 @@ func TestHostOwnedPluginRootsIncludesProfileWithoutConfigFile(t *testing.T) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 }
+
+func TestListPluginsSymlinksAndProfileCoexist(t *testing.T) {
+	global, profile, store := t.TempDir(), t.TempDir(), t.TempDir()
+	writePlugin(t, store, "search", `{"name":"Search","mcpServers":{"search":{"command":"search"}}}`, "search", "Search")
+	writePlugin(t, profile, "review", `{"name":"Review"}`, "review", "Review")
+	for name, target := range map[string]string{
+		"search":  filepath.Join(store, "search"),
+		"broken":  filepath.Join(store, "missing"),
+		"file":    filepath.Join(store, "search", "plugin.json"),
+		".hidden": filepath.Join(store, "search"),
+	} {
+		if err := os.Symlink(target, filepath.Join(global, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := ListPlugins([]string{global, profile})
+	if len(got) != 2 || got[0].ID != "review" || got[1].ID != "search" {
+		t.Fatalf("plugins=%+v", got)
+	}
+	if len(got[1].SkillFolders) != 1 || len(got[1].MCPServers) != 1 {
+		t.Fatalf("symlink plugin contents missing: %+v", got[1])
+	}
+}

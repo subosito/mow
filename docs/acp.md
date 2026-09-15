@@ -46,3 +46,18 @@ Engine JSONL id (so `--session` / `--continue` stay the ids operators already
 use). A second `session/new` while bound is `-32600`. `session/close` unbinds;
 the next `session/new` starts a **new** JSONL via `Engine.BeginSession`. Loading
 a different on-disk id requires a new process (`mow acp --session ID`).
+
+
+Plugin visibility extras:
+- `skill.list.items[].status`: `available`, `manual` (automatic selection
+  disabled), `enabled (next prompt)`, or `loaded`.
+- `plugin.list.items[].status`: `enabled` for discovered plugins;
+  `default_skills` and `always` describe automatic skill activation.
+- `mcp.list` (advertised as `mcp`) reports registered MCP server IDs and
+  activation status. This is registration/activation state, not a health probe.
+
+Plugin skill invocations and `commands/*.md` / `commands/*.toml` are advertised
+through `available_commands_update`. Prompt commands carry `prompt: true`;
+clients should invoke them through `session/prompt`, not the `slash` control
+extra. Both `/command` and `/plugin-id:command` are offered. Built-in commands
+take precedence; qualified names disambiguate plugin collisions.

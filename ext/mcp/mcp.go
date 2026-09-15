@@ -47,6 +47,8 @@ type ServerConfig struct {
 	Headers  map[string]string `yaml:"headers"`
 	Auth     AuthConfig        `yaml:"auth"`
 	MinTurns int               `yaml:"min_turns"`
+	// Prompt is operator-configured guidance appended to active requests.
+	Prompt string `yaml:"prompt"`
 	// TimeoutSec bounds one tools/call (and HTTP RPC). 0 uses
 	// defaultMCPCallTimeout. Negative disables the extra deadline (turn
 	// cancel still applies). A silent stdio server otherwise waits forever.
@@ -128,6 +130,7 @@ func registerAll(configPaths ...string) error {
 func registerAllContext(ctx ext.SetupContext) error {
 	// Instances are re-registered below for this BeforeNew generation; a stale
 	// entry from a prior host setup must not survive (cmdhook does the same).
+	clearRegisteredPrompts()
 	ext.ClearExtensionKind("mcp")
 	var c Config
 	ok, err := extcfg.DecodeSection("mcp", ctx.ConfigPaths, &c)
@@ -276,6 +279,7 @@ func mergePluginMCPServersContext(servers []ServerConfig, configPaths []string, 
 				Args:    ms.Args,
 				Env:     pluginMCPEnv(p.Path, ms.Env),
 				URL:     ms.URL,
+				Prompt:  ms.Prompt,
 			})
 		}
 	}
@@ -375,6 +379,7 @@ func RegisterServers(servers []ServerConfig) error {
 		registerTransport(name, gen, tr)
 		registered = append(registered, name)
 		ext.RegisterExtensionInstance("mcp", name, s.MinTurns)
+		registerServerPrompt(name, s.Prompt)
 		n := 0
 		for _, t := range tools {
 			// Server metadata is untrusted: cap what reaches the model.

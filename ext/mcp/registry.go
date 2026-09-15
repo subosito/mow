@@ -43,6 +43,7 @@ func retireTransportLocked(gen int, tr toolTransport) {
 }
 
 func unregisterTransport(name string) {
+	ext.ClearHookSource(serverPromptSource(name))
 	registryMu.Lock()
 	slot := transports[name]
 	delete(transports, name)
