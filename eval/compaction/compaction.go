@@ -1,5 +1,5 @@
 // Package compaction measures whether the opt-in compaction summarizer
-// (policy.compact_summary) actually saves money.
+// (policy.compact_summary) reduces token consumption.
 //
 // The premise behind the feature is that a deterministic compaction stub makes
 // the model lose the thread and re-explore — re-reading files it already read,
@@ -33,7 +33,8 @@ type Report struct {
 	// Arm is "stub" or "summary".
 	Arm string
 	// InputTokens is the sum of provider-reported input tokens across all
-	// requests in the run. This is the number that shows up on the bill.
+	// requests in the run, including compaction summaries. Pricing and cache
+	// discounts are not applied; token counts alone are not a monetary bill.
 	InputTokens int
 	// OutputTokens is the sum of provider-reported output tokens.
 	OutputTokens int
@@ -52,7 +53,7 @@ type Report struct {
 }
 
 // Net returns the input-token difference against a baseline arm. Negative
-// means this arm was cheaper.
+// means this arm used fewer input tokens, including summaries.
 func (r Report) Net(baseline Report) int {
 	return r.InputTokens - baseline.InputTokens
 }
@@ -101,6 +102,8 @@ func Run(ctx context.Context, opt Options) (Report, error) {
 			rep.InputTokens += ev.InputTokens
 			rep.OutputTokens += ev.OutputTokens
 		case mow.EventCompactSummary:
+			rep.InputTokens += ev.InputTokens
+			rep.OutputTokens += ev.OutputTokens
 			rep.SummaryInputTokens += ev.InputTokens
 			rep.SummaryOutputTokens += ev.OutputTokens
 		case mow.EventCompact:
@@ -156,10 +159,10 @@ func Compare(ctx context.Context, opt Options) (stub, summary Report, verdict st
 	case stub.Compactions == 0 && summary.Compactions == 0:
 		verdict = "inconclusive: no compaction occurred — lower MaxContextChars or add prompts"
 	case delta < 0:
-		verdict = fmt.Sprintf("summary cheaper by %d input tokens (spent %d on summaries)",
+		verdict = fmt.Sprintf("summary used %d fewer input tokens (including %d on summaries)",
 			-delta, summary.SummaryInputTokens)
 	default:
-		verdict = fmt.Sprintf("summary costlier by %d input tokens (spent %d on summaries)",
+		verdict = fmt.Sprintf("summary used %d more input tokens (including %d on summaries)",
 			delta, summary.SummaryInputTokens)
 	}
 	return

@@ -1,13 +1,68 @@
 package compaction_test
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/subosito/mow/eval/compaction"
 )
+
+func TestRunIncludesSummaryUsageInTotals(t *testing.T) {
+	var calls, summaries atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5-mini"}]}`))
+			return
+		}
+		calls.Add(1)
+		in, out := 100, 20
+		content := strings.Repeat("answer ", 2000)
+		if r.Header.Get("X-Mow-Component") == "turn.compact" {
+			summaries.Add(1)
+			in, out, content = 2000, 30, "Earlier work summarized."
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": content}, "finish_reason": "stop"}},
+			"usage":   map[string]int{"prompt_tokens": in, "completion_tokens": out},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MOW_HOME", t.TempDir())
+	t.Setenv("MOW_API_KEY", "test-key")
+	t.Setenv("MOW_MODEL", "gpt-5-mini")
+	t.Setenv("MOW_BASE_URL", srv.URL)
+	t.Setenv("MOW_WIRE", "openai-chat-completions")
+	rep, err := compaction.Run(t.Context(), compaction.Options{
+		Workspace: t.TempDir(), Summary: true, MaxContextChars: 12_000,
+		Prompts: []string{"Inspect the parser.", "Explain its error handling.", "Describe a useful change.", "Review that change."},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaryCalls := int(summaries.Load())
+	if summaryCalls == 0 {
+		t.Fatal("fixture did not exercise summarization")
+	}
+	regularCalls := int(calls.Load()) - summaryCalls
+	wantIn, wantOut := regularCalls*100+summaryCalls*2000, regularCalls*20+summaryCalls*30
+	if rep.InputTokens != wantIn || rep.OutputTokens != wantOut {
+		t.Fatalf("totals=%d/%d, want %d/%d including summaries", rep.InputTokens, rep.OutputTokens, wantIn, wantOut)
+	}
+	if rep.SummaryInputTokens != summaryCalls*2000 || rep.SummaryOutputTokens != summaryCalls*30 {
+		t.Fatalf("summary breakdown=%d/%d", rep.SummaryInputTokens, rep.SummaryOutputTokens)
+	}
+	// The summary overhead reverses the apparent saving from regular calls.
+	baseline := compaction.Report{InputTokens: regularCalls*100 + 1000}
+	if rep.Net(baseline) <= 0 {
+		t.Fatal("summary overhead incorrectly reported as a token saving")
+	}
+}
 
 // TestCompactionCost is the measurement item 7 depends on: does the opt-in
 // compaction summarizer save more than it spends?
@@ -65,7 +120,7 @@ func TestReportArithmetic(t *testing.T) {
 		Arm: "summary", InputTokens: 80_000, SummaryInputTokens: 6_000,
 	}
 	if got := summary.Net(stub); got != -20_000 {
-		t.Errorf("Net = %d, want -20000 (negative means cheaper)", got)
+		t.Errorf("Net = %d, want -20000 (negative means fewer input tokens)", got)
 	}
 	if got := stub.Net(summary); got != 20_000 {
 		t.Errorf("Net = %d, want 20000", got)
