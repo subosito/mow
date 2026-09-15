@@ -19,6 +19,7 @@
 | [extensions.md](extensions.md) | Integrators | Core extensions, CLI ownership, ACP, MCP |
 | [acp.md](acp.md) | Protocol | `mow acp` + extras vs ACP v1/v2 |
 | [workspace-profiles.md](workspace-profiles.md) | CLI operators | `$MOW_HOME/workspaces/<name>/`: roots, overlay, skills, plugins, scoped ACP peers |
+| [../openspec/specs/](../openspec/specs/) | Humans and agents | Behavior contracts: what ships in stock mow, trust, goal, baked-in guards |
 
 Per-extension one-pagers live next to the code (`ext/*/README.md`). Longer how-tos stay here.
 

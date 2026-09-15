@@ -22,7 +22,8 @@ integrate against; the CLI and every pack are thin shells over it. So:
 Read [docs/architecture.md](docs/architecture.md) once for the public/internal
 line, then [docs/embedding.md](docs/embedding.md) to see the API from an
 integrator's seat — most "where does this go?" questions answer themselves
-after those two.
+after those two. Behavior contracts for what ships in stock mow live under
+[openspec/specs/](openspec/specs/).
 
 ## Build, test, verify
 

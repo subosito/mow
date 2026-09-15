@@ -58,7 +58,7 @@ depends on an application module.
 
 Integrators never import `internal/*`. If an optional module needs internal
 behavior, the root public package re-exports a narrow API (for example
-`mow.Proc*`, `mow.MediaClient`).
+`mow.Proc*`).
 
 ```text
 Embedder / cmd/mow / external applications
@@ -129,3 +129,4 @@ use the workspace/extra-root jail; shell is a separate explicit trust decision.
 - [harness.md](harness.md) — loop, tools, config, sessions
 - [extensions.md](extensions.md) — extension and pack details
 - [workspace-profiles.md](workspace-profiles.md) — `$MOW_HOME/workspaces/<name>/`
+- [openspec/specs/](../openspec/specs/) — behavior contracts (composition, trust, goal, guards)

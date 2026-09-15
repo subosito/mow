@@ -101,3 +101,4 @@ Non-trivial change: `devenv shell -- just verify` before commit. Docs/fixtures a
 | [docs/extensions.md](docs/extensions.md) | Core extensions, ACP, MCP |
 | [docs/acp.md](docs/acp.md) | `mow acp` + extras |
 | [docs/workspace-profiles.md](docs/workspace-profiles.md) | `$MOW_HOME/workspaces/<name>/`: roots, overlay, skills, plugins |
+| [openspec/specs/](openspec/specs/) | Behavior contracts and composition decisions; in-flight work under `openspec/changes/` |

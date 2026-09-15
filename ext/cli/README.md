@@ -16,7 +16,7 @@ func main() {
 
 Blank-import extensions and packs separately; each registers its subcommands in `init`.
 
-Stock `cmd/mow` links `ext/cli` plus `ext/acp`, `ext/tty`, and the lean pack set.
+Stock `cmd/mow` links `ext/cli` plus `ext/acp`, `ext/tty`, `ext/proc`, `ext/cmdhook`, `ext/mcp`, and `ext/goal`.
 
 ## Commands
 
@@ -30,7 +30,7 @@ Stock `cmd/mow` links `ext/cli` plus `ext/acp`, `ext/tty`, and the lean pack set
 | CLI | `version`, `help` |
 | Slash | `doctor`, `trace`, `approvals` (for tty / host UIs) |
 
-Core commands register with `ext.RegisterCommand` (`Layer: "ext"`) but appear under **Core** in top-level help. Linked `ext/` surfaces (tty, acp, mcp) show in **Extensions**; external application commands (goal, review, etc.) show in **Packs**.
+Core commands register with `ext.RegisterCommand` (`Layer: "ext"`) but appear under **Core** in top-level help. Linked `ext/` surfaces (tty, acp, mcp, goal) show in **Extensions**. Application commands from an external module (job, ops, review, …) show in **Packs** only when that binary links them. Stock `mow` has no Packs group.
 
 No-args on a TTY runs `ext.DefaultInteractiveCommand` when one is registered; otherwise usage is printed.
 
