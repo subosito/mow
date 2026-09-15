@@ -1,7 +1,7 @@
 default:
     @just verify
 
-# Commit gate — mirrors .github/workflows/ci.yml (vet + race test + build).
+# Commit gate — mirrors CI's Linux/macOS jobs on the current platform.
 # Keep these steps in sync with CI so failures surface locally, not on push.
 verify: vet test-race build version-check
 
