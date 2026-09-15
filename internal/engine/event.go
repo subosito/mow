@@ -202,13 +202,16 @@ type Event struct {
 	Agent string `json:"agent,omitempty"`
 
 	// Context compaction (loop.compact / loop.compact.start). Counts are raw
-	// characters/messages; OverBudget means all layers ran but the projection
-	// still exceeds target. Auto is true when the loop triggered compaction
-	// (over budget), false for an explicit Engine.Compact / RPC compact.
+	// characters/messages; TokensBefore/After are the same span in token units
+	// (context-chip / model-window). OverBudget means all layers ran but the
+	// projection still exceeds target. Auto is true when the loop triggered
+	// compaction (over budget), false for an explicit Engine.Compact / RPC compact.
 	Layer          CompactLayer `json:"layer,omitempty"`
 	CharsBefore    int          `json:"chars_before,omitempty"`
 	CharsAfter     int          `json:"chars_after,omitempty"`
 	CharsSaved     int          `json:"chars_saved,omitempty"`
+	TokensBefore   int          `json:"tokens_before,omitempty"`
+	TokensAfter    int          `json:"tokens_after,omitempty"`
 	MessagesBefore int          `json:"messages_before,omitempty"`
 	MessagesAfter  int          `json:"messages_after,omitempty"`
 	OverBudget     bool         `json:"over_budget,omitempty"`

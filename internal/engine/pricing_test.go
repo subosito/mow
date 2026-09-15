@@ -201,3 +201,27 @@ func TestLimitsFromGatewayModels(t *testing.T) {
 		t.Fatalf("unknown model should not invent limits: %+v", got)
 	}
 }
+
+func TestCompactHistoryTokens(t *testing.T) {
+	t.Parallel()
+
+	t.Run("scales billed input by char ratio", func(t *testing.T) {
+		t.Parallel()
+		before, after := compactHistoryTokens(1_300_000, 34_600, 325_000, 4)
+		if before != 325_000 {
+			t.Fatalf("tokens before: got %d want 325000", before)
+		}
+		wantAfter := 8650
+		if after != wantAfter {
+			t.Fatalf("tokens after: got %d want %d", after, wantAfter)
+		}
+	})
+
+	t.Run("falls back to char heuristic without a bill", func(t *testing.T) {
+		t.Parallel()
+		before, after := compactHistoryTokens(4000, 1000, 0, 4)
+		if before != 1000 || after != 250 {
+			t.Fatalf("got %d → %d want 1000 → 250", before, after)
+		}
+	})
+}

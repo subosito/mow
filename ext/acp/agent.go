@@ -631,6 +631,8 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 					"chars_before":    ev.CharsBefore,
 					"chars_after":     ev.CharsAfter,
 					"chars_saved":     ev.CharsSaved,
+					"tokens_before":   ev.TokensBefore,
+					"tokens_after":    ev.TokensAfter,
 					"messages_before": ev.MessagesBefore,
 					"messages_after":  ev.MessagesAfter,
 					"over_budget":     ev.OverBudget,

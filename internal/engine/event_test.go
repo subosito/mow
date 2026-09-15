@@ -152,13 +152,15 @@ func TestEngineFromContextDuringPrompt(t *testing.T) {
 func TestCompactEventPayload(t *testing.T) {
 	raw, err := json.Marshal(mow.Event{Type: mow.EventCompact, Layer: mow.CompactLayerDrop,
 		CharsBefore: 1000, CharsAfter: 400, CharsSaved: 600,
+		TokensBefore: 250, TokensAfter: 100,
 		MessagesBefore: 12, MessagesAfter: 5, OverBudget: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(raw)
 	for _, want := range []string{`"type":"loop.compact"`, `"layer":"drop"`, `"chars_before":1000`,
-		`"chars_after":400`, `"chars_saved":600`, `"messages_before":12`, `"messages_after":5`, `"over_budget":true`} {
+		`"chars_after":400`, `"chars_saved":600`, `"tokens_before":250`, `"tokens_after":100`,
+		`"messages_before":12`, `"messages_after":5`, `"over_budget":true`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("payload %s missing %s", got, want)
 		}

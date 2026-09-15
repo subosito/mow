@@ -14,6 +14,10 @@ type CompactReport struct {
 	// CharsBefore/After are raw character estimates around the compaction.
 	CharsBefore int `json:"chars_before,omitempty"`
 	CharsAfter  int `json:"chars_after,omitempty"`
+	// TokensBefore/After are the same span in token units (context chip /
+	// model window), so hosts do not have to guess chars-per-token.
+	TokensBefore int `json:"tokens_before,omitempty"`
+	TokensAfter  int `json:"tokens_after,omitempty"`
 	// CharsSaved is the raw character reduction (before − after).
 	CharsSaved int `json:"chars_saved,omitempty"`
 	// MessagesBefore/After are the transcript sizes around the compaction.
@@ -178,12 +182,15 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	// compaction cannot remove it, so omitting it reports a context far
 	// emptier than the next real request will measure.
 	e.lastCtxEstimate = estimateCtxTokens(res.CharsAfter, charsPerToken) + overheadTokens
+	tokBefore, tokAfter := compactHistoryTokens(res.CharsBefore, res.CharsAfter, e.lastProviderTokens, charsPerToken)
 	e.mu.Unlock()
 
 	rep := CompactReport{
 		Layer:          string(res.Layer),
 		CharsBefore:    res.CharsBefore,
 		CharsAfter:     res.CharsAfter,
+		TokensBefore:   tokBefore,
+		TokensAfter:    tokAfter,
 		CharsSaved:     res.CharsSaved,
 		MessagesBefore: res.MessagesBefore,
 		MessagesAfter:  res.MessagesAfter,
@@ -194,6 +201,8 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 		Layer:          CompactLayer(res.Layer),
 		CharsBefore:    res.CharsBefore,
 		CharsAfter:     res.CharsAfter,
+		TokensBefore:   tokBefore,
+		TokensAfter:    tokAfter,
 		CharsSaved:     res.CharsSaved,
 		MessagesBefore: res.MessagesBefore,
 		MessagesAfter:  res.MessagesAfter,

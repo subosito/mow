@@ -79,6 +79,8 @@ func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 				"chars_before":    rep.CharsBefore,
 				"chars_after":     rep.CharsAfter,
 				"chars_saved":     rep.CharsSaved,
+				"tokens_before":   rep.TokensBefore,
+				"tokens_after":    rep.TokensAfter,
 				"messages_before": rep.MessagesBefore,
 				"messages_after":  rep.MessagesAfter,
 				"over_budget":     rep.OverBudget,

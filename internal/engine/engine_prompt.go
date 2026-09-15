@@ -562,14 +562,17 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 		// (header ctx%) do not wait for the next LLM usage report.
 		e.mu.Lock()
 		cpt := 0.0
-		if e.lastProviderTokens > 0 && ev.CharsBefore > 0 {
-			cpt = float64(ev.CharsBefore) / float64(e.lastProviderTokens)
+		lastIn := e.lastProviderTokens
+		if lastIn > 0 && ev.CharsBefore > 0 {
+			cpt = float64(ev.CharsBefore) / float64(lastIn)
 		}
+		tokBefore, tokAfter := compactHistoryTokens(ev.CharsBefore, ev.CharsAfter, lastIn, cpt)
 		e.lastCtxEstimate = estimateCtxTokens(ev.CharsAfter, cpt)
 		e.mu.Unlock()
 		e.Emit(Event{
 			Type: EventCompact, RunID: runID, SessionID: sid, Layer: CompactLayer(ev.Layer),
 			CharsBefore: ev.CharsBefore, CharsAfter: ev.CharsAfter, CharsSaved: ev.CharsSaved,
+			TokensBefore: tokBefore, TokensAfter: tokAfter,
 			MessagesBefore: ev.MessagesBefore, MessagesAfter: ev.MessagesAfter, OverBudget: ev.OverBudget,
 			Auto: true,
 		})

@@ -217,3 +217,19 @@ func estimateCtxTokens(charsAfter int, charsPerToken float64) int {
 	}
 	return tok
 }
+
+// compactHistoryTokens estimates occupancy in token units so compact notes
+// match the context chip / model window. When lastInput is a billed prompt
+// size, scale it by the char ratio (same as the TUI ctx-chip projection).
+// Otherwise convert chars through estimateCtxTokens.
+func compactHistoryTokens(charsBefore, charsAfter, lastInput int, charsPerToken float64) (before, after int) {
+	if charsBefore > 0 && charsAfter >= 0 && lastInput > 0 {
+		before = lastInput
+		after = int(float64(lastInput)*float64(charsAfter)/float64(charsBefore) + 0.5)
+		if charsAfter > 0 && after < 1 {
+			after = 1
+		}
+		return before, after
+	}
+	return estimateCtxTokens(charsBefore, charsPerToken), estimateCtxTokens(charsAfter, charsPerToken)
+}
