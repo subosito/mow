@@ -44,7 +44,7 @@ If integrators need something in `internal/`, re-export — do not tell them to 
 
 ## Extensions
 
-- Stock `cmd/mow`: acp, cli, tty, proc, cmdhook, mcp, goal.
+- Stock `cmd/mow`: acp, cli, tty, proc, cmdhook, mcp, goal, workflow.
 - Application workflows (review, job, ops, media) live in external modules such as `external application modules`.
 - Remove import → subcommand/tools gone. Config: `extensions.<name>` via `Engine.Extension` or `extcfg.DecodeSection`. MCP only if configured.
 

@@ -17,7 +17,7 @@ Customization modes:
 |---|---|---|
 | Public Engine | `github.com/subosito/mow` | `Engine`, `Run`, hooks, events, providers |
 | Registration | `github.com/subosito/mow/ext` | `RegisterTool`, `RegisterCommand`, lifecycle hooks |
-| Core extensions | `github.com/subosito/mow/ext/<name>` | cli, tty, acp, proc, cmdhook, mcp, goal; one-pager in each `ext/<name>/README.md` |
+| Core extensions | `github.com/subosito/mow/ext/<name>` | cli, tty, acp, proc, cmdhook, mcp, goal, workflow; one-pager in each `ext/<name>/README.md` |
 
 ```go
 import (
@@ -36,7 +36,7 @@ tools it actually has.
 ## Linked binaries
 
 - `cmd/mow` is an import list over `ext/cli.Main`, linking tty, acp, proc,
-  cmdhook, mcp, and goal. Drop an import and that surface is gone.
+  cmdhook, mcp, goal, and workflow. Drop an import and that surface is gone.
 - External hosts launch `mow acp` (`ext/acp`), own presentation, and receive
   registered command/tool events over ACP + extras.
 - Native `agents` (`model:`) start the currently running executable
@@ -148,6 +148,14 @@ extensions:
       remote:
         url: https://mcp.example/mcp
 ```
+
+### Workflow (`ext/workflow`)
+
+Host-owned versioned procedures with sequential typed JSON prompt/verify phases,
+durable local run state, resume/block-on-interruption semantics, and `mow workflow`
+plus `/workflow` surfaces. Definitions are registered by linked Go code; this is
+not a script runtime or scheduler. See [ext/workflow/README.md](../ext/workflow/README.md)
+and [orchestration.md](orchestration.md).
 
 ### Goal (`ext/goal`)
 

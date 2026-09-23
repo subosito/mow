@@ -9,6 +9,7 @@
 - feat(tools): add exact single-file `apply_patch`, typed tool outcomes, prompt-scoped `ask_user`, and consolidated `harness.fs.change` events.
 - feat(goal): add read-only `/plan`/`mow goal plan`, persist phase/worker/verification projections, and fail when state transitions cannot be saved.
 - feat(hosts): add session-local bounded `/loop` scheduling in mowi and `mow tty`; external recurrence remains a system scheduler concern.
+- feat(workflow): add registered sequential prompt/verify procedures with bounded typed JSON, durable locked run state, interruption blocking, and optional CLI/slash composition.
 - fix(agent): cap one tool batch at 64, ignore orphan Responses argument events, sanitize malformed resumed tool calls, and require synthesis after bounded delegate fan-out.
 
 - feat(goal): stock `mow goal` outer loop (checklist, worktrees, parallel steps); bash refuses WIP-discard and discover-tool dumps.

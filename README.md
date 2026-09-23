@@ -146,6 +146,7 @@ Docs: [docs/extensions.md](docs/extensions.md).
 | [docs/acp.md](docs/acp.md) | `mow acp` + extras |
 | [docs/jev.md](docs/jev.md) | Optional structured decisions: use cases, safety, calibration, rollout |
 | [docs/media.md](docs/media.md) | Binary media inputs, optional understand/generate tools, client gaps |
+| [docs/orchestration.md](docs/orchestration.md) | Goal, loop, scheduler, and workflow boundaries |
 | [docs/workspace-profiles.md](docs/workspace-profiles.md) | Named workspace sets: roots, overlay, skills, plugins |
 | [ext/*/README.md](ext/) | Per-extension one-pagers |
 | [docs/extensions.md](docs/extensions.md) | Core extensions, ACP, and MCP |

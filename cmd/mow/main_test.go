@@ -49,7 +49,7 @@ func TestLeanHelpListsLeanCommands(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d\n%s", code, output)
 	}
-	for _, want := range []string{"mow acp", "mow mcp", "mow tty", "mow goal", "Extensions (this binary):"} {
+	for _, want := range []string{"mow acp", "mow mcp", "mow tty", "mow goal", "mow workflow", "Extensions (this binary):"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("lean help missing %q:\n%s", want, output)
 		}

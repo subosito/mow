@@ -30,6 +30,9 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		return RunResult{}, fmt.Errorf("mow: empty prompt")
 	}
 
+	if opt.MaxTurns < 0 {
+		return RunResult{}, fmt.Errorf("mow: PromptOpts.MaxTurns must not be negative")
+	}
 	if err := validateUserParts(opt.UserParts); err != nil {
 		return RunResult{}, err
 	}
@@ -126,6 +129,9 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		maxTurns = e.cfg.Policy.MaxTurns
 		maxToolRes = e.cfg.Policy.MaxToolResultChars
 		maxPar = e.cfg.Policy.MaxParallelTools
+	}
+	if opt.MaxTurns > 0 && (maxTurns <= 0 || opt.MaxTurns < maxTurns) {
+		maxTurns = opt.MaxTurns
 	}
 	// Use limitsLocked: e.mu is held; Limits() would re-lock and deadlock.
 	window := e.limitsLocked().ContextWindow

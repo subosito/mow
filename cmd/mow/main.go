@@ -16,6 +16,7 @@ import (
 	_ "github.com/subosito/mow/ext/mcp"
 	_ "github.com/subosito/mow/ext/proc"
 	_ "github.com/subosito/mow/ext/tty"
+	_ "github.com/subosito/mow/ext/workflow"
 )
 
 func main() {

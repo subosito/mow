@@ -290,6 +290,9 @@ type PromptOpts struct {
 	// Combine with ReadOnly for strict review workflows that must not expose
 	// MCP, ACP, or other extension tools even when they declare ReadOnly() true.
 	AllowedTools []string
+	// MaxTurns tightens this prompt's model round-trip ceiling when positive.
+	// Zero keeps the Engine ceiling; it cannot raise that host ceiling.
+	MaxTurns int
 }
 
 // Run is a one-shot helper: New + single Prompt. Close is deferred so
