@@ -163,8 +163,39 @@ func (i *idleReader) run() {
 
 // errStreamIncomplete means EOF arrived without a recognized completion signal.
 // It does not establish whether the provider stopped generating or a gateway
-// omitted the terminal frame. Earlier turns and tool effects may already persist.
-var errStreamIncomplete = errors.New("llm: stream ended before completion was confirmed (partial reply not committed; earlier tool work may be saved — retry to continue, and check provider/gateway logs if it repeats)")
+// omitted the terminal frame. Nothing from the cut reply is committed; earlier
+// turns and tool effects may already persist. Match with errors.Is.
+var errStreamIncomplete = errors.New("reply was cut off before it finished — send again to continue")
+
+// streamIncompleteError is errStreamIncomplete plus payload-free counts for
+// logs and the retry decision. Error() stays the short user-facing sentence;
+// Detail() carries the diagnostics.
+type streamIncompleteError struct {
+	Wire         string
+	Frames       int
+	Malformed    int
+	ContentBytes int
+	ToolCalls    int
+	Elapsed      time.Duration
+}
+
+func (e *streamIncompleteError) Error() string { return errStreamIncomplete.Error() }
+
+func (e *streamIncompleteError) Unwrap() error { return errStreamIncomplete }
+
+// Detail is the counts-only diagnostic (never prompt text or arguments).
+func (e *streamIncompleteError) Detail() string {
+	return fmt.Sprintf("wire=%s frames=%d malformed=%d content_bytes=%d tool_calls=%d elapsed=%s",
+		e.Wire, e.Frames, e.Malformed, e.ContentBytes, e.ToolCalls, e.Elapsed.Round(time.Millisecond))
+}
+
+// retryableIncomplete reports whether a cut stream may be re-sent whole: no
+// visible text reached the host yet (so a retry cannot duplicate streamed UI
+// text) and nothing was committed (stream parsers return no partial message).
+func retryableIncomplete(err error) bool {
+	var inc *streamIncompleteError
+	return errors.As(err, &inc) && inc.ContentBytes == 0
+}
 
 // DeltaFn is called with content token deltas during streaming (may be empty for tool-only chunks).
 type DeltaFn func(delta string)
@@ -504,8 +535,8 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 			return Message{}, err
 		}
 		// Counts only: never include prompt text, tool arguments, or headers.
-		return Message{}, fmt.Errorf("%w [wire=chat-completions frames=%d malformed=%d content_bytes=%d tool_calls=%d elapsed=%s]",
-			errStreamIncomplete, frames, malformed, content.Len(), len(toolsAcc), time.Since(started).Round(time.Millisecond))
+		return Message{}, &streamIncompleteError{Wire: "chat-completions", Frames: frames, Malformed: malformed,
+			ContentBytes: content.Len(), ToolCalls: len(toolsAcc), Elapsed: time.Since(started)}
 	}
 	// A finish_reason confirms generation completed even if the optional
 	// usage/[DONE] tail is cut short by a transport error. Keep collected usage.

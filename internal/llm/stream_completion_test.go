@@ -48,7 +48,11 @@ func TestChatStreamMalformedCompletionDiagnostics(t *testing.T) {
 	defer srv.Close()
 	c := &Client{BaseURL: srv.URL + "/v1", APIKey: "test-key", Model: "gpt-5-mini", HTTP: srv.Client()}
 	_, err := c.ChatStreamHooks(t.Context(), []Message{{Role: "user", Content: "hello"}}, nil, StreamHooks{})
-	if !errors.Is(err, errStreamIncomplete) || !strings.Contains(err.Error(), "malformed=1") || strings.Contains(err.Error(), "private") {
-		t.Fatalf("expected payload-free incomplete diagnostics: %v", err)
+	inc, ok := errors.AsType[*streamIncompleteError](err)
+	if !ok || !errors.Is(err, errStreamIncomplete) {
+		t.Fatalf("err=%v want *streamIncompleteError", err)
+	}
+	if d := inc.Detail(); !strings.Contains(d, "malformed=1") || strings.Contains(d, "private") || strings.Contains(err.Error(), "private") {
+		t.Fatalf("expected payload-free incomplete diagnostics: err=%q detail=%q", err, d)
 	}
 }

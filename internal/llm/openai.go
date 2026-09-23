@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -342,34 +343,38 @@ func (c *Client) chatWithStream(ctx context.Context, messages []Message, tools [
 	stream := c.Stream || hooks.OnContent != nil || hooks.OnReasoning != nil || hooks.OnActivity != nil
 	// Leading system segments for non-Anthropic wires (Anthropic uses system blocks).
 	messages = c.messagesWithSystemPrefix(messages)
+	if !stream {
+		switch NormalizeWire(c.Wire) {
+		case WireAnthropicMsg:
+			return c.chatAnthropic(ctx, messages, tools)
+		case WireOpenAIResponses:
+			return c.chatOpenAIResponses(ctx, messages, tools)
+		default: // WireOpenAIChat
+			return c.chatOpenAI(ctx, messages, tools)
+		}
+	}
+	var msg Message
+	var err error
 	switch NormalizeWire(c.Wire) {
 	case WireAnthropicMsg:
-		if stream {
-			return c.chatAnthropicStream(ctx, messages, tools, hooks)
-		}
-		return c.chatAnthropic(ctx, messages, tools)
+		msg, err = c.chatAnthropicStream(ctx, messages, tools, hooks)
 	case WireOpenAIResponses:
-		if stream {
-			return c.chatOpenAIResponsesStream(ctx, messages, tools, hooks)
-		}
-		return c.chatOpenAIResponses(ctx, messages, tools)
+		msg, err = c.chatOpenAIResponsesStream(ctx, messages, tools, hooks)
 	default: // WireOpenAIChat
-		if stream {
-			msg, err := c.ChatStreamHooks(ctx, messages, tools, hooks)
-			if retryIncomplete && errors.Is(err, errStreamIncomplete) && ctx.Err() == nil {
-				// No Message was committed and stream parsers return no partial
-				// content/tool calls on this error, so one whole-request retry cannot
-				// duplicate host tool side effects. Avoid streaming duplicate partial
-				// UI text: incomplete streams with content remain hard failures.
-				if !strings.Contains(err.Error(), "content_bytes=0") {
-					return msg, err
-				}
-				return c.chatWithStream(ctx, messages, tools, hooks, false)
-			}
-			return msg, err
-		}
-		return c.chatOpenAI(ctx, messages, tools)
+		msg, err = c.ChatStreamHooks(ctx, messages, tools, hooks)
 	}
+	// A cut stream commits nothing and the parsers return no partial content
+	// or tool calls, so one whole-request retry cannot duplicate host tool
+	// side effects. Only retry when no visible text was streamed yet, so the
+	// UI never shows the same words twice.
+	if inc, ok := errors.AsType[*streamIncompleteError](err); ok {
+		// The user sees one short sentence; operators get the counts here.
+		slog.Warn("llm: stream cut before completion", "model", c.Model, "detail", inc.Detail(), "retry", retryIncomplete && inc.ContentBytes == 0)
+	}
+	if retryIncomplete && ctx.Err() == nil && retryableIncomplete(err) {
+		return c.chatWithStream(ctx, messages, tools, hooks, false)
+	}
+	return msg, err
 }
 
 func (c *Client) chatOpenAI(ctx context.Context, messages []Message, tools []ToolSpec) (Message, error) {

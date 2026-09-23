@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 )
 
 type anthToolAcc struct {
@@ -84,6 +85,7 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 	// Text deltas accumulate here and are flushed to msg.Content after the
 	// stream: `msg.Content += delta` per event is O(n^2) copying.
 	var content strings.Builder
+	started := time.Now()
 
 	// Stream HTTP client has Timeout:0 so long generations work; without an
 	// idle bound a silent upstream hangs forever.
@@ -143,7 +145,8 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 		return Message{}, err
 	}
 	if !terminal && msg.StopReason == "" {
-		return Message{}, errStreamIncomplete
+		return Message{}, &streamIncompleteError{Wire: "anthropic-messages", ContentBytes: content.Len(),
+			ToolCalls: len(toolsByIdx), Elapsed: time.Since(started)}
 	}
 	msg.Content = content.String()
 	// Keys are Anthropic content-block indices shared with text blocks, so they

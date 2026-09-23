@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 )
 
 // responsesReq is the POST /v1/responses body (subset we speak).
@@ -391,6 +392,7 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 	// Text deltas accumulate here and are flushed to msg.Content after the
 	// stream (see applyResponsesSSE).
 	var content strings.Builder
+	started := time.Now()
 
 	streamBody := &idleReader{r: res.Body, idle: streamIdleTimeout, ctx: ctx}
 	defer streamBody.abandon()
@@ -448,7 +450,8 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 		return Message{}, err
 	}
 	if !terminal {
-		return Message{}, errStreamIncomplete
+		return Message{}, &streamIncompleteError{Wire: "openai-responses", ContentBytes: content.Len(),
+			ToolCalls: len(toolsByIdx), Elapsed: time.Since(started)}
 	}
 
 	msg.Content = content.String()

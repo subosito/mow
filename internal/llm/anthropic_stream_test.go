@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -271,5 +272,27 @@ func TestAnthropicStreamReturnsAtMessageStopWithoutEOF(t *testing.T) {
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("stream waited %s for EOF after message_stop", d)
+	}
+}
+
+// A cut Anthropic stream with no visible text is re-sent once, like the
+// chat-completions wire, so a gateway hiccup does not end the turn.
+func TestAnthropicStreamRetriesCutBeforeAnyText(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls == 1 {
+			_, _ = io.WriteString(w, "event: message_start\n"+`data: {"type":"message_start","message":{"usage":{"input_tokens":5}}}`+"\n\n")
+			return
+		}
+		_, _ = io.WriteString(w, "event: content_block_delta\n"+`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`+"\n\n"+
+			"event: message_stop\n"+`data: {"type":"message_stop"}`+"\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{Wire: WireAnthropicMsg, BaseURL: srv.URL, APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
+	msg, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err != nil || msg.Content != "ok" || calls != 2 {
+		t.Fatalf("msg=%q err=%v calls=%d, want one retry then ok", msg.Content, err, calls)
 	}
 }
