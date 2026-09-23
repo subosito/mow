@@ -2,6 +2,7 @@ package goal_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -268,6 +269,105 @@ func TestRunnerAccumulatesUsage(t *testing.T) {
 	loaded, _ := r.Store.Load("u1")
 	if loaded.InputTokens != 300 {
 		t.Fatalf("persisted usage lost: %d", loaded.InputTokens)
+	}
+}
+
+func TestRunnerKeepsTheCachedPrefixStableAcrossSteps(t *testing.T) {
+	// Provider prompt caches key on the request prefix. Across goal steps the
+	// system message must be byte-identical and the earlier conversation must
+	// be replayed unchanged, so only the new step's messages are uncached.
+	dir := t.TempDir()
+	t.Setenv("MOW_HOME", dir)
+	type call struct {
+		system string
+		msgs   []mow.Message
+	}
+	var calls []call
+	report := func(id string, args map[string]any) mow.Message {
+		raw, _ := json.Marshal(args)
+		return mow.Message{Role: "assistant", ToolCalls: []mow.ToolCall{{
+			ID: id, Type: "function",
+			Function: mow.FunctionCall{Name: "goal_report", Arguments: string(raw)},
+		}}}
+	}
+	eng, err := mow.New(mow.Options{
+		Workspace: t.TempDir(),
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			var sys string
+			for _, m := range messages {
+				if m.Role == "system" {
+					sys += m.Content
+				}
+			}
+			calls = append(calls, call{system: sys, msgs: append([]mow.Message(nil), messages...)})
+			// goal_report ends the step, so each model call here is one step:
+			// plan, finish item a (with evidence), then finish the goal.
+			switch len(calls) {
+			case 1:
+				return report("p", map[string]any{"status": "continue", "plan": []map[string]string{
+					{"id": "a", "title": "Do A", "status": "pending"},
+					{"id": "b", "title": "Do B", "status": "pending"},
+				}}), nil
+			case 2:
+				return report("a", map[string]any{"status": "continue", "item_id": "a", "item_status": "done",
+					"evidence": []map[string]any{{"claim": "A works"}}}), nil
+			default:
+				return report("d", map[string]any{"status": "done", "summary": "all done", "plan": []map[string]string{
+					{"id": "a", "title": "Do A", "status": "done"},
+					{"id": "b", "title": "Do B", "status": "done"},
+				}}), nil
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &goal.Runner{Engine: eng, Store: &goal.Store{Dir: dir + "/goals"}}
+	st, err := r.RunSpec(context.Background(), goal.Spec{ID: "cache", Goal: "ship A and B", MaxSteps: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Status != goal.StatusDone {
+		t.Fatalf("status=%s step=%d", st.Status, st.Step)
+	}
+	// Step starts are the calls whose last message is a user prompt.
+	var starts []call
+	for _, c := range calls {
+		if c.msgs[len(c.msgs)-1].Role == "user" {
+			starts = append(starts, c)
+		}
+	}
+	if len(starts) < 3 {
+		t.Fatalf("want >=3 goal steps, saw %d (calls=%d)", len(starts), len(calls))
+	}
+	for i := 1; i < len(starts); i++ {
+		prev, cur := starts[i-1], starts[i]
+		if cur.system != prev.system {
+			t.Fatalf("system prompt changed between step %d and %d:\n--- before\n%s\n--- after\n%s", i, i+1, prev.system, cur.system)
+		}
+		// Everything the previous step sent (minus its new user turn, which
+		// is now history too) is replayed as an unchanged prefix.
+		if len(cur.msgs) <= len(prev.msgs) {
+			t.Fatalf("step %d did not carry history: %d <= %d messages", i+1, len(cur.msgs), len(prev.msgs))
+		}
+		for j := range prev.msgs {
+			a, b := prev.msgs[j], cur.msgs[j]
+			if a.Role != b.Role || a.Content != b.Content {
+				t.Fatalf("step %d rewrote history message %d (%s):\n%q\n->\n%q", i+1, j, a.Role, a.Content, b.Content)
+			}
+		}
+	}
+	// Per-step state reached the model through the user message instead.
+	last := starts[len(starts)-1].msgs
+	prompt := last[len(last)-1].Content
+	for _, want := range []string{"Checklist:", "Do B", "A works", "Outer loop step"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("final step prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(starts[0].system, "Checklist:\n- [") {
+		t.Errorf("system prompt still embeds the checklist:\n%s", starts[0].system)
 	}
 }
 

@@ -831,6 +831,11 @@ func stepPrompt(st State) string {
 	b.WriteString(current)
 	b.WriteString("Continue work on the goal.\n\nGoal:\n")
 	b.WriteString(st.Goal)
+	// Step budget lives here, not in SystemAppend: it changes every step and
+	// the system prompt must stay byte-identical for prefix caching.
+	if st.MaxSteps > 0 {
+		fmt.Fprintf(&b, "\n\nOuter loop step %d of %d.", st.Step+1, st.MaxSteps)
+	}
 	if st.Plan.HasItems() {
 		b.WriteString("\n\nChecklist:\n")
 		b.WriteString(st.Plan.Format())
@@ -840,6 +845,8 @@ func stepPrompt(st State) string {
 		} else if st.Plan.AllDone() {
 			b.WriteString("\n\nAll items done — call goal_report status=done summary=…")
 		}
+	} else {
+		b.WriteString("\n\nNo checklist yet. For multi-part work call goal_report status=continue with plan=[...] (id+title+status=pending); a trivial goal may finish with goal_report status=done summary=… now.")
 	}
 	if facts := st.FactsText(); facts != "" {
 		b.WriteString("\n\nDurable evidence so far (use these; do not re-derive):\n")

@@ -43,19 +43,67 @@ func TestNodeSummarySelectsPendingAndHandlesNoPlan(t *testing.T) {
 	}
 }
 
-func TestStepPromptsInjectNodeAndKeepChecklist(t *testing.T) {
-	st := State{Goal: "ship", Step: 1, MaxSteps: 4, CurrentItem: "b", Plan: Plan{Items: []PlanItem{
-		{ID: "a", Title: "prepare", Status: ItemDone},
-		{ID: "b", Title: "verify", Status: ItemPending},
-	}}}
-	wantNode := "Current node: node 2/2 [b] verify (evidence: 0)"
-	for name, prompt := range map[string]string{"step": stepPrompt(st), "system": SystemAppend(st)} {
-		if !strings.HasPrefix(prompt, wantNode+"\n\n") {
-			t.Errorf("%s missing leading node summary:\n%s", name, prompt)
+func TestSystemAppendIsStepInvariantAndStepPromptCarriesState(t *testing.T) {
+	// The system prompt is the head of the provider's cached prefix, and each
+	// goal step replays the whole conversation after it. Anything that varies
+	// by step there re-bills that history uncached, so SystemAppend may depend
+	// only on the goal text. Per-step state belongs in stepPrompt.
+	plan := func(a, b PlanItemStatus) Plan {
+		return Plan{Items: []PlanItem{
+			{ID: "a", Title: "prepare", Status: a},
+			{ID: "b", Title: "verify", Status: b},
+		}}
+	}
+	steps := []State{
+		{Goal: "ship", Step: 0, MaxSteps: 4},
+		{Goal: "ship", Step: 1, MaxSteps: 4, Plan: plan(ItemPending, ItemPending)},
+		{Goal: "ship", Step: 2, MaxSteps: 4, CurrentItem: "b", Plan: plan(ItemDone, ItemPending),
+			Facts: []Fact{{Claim: "tests pass"}}, Summary: "prepared", VerifyNote: "check b"},
+		{Goal: "ship", Step: 3, MaxSteps: 4, Plan: plan(ItemDone, ItemDone)},
+	}
+	want := SystemAppend(steps[0])
+	for i, st := range steps[1:] {
+		if got := SystemAppend(st); got != want {
+			t.Fatalf("SystemAppend changed at step %d:\n--- step 0\n%s\n--- step %d\n%s", i+1, want, i+1, got)
 		}
-		if !strings.Contains(prompt, "Checklist:\n") || !strings.Contains(prompt, "- [pending] verify (b)") {
-			t.Errorf("%s lost full checklist protocol:\n%s", name, prompt)
+	}
+	for _, leaked := range []string{"Current node:", "step 1 of", "- [pending]", "Focus this step on", "(evidence:"} {
+		if strings.Contains(want, leaked) {
+			t.Errorf("SystemAppend carries per-step state %q:\n%s", leaked, want)
 		}
+	}
+	// The stable protocol survives in generic form.
+	for _, keep := range []string{"ship", "goal_report status=done", "item_id=<id>", "plan=[", "Do not discard uncommitted work"} {
+		if !strings.Contains(want, keep) {
+			t.Errorf("SystemAppend lost protocol %q:\n%s", keep, want)
+		}
+	}
+	// A different goal is a different system prompt: invariance is per goal.
+	if SystemAppend(State{Goal: "other"}) == want {
+		t.Fatal("SystemAppend ignores the goal text")
+	}
+
+	mid := stepPrompt(steps[2])
+	for _, keep := range []string{
+		"Current node: node 2/2 [b] verify (evidence: 1)\n\n",
+		"Outer loop step 3 of 4.",
+		"Checklist:\n", "- [done] prepare (a)", "- [pending] verify (b)",
+		"Focus: [b] verify", "item_id=b item_status=done",
+		"tests pass", "check b", "prepared",
+	} {
+		if !strings.Contains(mid, keep) {
+			t.Errorf("stepPrompt missing %q:\n%s", keep, mid)
+		}
+	}
+	if !strings.HasPrefix(mid, "Current node: ") {
+		t.Errorf("stepPrompt must lead with the node summary:\n%s", mid)
+	}
+	noPlan := stepPrompt(State{Goal: "ship", Step: 1, MaxSteps: 4})
+	if !strings.Contains(noPlan, "No checklist yet.") || !strings.Contains(noPlan, "plan=[...]") {
+		t.Errorf("later step without a plan lost the planning hint:\n%s", noPlan)
+	}
+	if !strings.Contains(stepPrompt(steps[3]), "All items done") {
+		t.Errorf("all-done step lost its finish hint")
 	}
 }
 

@@ -463,29 +463,26 @@ func contentWithoutMarkers(text string) string {
 	return strings.TrimSpace(b.String())
 }
 
-// SystemAppend is injected each step (via PromptOpts) for the outer-loop protocol.
+// SystemAppend is the goal protocol merged into the system prompt of every
+// step (via PromptOpts). It depends only on the goal text, which is fixed for
+// the life of a goal, so it is byte-identical from step to step.
+//
+// That is deliberate: providers cache the prompt prefix, and each goal step
+// replays the whole carried conversation after the system prompt. Anything
+// step-varying here (current node, step counter, checklist statuses, focus)
+// would change the prefix and re-bill that entire history uncached at every
+// step boundary. Per-step state belongs in the step's user message
+// (stepPrompt), which is appended after the cached history.
 func SystemAppend(st State) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Current node: %s\n\n", st.NodeSummary())
-	fmt.Fprintf(&b, "You are working toward THIS goal only (outer loop step %d of %d):\n%s\n\n",
-		st.Step+1, st.MaxSteps, st.Goal)
+	fmt.Fprintf(&b, "You are working toward THIS goal only:\n%s\n\n", st.Goal)
 	b.WriteString("The summary you report must answer THIS goal — ignore unrelated prior chat. Do not discard uncommitted work to tidy the tree.\n\n")
-	if st.Plan.HasItems() {
-		b.WriteString("Checklist:\n")
-		b.WriteString(st.Plan.Format())
-		b.WriteString("\n\n")
-		if item, ok := st.Plan.NextPending(); ok {
-			fmt.Fprintf(&b, "Focus this step on: [%s] %s\n", item.ID, item.Title)
-			b.WriteString("When that item is done: goal_report status=continue item_id=" + item.ID + " item_status=done item_note=…\n")
-			b.WriteString("When ALL items are done/skipped: goal_report status=done summary=…\n\n")
-		} else if st.Plan.AllDone() {
-			b.WriteString("All checklist items are done — call goal_report status=done summary=…\n\n")
-		}
-	} else {
-		b.WriteString("No checklist yet. Early in the goal, call goal_report status=continue with plan=[{id,title,status:pending},…] " +
-			"to break the goal into concrete items (recommended for multi-part work).\n")
-		b.WriteString("Or if the goal is trivial, goal_report status=done summary=… immediately.\n\n")
-	}
+	b.WriteString("Each step's user message states the current node, step budget, checklist, focus item, and evidence ledger. " +
+		"Treat the latest such message as the source of truth for goal state; earlier ones are history.\n\n")
+	b.WriteString("Checklist protocol:\n" +
+		"- Without a checklist, for multi-part work call goal_report status=continue with plan=[{id,title,status:pending},…] early; a trivial goal may finish with goal_report status=done summary=… immediately.\n" +
+		"- When the focus item is done: goal_report status=continue item_id=<id> item_status=done item_note=…\n" +
+		"- When ALL items are done/skipped: goal_report status=done summary=…\n\n")
 	fmt.Fprintf(&b,
 		"Evidence: record durable facts with goal_report evidence=[{claim,source,confidence}] — \n"+
 			"later steps see the evidence ledger, not the whole conversation.\n\n"+
