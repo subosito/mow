@@ -47,6 +47,8 @@ func (c *Client) handleAgentRequest(req request) {
 	resp := response{JSONRPC: "2.0", ID: req.ID}
 
 	switch {
+	case method == "session/request_input" || method == "session/requestInput":
+		resp.Result = map[string]any{"answers": []any{}}
 	case method == "session/request_permission" || method == "session/requestPermission":
 		resp.Result = c.permissionResult(req.Params)
 	case strings.HasPrefix(method, "fs/"):

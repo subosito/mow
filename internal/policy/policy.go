@@ -72,11 +72,12 @@ type Policy struct {
 
 // Power tools that are denied unless explicitly allowed.
 var powerTools = map[string]string{
-	"write":      "write",
-	"edit":       "write",
-	"bash":       "shell",
-	"proc_start": "shell",
-	"proc_stop":  "shell",
+	"write":       "write",
+	"edit":        "write",
+	"apply_patch": "write",
+	"bash":        "shell",
+	"proc_start":  "shell",
+	"proc_stop":   "shell",
 }
 
 // IsPowerTool reports whether name is gated behind allow-write/allow-shell.

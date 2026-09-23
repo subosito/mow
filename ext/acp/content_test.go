@@ -13,7 +13,7 @@ import (
 
 func TestMaterializePromptTextDoesNotCreateMediaDir(t *testing.T) {
 	ws := t.TempDir()
-	if _, err := materializePrompt([]ContentBlock{{Type: "text", Text: "hello"}}, ws, "s1"); err != nil {
+	if _, _, err := materializePrompt([]ContentBlock{{Type: "text", Text: "hello"}}, ws, "s1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(ws, "media", "acp")); !os.IsNotExist(err) {
@@ -22,9 +22,28 @@ func TestMaterializePromptTextDoesNotCreateMediaDir(t *testing.T) {
 }
 
 func TestMaterializePromptRequiresWorkspace(t *testing.T) {
-	_, err := materializePrompt([]ContentBlock{{Type: "text", Text: "hi"}}, "", "s1")
+	_, _, err := materializePrompt([]ContentBlock{{Type: "text", Text: "hi"}}, "", "s1")
 	if err == nil {
 		t.Fatal("expected error for empty workspace")
+	}
+}
+
+func TestExpandPromptRefsDoesNotInlineBinaryImage(t *testing.T) {
+	ws := t.TempDir()
+	image := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 64)...)
+	if err := os.WriteFile(filepath.Join(ws, "photo.PNG"), image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := mow.New(mow.Options{Workspace: ws, NoSession: true, Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+		return mow.Message{Role: "assistant", Content: "ok"}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	got := expandPromptFileRefs(eng, "inspect @photo.PNG")
+	if !strings.Contains(got, "Image file reference") || !strings.Contains(got, "ACP image content") || strings.Contains(got, string(image)) {
+		t.Fatalf("image reference expanded unsafely: %q", got)
 	}
 }
 
@@ -32,7 +51,7 @@ func TestMaterializePromptImage(t *testing.T) {
 	ws := t.TempDir()
 	png := []byte{0x89, 0x50, 0x4e, 0x47}
 	b64 := base64.StdEncoding.EncodeToString(png)
-	text, err := materializePrompt([]ContentBlock{
+	text, media, err := materializePrompt([]ContentBlock{
 		{Type: "text", Text: "what is this?"},
 		{Type: "image", Data: b64, MimeType: "image/png"},
 	}, ws, "s1")
@@ -45,6 +64,9 @@ func TestMaterializePromptImage(t *testing.T) {
 	if !strings.Contains(text, "media/acp/") || !strings.Contains(text, "understand_image") {
 		t.Fatalf("missing attachment note: %q", text)
 	}
+	if len(media) != 1 || media[0].Type != "image" || media[0].MimeType != "image/png" {
+		t.Fatalf("media=%+v", media)
+	}
 	entries, err := os.ReadDir(filepath.Join(ws, "media", "acp"))
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("entries=%v err=%v", entries, err)
@@ -55,9 +77,34 @@ func TestMaterializePromptImage(t *testing.T) {
 	}
 }
 
+func TestMaterializePromptAudioAndVideo(t *testing.T) {
+	for _, tc := range []struct {
+		typeName, mime, wantTool, wantExt string
+	}{
+		{"audio", "audio/wav", "understand_voice", ".wav"},
+		{"video", "video/mp4", "understand_video", ".mp4"},
+	} {
+		t.Run(tc.typeName, func(t *testing.T) {
+			ws := t.TempDir()
+			text, media, err := materializePrompt([]ContentBlock{{Type: tc.typeName, Data: base64.StdEncoding.EncodeToString([]byte("media")), MimeType: tc.mime}}, ws, "s")
+			wantMedia := 1
+			if tc.typeName == "video" {
+				wantMedia = 0
+			}
+			if err != nil || len(media) != wantMedia || wantMedia == 1 && media[0].Type != tc.typeName || !strings.Contains(text, tc.wantTool) || !strings.Contains(text, "if an appropriate extension is installed") {
+				t.Fatalf("text=%q err=%v", text, err)
+			}
+			entries, err := os.ReadDir(filepath.Join(ws, "media", "acp"))
+			if err != nil || len(entries) != 1 || filepath.Ext(entries[0].Name()) != tc.wantExt {
+				t.Fatalf("entries=%v err=%v", entries, err)
+			}
+		})
+	}
+}
+
 func TestMaterializePromptResourceText(t *testing.T) {
 	ws := t.TempDir()
-	text, err := materializePrompt([]ContentBlock{
+	text, _, err := materializePrompt([]ContentBlock{
 		{Type: "resource", Resource: &ResourceContents{URI: "file:///x.go", Text: "package main"}},
 	}, ws, "s")
 	if err != nil {
@@ -75,7 +122,7 @@ func TestMaterializePromptRejectsMediaSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	b64 := base64.StdEncoding.EncodeToString([]byte("outside"))
-	_, err := materializePrompt([]ContentBlock{{Type: "image", Data: b64, MimeType: "image/png"}}, ws, "s1")
+	_, _, err := materializePrompt([]ContentBlock{{Type: "image", Data: b64, MimeType: "image/png"}}, ws, "s1")
 	if err == nil {
 		t.Fatal("expected media symlink escape to be rejected")
 	}

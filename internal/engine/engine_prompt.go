@@ -30,6 +30,9 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		return RunResult{}, fmt.Errorf("mow: empty prompt")
 	}
 
+	if err := validateUserParts(opt.UserParts); err != nil {
+		return RunResult{}, err
+	}
 	e.promptMu.Lock()
 	defer e.promptMu.Unlock()
 
@@ -154,6 +157,13 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 			continue
 		}
 		tools = append(tools, adaptTool(t))
+	}
+	ask := opt.AskUser
+	if ask == nil {
+		ask = e.opt.AskUser
+	}
+	if ask != nil {
+		tools = append(tools, adaptTool(askUserTool{fn: ask}))
 	}
 	allowed := allowedToolSet(opt.AllowedTools)
 	if len(allowed) > 0 {
@@ -303,6 +313,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		MaxTurns:           maxTurns,
 		Tools:              tools,
 		PriorMessages:      prior,
+		UserParts:          publicPartsToInternal(opt.UserParts),
 		Hooks:              hooks,
 		OnToken:            onTok,
 		MaxContextChars:    maxCtx,
@@ -362,6 +373,9 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	// producing, so a host is painting a "finishing" verb across it. Time the
 	// commit so a long tail can be attributed to a phase instead of guessed
 	// at; debug-level, one line, no content.
+	if changes := runFileChanges(prior, res.Messages); len(changes) > 0 {
+		e.Emit(Event{Type: EventFSChange, RunID: runID, SessionID: sid, Files: changes})
+	}
 	commitStart := time.Now()
 	var snapshotDur time.Duration
 
@@ -542,7 +556,8 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 		e.Emit(Event{
 			Type: EventToolEnd, RunID: runID, SessionID: sid,
 			Tool: ev.Name, ToolCallID: ev.ToolCallID, Args: ev.Args,
-			Result: res, Denied: ev.Denied, Error: errStr, DurationMs: durMs,
+			Result: res, Denied: ev.Denied, Executed: !ev.Denied, IsError: errStr != "" || ev.Denied,
+			ErrorCode: toolErrorCode(ev.Denied, ev.ExecErr), Error: errStr, DurationMs: durMs,
 		})
 		e.log().Debug("mow tool end", "run_id", runID, "tool", ev.Name, "denied", ev.Denied, "error", errStr, "duration_ms", durMs)
 		return agent.PostToolDecision{}, nil
@@ -606,6 +621,16 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 		h.PreModel = append([]agent.PreModelFunc{gate}, h.PreModel...)
 	}
 	return h
+}
+
+func toolErrorCode(denied bool, err error) string {
+	if denied {
+		return "denied"
+	}
+	if err != nil && !errors.Is(err, agent.ErrDone) {
+		return "execution_failed"
+	}
+	return ""
 }
 
 // eventToolResult is the EventToolEnd body for hosts. Read/grep/bash stay

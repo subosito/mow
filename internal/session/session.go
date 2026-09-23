@@ -380,6 +380,38 @@ func (s *Store) LoadMessages() ([]llm.Message, error) {
 // the session. Filling the gaps keeps resume valid and tells the model what
 // happened.
 func repairToolCalls(msgs []llm.Message) []llm.Message {
+	// First sanitize malformed/duplicate calls and orphan results. Provider
+	// streams may contain an empty terminal accumulator; replay must never send
+	// a tool call without a stable ID and function name.
+	cleaned := make([]llm.Message, 0, len(msgs))
+	validIDs := map[string]bool{}
+	for _, m := range msgs {
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			seen := map[string]bool{}
+			calls := m.ToolCalls[:0]
+			for _, tc := range m.ToolCalls {
+				id, name := strings.TrimSpace(tc.ID), strings.TrimSpace(tc.Function.Name)
+				// Signature-only legacy calls are retained for round-trip fidelity.
+				// Drop only wire-invalid ordinary calls; pathological valid batches
+				// are refused before execution, not rewritten from durable history.
+				if (id == "" || name == "") && strings.TrimSpace(tc.ThoughtSignature) == "" || seen[id] {
+					continue
+				}
+				seen[id], validIDs[id] = true, true
+				tc.ID, tc.Function.Name = id, name
+				if strings.TrimSpace(tc.Function.Arguments) == "" && strings.TrimSpace(tc.ThoughtSignature) == "" {
+					tc.Function.Arguments = "{}"
+				}
+				calls = append(calls, tc)
+			}
+			m.ToolCalls = calls
+		}
+		if m.Role == "tool" && m.ToolCallID != "" && !validIDs[m.ToolCallID] {
+			continue
+		}
+		cleaned = append(cleaned, m)
+	}
+	msgs = cleaned
 	var out []llm.Message
 	for i := 0; i < len(msgs); i++ {
 		m := msgs[i]
@@ -527,7 +559,9 @@ func firstUserLine(path string) string {
 	return ""
 }
 
-// LatestID returns the most recently modified session id under dir (basename without .jsonl).
+// LatestID returns the most recently modified session id under dir (basename
+// without .jsonl). Callers must pass the already workspace-scoped directory;
+// this function never scans sibling project hashes.
 func LatestID(dir string) (string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

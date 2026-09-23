@@ -406,6 +406,29 @@ func TestReadPagesPastByteCapAndRefusesBinary(t *testing.T) {
 	if !strings.Contains(err.Error(), "binary") {
 		t.Fatalf("want binary error, got %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "photo.png"), append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 32)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = reg[0].Exec(t.Context(), json.RawMessage(`{"path":"photo.png"}`))
+	if err == nil || !strings.Contains(err.Error(), "image content") || !strings.Contains(err.Error(), "UTF-8 text") {
+		t.Fatalf("image read must explain the supported path, got %v", err)
+	}
+	for _, tc := range []struct {
+		path, want string
+	}{
+		{"voice.mp3", "audio files"},
+		{"clip.mp4", "video files"},
+		{"report.pdf", "pdf files"},
+		{"bundle.zip", "archive files"},
+	} {
+		if err := os.WriteFile(filepath.Join(root, tc.path), []byte("\x00binary"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err = reg[0].Exec(t.Context(), json.RawMessage(fmt.Sprintf(`{"path":%q}`, tc.path)))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s guidance=%v", tc.path, err)
+		}
+	}
 }
 
 func TestGrepSkipsDotGitUnlessPathIsDotGit(t *testing.T) {

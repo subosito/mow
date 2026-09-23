@@ -57,6 +57,30 @@ func (a toolAdapter) Exploratory() bool {
 	return false
 }
 
+// MaxParallel forwards an optional per-tool fan-out cap.
+func (a toolAdapter) MaxParallel() int {
+	if t, ok := a.t.(interface{ MaxParallel() int }); ok {
+		return t.MaxParallel()
+	}
+	return 0
+}
+
+// PostBatchContext forwards optional synthesis guidance after a completed batch.
+func (a toolAdapter) PostBatchContext() string {
+	if t, ok := a.t.(interface{ PostBatchContext() string }); ok {
+		return t.PostBatchContext()
+	}
+	return ""
+}
+
+// Sequential forwards optional Sequential() for interactive/barrier tools.
+func (a toolAdapter) Sequential() bool {
+	if t, ok := a.t.(interface{ Sequential() bool }); ok {
+		return t.Sequential()
+	}
+	return false
+}
+
 // Enabled forwards optional Enabled(*Engine) so conditionally registered
 // extension and per-engine tools are filtered for the current engine.
 func (a toolAdapter) Enabled(e *Engine) bool {
@@ -241,6 +265,9 @@ func toPublicMessage(m llm.Message) Message {
 		StopReason: m.StopReason,
 		Usage:      Usage{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens, CachedInputTokens: m.Usage.CachedInputTokens, CacheWriteInputTokens: m.Usage.CacheWriteInputTokens},
 	}
+	for _, p := range m.Parts {
+		pm.Parts = append(pm.Parts, ContentPart{Type: p.Type, Text: p.Text, Data: p.Data, MimeType: p.MimeType})
+	}
 	for _, tc := range m.ToolCalls {
 		pm.ToolCalls = append(pm.ToolCalls, ToolCall{
 			ID: tc.ID, Type: tc.Type,
@@ -256,6 +283,9 @@ func toInternalMessage(m Message) llm.Message {
 		StopReason: m.StopReason,
 		Usage:      llm.Usage{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens, CachedInputTokens: m.Usage.CachedInputTokens, CacheWriteInputTokens: m.Usage.CacheWriteInputTokens},
 	}
+	for _, p := range m.Parts {
+		im.Parts = append(im.Parts, llm.ContentPart{Type: p.Type, Text: p.Text, Data: p.Data, MimeType: p.MimeType})
+	}
 	for _, tc := range m.ToolCalls {
 		im.ToolCalls = append(im.ToolCalls, llm.ToolCall{
 			ID: tc.ID, Type: tc.Type,
@@ -263,6 +293,14 @@ func toInternalMessage(m Message) llm.Message {
 		})
 	}
 	return im
+}
+
+func publicPartsToInternal(parts []ContentPart) []llm.ContentPart {
+	out := make([]llm.ContentPart, 0, len(parts))
+	for _, p := range parts {
+		out = append(out, llm.ContentPart{Type: p.Type, Text: p.Text, Data: p.Data, MimeType: p.MimeType})
+	}
+	return out
 }
 
 func toPublicToolSpecs(in []llm.ToolSpec) []ToolSpec {
@@ -280,7 +318,7 @@ func toPublicToolSpecs(in []llm.ToolSpec) []ToolSpec {
 
 func isBuiltin(name string) bool {
 	switch name {
-	case "read", "glob", "grep", "write", "edit", "bash":
+	case "read", "glob", "grep", "write", "edit", "apply_patch", "bash":
 		return true
 	default:
 		return false

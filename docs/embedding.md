@@ -373,3 +373,17 @@ if !sr.OK { /* fail CI */ }
 ```
 
 See [extensions.md](extensions.md) § Eval / replay.
+
+
+## Structured user questions and file changes
+
+Interactive hosts may set `Options.AskUser` or `PromptOpts.AskUser`. Mow then
+advertises a prompt-scoped `ask_user` tool (maximum four questions/eight options).
+It is sequential: a batch containing it and sibling tools is refused before any
+executes. A missing host callback means the tool is absent; headless hosts cannot
+hang waiting for UI. ACP maps it to `session/request_input` for capable clients.
+
+Successful builtin `write`, `edit`, and `apply_patch` calls are summarized once at
+run end via `EventFSChange` (`harness.fs.change`) with path + add/modify only.
+Shell/extension mutations are not inferred. This event is an audit/UI summary,
+not a transaction log or proof the whole task succeeded.

@@ -42,6 +42,8 @@ What the embed gives you beyond a one-liner:
   token usage all preserved), or `Options.Chat` for quick fakes.
 - **Per-engine tools** — `Options.Tools`; two engines in one process can run
   different toolsets.
+- **Tools** — read/glob/grep by default; `write`, `edit`, and exact single-file
+  `apply_patch` under `--allow-write`; shell remains the explicit trust cliff.
 - **Events & tokens** — `Options.OnEvent` for the lifecycle stream;
   `RunResult.Usage` / `loop.run.end` for provider-reported token totals.
 - **Sessions** — `eng.Sessions()` lists resumable sessions;
@@ -142,6 +144,8 @@ Docs: [docs/extensions.md](docs/extensions.md).
 | [docs/embedding.md](docs/embedding.md) | Embed in Go: options, events, custom tools/providers, hooks, sessions |
 | [docs/harness.md](docs/harness.md) | Loop, tools, config |
 | [docs/acp.md](docs/acp.md) | `mow acp` + extras |
+| [docs/jev.md](docs/jev.md) | Optional structured decisions: use cases, safety, calibration, rollout |
+| [docs/media.md](docs/media.md) | Binary media inputs, optional understand/generate tools, client gaps |
 | [docs/workspace-profiles.md](docs/workspace-profiles.md) | Named workspace sets: roots, overlay, skills, plugins |
 | [ext/*/README.md](ext/) | Per-extension one-pagers |
 | [docs/extensions.md](docs/extensions.md) | Core extensions, ACP, and MCP |

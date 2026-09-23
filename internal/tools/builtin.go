@@ -47,6 +47,9 @@ func Registry(p *policy.Policy, enable []string) []agent.Tool {
 	if want["edit"] {
 		out = append(out, &editTool{p: p})
 	}
+	if want["apply_patch"] {
+		out = append(out, &applyPatchTool{p: p})
+	}
 	if want["bash"] {
 		out = append(out, &bashTool{p: p})
 	}
@@ -153,10 +156,54 @@ func (t *readTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	br := bufio.NewReaderSize(f, 64*1024)
 	peek, _ := br.Peek(sniffBytes)
 	if isBinaryPrefix(peek) {
-		return "", fmt.Errorf("read %s: not a UTF-8 text file (binary)", a.Path)
+		return "", binaryReadError(a.Path, peek)
 	}
 	hashline := t.p != nil && t.p.Hashline
 	return renderReadFrom(br, a.Offset, a.Limit, hashline, lim, a.Path)
+}
+
+func binaryReadError(path string, prefix []byte) error {
+	kind := binaryKind(path, prefix)
+	switch kind {
+	case "image":
+		return fmt.Errorf("read %s: image files are binary and the read tool only reads UTF-8 text; attach the file as image content for a vision-capable model, or use an installed image-understanding extension", path)
+	case "audio":
+		return fmt.Errorf("read %s: audio files are binary and the read tool only reads UTF-8 text; attach the file as audio content for a compatible client/model, or use an installed speech/voice-understanding extension", path)
+	case "video":
+		return fmt.Errorf("read %s: video files are binary and the read tool only reads UTF-8 text; use an installed video-understanding extension (ACP v1 prompt content has no native video block)", path)
+	case "pdf", "archive":
+		return fmt.Errorf("read %s: %s files are binary and the read tool only reads UTF-8 text; use an installed file-type-specific extraction tool", path, kind)
+	default:
+		return fmt.Errorf("read %s: not a UTF-8 text file (binary); use a tool intended for this file type", path)
+	}
+}
+
+func binaryKind(path string, b []byte) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif":
+		return "image"
+	case ".mp3", ".wav", ".ogg", ".oga", ".m4a", ".aac", ".flac", ".opus":
+		return "audio"
+	case ".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v":
+		return "video"
+	case ".pdf":
+		return "pdf"
+	case ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z":
+		return "archive"
+	}
+	switch {
+	case len(b) >= 8 && bytes.Equal(b[:8], []byte("\x89PNG\r\n\x1a\n")):
+		return "image"
+	case len(b) >= 3 && bytes.Equal(b[:3], []byte("\xff\xd8\xff")):
+		return "image"
+	case len(b) >= 6 && (bytes.Equal(b[:6], []byte("GIF87a")) || bytes.Equal(b[:6], []byte("GIF89a"))):
+		return "image"
+	case len(b) >= 12 && bytes.Equal(b[:4], []byte("RIFF")) && bytes.Equal(b[8:12], []byte("WEBP")):
+		return "image"
+	default:
+		return "binary"
+	}
 }
 
 func isBinaryPrefix(b []byte) bool {

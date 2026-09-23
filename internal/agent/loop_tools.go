@@ -12,15 +12,44 @@ import (
 	"github.com/subosito/mow/internal/llm"
 )
 
+// maxToolCallsPerTurn bounds one model response. Thousands of calls can exhaust
+// memory/IO and make the session unreplayable; normal parallel work is far below it.
+const maxToolCallsPerTurn = 64
+
 func runToolBatch(ctx context.Context, calls []llm.ToolCall, byName map[string]Tool, opt Options) ([]llm.Message, error) {
 	if len(calls) == 0 {
 		return nil, nil
 	}
+	if len(calls) > maxToolCallsPerTurn {
+		return repairToolResults(calls, nil, fmt.Errorf("tool batch has %d calls; maximum is %d", len(calls), maxToolCallsPerTurn)), nil
+	}
+	for _, tc := range calls {
+		if strings.TrimSpace(tc.ID) == "" || strings.TrimSpace(tc.Function.Name) == "" {
+			return repairToolResults(calls, nil, errors.New("tool batch contains a call without id or function name")), nil
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Interactive/sequential tools cannot safely run beside siblings whose
+	// execution assumes the answer. Refuse the batch softly; the model can
+	// reissue ask_user alone, then continue with the answer in history.
+	for _, tc := range calls {
+		if tool := byName[tc.Function.Name]; tool != nil {
+			if seq, ok := tool.(interface{ Sequential() bool }); ok && seq.Sequential() && len(calls) > 1 {
+				return sequentialBatchErrors(calls, tc.ID, tc.Function.Name), nil
+			}
+		}
+	}
 
 	limit := parallelLimit(opt)
+	for _, tc := range calls {
+		if tool := byName[tc.Function.Name]; tool != nil {
+			if capped, ok := tool.(interface{ MaxParallel() int }); ok && capped.MaxParallel() > 0 {
+				limit = min(limit, capped.MaxParallel())
+			}
+		}
+	}
 	if len(calls) == 1 || limit == 1 {
 		return runToolBatchSequential(ctx, calls, byName, opt)
 	}
@@ -48,6 +77,7 @@ func runToolBatchSequential(ctx context.Context, calls []llm.ToolCall, byName ma
 	if done {
 		return out, ErrDone
 	}
+	appendPostBatchContext(calls, byName, out)
 	return out, nil
 }
 
@@ -104,6 +134,7 @@ func runToolBatchParallel(ctx context.Context, calls []llm.ToolCall, byName map[
 	if err := ctx.Err(); err != nil {
 		return out, err
 	}
+	appendPostBatchContext(calls, byName, out)
 	if done {
 		return out, ErrDone
 	}
@@ -115,28 +146,16 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 	name := tc.Function.Name
 	if opt.AllowTool != nil {
 		if err := opt.AllowTool(name); err != nil {
-			return toolSlot{
-				ok: true,
-				msg: llm.Message{
-					Role:       "tool",
-					ToolCallID: tc.ID,
-					Name:       name,
-					Content:    "error: " + err.Error(),
-				},
+			tool := byName[name]
+			if tool == nil {
+				tool = softErrorTool{name: name}
 			}
+			return runPolicyDenied(ctx, tool, tc, opt, err)
 		}
 	}
 	tool, ok := byName[name]
 	if !ok {
-		return toolSlot{
-			ok: true,
-			msg: llm.Message{
-				Role:       "tool",
-				ToolCallID: tc.ID,
-				Name:       name,
-				Content:    fmt.Sprintf("error: unknown tool %q", name),
-			},
-		}
+		return runUnknownTool(ctx, tc, opt)
 	}
 	args := json.RawMessage(tc.Function.Arguments)
 	if len(args) == 0 {

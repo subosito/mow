@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -35,22 +36,23 @@ type ResourceContents struct {
 	MimeType string `json:"mimeType,omitempty"`
 }
 
-// materializePrompt turns ACP content blocks into a text prompt for Engine.Prompt.
-// Images/audio/blobs are written under <workspace>/media/acp/ and referenced by
-// path so tools (understand_*) or the model can use them. Non-text blocks are
-// never silently dropped.
-func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (string, error) {
+// materializePrompt turns ACP content blocks into prompt text plus typed media
+// parts. Images/audio are sent on the provider wire and also saved under
+// <workspace>/media/acp/ so optional tools and session operators have a jailed
+// artifact reference. Video is path-only because provider message wires differ.
+func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (string, []mow.ContentPart, error) {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
-		return "", fmt.Errorf("workspace not set")
+		return "", nil, fmt.Errorf("workspace not set")
 	}
 	abs, err := filepath.Abs(workspace)
 	if err != nil {
-		return "", fmt.Errorf("workspace: %w", err)
+		return "", nil, fmt.Errorf("workspace: %w", err)
 	}
 	workspace = abs
 
 	var parts []string
+	var media []mow.ContentPart
 	var nMedia int
 	stamp := time.Now().Format("20060102-150405")
 	sid := strings.TrimSpace(sessionID)
@@ -69,13 +71,16 @@ func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (stri
 			if s := strings.TrimSpace(c.Text); s != "" {
 				parts = append(parts, s)
 			}
-		case "image", "audio":
+		case "image", "audio", "video":
 			data, err := decodeB64(c.Data)
 			if err != nil {
-				return "", fmt.Errorf("content %s: %w", typ, err)
+				return "", nil, fmt.Errorf("content %s: %w", typ, err)
 			}
 			if len(data) == 0 {
 				continue
+			}
+			if typ == "image" || typ == "audio" {
+				media = append(media, mow.ContentPart{Type: typ, Data: base64.StdEncoding.EncodeToString(data), MimeType: c.MimeType})
 			}
 			nMedia++
 			ext := extFromMIME(c.MimeType, typ)
@@ -83,15 +88,18 @@ func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (stri
 			rel := filepath.Join("media", "acp", name)
 			pol := &policy.Policy{Workspace: workspace}
 			if _, err := toolspkg.WriteFileJailed(pol, rel, data, 0o644); err != nil {
-				return "", err
+				return "", nil, err
 			}
-			label := "image"
-			if typ == "audio" {
-				label = "audio"
+			label, tool := "image", "understand_image"
+			switch typ {
+			case "audio":
+				label, tool = "audio", "understand_voice"
+			case "video":
+				label, tool = "video", "understand_video"
 			}
 			parts = append(parts, fmt.Sprintf(
-				"[User attached %s: workspace path %q, mime %q. Use understand_%s or open the file if needed.]",
-				label, rel, c.MimeType, map[string]string{"image": "image", "audio": "voice"}[typ],
+				"[User attached %s: workspace path %q, mime %q. Use %s if an appropriate extension is installed; otherwise explain that this binary cannot inspect it.]",
+				label, rel, c.MimeType, tool,
 			))
 		case "resource_link", "resourcelink":
 			// Link only — no fetch (agent may not have network).
@@ -120,7 +128,7 @@ func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (stri
 			if r.Blob != "" {
 				data, err := decodeB64(r.Blob)
 				if err != nil {
-					return "", fmt.Errorf("resource blob: %w", err)
+					return "", nil, fmt.Errorf("resource blob: %w", err)
 				}
 				if len(data) == 0 {
 					continue
@@ -131,7 +139,7 @@ func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (stri
 				rel := filepath.Join("media", "acp", name)
 				pol := &policy.Policy{Workspace: workspace}
 				if _, err := toolspkg.WriteFileJailed(pol, rel, data, 0o644); err != nil {
-					return "", err
+					return "", nil, err
 				}
 				parts = append(parts, fmt.Sprintf(
 					"[Embedded resource blob saved at workspace path %q (mime %q).]",
@@ -147,7 +155,7 @@ func materializePrompt(blocks []ContentBlock, workspace, sessionID string) (stri
 			}
 		}
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n")), nil
+	return strings.TrimSpace(strings.Join(parts, "\n\n")), media, nil
 }
 
 const maxPromptRefBytes = 100_000
@@ -182,6 +190,16 @@ func expandPromptFileRefs(eng *mow.Engine, text string) string {
 		if err != nil {
 			continue
 		}
+		if isPromptImage(ref, data) {
+			seen[ref] = true
+			fmt.Fprintf(&body, "\n\n[Image file reference: workspace path %q. The text read tool cannot decode image bytes. The client should attach it as ACP image content for vision, or use an installed image-understanding extension.]", ref)
+			continue
+		}
+		if isPromptBinary(data) {
+			seen[ref] = true
+			fmt.Fprintf(&body, "\n\n[Binary file reference: workspace path %q. The text read tool cannot decode this file; use a file-type-specific tool.]", ref)
+			continue
+		}
 		if len(data) > maxPromptRefBytes {
 			data = append(append([]byte{}, data[:maxPromptRefBytes]...), []byte("\n… (truncated)")...)
 		}
@@ -194,6 +212,25 @@ func expandPromptFileRefs(eng *mow.Engine, text string) string {
 		return text
 	}
 	return text + "\n" + body.String()
+}
+
+func isPromptImage(path string, data []byte) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+		return true
+	}
+	return len(data) >= 8 && bytes.Equal(data[:8], []byte("\x89PNG\r\n\x1a\n")) ||
+		len(data) >= 3 && bytes.Equal(data[:3], []byte("\xff\xd8\xff")) ||
+		len(data) >= 6 && (bytes.Equal(data[:6], []byte("GIF87a")) || bytes.Equal(data[:6], []byte("GIF89a"))) ||
+		len(data) >= 12 && bytes.Equal(data[:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP"))
+}
+
+func isPromptBinary(data []byte) bool {
+	prefix := data
+	if len(prefix) > 8192 {
+		prefix = prefix[:8192]
+	}
+	return bytes.IndexByte(prefix, 0) >= 0
 }
 
 func promptRefLanguage(path string) string {
@@ -263,6 +300,8 @@ func extFromMIME(mime, kind string) string {
 		return ".mp4"
 	case strings.Contains(mime, "webm"):
 		return ".webm"
+	case kind == "video":
+		return ".mp4"
 	case kind == "image":
 		return ".png"
 	case kind == "audio":

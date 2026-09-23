@@ -92,6 +92,9 @@ const (
 	EventGoalBlocked EventType = "graph.goal.blocked"
 	EventToolStart   EventType = "harness.tool.start"
 	EventToolEnd     EventType = "harness.tool.end"
+	// EventFSChange summarizes successful structured file mutations at run end.
+	// Shell side effects are intentionally not inferred.
+	EventFSChange EventType = "harness.fs.change"
 
 	// EventCompactSummary reports the cost of one opt-in compaction summary
 	// call (policy.compact_summary). Surfaced separately from run totals so
@@ -137,14 +140,32 @@ type GoalNode struct {
 	Status string `json:"status"`
 }
 
+type GoalVerification struct {
+	Status string `json:"status,omitempty"` // pending | passed | failed
+	Note   string `json:"note,omitempty"`
+}
+type GoalWorker struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Mode   string `json:"mode,omitempty"`
+}
+
 // GoalEvent is the goal orchestration payload projection for Event.
 type GoalEvent struct {
-	ID       string     `json:"id"`
-	Status   string     `json:"status"`
-	Step     int        `json:"step,omitempty"`
-	MaxSteps int        `json:"max_steps,omitempty"`
-	Summary  string     `json:"summary,omitempty"`
-	Nodes    []GoalNode `json:"nodes,omitempty"`
+	ID           string            `json:"id"`
+	Status       string            `json:"status"`
+	Step         int               `json:"step,omitempty"`
+	MaxSteps     int               `json:"max_steps,omitempty"`
+	Summary      string            `json:"summary,omitempty"`
+	Phase        string            `json:"phase,omitempty"`
+	Nodes        []GoalNode        `json:"nodes,omitempty"`
+	Workers      []GoalWorker      `json:"workers,omitempty"`
+	Verification *GoalVerification `json:"verification,omitempty"`
+}
+
+type FileChange struct {
+	Path string `json:"path"`
+	Op   string `json:"op"` // add | modify
 }
 
 // Event is one structured notification during Engine.Prompt.
@@ -172,6 +193,9 @@ type Event struct {
 	Args       json.RawMessage `json:"args,omitempty"`
 	Result     string          `json:"result,omitempty"` // may be truncated for size
 	Denied     bool            `json:"denied,omitempty"`
+	Executed   bool            `json:"executed,omitempty"`
+	IsError    bool            `json:"is_error,omitempty"`
+	ErrorCode  string          `json:"error_code,omitempty"`
 	Error      string          `json:"error,omitempty"`
 	// DurationMs is wall time for the tool (tool.end only).
 	DurationMs int64 `json:"duration_ms,omitempty"`
@@ -242,6 +266,9 @@ type Event struct {
 	// Carried on EventToolStart/EventToolEnd, including peer tool updates
 	// (ext/acp renders per-file cards from it).
 	Path string `json:"path,omitempty"`
+	// Files is populated on harness.fs.change. Paths are workspace-relative
+	// when possible and contain no file contents.
+	Files []FileChange `json:"files,omitempty"`
 }
 
 // EventFunc receives lifecycle events. Must not block long.

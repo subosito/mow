@@ -730,6 +730,9 @@ func EstChars(msgs []llm.Message) int {
 // msgChars is the per-message body of EstChars.
 func msgChars(m llm.Message) int {
 	n := len(m.Content) + len(m.Role) + 8
+	for _, part := range m.Parts {
+		n += len(part.Text) + len(part.Data) + len(part.MimeType) + len(part.Type)
+	}
 	for _, tc := range m.ToolCalls {
 		n += len(tc.Function.Name) + len(tc.Function.Arguments)
 	}

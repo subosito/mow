@@ -120,6 +120,12 @@ type State struct {
 	Question string `json:"question,omitempty"`
 	// VerifyNote carries the verifier's feedback for the next retry step.
 	VerifyNote string `json:"verify_note,omitempty"`
+	// Phase is a durable host-facing label (e.g. explore/fix/verify).
+	Phase string `json:"phase,omitempty"`
+	// Workers records bounded child/worktree attempts for host status and resume.
+	Workers []WorkerRecord `json:"workers,omitempty"`
+	// Verification is the latest independent verification outcome.
+	Verification VerificationRecord `json:"verification,omitempty"`
 	// Partial is a machine-readable summary when Status == StatusPartial:
 	// what is done, what is missing, and the best artifact so far.
 	Partial string `json:"partial,omitempty"`

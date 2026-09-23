@@ -214,6 +214,19 @@ func resolveSSEType(eventName, data string) string {
 	return base.Type
 }
 
+func audioFormat(mime string) string {
+	switch strings.ToLower(mime) {
+	case "audio/wav", "audio/x-wav":
+		return "wav"
+	case "audio/ogg", "audio/opus":
+		return "ogg"
+	case "audio/mp4", "audio/m4a":
+		return "m4a"
+	default:
+		return "mp3"
+	}
+}
+
 // streamChunk is one OpenAI chat-completions SSE payload. Declared once (not
 // inside the scan loop) so the decoder can reuse it (and its slice capacity)
 // across deltas; callers must call reset() before each Unmarshal.

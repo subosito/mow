@@ -344,14 +344,27 @@ func (t *delegateTool) stopReaper() {
 	}
 }
 
-func (t *delegateTool) Name() string    { return ToolName }
-func (t *delegateTool) Untrusted() bool { return true }
+func (t *delegateTool) Name() string      { return ToolName }
+func (t *delegateTool) Untrusted() bool   { return true }
+func (t *delegateTool) Exploratory() bool { return true }
+
+// MaxParallel limits one model batch even when policy.max_parallel_tools is
+// larger. Parallel delegates are expensive long-lived conversations; a bounded
+// fan-out also leaves the parent enough context to synthesize before more work.
+func (t *delegateTool) MaxParallel() int { return 3 }
+
+// PostBatchContext asks the parent to synthesize after delegate evidence lands.
+// The loop attaches it once to the last tool result in the completed batch.
+func (t *delegateTool) PostBatchContext() string {
+	return "Delegate batch complete. Synthesize agreements, conflicts, and remaining uncertainty now. Continue only with a targeted check that can change the conclusion; do not launch another peer batch before synthesis."
+}
 func (t *delegateTool) Description() string {
 	t.peersMu.Lock()
 	names := slices.Sorted(maps.Keys(t.agents))
 	t.peersMu.Unlock()
 	return "Delegate a task to a named peer agent over ACP (in other harnesses often called a subagent). " +
 		"Only call this when the user names a peer or explicitly asks to delegate — not because a task list looks parallelizable. " +
+		"A batch may use at most 3 peers. After one peer batch, synthesize their evidence before doing more exploration or delegation. " +
 		"Peers are configured under extensions.acp.peers (command = external ACP peer; model = native mow acp). " +
 		"Process/session is reused across calls when possible. " +
 		"Long runs are capped by the agent's timeout_sec; cancel the host turn to abort. " +

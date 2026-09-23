@@ -13,6 +13,7 @@ import (
 
 type Tool = engine.Tool
 type Message = engine.Message
+type ContentPart = engine.ContentPart
 type ToolCall = engine.ToolCall
 type FunctionCall = engine.FunctionCall
 type ToolSpec = engine.ToolSpec
@@ -46,6 +47,8 @@ type PluginMCPServer = engine.PluginMCPServer
 type EventType = engine.EventType
 type CompactLayer = engine.CompactLayer
 type GoalNode = engine.GoalNode
+type GoalWorker = engine.GoalWorker
+type GoalVerification = engine.GoalVerification
 type GoalEvent = engine.GoalEvent
 type Event = engine.Event
 type EventFunc = engine.EventFunc
@@ -70,9 +73,15 @@ type AfterTurnEvent = engine.AfterTurnEvent
 type AfterTurnFunc = engine.AfterTurnFunc
 type StopEvent = engine.StopEvent
 type StopFunc = engine.StopFunc
+type AskUserFunc = engine.AskUserFunc
+type AskUserQuestion = engine.AskUserQuestion
+type AskUserOption = engine.AskUserOption
+type AskUserAnswer = engine.AskUserAnswer
+
 type Hooks = engine.Hooks
 
 type ProcInfo = engine.ProcInfo
+type FileChange = engine.FileChange
 type ProviderConnection = engine.ProviderConnection
 
 // SandboxBackend is the OS jail passed to ProcStart (nil/omitted = no jail).
@@ -94,6 +103,7 @@ const (
 	EventReasoning        = engine.EventReasoning
 	EventTurn             = engine.EventTurn
 	EventStall            = engine.EventStall
+	EventFSChange         = engine.EventFSChange
 	EventRunEnd           = engine.EventRunEnd
 	EventCompactStart     = engine.EventCompactStart
 	EventCompact          = engine.EventCompact

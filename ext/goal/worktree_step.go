@@ -39,7 +39,6 @@ func (r *Runner) runWorktreeItem(ctx context.Context, exec *Executor, st State, 
 		return r.fallbackStep(ctx, exec, st, item,
 			"git worktree unavailable: "+truncateRunes(err.Error(), 200))
 	}
-
 	eng, err := r.WorktreeEngineFactory(wt.Dir)
 	if err != nil {
 		wt.cleanup(ctx)

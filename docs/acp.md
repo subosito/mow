@@ -35,7 +35,10 @@ methods stay `-32601`. TUI theme / mode / approvals live in host
 
 Ephemeral aside is an extra field on `session/prompt`. Exclusive slash is the
 extra `slash` method (busy refuse) plus `exclusive` on
-`available_commands_update`. Jail-safe `@path` expands on `session/prompt`.
+`available_commands_update`. Jail-safe `@path` expands text references on
+`session/prompt`. Image/audio blocks (and recognized jailed mowi `@path` media)
+remain typed provider content while a jailed copy is saved under `media/acp/`;
+video remains a nonstandard path-only extension.
 
 v2 stays behind `protocolVersion` negotiation. Do not drop v1.
 

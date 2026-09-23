@@ -12,6 +12,13 @@ import (
 	"unicode/utf8"
 )
 
+type ContentPart struct {
+	Type     string `json:"type"` // text | image | audio
+	Text     string `json:"text,omitempty"`
+	Data     string `json:"data,omitempty"` // base64 without data URL prefix
+	MimeType string `json:"mime_type,omitempty"`
+}
+
 // Message is a chat message in OpenAI-ish shape.
 //
 // Content uses omitempty for session/history JSON. OpenAI chat/completions
@@ -19,11 +26,12 @@ import (
 // (including "") so gateways with a strict MessageContent enum accept
 // tool-call turns and empty tool results.
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
+	Role       string        `json:"role"`
+	Content    string        `json:"content,omitempty"`
+	Parts      []ContentPart `json:"parts,omitempty"`
+	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+	Name       string        `json:"name,omitempty"`
 	// Synthetic marks host-injected user messages (thrash/explore warnings,
 	// mid-turn steer) that never came from the user's prompt. They are real
 	// history for the model, but Engine.Rewind must skip them so edit/retry
@@ -52,7 +60,7 @@ type Message struct {
 // is missing or null. Emitting "" is accepted by OpenAI and those gateways.
 type openAIMessage struct {
 	Role       string     `json:"role"`
-	Content    string     `json:"content"`
+	Content    any        `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
@@ -62,9 +70,27 @@ type openAIMessage struct {
 func toOpenAIMessages(in []Message) []openAIMessage {
 	out := make([]openAIMessage, len(in))
 	for i, m := range in {
+		content := any(m.Content)
+		if len(m.Parts) > 0 {
+			parts := make([]map[string]any, 0, len(m.Parts)+1)
+			if m.Content != "" {
+				parts = append(parts, map[string]any{"type": "text", "text": m.Content})
+			}
+			for _, p := range m.Parts {
+				switch p.Type {
+				case "text":
+					parts = append(parts, map[string]any{"type": "text", "text": p.Text})
+				case "image":
+					parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]string{"url": "data:" + p.MimeType + ";base64," + p.Data}})
+				case "audio":
+					parts = append(parts, map[string]any{"type": "input_audio", "input_audio": map[string]string{"data": p.Data, "format": audioFormat(p.MimeType)}})
+				}
+			}
+			content = parts
+		}
 		out[i] = openAIMessage{
 			Role:       m.Role,
-			Content:    m.Content,
+			Content:    content,
 			ToolCallID: m.ToolCallID,
 			Name:       m.Name,
 		}

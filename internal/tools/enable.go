@@ -4,7 +4,7 @@ import "strings"
 
 // RegistryNames are the tools Registry can construct.
 func RegistryNames() []string {
-	return []string{"read", "glob", "grep", "write", "edit", "bash"}
+	return []string{"read", "glob", "grep", "write", "edit", "apply_patch", "bash"}
 }
 
 // UnknownEnable returns enable-list names that are not in registered.

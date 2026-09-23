@@ -82,6 +82,7 @@ func TestPublicConstsResolve(t *testing.T) {
 	_ = mow.EventReasoning
 	_ = mow.EventTurn
 	_ = mow.EventStall
+	_ = mow.EventFSChange
 	_ = mow.EventRunEnd
 	_ = mow.EventCompactStart
 	_ = mow.EventCompact

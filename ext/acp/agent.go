@@ -295,7 +295,8 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				"agentCapabilities": map[string]any{
 					"loadSession": true,
 					"promptCapabilities": map[string]any{
-						// Media is saved under media/acp/ and referenced in the text prompt.
+						// ACP standard media blocks: image/audio. Video is accepted as a
+						// mow extension but is not advertised as a standard capability.
 						"image": true, "audio": true, "embeddedContext": true,
 					},
 					"mcpCapabilities": map[string]any{"http": false, "sse": false},
@@ -480,7 +481,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			return
 		}
 		ws := a.eng.Workspace()
-		text, err := materializePrompt(p.Prompt, ws, p.SessionID)
+		text, media, err := materializePrompt(p.Prompt, ws, p.SessionID)
 		if err != nil {
 			a.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalid, Message: err.Error()}})
 			return
@@ -578,7 +579,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 		}
 		// writeToolCall emits ACP tool_call / tool_call_update so hosts can show
 		// "read engine.go" / "grep foo in pkg/" instead of bare "→ read".
-		writeToolCall := func(updateKind, callID, kind, title, status string, args json.RawMessage, result string, durationMs int64) {
+		writeToolCall := func(updateKind, callID, kind, title, status string, args json.RawMessage, result, errorText, errorCode string, executed bool, durationMs int64) {
 			if kind == "" && title == "" {
 				return
 			}
@@ -594,6 +595,16 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			}
 			if durationMs > 0 {
 				update["duration_ms"] = durationMs
+			}
+			if errorText != "" {
+				update["error"] = errorText
+			}
+			if errorCode != "" {
+				update["error_code"] = errorCode
+			}
+			if updateKind == "tool_call_update" {
+				update["executed"] = executed
+				update["is_error"] = status == "failed"
 			}
 			if result != "" && toolCallAttachesResult(kind) {
 				update["rawOutput"] = result
@@ -631,16 +642,22 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 					"agent":         agent,
 					"phase":         line,
 				})
+			case mow.EventFSChange:
+				files := make([]map[string]any, 0, len(ev.Files))
+				for _, file := range ev.Files {
+					files = append(files, map[string]any{"path": file.Path, "op": file.Op})
+				}
+				a.emitSessionUpdate(p.SessionID, map[string]any{"sessionUpdate": "fs_change", "files": files})
 			case mow.EventToolStart:
 				kind, title := toolCallKindTitle(ev.Tool, ev.Args)
-				writeToolCall("tool_call", ev.ToolCallID, kind, title, "in_progress", ev.Args, "", 0)
+				writeToolCall("tool_call", ev.ToolCallID, kind, title, "in_progress", ev.Args, "", "", "", false, 0)
 			case mow.EventToolEnd:
 				kind, title := toolCallKindTitle(ev.Tool, ev.Args)
 				status := "completed"
 				if ev.Denied || strings.TrimSpace(ev.Error) != "" {
 					status = "failed"
 				}
-				writeToolCall("tool_call_update", ev.ToolCallID, kind, title, status, ev.Args, ev.Result, ev.DurationMs)
+				writeToolCall("tool_call_update", ev.ToolCallID, kind, title, status, ev.Args, ev.Result, ev.Error, ev.ErrorCode, ev.Executed, ev.DurationMs)
 			case mow.EventCompactStart:
 				a.emitSessionUpdate(p.SessionID, map[string]any{
 					"sessionUpdate": "compact_start",
@@ -676,7 +693,7 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 				a.emitUsage(p.SessionID, ev.InputTokens, ev.OutputTokens, ev.CachedInputTokens)
 			}
 		})
-		popt := mow.PromptOpts{Ephemeral: p.Ephemeral}
+		popt := mow.PromptOpts{Ephemeral: p.Ephemeral, AskUser: a.askUser, UserParts: media}
 		if mode == ModeAsk {
 			popt.SystemAppend = "Session mode is ask: confirm with the operator before write, edit, or bash."
 		}

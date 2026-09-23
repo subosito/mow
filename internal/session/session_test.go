@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,31 @@ import (
 
 	"github.com/subosito/mow/internal/llm"
 )
+
+func TestLoadMessagesDropsMalformedAndCapsToolCalls(t *testing.T) {
+	s := &Store{Dir: t.TempDir(), ID: "malformed"}
+	calls := make([]llm.ToolCall, 0, 67)
+	for i := 0; i < 65; i++ {
+		calls = append(calls, llm.ToolCall{ID: fmt.Sprintf("c%d", i), Function: llm.FunctionCall{Name: "read", Arguments: `{}`}})
+	}
+	calls = append(calls, llm.ToolCall{ID: "", Function: llm.FunctionCall{Name: ""}}, llm.ToolCall{ID: "c0", Function: llm.FunctionCall{Name: "read"}})
+	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "assistant", ToolCalls: calls}, {Role: "tool", ToolCallID: "c0", Content: "ok"}, {Role: "tool", ToolCallID: "orphan", Content: "bad"}}
+	if err := s.AppendSnapshot(msgs); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 3 || len(got[1].ToolCalls) != 65 {
+		t.Fatalf("messages=%d calls=%d", len(got), len(got[1].ToolCalls))
+	}
+	for _, m := range got {
+		if m.Role == "tool" && m.ToolCallID == "orphan" {
+			t.Fatal("orphan retained")
+		}
+	}
+}
 
 func TestLatestID(t *testing.T) {
 	dir := t.TempDir()

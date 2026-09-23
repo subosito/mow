@@ -546,7 +546,7 @@ func dropProjectTools(enable []string) []string {
 	var out []string
 	for _, t := range enable {
 		switch strings.ToLower(strings.TrimSpace(t)) {
-		case "write", "edit", "bash",
+		case "write", "edit", "apply_patch", "bash",
 			"generate_image", "generate_speech", "generate_video":
 			continue
 		}

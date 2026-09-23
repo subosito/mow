@@ -84,9 +84,27 @@ func toResponsesInput(messages []Message) (instructions string, input []map[stri
 			}
 			instructions += m.Content
 		case "user":
+			content := any(m.Content)
+			if len(m.Parts) > 0 {
+				var parts []map[string]any
+				if m.Content != "" {
+					parts = append(parts, map[string]any{"type": "input_text", "text": m.Content})
+				}
+				for _, p := range m.Parts {
+					switch p.Type {
+					case "text":
+						parts = append(parts, map[string]any{"type": "input_text", "text": p.Text})
+					case "image":
+						parts = append(parts, map[string]any{"type": "input_image", "image_url": "data:" + p.MimeType + ";base64," + p.Data})
+					case "audio":
+						parts = append(parts, map[string]any{"type": "input_audio", "input_audio": map[string]string{"data": p.Data, "format": audioFormat(p.MimeType)}})
+					}
+				}
+				content = parts
+			}
 			input = append(input, map[string]any{
 				"role":    "user",
-				"content": m.Content,
+				"content": content,
 			})
 		case "assistant":
 			if m.Content != "" {
@@ -201,6 +219,9 @@ func messageFromResponses(parsed responsesAPIResponse) Message {
 				}
 			}
 		case "function_call":
+			if strings.TrimSpace(item.Name) == "" {
+				continue
+			}
 			args := item.Arguments
 			if strings.TrimSpace(args) == "" {
 				args = "{}"
@@ -208,6 +229,9 @@ func messageFromResponses(parsed responsesAPIResponse) Message {
 			id := item.CallID
 			if id == "" {
 				id = item.ID
+			}
+			if id == "" {
+				continue
 			}
 			msg.ToolCalls = append(msg.ToolCalls, ToolCall{
 				ID:   id,
@@ -432,7 +456,7 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 	idxs := slices.Sorted(maps.Keys(toolsByIdx))
 	for _, i := range idxs {
 		a := toolsByIdx[i]
-		if a == nil {
+		if a == nil || strings.TrimSpace(a.name) == "" || strings.TrimSpace(a.callID) == "" {
 			continue
 		}
 		args := a.args.String()
@@ -591,8 +615,10 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 		}
 		a := toolsByIdx[idx]
 		if a == nil {
-			a = &responsesToolAcc{}
-			toolsByIdx[idx] = a
+			// Argument events must belong to a preceding function_call output
+			// item. Creating an accumulator here turns an orphan `{}`/sentinel
+			// into a nameless tool call that bricks replay on the next request.
+			return nil
 		}
 		a.args.WriteString(ev.Delta)
 
@@ -611,8 +637,7 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 		}
 		a := toolsByIdx[idx]
 		if a == nil {
-			a = &responsesToolAcc{}
-			toolsByIdx[idx] = a
+			return nil // orphan done event; no valid function_call metadata
 		}
 		if ev.Arguments != "" {
 			a.args.Reset()

@@ -15,9 +15,11 @@
 | [../AGENTS.md](../AGENTS.md) | AI coding agents | Build/test, spine, layout, security, gotchas |
 | [architecture.md](architecture.md) | Everyone | Public vs `internal/`, LLM endpoint model |
 | [embedding.md](embedding.md) | Go integrators | Options, events, custom tools/providers, hooks, sessions — with code |
+| [jev.md](jev.md) | Harness designers | Optional structured decisions: client, use cases, safety, calibration, rollout |
 | [harness.md](harness.md) | Implementers | Loop, tools, config, sessions, policy |
 | [extensions.md](extensions.md) | Integrators | Core extensions, CLI ownership, ACP, MCP |
 | [acp.md](acp.md) | Protocol | `mow acp` + extras vs ACP v1/v2 |
+| [media.md](media.md) | Hosts and operators | Binary media inputs, optional understand/generate tools, client gaps |
 | [workspace-profiles.md](workspace-profiles.md) | CLI operators | `$MOW_HOME/workspaces/<name>/`: roots, overlay, skills, plugins, scoped ACP peers |
 | [../openspec/specs/](../openspec/specs/) | Humans and agents | Behavior contracts: what ships in stock mow, trust, goal, baked-in guards |
 

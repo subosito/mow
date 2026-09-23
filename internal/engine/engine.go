@@ -315,7 +315,7 @@ func New(opt Options) (*Engine, error) {
 	// derive the enable list from them the same way flags do below, so the
 	// user never maintains the list by hand. Flags still layer on top.
 	if cfg.Tools.Write {
-		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit")
+		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit", "apply_patch")
 	}
 	if cfg.Tools.Shell {
 		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "bash")
@@ -328,13 +328,13 @@ func New(opt Options) (*Engine, error) {
 		applySessionPolicy(&opt, rt)
 	}
 	if opt.AllowWrite {
-		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit")
+		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit", "apply_patch")
 	}
 	if opt.AllowShell {
 		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "bash")
 	}
 	if opt.DisableWrite {
-		cfg.Tools.Enable = removeNames(cfg.Tools.Enable, "write", "edit")
+		cfg.Tools.Enable = removeNames(cfg.Tools.Enable, "write", "edit", "apply_patch")
 	}
 	if opt.DisableShell {
 		cfg.Tools.Enable = removeNames(cfg.Tools.Enable, "bash")
@@ -345,7 +345,7 @@ func New(opt Options) (*Engine, error) {
 	// read-only. Without any writable root, --read-only is a pure disable and
 	// leaves write/edit removed (backward compatible).
 	if opt.ReadOnly && len(opt.WritableRoots) > 0 {
-		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit")
+		cfg.Tools.Enable = appendUnique(cfg.Tools.Enable, "write", "edit", "apply_patch")
 	}
 	// MaxTurns: >0 overrides; <0 means unlimited (stored as 0). 0 leaves config.
 	if opt.MaxTurns > 0 {

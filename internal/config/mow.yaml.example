@@ -106,7 +106,7 @@ tools:
   # hashline: true   # optional N:hash|line read + line_hash edit
   #
   # enable is the explicit override form for hosts (rarely needed):
-  #   enable: [read, glob, grep, write, edit, bash]
+  #   enable: [read, glob, grep, write, edit, apply_patch, bash]
 
 policy:
   # max_turns: 200                # cap LLM round-trips per Prompt. Default: unlimited —

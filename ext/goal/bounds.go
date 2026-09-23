@@ -38,6 +38,18 @@ func sanitizeState(st *State) {
 	st.Partial = truncateRunes(st.Partial, maxStateTextRunes)
 	st.Question = truncateRunes(st.Question, maxStateTextRunes)
 	st.VerifyNote = truncateRunes(st.VerifyNote, maxStateTextRunes)
+	st.Phase = truncateRunes(st.Phase, 80)
+	st.Verification.Status = truncateRunes(st.Verification.Status, 40)
+	st.Verification.Note = truncateRunes(st.Verification.Note, 2000)
+	if len(st.Workers) > 128 {
+		st.Workers = st.Workers[len(st.Workers)-128:]
+	}
+	for i := range st.Workers {
+		st.Workers[i].ID = truncateRunes(st.Workers[i].ID, 80)
+		st.Workers[i].Mode = truncateRunes(st.Workers[i].Mode, 40)
+		st.Workers[i].Status = truncateRunes(st.Workers[i].Status, 40)
+		st.Workers[i].Summary = truncateRunes(st.Workers[i].Summary, 1000)
+	}
 	st.SessionID = truncateRunes(st.SessionID, 256)
 	st.CurrentItem = truncateRunes(st.CurrentItem, 128)
 	st.Workspace = truncateRunes(st.Workspace, 4096)

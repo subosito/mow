@@ -37,17 +37,26 @@ type Tool = ext.Tool
 
 // Message is a chat message for injectable Chat funcs (tests / custom LLM).
 type Message struct {
-	Role       string     `json:"role"`
-	Timestamp  time.Time  `json:"ts"`
-	Content    string     `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
+	Role       string        `json:"role"`
+	Timestamp  time.Time     `json:"ts"`
+	Content    string        `json:"content,omitempty"`
+	Parts      []ContentPart `json:"parts,omitempty"`
+	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+	Name       string        `json:"name,omitempty"`
 	// StopReason and Usage are response-only metadata set by providers
 	// ("max_tokens"/"length" = truncated; usage zero = not reported). They are
 	// never serialized onto the wire.
 	StopReason string `json:"-"`
 	Usage      Usage  `json:"-"`
+}
+
+// ContentPart is typed multimodal user content (text/image/audio).
+type ContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Data     string `json:"data,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
 }
 
 // ToolCall is a model-requested tool invocation.

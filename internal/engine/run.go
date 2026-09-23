@@ -30,6 +30,26 @@ var ErrAgentStuck = agent.ErrStuck
 // ErrAgentMaxTurns is returned when a Prompt hits MaxTurns or the unlimited safety cap.
 var ErrAgentMaxTurns = agent.ErrMaxTurns
 
+type AskUserQuestion struct {
+	ID            string          `json:"id"`
+	Prompt        string          `json:"prompt"`
+	AllowMultiple bool            `json:"allow_multiple,omitempty"`
+	Options       []AskUserOption `json:"options,omitempty"`
+}
+type AskUserOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+type AskUserAnswer struct {
+	ID       string   `json:"id"`
+	Selected []string `json:"selected,omitempty"`
+	Text     string   `json:"text,omitempty"`
+}
+
+// AskUserFunc is an optional interactive host seam. Headless hosts leave it nil;
+// the per-prompt ask_user tool then returns a soft error instead of blocking.
+type AskUserFunc func(context.Context, []AskUserQuestion) ([]AskUserAnswer, error)
+
 // Options configures New / Run.
 type Options struct {
 	ConfigPaths []string
@@ -187,6 +207,9 @@ type Options struct {
 	OnEvent EventFunc
 	// Hooks optional lifecycle callbacks (merged with ext global hooks).
 	Hooks Hooks
+	// AskUser optionally enables the per-prompt ask_user tool for interactive
+	// hosts. It is never registered globally and runs sequentially.
+	AskUser AskUserFunc
 	// MaxContextChars overrides auto history compaction (0 = 80% of
 	// context_window in tokens when known; off when the window is unknown).
 	// Positive = absolute char budget (tests). Negative = off.
@@ -236,6 +259,9 @@ type Usage struct {
 
 // PromptOpts configures a single Prompt call (not Engine lifetime).
 type PromptOpts struct {
+	// UserParts adds typed user content (image/audio) to this Prompt. Text still
+	// comes from the Prompt text argument. Parts are persisted in full history.
+	UserParts []ContentPart
 	// SystemAppend is merged into the system prompt for this call only
 	// (after config/skills/SessionStart appends).
 	SystemAppend string
@@ -248,6 +274,9 @@ type PromptOpts struct {
 	// Used by packs like goal for goal_report so the tool is not always visible
 	// in repl/run (where it used to encourage false "task complete" reports).
 	ExtraTools []Tool
+	// AskUser overrides the engine callback for this Prompt. When neither is
+	// set, ask_user is absent from tool schemas.
+	AskUser AskUserFunc
 	// Ephemeral runs the turn against the current context but does NOT persist
 	// it: the question and answer are not appended to the in-memory history
 	// (e.prior/transcript) or the session file, so they never re-enter a later

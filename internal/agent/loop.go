@@ -72,6 +72,8 @@ type Options struct {
 	// PriorMessages, if non-empty, seed history before the new user prompt
 	// (session resume). System is still prepended when set and not already first.
 	PriorMessages []llm.Message
+	// UserParts are typed media content on the new user message.
+	UserParts []llm.ContentPart
 	// AllowTool is called before Exec; nil means always allow.
 	AllowTool func(name string) error
 	// Hooks optional lifecycle callbacks.
@@ -191,7 +193,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 	} else if sys != "" {
 		messages = append(messages, llm.Message{Role: "system", Content: sys})
 	}
-	messages = append(messages, llm.Message{Role: "user", Content: userPrompt})
+	messages = append(messages, llm.Message{Role: "user", Content: userPrompt, Parts: append([]llm.ContentPart(nil), opt.UserParts...)})
 
 	var usage llm.Usage
 	toolSpecs := make([]llm.ToolSpec, 0, len(opt.Tools))

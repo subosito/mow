@@ -271,6 +271,13 @@ func RunParallel(ctx context.Context, specs []Spec, newEng func() (*mow.Engine, 
 	return out, first
 }
 
+func (r *Runner) save(st State) error {
+	if err := r.store().Save(st); err != nil {
+		return fmt.Errorf("goal: persist state: %w", err)
+	}
+	return nil
+}
+
 func (r *Runner) store() *Store {
 	if r.Store != nil {
 		return r.Store
@@ -296,7 +303,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 
 	// Heal stale Running left by a crashed peer before we re-enter the loop.
 	if healStaleRunning(&st) {
-		_ = r.store().Save(st)
+		if err := r.store().Save(st); err != nil {
+			return st, fmt.Errorf("goal: persist healed state: %w", err)
+		}
 	}
 
 	if st.Status == StatusDone {
@@ -326,7 +335,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		if err := ctx.Err(); err != nil {
 			st.Status = StatusFailed
 			st.Error = err.Error()
-			_ = r.store().Save(st)
+			if saveErr := r.save(st); saveErr != nil {
+				return st, saveErr
+			}
 			r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error})
 			return st, err
@@ -363,7 +374,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			st.Status = StatusPartial
 			st.Partial = why
 			st.Error = why
-			_ = r.store().Save(st)
+			if saveErr := r.save(st); saveErr != nil {
+				return st, saveErr
+			}
 			r.fire(Event{Kind: EventPartial, State: st, Text: why})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "budget", Status: st.Status, Step: st.Step, Text: why, Plan: planPtr(st.Plan)})
 			return st, nil
@@ -385,12 +398,16 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 				if turnBudgetSteps >= maxTurnBudgetSteps {
 					st.Status = StatusFailed
 					st.Error = classifyStepError(err) + fmt.Sprintf(" (%d steps)", turnBudgetSteps)
-					_ = r.store().Save(st)
+					if saveErr := r.save(st); saveErr != nil {
+						return st, saveErr
+					}
 					r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
 					r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error, Outcome: string(OutcomeBudget)})
 					return st, fmt.Errorf("goal: %s", st.Error)
 				}
-				_ = r.store().Save(st)
+				if saveErr := r.save(st); saveErr != nil {
+					return st, saveErr
+				}
 				r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d (max turns — continuing)", st.Step, st.MaxSteps)})
 				r.store().AppendEvent(st.ID, LogEvent{Kind: "budget", Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan)})
 				continue
@@ -404,19 +421,25 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 				if transientSteps >= maxTransientSteps {
 					st.Status = StatusFailed
 					st.Error = classifyStepError(err) + fmt.Sprintf(" (%d consecutive upstream failures)", transientSteps)
-					_ = r.store().Save(st)
+					if saveErr := r.save(st); saveErr != nil {
+						return st, saveErr
+					}
 					r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
 					r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error, Outcome: string(OutcomeRetry)})
 					return st, fmt.Errorf("goal: %s", st.Error)
 				}
-				_ = r.store().Save(st)
+				if saveErr := r.save(st); saveErr != nil {
+					return st, saveErr
+				}
 				r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d (LLM upstream blip — retrying)", st.Step, st.MaxSteps)})
 				r.store().AppendEvent(st.ID, LogEvent{Kind: "retry", Step: st.Step, Text: st.Summary, Error: err.Error()})
 				select {
 				case <-ctx.Done():
 					st.Status = StatusFailed
 					st.Error = ctx.Err().Error()
-					_ = r.store().Save(st)
+					if saveErr := r.save(st); saveErr != nil {
+						return st, saveErr
+					}
 					r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
 					return st, ctx.Err()
 				case <-time.After(transientBackoff):
@@ -426,7 +449,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			st.Status = StatusFailed
 			st.Error = classifyStepError(err)
 			st.LastReply = sr.Text
-			_ = r.store().Save(st)
+			if saveErr := r.save(st); saveErr != nil {
+				return st, saveErr
+			}
 			r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error})
 			return st, fmt.Errorf("goal: %s", st.Error)
@@ -435,6 +460,7 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		turnBudgetSteps = 0
 		transientSteps = 0
 		st.VerifyNote = "" // verification passed (or no gate)
+		st.SetVerification("passed", "")
 		st.LastReply = sr.Text
 		if sr.Summary != "" {
 			st.Summary = sr.Summary
@@ -463,6 +489,14 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			}
 		}
 
+		if current := strings.TrimSpace(st.CurrentItem); current != "" {
+			for _, item := range st.Plan.Items {
+				if item.ID == current {
+					st.SetPhase(item.Title)
+					break
+				}
+			}
+		}
 		// Code-owned edge: a Router overrides the model-decided outcome.
 		if r.Router != nil {
 			if routed := r.Router(st, sr); routed != "" {
@@ -475,6 +509,7 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 		if r.Verify != nil && sr.Outcome != OutcomeEscalate {
 			if issues := r.Verify(st, sr); len(issues) > 0 {
 				st.VerifyNote = strings.Join(issues, "; ")
+				st.SetVerification("failed", st.VerifyNote)
 				sr.Outcome = OutcomeRetrySame
 			}
 		}
@@ -486,7 +521,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			// stuck pattern.
 			st.RetryCount = 0
 			st.Status = StatusRunning
-			_ = r.store().Save(st)
+			if saveErr := r.save(st); saveErr != nil {
+				return st, saveErr
+			}
 			r.fire(Event{Kind: EventStep, State: st, Text: "step " + strconv.Itoa(st.Step) + " rerouted — change approach"})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "reroute", Status: st.Status, Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan), Outcome: string(OutcomeReroute)})
 			continue
@@ -498,12 +535,16 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 				st.Status = StatusPartial
 				st.Error = fmt.Sprintf("retried %d times without progress", st.RetryCount-1)
 				st.Partial = PartialSummaryFor(st)
-				_ = r.store().Save(st)
+				if saveErr := r.save(st); saveErr != nil {
+					return st, saveErr
+				}
 				r.fire(Event{Kind: EventPartial, State: st, Text: st.Partial})
 				r.store().AppendEvent(st.ID, LogEvent{Kind: "partial", Status: st.Status, Step: st.Step, Text: st.Partial, Plan: planPtr(st.Plan)})
 				return st, fmt.Errorf("goal: %s (partial result saved)", st.Error)
 			}
-			_ = r.store().Save(st)
+			if saveErr := r.save(st); saveErr != nil {
+				return st, saveErr
+			}
 			r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d (retry %d/%d)", st.Step, st.MaxSteps, st.RetryCount, MaxStepRetries)})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "retry_same", Status: st.Status, Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan), Outcome: string(OutcomeRetrySame)})
 			continue
@@ -515,7 +556,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 				st.Question = "A step escalated: " + strings.TrimSpace(st.Summary)
 			}
 			st.Error = "waiting for human decision"
-			_ = r.store().Save(st)
+			if saveErr := r.save(st); saveErr != nil {
+				return st, saveErr
+			}
 			r.fire(Event{Kind: EventBlocked, State: st, Text: st.Question})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "blocked", Status: st.Status, Step: st.Step, Text: st.Question, Plan: planPtr(st.Plan), Outcome: string(OutcomeEscalate)})
 			return st, fmt.Errorf("goal blocked: %s (resume with --answer)", st.Question)
@@ -523,7 +566,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			st.Status = StatusPartial
 			st.Error = "stopped partial by route"
 			st.Partial = PartialSummaryFor(st)
-			_ = r.store().Save(st)
+			if saveErr := r.save(st); saveErr != nil {
+				return st, saveErr
+			}
 			r.fire(Event{Kind: EventPartial, State: st, Text: st.Partial})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "partial", Status: st.Status, Step: st.Step, Text: st.Partial, Plan: planPtr(st.Plan)})
 			return st, nil
@@ -531,7 +576,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			st.Status = StatusDone
 			st.Error = ""
 			st.RetryCount = 0
-			_ = r.store().Save(st)
+			if saveErr := r.save(st); saveErr != nil {
+				return st, saveErr
+			}
 			r.fire(Event{Kind: EventDone, State: st, Text: "goal complete"})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "done", Status: st.Status, Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan), Outcome: string(OutcomeDone)})
 			return st, nil
@@ -542,14 +589,18 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			} else {
 				st.Error = sr.Reason
 			}
-			_ = r.store().Save(st)
+			if saveErr := r.save(st); saveErr != nil {
+				return st, saveErr
+			}
 			r.fire(Event{Kind: EventFail, State: st, Text: st.Error})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "fail", Status: st.Status, Step: st.Step, Error: st.Error, Outcome: string(OutcomeFailed)})
 			return st, fmt.Errorf("goal failed: %s", st.Error)
 		default:
 			// continue — progress breaks the retry_same streak.
 			st.RetryCount = 0
-			_ = r.store().Save(st)
+			if saveErr := r.save(st); saveErr != nil {
+				return st, saveErr
+			}
 			r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d", st.Step, st.MaxSteps)})
 			r.store().AppendEvent(st.ID, LogEvent{Kind: "step", Status: st.Status, Step: st.Step, Text: st.Summary, Plan: planPtr(st.Plan), Outcome: string(OutcomeContinue)})
 		}
@@ -561,7 +612,9 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 	st.Status = StatusPartial
 	st.Error = fmt.Sprintf("max steps %d exceeded", st.MaxSteps)
 	st.Partial = PartialSummaryFor(st)
-	_ = r.store().Save(st)
+	if saveErr := r.save(st); saveErr != nil {
+		return st, saveErr
+	}
 	r.fire(Event{Kind: EventPartial, State: st, Text: st.Partial})
 	r.store().AppendEvent(st.ID, LogEvent{Kind: "partial", Status: st.Status, Step: st.Step, Text: st.Partial, Plan: planPtr(st.Plan)})
 	return st, fmt.Errorf("goal: %s (partial result saved)", st.Error)
@@ -729,18 +782,29 @@ func (r *Runner) fire(e Event) {
 			Status: string(item.Status),
 		})
 	}
+	var workers []mow.GoalWorker
+	for _, worker := range e.State.Workers {
+		workers = append(workers, mow.GoalWorker{ID: worker.ID, Status: worker.Status, Mode: worker.Mode})
+	}
+	var verification *mow.GoalVerification
+	if e.State.Verification.Status != "" {
+		verification = &mow.GoalVerification{Status: e.State.Verification.Status, Note: e.State.Verification.Note}
+	}
 	r.Engine.Emit(mow.Event{
 		Type:       eventType,
 		SessionID:  e.State.SessionID,
 		Text:       e.Text,
 		StopReason: e.State.Error,
 		Goal: &mow.GoalEvent{
-			ID:       e.State.ID,
-			Status:   string(e.State.Status),
-			Step:     e.State.Step,
-			MaxSteps: e.State.MaxSteps,
-			Summary:  e.State.Summary,
-			Nodes:    nodes,
+			ID:           e.State.ID,
+			Status:       string(e.State.Status),
+			Step:         e.State.Step,
+			MaxSteps:     e.State.MaxSteps,
+			Summary:      e.State.Summary,
+			Phase:        e.State.Phase,
+			Nodes:        nodes,
+			Workers:      workers,
+			Verification: verification,
 		},
 	})
 }

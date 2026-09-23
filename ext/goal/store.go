@@ -215,6 +215,9 @@ func (s *Store) Reset(id string) (State, error) {
 	st.SessionID = ""
 	st.LastReply = ""
 	st.CurrentItem = ""
+	st.Phase = ""
+	st.Workers = nil
+	st.Verification = VerificationRecord{}
 	st.StartedAt = time.Time{}
 	st.InputTokens = 0
 	st.OutputTokens = 0

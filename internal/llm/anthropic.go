@@ -256,7 +256,25 @@ func toAnthropicMessages(messages []Message) (system string, out []map[string]an
 			}
 			system += m.Content
 		case "user":
-			out = append(out, map[string]any{"role": "user", "content": m.Content})
+			content := any(m.Content)
+			if len(m.Parts) > 0 {
+				var blocks []map[string]any
+				if m.Content != "" {
+					blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+				}
+				for _, p := range m.Parts {
+					switch p.Type {
+					case "text":
+						blocks = append(blocks, map[string]any{"type": "text", "text": p.Text})
+					case "image":
+						blocks = append(blocks, map[string]any{"type": "image", "source": map[string]string{"type": "base64", "media_type": p.MimeType, "data": p.Data}})
+					case "audio":
+						blocks = append(blocks, map[string]any{"type": "document", "source": map[string]string{"type": "base64", "media_type": p.MimeType, "data": p.Data}})
+					}
+				}
+				content = blocks
+			}
+			out = append(out, map[string]any{"role": "user", "content": content})
 		case "assistant":
 			var blocks []map[string]any
 			if m.Content != "" {
