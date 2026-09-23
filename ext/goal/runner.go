@@ -343,12 +343,19 @@ func (r *Runner) runState(ctx context.Context, st State) (State, error) {
 			return st, err
 		}
 
-		// Hint focus item for prompts.
+		// Hint focus item for prompts and persist the visible phase before work
+		// begins, so hosts never show a blank goal while a long step is running.
 		if item, ok := st.Plan.NextPending(); ok {
 			st.CurrentItem = item.ID
+			st.SetPhase(item.Title)
 		} else {
 			st.CurrentItem = ""
+			st.SetPhase("planning")
 		}
+		if err := r.save(st); err != nil {
+			return st, err
+		}
+		r.fire(Event{Kind: EventStep, State: st, Text: fmt.Sprintf("step %d/%d · %s", st.Step+1, st.MaxSteps, st.Phase)})
 
 		var (
 			sr  StepResult

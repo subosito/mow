@@ -22,6 +22,7 @@ In-session slash meta-commands:
 
 - `/model [id]` — list or switch models
 - `/btw <question>` — aside (not kept in context)
+- `/loop INTERVAL [--max N] [--for DURATION] [--ephemeral] PROMPT`; `/loop status|now|stop` — session-local recurring prompts (minimum 1m; not restored)
 - `/help`, `/quit` (or `/exit`)
 - Pack-registered slash commands (same registry as host UIs over `mow acp`)
 

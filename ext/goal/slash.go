@@ -25,6 +25,10 @@ func init() {
 		Exclusive: true,
 		Run:       runSlash,
 	})
+	slash.Register(slash.Command{
+		Name: "plan", Summary: "Create a read-only durable goal plan", Usage: `/plan <id> <objective…>`, Exclusive: true,
+		Run: runPlanSlash,
+	})
 }
 
 const goalSlashUsage = `/goal — list goals
@@ -126,6 +130,19 @@ func stateResult(title string, st State, store *Store) slash.Result {
 	var b strings.Builder
 	fmt.Fprintf(&b, "id=%s status=%s step=%d/%d\n", st.ID, st.Status, st.Step, st.MaxSteps)
 	fmt.Fprintf(&b, "goal: %s\n", st.Goal)
+	if st.Phase != "" {
+		fmt.Fprintf(&b, "phase: %s\n", st.Phase)
+	}
+	if st.Verification.Status != "" {
+		fmt.Fprintf(&b, "verification: %s", st.Verification.Status)
+		if st.Verification.Note != "" {
+			fmt.Fprintf(&b, " — %s", st.Verification.Note)
+		}
+		b.WriteByte('\n')
+	}
+	if len(st.Workers) > 0 {
+		fmt.Fprintf(&b, "workers: %d\n", len(st.Workers))
+	}
 	if st.Summary != "" {
 		fmt.Fprintf(&b, "summary: %s\n", st.Summary)
 	}

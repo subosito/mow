@@ -346,6 +346,30 @@ func (a *agentServer) handleSlashExtra(ctx context.Context, req request) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Exclusive slash commands such as /goal drive Engine work outside a
+	// session/prompt handler. Bridge their lifecycle events here so hosts see
+	// progress before the final slash response.
+	sid := a.boundSID
+	unsub := a.eng.AddOnEvent(func(ev mow.Event) {
+		switch ev.Type {
+		case mow.EventGoalStart, mow.EventGoalStep, mow.EventGoalDone, mow.EventGoalFail, mow.EventGoalPartial, mow.EventGoalBlocked:
+			update := map[string]any{"sessionUpdate": "goal", "type": string(ev.Type)}
+			if ev.Goal != nil {
+				update["goal"] = ev.Goal
+			}
+			if ev.Text != "" {
+				update["text"] = ev.Text
+			}
+			a.emitSessionUpdate(sid, update)
+		case mow.EventFSChange:
+			files := make([]map[string]any, 0, len(ev.Files))
+			for _, f := range ev.Files {
+				files = append(files, map[string]any{"path": f.Path, "op": f.Op})
+			}
+			a.emitSessionUpdate(sid, map[string]any{"sessionUpdate": "fs_change", "files": files})
+		}
+	})
+	defer unsub()
 	res, err := cmd.Run(ctx, slash.Request{
 		Name:      cmd.Name,
 		Invoked:   strings.TrimPrefix(token, "/"),

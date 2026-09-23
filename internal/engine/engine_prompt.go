@@ -156,7 +156,11 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		if t == nil {
 			continue
 		}
-		tools = append(tools, adaptTool(t))
+		adapted := adaptTool(t)
+		tools = append(tools, adapted)
+		if ro, ok := t.(interface{ ReadOnly() bool }); ok && ro.ReadOnly() {
+			readOnlyExt[strings.ToLower(strings.TrimSpace(t.Name()))] = true
+		}
 	}
 	ask := opt.AskUser
 	if ask == nil {

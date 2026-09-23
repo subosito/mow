@@ -76,6 +76,7 @@ func runCmd(args []string) int {
 	defer input.close()
 	ctx, terminate := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer terminate()
+	var loops ttyLoop
 	// Input is cancellable too, including while the editor has the terminal raw.
 	inputDone := make(chan struct{})
 	defer close(inputDone)
@@ -109,6 +110,12 @@ func runCmd(args []string) int {
 			continue
 		}
 		pctx, stop := signal.NotifyContext(ctx, syscall.SIGINT)
+		if strings.HasPrefix(line, "/loop") {
+			parts := strings.Fields(line)
+			fmt.Fprintln(os.Stderr, loops.configure(ctx, eng, parts[1:], func(s string) { fmt.Fprintln(os.Stderr, s) }))
+			stop()
+			continue
+		}
 		// Slash meta-commands (not sent to the model).
 		if strings.HasPrefix(line, "/") {
 			if handled, err := handleSlash(pctx, eng, line); handled {
@@ -136,7 +143,9 @@ func runCmd(args []string) int {
 		cliutil.PrintPromptCostEstimate(eng)
 		// Per-prompt cancel: first Ctrl+C aborts this turn only; session stays up.
 		output.begin()
+		loops.interactiveLock()
 		res, err := eng.PromptWith(pctx, line, mow.PromptOpts{Ephemeral: btw})
+		loops.interactiveUnlock()
 		stop()
 		output.finish(res.Text)
 		if err != nil {
@@ -218,7 +227,7 @@ func runSlash(ctx context.Context, eng *mow.Engine, c slash.Command, parts []str
 // text cannot drift from what actually dispatches.
 func helpText() string {
 	var b strings.Builder
-	b.WriteString("commands: /model [id]  /btw <q>  /help  /quit (or /exit)")
+	b.WriteString("commands: /model [id]  /btw <q>  /loop …  /help  /quit (or /exit)")
 	for _, line := range slash.HelpLines() {
 		b.WriteString("\n  ")
 		b.WriteString(line)

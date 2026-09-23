@@ -34,6 +34,8 @@ func runCmd(args []string) int {
 	switch args[0] {
 	case "new":
 		return cmdNew(args[1:])
+	case "plan":
+		return cmdPlan(args[1:])
 	case "run":
 		return cmdRun(args[1:])
 	case "status":
@@ -61,6 +63,7 @@ Commands:
 
   mow goal list
   mow goal new    --id NAME --goal "…" [--max-steps N]
+  mow goal plan   --id NAME --goal "…" [engine flags]   read-only; does not run
   mow goal run    --id NAME | --goal "…" [engine flags]
   mow goal status --id NAME
   mow goal reset  --id NAME          clear progress → pending

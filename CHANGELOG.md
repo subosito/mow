@@ -7,7 +7,8 @@
 - feat(decision): add an optional bounded client for native `/v1/decisions` choice/score/noul evaluation; it is not wired into loop policy.
 - feat(media): preserve image/audio prompt parts through sessions and provider wires; mowi can attach jailed media with `@path` or `/attach`.
 - feat(tools): add exact single-file `apply_patch`, typed tool outcomes, prompt-scoped `ask_user`, and consolidated `harness.fs.change` events.
-- feat(goal): persist phase/worker/verification projections and fail when state transitions cannot be saved.
+- feat(goal): add read-only `/plan`/`mow goal plan`, persist phase/worker/verification projections, and fail when state transitions cannot be saved.
+- feat(hosts): add session-local bounded `/loop` scheduling in mowi and `mow tty`; external recurrence remains a system scheduler concern.
 - fix(agent): cap one tool batch at 64, ignore orphan Responses argument events, sanitize malformed resumed tool calls, and require synthesis after bounded delegate fan-out.
 
 - feat(goal): stock `mow goal` outer loop (checklist, worktrees, parallel steps); bash refuses WIP-discard and discover-tool dumps.

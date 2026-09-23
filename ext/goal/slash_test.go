@@ -8,6 +8,13 @@ import (
 	"github.com/subosito/mow/slash"
 )
 
+func TestPlanSlashIsRegistered(t *testing.T) {
+	c, ok := slash.Lookup("plan")
+	if !ok || !c.Exclusive || !strings.Contains(c.Usage, "/plan") {
+		t.Fatalf("plan command=%+v ok=%v", c, ok)
+	}
+}
+
 func TestGoalSlashIsRegistered(t *testing.T) {
 	c, ok := slash.Lookup("goal")
 	if !ok {

@@ -15,9 +15,13 @@ Stock `cmd/mow` blank-imports this package. Goal-step tools are **not** globally
 | Surface | Name |
 |---|---|
 | CLI | `goal` (`mow goal`) |
-| Slash | `/goal` |
+| Slash | `/goal`, `/plan` |
 
-Subcommands: `list`, `new`, `run`, `status`, `reset`, `delete`.
+Commands: `list`, `new`, `plan`, `run`, `status`, `reset`, `delete`.
+
+`plan` uses one read-only Prompt to persist a pending checklist; it never runs
+implementation steps. `/plan ID OBJECTIVE…` is the interactive equivalent. Execute
+later with `mow goal run --id ID` or `/goal run ID`.
 
 ```bash
 mow goal new --id fix-ci --goal "Make CI green"

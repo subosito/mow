@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -332,6 +333,10 @@ func (c *Client) ChatWithDelta(ctx context.Context, messages []Message, tools []
 
 // ChatWithStream is Chat with content and reasoning SSE callbacks.
 func (c *Client) ChatWithStream(ctx context.Context, messages []Message, tools []ToolSpec, hooks StreamHooks) (Message, error) {
+	return c.chatWithStream(ctx, messages, tools, hooks, true)
+}
+
+func (c *Client) chatWithStream(ctx context.Context, messages []Message, tools []ToolSpec, hooks StreamHooks, retryIncomplete bool) (Message, error) {
 	// OnActivity is streaming-only too: a caller asking for the first-frame
 	// signal must get the stream even when it does not consume deltas.
 	stream := c.Stream || hooks.OnContent != nil || hooks.OnReasoning != nil || hooks.OnActivity != nil
@@ -350,7 +355,18 @@ func (c *Client) ChatWithStream(ctx context.Context, messages []Message, tools [
 		return c.chatOpenAIResponses(ctx, messages, tools)
 	default: // WireOpenAIChat
 		if stream {
-			return c.ChatStreamHooks(ctx, messages, tools, hooks)
+			msg, err := c.ChatStreamHooks(ctx, messages, tools, hooks)
+			if retryIncomplete && errors.Is(err, errStreamIncomplete) && ctx.Err() == nil {
+				// No Message was committed and stream parsers return no partial
+				// content/tool calls on this error, so one whole-request retry cannot
+				// duplicate host tool side effects. Avoid streaming duplicate partial
+				// UI text: incomplete streams with content remain hard failures.
+				if !strings.Contains(err.Error(), "content_bytes=0") {
+					return msg, err
+				}
+				return c.chatWithStream(ctx, messages, tools, hooks, false)
+			}
+			return msg, err
 		}
 		return c.chatOpenAI(ctx, messages, tools)
 	}
