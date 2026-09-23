@@ -97,6 +97,18 @@ func globFd(ctx context.Context, bin, root, pat string) ([]string, bool) {
 	for name := range skipDirNames {
 		args = append(args, "--exclude", name)
 	}
+	if strings.Contains(rel, "/") {
+		// fd ≥10.5 no longer matches a pattern with a separator against the
+		// basename; anchor it at base and match the full path instead. A base
+		// that itself holds glob metacharacters cannot be anchored literally,
+		// so let the walker handle it.
+		abs := filepath.ToSlash(base)
+		if strings.ContainsAny(abs, "*?[]{}\\") {
+			return nil, false
+		}
+		args = append(args, "--full-path")
+		rel = strings.TrimSuffix(abs, "/") + "/" + rel
+	}
 	args = append(args, "--", rel, base)
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = base
