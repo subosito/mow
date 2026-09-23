@@ -3,7 +3,7 @@ default:
 
 # Commit gate — mirrors CI's Linux/macOS jobs on the current platform.
 # Keep these steps in sync with CI so failures surface locally, not on push.
-verify: vet test-race build version-check
+verify: vet test-race build version-check vulncheck
 
 # Fast inner-loop tests (no race detector).
 test:
@@ -16,6 +16,11 @@ test-race:
 
 vet:
     go vet ./...
+
+# Known-vulnerable stdlib or module code reachable from mow (needs network
+# for the vuln DB). A hit usually means bump the go directive or a module.
+vulncheck:
+    go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
 build: build-mow
 

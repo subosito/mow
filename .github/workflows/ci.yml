@@ -27,6 +27,9 @@ jobs:
       - name: Vet root
         run: go vet ./...
 
+      - name: Vulnerability check
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
       - name: Test root
         run: go test -race ./...
 
