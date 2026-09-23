@@ -87,6 +87,49 @@ llm:
 	}
 }
 
+// TestAPIKeyEnvNames covers the shell credential deny list: every name mow may
+// read a model credential from, not just the currently selected provider.
+func TestAPIKeyEnvNames(t *testing.T) {
+	cases := []struct {
+		name string
+		llm  config.LLMConfig
+		want []string
+	}{
+		{
+			name: "live key only",
+			llm:  config.LLMConfig{APIKeyEnv: "OPENAI_API_KEY"},
+			want: []string{"OPENAI_API_KEY"},
+		},
+		{
+			name: "provider keys included once, sorted",
+			llm: config.LLMConfig{
+				APIKeyEnv: "MOW_API_KEY",
+				Providers: map[string]config.LLMProviderProfile{
+					"gateway": {APIKeyEnv: "MOW_API_KEY"},
+					"direct":  {APIKeyEnv: "DEEPSEEK_API_KEY"},
+					"blank":   {},
+				},
+			},
+			want: []string{"MOW_API_KEY", "DEEPSEEK_API_KEY"},
+		},
+		{name: "none", llm: config.LLMConfig{}, want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &config.File{LLM: tc.llm}
+			got := f.APIKeyEnvNames()
+			if len(got) != len(tc.want) {
+				t.Fatalf("APIKeyEnvNames = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("APIKeyEnvNames = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 func TestNamedProviderUnknownErrors(t *testing.T) {
 	t.Setenv(config.EnvHome, t.TempDir())
 	t.Setenv("MOW_PROVIDER", "")

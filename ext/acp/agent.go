@@ -16,7 +16,6 @@ import (
 
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/internal/policy"
-	toolspkg "github.com/subosito/mow/internal/tools"
 )
 
 // AgentOptions configures ACP agent mode over an Engine.
@@ -991,8 +990,7 @@ func resolveInWorkspace(ws, p string) (string, error) {
 }
 
 func (a *agentServer) readWorkspaceFile(p string) (string, error) {
-	pol := &policy.Policy{Workspace: a.eng.Workspace()}
-	_, data, err := toolspkg.ReadFileJailed(pol, p)
+	_, data, err := a.eng.ReadFile(p)
 	if err != nil {
 		return "", err
 	}
@@ -1004,8 +1002,9 @@ func (a *agentServer) readWorkspaceFile(p string) (string, error) {
 }
 
 func (a *agentServer) writeWorkspaceFile(p string, data []byte) error {
-	pol := &policy.Policy{Workspace: a.eng.Workspace()}
-	_, err := toolspkg.WriteFileJailed(pol, p, data, 0o644)
+	// Engine policy, not a bare workspace jail: ExtraRoots / ReadOnly /
+	// WritableRoots apply exactly as they do for the write tool.
+	_, err := a.eng.WriteFile(p, data)
 	return err
 }
 

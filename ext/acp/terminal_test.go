@@ -3,6 +3,8 @@ package acp
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +47,95 @@ func TestTerminalPTY(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("process did not exit")
 	}
+}
+
+func TestTerminalScrubsCredentials(t *testing.T) {
+	// A terminal is a shell entry point: it must not hand the child the key
+	// mow authenticates with (or the rest of the operator's credentials).
+	t.Setenv("PROBE_API_KEY", "probe-key-secret")
+	t.Setenv("PROBE_GITHUB_TOKEN", "probe-token-secret")
+	t.Setenv("PROBE_API_TOKEN", "probe-token2-secret")
+	t.Setenv("PROBE_PLAIN", "visible")
+	eng, err := mow.New(mow.Options{
+		NoSession:  true,
+		AllowShell: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "x"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &agentServer{eng: eng, terms: map[string]*termSession{}}
+	term, err := a.createTerminal("s1", "bash", []string{"-c", "env; echo ENV-DONE"}, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.releaseTerm(term.id)
+	out := drainTerminal(t, term, "ENV-DONE")
+	if !strings.Contains(out, "PROBE_PLAIN=visible") {
+		t.Fatalf("ordinary env must reach the terminal child: %q", out)
+	}
+	for _, secret := range []string{"probe-key-secret", "probe-token-secret", "probe-token2-secret"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("credential %q leaked into terminal child: %q", secret, out)
+		}
+	}
+}
+
+// TestTerminalDeniesConfiguredCredential: the shape rule cannot see a gateway
+// key with an arbitrary name, so the engine's configured api_key_env names are
+// withheld explicitly.
+func TestTerminalDeniesConfiguredCredential(t *testing.T) {
+	t.Setenv("MOW_HOME", t.TempDir())
+	t.Setenv("PROBE_GATEWAY_KEY", "probe-gateway-secret")
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("llm:\n  api_key_env: PROBE_GATEWAY_KEY\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := mow.New(mow.Options{
+		NoSession:   true,
+		AllowShell:  true,
+		ConfigPaths: []string{cfgPath},
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "x"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &agentServer{eng: eng, terms: map[string]*termSession{}}
+	term, err := a.createTerminal("s1", "bash", []string{"-c", "env; echo ENV-DONE"}, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.releaseTerm(term.id)
+	out := drainTerminal(t, term, "ENV-DONE")
+	if got := eng.CredentialEnvNames(); len(got) != 1 || got[0] != "PROBE_GATEWAY_KEY" {
+		t.Fatalf("CredentialEnvNames = %v", got)
+	}
+	if strings.Contains(out, "probe-gateway-secret") {
+		t.Fatalf("configured credential leaked into terminal child: %q", out)
+	}
+	if strings.Contains(out, "PROBE_GATEWAY_KEY") {
+		t.Fatalf("configured credential name leaked into terminal child: %q", out)
+	}
+}
+
+// drainTerminal reads until the sentinel appears (the shell echoed it last).
+func drainTerminal(t *testing.T, term *termSession, sentinel string) string {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	var out string
+	for time.Now().Before(deadline) {
+		out += term.takeOutput()
+		if strings.Contains(out, sentinel) {
+			return out
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("terminal produced no %q sentinel: %q", sentinel, out)
+	return out
 }
 
 func TestTerminalPushNotifications(t *testing.T) {

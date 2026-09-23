@@ -71,7 +71,10 @@ func TestScrubEnv(t *testing.T) {
 		{"keeps ordinary vars", []string{"PATH=/bin", "HOME=/h"}, []string{"PATH=/bin", "HOME=/h"}},
 		{"drops exact names", []string{"MOW_API_KEY=a", "OPENAI_API_KEY=b", "ANTHROPIC_API_KEY=c", "TERM=xterm"}, []string{"TERM=xterm"}},
 		{"drops any _API_KEY suffix", []string{"GEMINI_API_KEY=x", "FOO=1"}, []string{"FOO=1"}},
-		{"keeps other secrets-looking vars", []string{"AWS_SECRET_ACCESS_KEY=k", "GITHUB_TOKEN=t"}, []string{"AWS_SECRET_ACCESS_KEY=k", "GITHUB_TOKEN=t"}},
+		{"drops _TOKEN suffix", []string{"GITHUB_TOKEN=t", "NPM_TOKEN=n", "PATH=/bin"}, []string{"PATH=/bin"}},
+		{"drops _SECRET suffix", []string{"APP_SECRET=s", "APP_SECRET_KEY=k", "APP_SECRET_ACCESS_KEY=a", "PATH=/bin"}, []string{"PATH=/bin"}},
+		{"drops exact cloud names", []string{"AWS_SESSION_TOKEN=t", "AWS_ACCESS_KEY_ID=id", "PATH=/bin"}, []string{"AWS_ACCESS_KEY_ID=id", "PATH=/bin"}},
+		{"suffix must be whole", []string{"MY_TOKENIZER=ok", "SECRETIVE=ok", "TOKEN=ok"}, []string{"MY_TOKENIZER=ok", "SECRETIVE=ok", "TOKEN=ok"}},
 		{"value containing the name is untouched", []string{"NOTE=MOW_API_KEY=see-docs"}, []string{"NOTE=MOW_API_KEY=see-docs"}},
 	}
 	for _, tc := range cases {
@@ -81,6 +84,50 @@ func TestScrubEnv(t *testing.T) {
 				t.Fatalf("ScrubEnv(%v) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestScrubEnvWithDenyList(t *testing.T) {
+	// The deny list catches credentials whose name is not secret-shaped:
+	// llm.api_key_env may point at MY_GATEWAY_KEY.
+	in := []string{"PATH=/bin", "MY_GATEWAY_KEY=g", "GITHUB_TOKEN=t"}
+	got := ScrubEnvWith(in, []string{"MY_GATEWAY_KEY", " ", ""}, nil)
+	want := []string{"PATH=/bin"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("deny = %v, want %v", got, want)
+	}
+	// allow (env_passthrough) is a host decision and wins over deny.
+	got = ScrubEnvWith(in, []string{"MY_GATEWAY_KEY", "GITHUB_TOKEN"}, []string{"GITHUB_TOKEN"})
+	want = []string{"PATH=/bin", "GITHUB_TOKEN=t"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("allow must beat deny: %v, want %v", got, want)
+	}
+	// nil deny keeps the plain suffix rule.
+	if got := ScrubEnvWith([]string{"OPENAI_API_KEY=a", "PATH=/bin"}, nil, nil); len(got) != 1 || got[0] != "PATH=/bin" {
+		t.Fatalf("nil deny: %v", got)
+	}
+}
+
+func TestIsCredentialName(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{"PATH", false},
+		{"MOW_API_KEY", true},
+		{"AWS_SESSION_TOKEN", true},
+		{"GITHUB_TOKEN", true},
+		{"DB_SECRET", true},
+		{"FOO_SECRET_KEY", true},
+		{"AWS_SECRET_ACCESS_KEY", true},
+		{"TOKEN", false},
+		{"MY_TOKENIZER", false},
+		{"AWS_ACCESS_KEY_ID", false},
+		{"openai_api_key", false}, // environment names are case-sensitive
+	} {
+		if got := IsCredentialName(tc.name); got != tc.want {
+			t.Errorf("IsCredentialName(%q) = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

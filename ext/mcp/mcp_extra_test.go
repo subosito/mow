@@ -30,6 +30,10 @@ func TestHelperProcess(t *testing.T) {
 	case "marker":
 		runHelperMarker()
 		return
+	case "env":
+		// Dump this child's environment, then serve the normal handshake so
+		// the parent's registration still completes.
+		runHelperEnvDump()
 	case "hang_call":
 		runHelperHangCall()
 		return
@@ -87,6 +91,16 @@ func TestHelperProcess(t *testing.T) {
 			fmt.Println(string(res))
 		}
 	}
+}
+
+// runHelperEnvDump writes this child's environment to MCP_ENV_DUMP so the
+// parent can assert what an MCP server actually inherits.
+func runHelperEnvDump() {
+	out := os.Getenv("MCP_ENV_DUMP")
+	if out == "" {
+		return
+	}
+	_ = os.WriteFile(out, []byte(strings.Join(os.Environ(), "\n")), 0o600)
 }
 
 func runHelperMarker() {

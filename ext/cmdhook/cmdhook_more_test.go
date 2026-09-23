@@ -845,25 +845,73 @@ func TestClaudePluginRootExpandedByShell(t *testing.T) {
 func TestScrubEnvDropsCredentials(t *testing.T) {
 	tests := []struct {
 		name string
-		in   string
+		env  string
 		keep bool
 	}{
-		{name: "mow key", in: "MOW_API_KEY=sk-1", keep: false},
-		{name: "openai key", in: "OPENAI_API_KEY=sk-2", keep: false},
-		{name: "anthropic key", in: "ANTHROPIC_API_KEY=sk-3", keep: false},
-		{name: "suffix rule", in: "ACME_API_KEY=sk-4", keep: false},
-		{name: "unrelated", in: "PATH=/usr/bin", keep: true},
-		{name: "near miss", in: "MY_API_KEYS=ok", keep: true},
+		{name: "mow key", env: "MOW_API_KEY", keep: false},
+		{name: "openai key", env: "OPENAI_API_KEY", keep: false},
+		{name: "anthropic key", env: "ANTHROPIC_API_KEY", keep: false},
+		{name: "suffix rule", env: "ACME_API_KEY", keep: false},
+		{name: "github token", env: "GITHUB_TOKEN", keep: false},
+		{name: "aws secret", env: "AWS_SECRET_ACCESS_KEY", keep: false},
+		{name: "aws session token", env: "AWS_SESSION_TOKEN", keep: false},
+		{name: "unrelated", env: "PATH", keep: true},
+		{name: "near miss", env: "MY_API_KEYS", keep: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := scrubEnv([]string{tc.in})
-			if tc.keep && (len(got) != 1 || got[0] != tc.in) {
-				t.Fatalf("scrubEnv dropped %q: %v", tc.in, got)
+			t.Setenv(tc.env, "probe-secret")
+			got := ""
+			for _, kv := range hookEnv(t.Context()) {
+				if k, v, ok := strings.Cut(kv, "="); ok && k == tc.env {
+					got = v
+				}
 			}
-			if !tc.keep && len(got) != 0 {
-				t.Fatalf("scrubEnv kept credential %q: %v", tc.in, got)
+			if tc.keep && got != "probe-secret" {
+				t.Fatalf("hookEnv dropped %s: %q", tc.env, got)
+			}
+			if !tc.keep && got != "" {
+				t.Fatalf("hookEnv kept credential %s=%q", tc.env, got)
 			}
 		})
+	}
+}
+
+// TestHookEnvUsesEngineCredentialNames: the shape rule cannot see a
+// gateway key whose name is not secret-shaped, so the engine's configured
+// api_key_env names are denied explicitly when the hook runs inside a Prompt.
+func TestHookEnvUsesEngineCredentialNames(t *testing.T) {
+	t.Setenv("MOW_HOME", t.TempDir())
+	t.Setenv("MY_GATEWAY_KEY", "probe-secret")
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("llm:\n  api_key_env: MY_GATEWAY_KEY\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := mow.New(mow.Options{
+		NoSession:   true,
+		ConfigPaths: []string{cfgPath},
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "x"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := eng.CredentialEnvNames(); len(got) != 1 || got[0] != "MY_GATEWAY_KEY" {
+		t.Fatalf("CredentialEnvNames = %v", got)
+	}
+	for _, kv := range hookEnv(mow.ContextWithEngine(t.Context(), eng)) {
+		if strings.HasPrefix(kv, "MY_GATEWAY_KEY=") {
+			t.Fatalf("engine credential leaked into hook env: %q", kv)
+		}
+	}
+	// Without an engine the name is unknown; only the shape rule applies, so
+	// the explicit deny list is what closes this gap.
+	kept := false
+	for _, kv := range hookEnv(t.Context()) {
+		kept = kept || strings.HasPrefix(kv, "MY_GATEWAY_KEY=")
+	}
+	if !kept {
+		t.Fatal("test premise: MY_GATEWAY_KEY must survive the shape-only scrub")
 	}
 }

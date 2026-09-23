@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -1012,6 +1013,33 @@ func (f *File) ResolveAPIKey() string {
 		return strings.TrimSpace(os.Getenv(f.LLM.APIKeyEnv))
 	}
 	return ""
+}
+
+// APIKeyEnvNames returns the environment variable names this config may read a
+// model credential from: llm.api_key_env plus every llm.providers[*].api_key_env
+// (a named provider is what --provider switches onto the live credentials).
+// Names are deduplicated and empty entries dropped; they feed the shell
+// credential scrub so a gateway key with a non-secret-looking name
+// (MY_GATEWAY_KEY) is still withheld from child processes.
+func (f *File) APIKeyEnvNames() []string {
+	if f == nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	add(f.LLM.APIKeyEnv)
+	for _, name := range slices.Sorted(maps.Keys(f.LLM.Providers)) {
+		add(f.LLM.Providers[name].APIKeyEnv)
+	}
+	return out
 }
 
 // ToolEnabled reports whether name is in the enable list.

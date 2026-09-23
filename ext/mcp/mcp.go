@@ -36,6 +36,7 @@ import (
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/extcfg"
 	"github.com/subosito/mow/internal/redact"
+	"github.com/subosito/mow/internal/sandbox"
 )
 
 // ServerConfig is one MCP server (stdio or streamable HTTP).
@@ -222,6 +223,13 @@ func overlayMCP(base, over Config) Config {
 
 // loadWorkspaceMCPJSON reads <workspace>/mcp.json when the project is trusted.
 // It does not read .mow/mcp.json — that would duplicate extensions.mcp.
+//
+// SECURITY: a trusted project can still name an arbitrary command here (and in
+// .mow/config.yaml extensions.mcp), which is the same "arbitrary exec" surface
+// internal/config.mergeProjectFile strips extensions.acp for. The trust gate is
+// the operator's out-of-band decision, so this stays; a project that is not
+// trusted gets nothing either way. Do not widen it (e.g. project-set args that
+// forward host flags) without the same review extensions.acp got.
 func loadWorkspaceMCPJSON(ws string, c *Config) error {
 	if ws == "" || !mow.WorkspaceTrusted(ws) {
 		return nil
@@ -563,12 +571,41 @@ type client struct {
 	closeErr  error
 }
 
+// serverEnv is the environment a stdio MCP server inherits: parent minus
+// credentials (sandbox.ScrubEnv), then the server's explicit env: entries.
+// An explicit entry replaces an inherited one of the same name instead of
+// being appended next to it — with two entries for one name, which value the
+// child reads is up to exec, not to the operator's intent.
+func serverEnv(parent []string, explicit map[string]string) []string {
+	out := sandbox.ScrubEnv(parent)
+	if len(explicit) == 0 {
+		return out
+	}
+	names := make(map[string]bool, len(explicit))
+	for k := range explicit {
+		names[k] = true
+	}
+	kept := out[:0]
+	for _, kv := range out {
+		if k, _, _ := strings.Cut(kv, "="); names[k] {
+			continue
+		}
+		kept = append(kept, kv)
+	}
+	out = kept
+	for k, v := range explicit {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
 func startServer(s ServerConfig) (*client, error) {
 	cmd := exec.Command(s.Command, s.Args...)
-	cmd.Env = os.Environ()
-	for k, v := range s.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	// Same credential scrub as the shell tools: an MCP server is a child
+	// process this agent spawns, so it must not inherit the key mow
+	// authenticates with. The server's own env: map is applied afterwards —
+	// handing a server its token deliberately is an operator decision.
+	cmd.Env = serverEnv(os.Environ(), s.Env)
 	setServerProcAttr(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

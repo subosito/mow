@@ -242,9 +242,17 @@ func ProcStart(dir, id, command, logName, workdir string, box ...SandboxBackend)
 
 // ProcStartEnv is ProcStart with the host's policy.env_passthrough names, so
 // the child keeps the credential variables the operator explicitly allowed
-// (see Engine.EnvPassthrough).
+// (see Engine.EnvPassthrough). Prefer ProcStartScrubbed, which also denies the
+// engine's configured credential names.
 func ProcStartEnv(dir, id, command, logName, workdir string, envAllow []string, box ...SandboxBackend) (ProcInfo, error) {
-	return engine.ProcStartEnv(dir, id, command, logName, workdir, envAllow, box...)
+	return engine.ProcStartScrubbed(dir, id, command, logName, workdir, nil, envAllow, box...)
+}
+
+// ProcStartScrubbed is ProcStartEnv plus envDeny: the exact variable names the
+// engine authenticates with (Engine.CredentialEnvNames), withheld from the
+// child even when not credential-shaped. envAllow still wins over envDeny.
+func ProcStartScrubbed(dir, id, command, logName, workdir string, envDeny, envAllow []string, box ...SandboxBackend) (ProcInfo, error) {
+	return engine.ProcStartScrubbed(dir, id, command, logName, workdir, envDeny, envAllow, box...)
 }
 func ProcStatus(dir, id string) (ProcInfo, error)    { return engine.ProcStatus(dir, id) }
 func ProcList(dir string) ([]ProcInfo, error)        { return engine.ProcList(dir) }

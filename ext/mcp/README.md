@@ -74,7 +74,7 @@ extensions:
     #     command: npx
 ```
 
-Per-server keys: `name`, `command`, `args`, `env`, `url`, `insecure`, `headers`, `auth`, `min_turns`, `timeout_sec`, `prompt`. Stdio uses `command`; streamable HTTP uses `url`. `timeout_sec` bounds one `tools/call` (default 30s). Set `-1` to wait until the turn is cancelled. A silent stdio server otherwise pins the turn.
+Per-server keys: `name`, `command`, `args`, `env`, `url`, `insecure`, `headers`, `auth`, `min_turns`, `timeout_sec`, `prompt`. Stdio uses `command`; streamable HTTP uses `url`. `timeout_sec` bounds one `tools/call` (default 30s). Set `-1` to wait until the turn is cancelled. A silent stdio server otherwise pins the turn. A stdio server is spawned with the harness credential scrub applied to the parent environment; its own `env` map is applied on top, so use it to hand one server a token deliberately.
 
 `prompt` is optional operator-authored guidance, appended to the system prompt
 for each request while the server is active. It uses the same `min_turns` and

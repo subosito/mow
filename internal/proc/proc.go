@@ -78,13 +78,15 @@ func StoreDir(home, workspace string) string {
 // the parent so the recorded pid is still the session leader we later signal —
 // the backend is asked not to add its own --new-session.
 func Start(dir, id, command, logName, workdir string, box ...sandbox.Backend) (Info, error) {
-	return StartEnv(dir, id, command, logName, workdir, nil, box...)
+	return StartEnv(dir, id, command, logName, workdir, nil, nil, box...)
 }
 
-// StartEnv is Start with envAllow: exact environment variable names that
-// survive the credential scrub (policy.env_passthrough). Host config only —
-// see sandbox.ScrubEnv.
-func StartEnv(dir, id, command, logName, workdir string, envAllow []string, box ...sandbox.Backend) (Info, error) {
+// StartEnv is Start with the credential scrub configured: envDeny is the set
+// of exact names that never reach the child (the engine's configured
+// credential names — see Engine.CredentialEnvNames) and envAllow the exact
+// names that survive anyway (policy.env_passthrough). Host config only — see
+// sandbox.ScrubEnvWith.
+func StartEnv(dir, id, command, logName, workdir string, envDeny, envAllow []string, box ...sandbox.Backend) (Info, error) {
 	id = SanitizeID(id)
 	command = strings.TrimSpace(command)
 	if id == "" || command == "" {
@@ -110,7 +112,7 @@ func StartEnv(dir, id, command, logName, workdir string, envAllow []string, box 
 	}
 	// Never hand the agent's own credentials to a child; Fence restricts the
 	// whole environment anyway.
-	c.Env = sandbox.ScrubEnv(os.Environ(), envAllow...)
+	c.Env = sandbox.ScrubEnvWith(os.Environ(), envDeny, envAllow)
 	c.Stdout = logF
 	c.Stderr = logF
 	c.Stdin = nil

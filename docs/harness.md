@@ -397,16 +397,22 @@ session.
 > flag does not. Treat it like root-adjacent, not a sibling of
 > `--allow-write`.
 >
-> **Credential scrub.** `bash` and `proc_start` children never inherit mow's
-> own API keys: `MOW_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and any
-> variable ending in `_API_KEY` are removed from the child environment (the
-> Fence path uses a strict environment allowlist). When a build genuinely
-> needs one — a package registry or CI token — name it exactly in
-> `policy.env_passthrough: [NPM_TOKEN, …]`. Exact names only, no globs; it is
-> host/user config (stripped from project `.mow/config`, like
-> `policy.extra_roots`).
+> **Credential scrub.** Child processes never inherit mow's own credentials.
+> Removed from the environment of `bash`, `proc_start`, the ACP terminal
+> (`terminal/create`), command hooks, and MCP stdio servers:
+> `MOW_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, anything ending in
+> `_API_KEY`, `_TOKEN`, `_SECRET`, `_SECRET_KEY`, or `_SECRET_ACCESS_KEY`,
+> `AWS_SESSION_TOKEN`, and the names mow reads model keys from
+> (`llm.api_key_env` and every `llm.providers[*].api_key_env`, whatever they
+> are called). An MCP server's own `env:` map is applied afterwards, so an
+> operator can still hand one server its own token deliberately. When a build
+> genuinely needs one — a package registry or CI token — name it exactly in
+> `policy.env_passthrough: [NPM_TOKEN, …]`; the passthrough list wins over the
+> scrub. Exact names only, no globs; it is host/user config (stripped from
+> project `.mow/config`, like `policy.extra_roots`).
 >
-> **Opt-in OS jail (`--sandbox`).** Both `bash` and `proc_start` use
+> **Opt-in OS jail (`--sandbox`).** `bash`, `proc_start`, and the ACP terminal
+> (`terminal/create`) use
 > Fence on Linux and macOS (config: `policy.sandbox: fence`). Install Fence
 > first; missing required isolation is a hard error, never an unsandboxed
 > fallback. Mow supplies workspace/extra-root permissions and denies outbound

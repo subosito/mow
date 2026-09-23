@@ -94,7 +94,7 @@ func (procStartTool) Exec(ctx context.Context, args json.RawMessage) (string, er
 	if err != nil {
 		return "error: " + err.Error(), nil
 	}
-	info, err := mow.ProcStartEnv(procDir(scope.Root, scope.GoalID), a.ID, a.Command, a.Log, eng.Workspace(), eng.EnvPassthrough(), box)
+	info, err := mow.ProcStartScrubbed(procDir(scope.Root, scope.GoalID), a.ID, a.Command, a.Log, eng.Workspace(), eng.CredentialEnvNames(), eng.EnvPassthrough(), box)
 	if errors.Is(err, mow.ProcErrAlreadyRunning) {
 		return fmt.Sprintf("already running id=%s pid=%d", info.ID, info.PID), nil
 	}

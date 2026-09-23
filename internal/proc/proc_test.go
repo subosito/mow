@@ -91,7 +91,8 @@ func TestStopTreatsRecycledPIDAsStale(t *testing.T) {
 func TestStartScrubsCredentialEnv(t *testing.T) {
 	t.Setenv("MOW_API_KEY", "super-secret")
 	t.Setenv("SOME_VENDOR_API_KEY", "also-secret")
-	t.Setenv("PLAIN_VAR", "visible")
+	t.Setenv("PROBE_GITHUB_TOKEN", "token-secret")
+	t.Setenv("PROBE_PLAIN", "visible")
 	dir := t.TempDir()
 	if _, err := Start(dir, "env", "env", "", ""); err != nil {
 		t.Fatalf("start: %v", err)
@@ -100,15 +101,51 @@ func TestStartScrubsCredentialEnv(t *testing.T) {
 	var out string
 	for {
 		out, _ = Tail(dir, "env", 0)
-		if strings.Contains(out, "PLAIN_VAR=visible") || time.Now().After(deadline) {
+		if strings.Contains(out, "PROBE_PLAIN=visible") || time.Now().After(deadline) {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if !strings.Contains(out, "PLAIN_VAR=visible") {
+	if !strings.Contains(out, "PROBE_PLAIN=visible") {
 		t.Fatalf("ordinary env must reach the child: %q", out)
 	}
-	if strings.Contains(out, "super-secret") || strings.Contains(out, "also-secret") {
-		t.Fatalf("credentials leaked into child env: %q", out)
+	for _, secret := range []string{"super-secret", "also-secret", "token-secret"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("credential %q leaked into child env: %q", secret, out)
+		}
+	}
+}
+
+// TestStartEnvDenyList: the exact-name deny list (engine credential names) is
+// scrubbed too, and envAllow still wins over it.
+func TestStartEnvDenyList(t *testing.T) {
+	t.Setenv("PROBE_GATEWAY_KEY", "gateway-secret")
+	dir := t.TempDir()
+	if _, err := StartEnv(dir, "env", "env; echo PROBE-DONE", "", "", []string{"PROBE_GATEWAY_KEY"}, nil); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	out := tailUntil(t, dir, "env", "PROBE-DONE")
+	if strings.Contains(out, "gateway-secret") {
+		t.Fatalf("denied variable reached the child: %q", out)
+	}
+	if _, err := StartEnv(dir, "env2", "env; echo PROBE-DONE", "", "", []string{"PROBE_GATEWAY_KEY"}, []string{"PROBE_GATEWAY_KEY"}); err != nil {
+		t.Fatalf("start2: %v", err)
+	}
+	out = tailUntil(t, dir, "env2", "PROBE-DONE")
+	if !strings.Contains(out, "gateway-secret") {
+		t.Fatalf("envAllow must beat the deny list: %q", out)
+	}
+}
+
+// tailUntil waits for the log to contain marker.
+func tailUntil(t *testing.T, dir, id, marker string) string {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		out, _ := Tail(dir, id, 0)
+		if strings.Contains(out, marker) || time.Now().After(deadline) {
+			return out
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

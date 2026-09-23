@@ -378,6 +378,7 @@ func New(opt Options) (*Engine, error) {
 		MaxBashTimeoutSec:  cfg.Policy.MaxBashTimeoutSec,
 		Hashline:           cfg.Tools.Hashline,
 		EnvPassthrough:     append([]string(nil), cfg.Policy.EnvPassthrough...),
+		CredentialEnv:      cfg.APIKeyEnvNames(),
 	}
 
 	enabled := cfg.Tools.Enable
@@ -1098,6 +1099,31 @@ func (e *Engine) EnvPassthrough() []string {
 		return nil
 	}
 	return append([]string(nil), e.pol.EnvPassthrough...)
+}
+
+// CredentialEnvNames returns the exact environment variable names mow reads
+// model credentials from (llm.api_key_env plus every
+// llm.providers[*].api_key_env). Shell entry points deny them explicitly on
+// top of the name-shape scrub, so a gateway key named MY_GATEWAY_KEY cannot
+// leak into a child that inherits the operator's environment.
+func (e *Engine) CredentialEnvNames() []string {
+	if e == nil || e.pol == nil {
+		return nil
+	}
+	return append([]string(nil), e.pol.CredentialEnv...)
+}
+
+// ShellEnv returns the environment a shell child may inherit: the parent
+// environment without credentials (see sandbox.ScrubEnvWith), with
+// policy.env_passthrough as the host opt-out. Shell entry points outside
+// internal/tools — the ACP terminal and ext/proc via ProcStartEnv — must use
+// this rather than os.Environ(), or they become the unsandboxed/credentialed
+// escape hatch next to bash.
+func (e *Engine) ShellEnv() []string {
+	if e == nil || e.pol == nil {
+		return sandbox.ScrubEnv(os.Environ())
+	}
+	return sandbox.ScrubEnvWith(os.Environ(), e.pol.CredentialEnv, e.pol.EnvPassthrough)
 }
 
 func sessionPolicyEvent(e *Engine, model, wire, effort string) session.Event {

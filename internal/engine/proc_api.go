@@ -40,7 +40,13 @@ func ProcStart(dir, id, command, logName, workdir string, box ...sandbox.Backend
 // exact environment variables allowed past the credential scrub. Use
 // Engine.EnvPassthrough() for the list; ProcStart keeps the full scrub.
 func ProcStartEnv(dir, id, command, logName, workdir string, envAllow []string, box ...sandbox.Backend) (ProcInfo, error) {
-	return proc.StartEnv(dir, id, command, logName, workdir, envAllow, box...)
+	return proc.StartEnv(dir, id, command, logName, workdir, nil, envAllow, box...)
+}
+
+// ProcStartScrubbed is ProcStartEnv plus envDeny: the engine's own credential
+// names (Engine.CredentialEnvNames). env_passthrough still wins over it.
+func ProcStartScrubbed(dir, id, command, logName, workdir string, envDeny, envAllow []string, box ...sandbox.Backend) (ProcInfo, error) {
+	return proc.StartEnv(dir, id, command, logName, workdir, envDeny, envAllow, box...)
 }
 
 // ProcStatus returns the info for one id.

@@ -581,7 +581,8 @@ func TestBashCancelledContextIsNotATimeout(t *testing.T) {
 
 func TestBashScrubsCredentialEnv(t *testing.T) {
 	t.Setenv("MOW_API_KEY", "super-secret")
-	t.Setenv("PLAIN_VAR", "visible")
+	t.Setenv("PROBE_GITHUB_TOKEN", "token-secret")
+	t.Setenv("PROBE_PLAIN", "visible")
 	root := t.TempDir()
 	p := &policy.Policy{Workspace: root, AllowShell: true}
 	reg := tools.Registry(p, []string{"bash"})
@@ -589,10 +590,35 @@ func TestBashScrubsCredentialEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "PLAIN_VAR=visible") {
+	if !strings.Contains(out, "PROBE_PLAIN=visible") {
 		t.Fatalf("ordinary env must reach the child: %q", out)
 	}
-	if strings.Contains(out, "super-secret") {
-		t.Fatalf("MOW_API_KEY leaked into bash: %q", out)
+	if strings.Contains(out, "super-secret") || strings.Contains(out, "token-secret") {
+		t.Fatalf("credential leaked into bash: %q", out)
+	}
+}
+
+// TestBashDeniesConfiguredCredentialEnv: a gateway key whose name is not
+// secret-shaped (llm.api_key_env) is denied through the policy deny list.
+func TestBashDeniesConfiguredCredentialEnv(t *testing.T) {
+	t.Setenv("PROBE_GATEWAY_KEY", "gateway-secret")
+	root := t.TempDir()
+	p := &policy.Policy{Workspace: root, AllowShell: true, CredentialEnv: []string{"PROBE_GATEWAY_KEY"}}
+	reg := tools.Registry(p, []string{"bash"})
+	out, err := reg[0].Exec(t.Context(), json.RawMessage(`{"command":"env"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "gateway-secret") {
+		t.Fatalf("configured credential leaked into bash: %q", out)
+	}
+	// env_passthrough is the host opt-out and beats the deny list.
+	p.EnvPassthrough = []string{"PROBE_GATEWAY_KEY"}
+	out, err = reg[0].Exec(t.Context(), json.RawMessage(`{"command":"env"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "gateway-secret") {
+		t.Fatalf("env_passthrough must keep the variable: %q", out)
 	}
 }

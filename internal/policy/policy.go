@@ -68,6 +68,12 @@ type Policy struct {
 	// credential scrub when mow spawns a shell (bash, proc_start). Comes from
 	// policy.env_passthrough — host/user config and CLI only, never project.
 	EnvPassthrough []string
+	// CredentialEnv are the exact variable names mow itself authenticates
+	// with (llm.api_key_env plus every llm.providers[*].api_key_env). The
+	// scrub also drops names shaped like credentials, but a gateway key may
+	// be named anything (MY_GATEWAY_KEY), so the configured names are denied
+	// explicitly. EnvPassthrough still wins over this.
+	CredentialEnv []string
 }
 
 // Power tools that are denied unless explicitly allowed.

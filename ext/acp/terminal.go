@@ -41,7 +41,21 @@ func (a *agentServer) createTerminal(sessionID, command string, args []string, c
 	}
 	cmd := exec.Command(command, args...)
 	cmd.Dir = ws
-	cmd.Env = os.Environ()
+	// Same credential scrub as the bash tool: the PTY is a shell entry point,
+	// so os.Environ() would hand the child the key mow authenticates with.
+	cmd.Env = a.eng.ShellEnv()
+	// Same OS jail as bash / proc_start. pty.StartWithSize applies the PTY to
+	// whatever command it is given, and the backend preserves stdio, so the
+	// wrapped command is what must be started — never the raw one.
+	box, err := a.eng.ShellSandbox()
+	if err != nil {
+		return nil, fmt.Errorf("terminal/create unavailable under sandbox: %w", err)
+	}
+	if wrapped, werr := box.Wrap(cmd); werr != nil {
+		return nil, fmt.Errorf("terminal/create unavailable under sandbox: %w", werr)
+	} else {
+		cmd = wrapped
+	}
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
 		return nil, err

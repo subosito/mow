@@ -136,26 +136,78 @@ var envAllowlist = []string{
 	"RUSTUP_HOME",
 }
 
-// ScrubEnv returns env without the agent's own credentials: any variable
-// ending in _API_KEY (MOW_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, …).
-// Used by the unsandboxed bash tool and proc_start so a child cannot read
-// the key mow itself authenticates with; Fence uses a stricter environment
-// allowlist.
+// credentialSuffixes are the variable-name shapes treated as secrets. _API_KEY
+// is mow's own convention; the rest cover cloud/CI credentials a child would
+// otherwise inherit from the operator's shell (AWS_SESSION_TOKEN,
+// AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN, …).
+var credentialSuffixes = []string{
+	"_API_KEY",
+	"_TOKEN",
+	"_SECRET",
+	"_SECRET_KEY",
+	"_SECRET_ACCESS_KEY",
+}
+
+// credentialExact are exact names that do not carry a telling suffix.
+var credentialExact = map[string]bool{
+	"AWS_SESSION_TOKEN": true,
+}
+
+// IsCredentialName reports whether a variable name looks like a credential a
+// child process must not inherit. Exact names first, then suffixes; the match
+// is case-sensitive like the environment itself.
+func IsCredentialName(name string) bool {
+	if credentialExact[name] {
+		return true
+	}
+	for _, suf := range credentialSuffixes {
+		if strings.HasSuffix(name, suf) {
+			return true
+		}
+	}
+	return false
+}
+
+// ScrubEnv returns env without the agent's own credentials. Used by the
+// unsandboxed shell entry points (bash, proc_start, ACP terminal) so a child
+// cannot read a key mow itself authenticates with; Fence uses a stricter
+// environment allowlist.
 //
 // allow lists exact variable names that survive the scrub anyway
 // (policy.env_passthrough) — a host opt-out for builds that genuinely need a
 // registry or CI token. Host/CLI config only; never project-settable.
 func ScrubEnv(env []string, allow ...string) []string {
+	return ScrubEnvWith(env, nil, allow)
+}
+
+// ScrubEnvWith is ScrubEnv with an extra deny list: exact variable names that
+// must never reach the child even though their spelling is not secret-shaped.
+// Callers pass the model credentials mow itself was configured to use
+// (config LLM.APIKeyEnv plus provider api_key_env, via Engine.CredentialEnvNames)
+// — a gateway key named MY_GATEWAY_KEY would otherwise sail through.
+//
+// deny is applied before allow: env_passthrough (a host decision) wins.
+func ScrubEnvWith(env, deny, allow []string) []string {
 	keep := map[string]bool{}
 	for _, name := range allow {
 		if name = strings.TrimSpace(name); name != "" {
 			keep[name] = true
 		}
 	}
+	drop := map[string]bool{}
+	for _, name := range deny {
+		if name = strings.TrimSpace(name); name != "" {
+			drop[name] = true
+		}
+	}
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
-		if !keep[k] && strings.HasSuffix(k, "_API_KEY") {
+		if keep[k] {
+			out = append(out, kv)
+			continue
+		}
+		if drop[k] || IsCredentialName(k) {
 			continue
 		}
 		out = append(out, kv)

@@ -739,7 +739,7 @@ func (t *bashTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	cmd.Dir = t.p.Workspace
 	// Never hand the agent's own credentials to the shell; the Fence path
 	// below replaces the whole environment anyway.
-	cmd.Env = sandbox.ScrubEnv(os.Environ(), t.p.EnvPassthrough...)
+	cmd.Env = sandbox.ScrubEnvWith(os.Environ(), t.p.CredentialEnv, t.p.EnvPassthrough)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Opt-in OS jail (policy.sandbox / --sandbox=fence). Identity by default;
 	// when enabled it rewrites argv to `fence ... -- bash -lc <command>` and

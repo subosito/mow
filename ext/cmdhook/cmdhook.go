@@ -35,6 +35,7 @@ import (
 	"github.com/subosito/mow"
 	"github.com/subosito/mow/ext"
 	"github.com/subosito/mow/extcfg"
+	toolssandbox "github.com/subosito/mow/internal/sandbox"
 )
 
 // PluginConfig is one hooks.json plugin instance (tests and plugin discovery).
@@ -316,7 +317,7 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Env = append(scrubEnv(os.Environ()),
+	cmd.Env = append(hookEnv(ctx),
 		"CLAUDE_PLUGIN_ROOT="+b.root,
 		"CLAUDE_PROJECT_DIR="+cwd,
 	)
@@ -705,18 +706,16 @@ func rawOrEmpty(raw json.RawMessage) json.RawMessage {
 	return raw
 }
 
-// scrubEnv drops hook-subprocess credentials: any variable ending in
-// _API_KEY (same rule as sandbox.ScrubEnv).
-func scrubEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		k, _, _ := strings.Cut(kv, "=")
-		if strings.HasSuffix(k, "_API_KEY") {
-			continue
-		}
-		out = append(out, kv)
+// hookEnv is the environment a hook subprocess may inherit: the parent
+// environment without credentials, scrubbed by the same rule as the shell
+// tools (sandbox.ScrubEnvWith). When the hook fires inside a Prompt the engine
+// supplies the extra exact deny list (its configured api_key_env names); the
+// shape rule still applies outside a Prompt.
+func hookEnv(ctx context.Context) []string {
+	if eng := mow.EngineFromContext(ctx); eng != nil {
+		return eng.ShellEnv()
 	}
-	return out
+	return toolssandbox.ScrubEnv(os.Environ())
 }
 
 // firstNonEmpty keeps the value untrimmed: hook stderr is shown verbatim.
