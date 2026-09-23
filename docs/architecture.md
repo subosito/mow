@@ -38,7 +38,7 @@ depends on an application module.
 |---|---|
 | `github.com/subosito/mow` | Thin aliases/wrappers: `Engine`, `Run`, options, events, hooks, providers |
 | `github.com/subosito/mow/ext` | Registration API: tools, lifecycle hooks, commands, `BeforeNew` |
-| `github.com/subosito/mow/ext/<name>` | Core Engine surfaces: acp, cli, tty, proc, cmdhook, mcp, goal, workflow (privileged; may import internal/) |
+| `github.com/subosito/mow/ext/<name>` | Core Engine surfaces: acp, cli, tty, proc, cmdhook, mcp, goal, workflow, worktree (privileged; may import internal/) |
 | `github.com/subosito/mow/cliutil` | CLI flags → Engine |
 | `github.com/subosito/mow/extcfg` | Decode `extensions.<name>` |
 
@@ -96,7 +96,7 @@ Application workflows (review, job, ops, media) are maintained separately in
 
 | Binary | Source | Ships |
 |---|---|---|
-| `mow` | `cmd/mow` | Import list: `ext/cli`, `ext/tty`, `ext/acp`, `ext/proc`, `ext/cmdhook`, `ext/mcp`, `ext/goal`, `ext/workflow` |
+| `mow` | `cmd/mow` | Import list: `ext/cli`, `ext/tty`, `ext/acp`, `ext/proc`, `ext/cmdhook`, `ext/mcp`, `ext/goal`, `ext/workflow`, `ext/worktree` |
 
 Composition lives in `cmd/` (blank imports + `ext/cli.Main`). Host UIs spawn
 `mow acp`; they do not need `run` or `tty`. The Engine library requires neither.

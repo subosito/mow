@@ -5,7 +5,7 @@
 ```text
 Embedder / tests ──┐
 ext/cli (run) ─────┼──▶  mow.Engine  ──▶  LLM HTTP (any compatible endpoint)
-ext/tty · ext/acp ─┘     (core: cli · tty · acp · proc · cmdhook · mcp · goal)
+ext/tty · ext/acp ─┘     (core: cli · tty · acp · proc · cmdhook · mcp · goal · worktree)
 ```
 
 **Why mow:** the core module has two runtime dependencies (pty, yaml) — no SDK,
@@ -77,6 +77,7 @@ export OPENAI_MODEL=gpt-5-mini
 ./bin/mow tty                                     # explicit interactive session
 ./bin/mow acp                                     # ext/acp — ACP agent + extras
 ./bin/mow goal new --id fix-ci --goal "Make CI green"   # ext/goal
+./bin/mow worktree add fix-auth                   # ext/worktree — parallel checkout
 ./bin/mow help                                # linked commands, dynamically
 
 ```
@@ -116,7 +117,7 @@ One Go module. Full public/internal map:
 | Path / module | Role |
 |---|---|
 | `mow.go` + `internal/` | Public API re-export and implementation |
-| `ext/` + `cliutil/` + `extcfg/` | Core extensions (cli, tty, acp, proc, cmdhook, mcp), CLI helpers, config decode |
+| `ext/` + `cliutil/` + `extcfg/` | Core extensions (cli, tty, acp, proc, cmdhook, mcp, goal, workflow, worktree), CLI helpers, config decode |
 | `cmd/mow/` | Stock host: `ext/cli.Main` plus linked core extensions |
 
 ## Pick extensions when embedding

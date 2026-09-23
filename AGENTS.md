@@ -34,7 +34,7 @@ Source of truth: [docs/architecture.md](docs/architecture.md).
 | `cliutil/` | CLI flags → Engine (**not** a pack) |
 | `extcfg/` | Decode `extensions.<name>` |
 | `testutil/` | Shared tests (pin `$MOW_HOME`) |
-| `ext/` | Registration + core extensions: acp, cli, tty, proc, cmdhook, mcp, goal |
+| `ext/` | Registration + core extensions: acp, cli, tty, proc, cmdhook, mcp, goal, workflow, worktree |
 | `internal/` | Implementation — **not** an integrator import |
 | `cmd/mow/` | Stock host |
 | `ext/cli/` | Unix CLI skeleton (run, trust, doctor, …) |
@@ -44,7 +44,7 @@ If integrators need something in `internal/`, re-export — do not tell them to 
 
 ## Extensions
 
-- Stock `cmd/mow`: acp, cli, tty, proc, cmdhook, mcp, goal, workflow.
+- Stock `cmd/mow`: acp, cli, tty, proc, cmdhook, mcp, goal, workflow, worktree.
 - Application workflows (review, job, ops, media) live in external modules such as `external application modules`.
 - Remove import → subcommand/tools gone. Config: `extensions.<name>` via `Engine.Extension` or `extcfg.DecodeSection`. MCP only if configured.
 

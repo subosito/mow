@@ -1,6 +1,6 @@
 //go:build unix
 
-package goal
+package gitx
 
 import (
 	"os/exec"
@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func setGitProcAttr(cmd *exec.Cmd) {
+func setProcAttr(cmd *exec.Cmd) {
 	if cmd == nil {
 		return
 	}

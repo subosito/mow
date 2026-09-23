@@ -157,6 +157,16 @@ plus `/workflow` surfaces. Definitions are registered by linked Go code; this is
 not a script runtime or scheduler. See [ext/workflow/README.md](../ext/workflow/README.md)
 and [orchestration.md](orchestration.md).
 
+### Worktree (`ext/worktree`)
+
+Dedicated git worktrees for parallel changes: `<repo>-worktrees/<name>` on
+branch `wt/<name>`, one checkout per line of work. `mow worktree
+list|add|remove|path`, `/worktree`, and `worktree_list` / `worktree_add` /
+`worktree_remove` tools (add/remove need `--allow-shell`: they write outside the
+jail). `remove` refuses uncommitted or unmerged work without `--force`. Open a
+parallel session with `--workspace "$(mow worktree path NAME)"` or
+`mowi --worktree NAME`. See [ext/worktree/README.md](../ext/worktree/README.md).
+
 ### Goal (`ext/goal`)
 
 Durable outer loop over `Engine.Prompt`: checklist, evidence, budgets,

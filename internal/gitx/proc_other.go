@@ -1,16 +1,16 @@
 //go:build !unix
 
-package goal
+package gitx
 
 import (
 	"os/exec"
 	"time"
 )
 
-// setGitProcAttr installs a Cancel that kills the process (no process groups
+// setProcAttr installs a Cancel that kills the process (no process groups
 // on this platform) and a WaitDelay so cancel does not hang forever on stuck
 // grandchildren that share no group.
-func setGitProcAttr(cmd *exec.Cmd) {
+func setProcAttr(cmd *exec.Cmd) {
 	if cmd == nil {
 		return
 	}

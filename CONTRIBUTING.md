@@ -53,7 +53,7 @@ Layout and module boundaries: [docs/architecture.md](docs/architecture.md)
 | A built-in tool or the path jail | `internal/tools/`, `internal/policy/` |
 | Config, env, trust | `internal/config/`, `internal/contextload/` |
 | An LLM wire | `internal/llm/` |
-| A core extension (acp, cli, tty, proc, cmdhook, mcp, goal) | `ext/<name>/` |
+| A core extension (acp, cli, tty, proc, cmdhook, mcp, goal, workflow, worktree) | `ext/<name>/` |
 | An application workflow | External module using the public `mow` API |
 
 Engine construction is `internal/engine/engine.go` (`New`); prompt/model/control

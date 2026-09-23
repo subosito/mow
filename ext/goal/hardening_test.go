@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/subosito/mow/internal/gitx"
 )
 
 func TestStoreConcurrentSave(t *testing.T) {
@@ -197,7 +199,7 @@ func TestSanitizeStateBounds(t *testing.T) {
 
 func TestRedactGitSecrets(t *testing.T) {
 	in := "fatal: https://user:secret-token@github.com/org/repo.git"
-	out := redactSecrets(in)
+	out := gitx.Redact(in)
 	if strings.Contains(out, "secret-token") {
 		t.Fatalf("leaked: %q", out)
 	}
