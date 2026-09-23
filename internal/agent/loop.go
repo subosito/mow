@@ -407,6 +407,7 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 				h(ctx, AfterTurnEvent{
 					AssistantText: msg.Content,
 					HasToolCalls:  len(msg.ToolCalls) > 0,
+					Usage:         msg.Usage,
 				})
 			}
 		}

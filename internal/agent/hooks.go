@@ -91,6 +91,9 @@ type AfterCompactFunc func(ctx context.Context, e AfterCompactEvent)
 type AfterTurnEvent struct {
 	AssistantText string
 	HasToolCalls  bool
+	// Usage is this call only, not the run sum. Hosts use InputTokens as
+	// context occupancy; billing totals stay on the run result.
+	Usage llm.Usage
 }
 
 // AfterTurnFunc runs after each LLM turn (tools may still follow).

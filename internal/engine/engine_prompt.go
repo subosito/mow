@@ -596,6 +596,8 @@ func hooksWithEvents(h agent.Hooks, e *Engine, runID, sid string) agent.Hooks {
 		e.Emit(Event{
 			Type: EventTurn, RunID: runID, SessionID: sid,
 			Text: ev.AssistantText, HasToolCalls: ev.HasToolCalls,
+			InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens,
+			CachedInputTokens: ev.Usage.CachedInputTokens,
 		})
 	}}, after...)
 	h.PreTool = pre

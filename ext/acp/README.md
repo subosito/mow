@@ -28,7 +28,12 @@ active session (`session/new` binds the Engine JSONL; a second `new`
 is refused until `session/close`, which then starts a fresh JSONL),
 `session/prompt` + `session/update`, `session/request_permission`
 (agent→client for power tools), usage_update, config options, and
-terminals. Native peers (`model:`) spawn the current executable
+terminals. `usage_update.used.inputTokens` is context occupancy (last
+model call's input, or the post-compaction estimate) — the figure a
+client paints as used/window. `usage_update.billed` is the run sum
+`{inputTokens, outputTokens, cachedReadTokens}` and is not occupancy.
+It is sent after every model call (occupancy) and again at run end
+(occupancy plus billed). Native peers (`model:`) spawn the current executable
 (`os.Executable()`), so the full `mow` host starts `mow acp`.
 Peer processes are reused by agent + cwd + effective argv + permission mode.
 `Engine.Close` (deferred by `mow acp`) SIGTERM then SIGKILL the

@@ -899,20 +899,38 @@ func acpStopReason(reason string) string {
 	}
 }
 
-func (a *agentServer) emitUsage(sessionID string, input, output, cached int) {
-	if a == nil || (input == 0 && output == 0 && cached == 0) {
+// emitUsage reports context occupancy and billing for one session.
+//
+// used is occupancy: the tokens the next prompt already occupies (Engine.ContextTokens,
+// which is the last model call's input, or the post-compaction estimate). It is
+// NOT the run sum — summing every call pegs the client's used/window chip.
+// billed is that run sum (input/output/cachedRead), for hosts that show spend
+// separately from the context chip. Both are omitted when zero so a quiet
+// turn does not invent a gauge.
+func (a *agentServer) emitUsage(sessionID string, occupancy, billedIn, billedOut, billedCached int) {
+	if a == nil || (occupancy == 0 && billedIn == 0 && billedOut == 0 && billedCached == 0) {
 		return
-	}
-	used := map[string]any{
-		"inputTokens":  input,
-		"outputTokens": output,
-	}
-	if cached > 0 {
-		used["cachedReadTokens"] = cached
 	}
 	update := map[string]any{
 		"sessionUpdate": "usage_update",
-		"used":          used,
+	}
+	if occupancy > 0 {
+		if a.eng != nil {
+			if lim := a.eng.Limits(); lim.ContextWindow > 0 && occupancy > lim.ContextWindow {
+				occupancy = lim.ContextWindow
+			}
+		}
+		update["used"] = map[string]any{"inputTokens": occupancy}
+	}
+	if billedIn > 0 || billedOut > 0 || billedCached > 0 {
+		billed := map[string]any{
+			"inputTokens":  billedIn,
+			"outputTokens": billedOut,
+		}
+		if billedCached > 0 {
+			billed["cachedReadTokens"] = billedCached
+		}
+		update["billed"] = billed
 	}
 	if a.eng != nil {
 		lim := a.eng.Limits()

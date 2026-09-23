@@ -249,8 +249,10 @@ func (a *agentServer) handleExtra(parent context.Context, req request) bool {
 	case "context":
 		used := a.eng.ContextTokens()
 		lim := a.eng.Limits()
+		// Occupancy can sit at the window just before compaction. Clamp only;
+		// do not rescale (a prior /4 treated a billing sum as chars).
 		if lim.ContextWindow > 0 && used > lim.ContextWindow {
-			used = min((used+2)/4, lim.ContextWindow)
+			used = lim.ContextWindow
 		}
 		out := map[string]any{"tokens": used}
 		if lim.ContextWindow > 0 {

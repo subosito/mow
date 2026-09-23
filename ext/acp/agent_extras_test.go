@@ -3,11 +3,13 @@ package acp_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -328,6 +330,146 @@ func TestAgentExtrasInitializeAndMethods(t *testing.T) {
 	}
 	if !sawUsage {
 		t.Fatal("missing usage_update for prompt")
+	}
+	cancel()
+	_ = aw.Close()
+}
+
+func TestUsageUpdateOccupancyIsLastCallNotSum(t *testing.T) {
+	var n atomic.Int32
+	eng, err := mow.New(mow.Options{
+		NoSession: true,
+		Chat: func(ctx context.Context, messages []mow.Message, tools []mow.ToolSpec) (mow.Message, error) {
+			i := int(n.Add(1))
+			msg := mow.Message{
+				Role: "assistant",
+				Usage: mow.Usage{
+					InputTokens:       100 * i,
+					OutputTokens:      10 * i,
+					CachedInputTokens: i,
+				},
+			}
+			if i < 3 {
+				msg.ToolCalls = []mow.ToolCall{{
+					ID:       fmt.Sprintf("c%d", i),
+					Type:     "function",
+					Function: mow.FunctionCall{Name: "read", Arguments: `{"path":"go.mod"}`},
+				}}
+				return msg, nil
+			}
+			msg.Content = "done"
+			return msg, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	ar, aw := io.Pipe()
+	cr, cw := io.Pipe()
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	go func() {
+		_ = acp.Agent(ctx, acp.AgentOptions{Engine: eng, In: ar, Out: cw})
+		_ = cw.Close()
+	}()
+	cl := newPipeClient(cr, aw)
+	var mu sync.Mutex
+	var updates []string
+	cl.onNotify = func(method string, params json.RawMessage) {
+		if method == "session/update" {
+			mu.Lock()
+			updates = append(updates, string(params))
+			mu.Unlock()
+		}
+	}
+	go cl.readLoop()
+	if err := cl.callOK(ctx, "initialize", map[string]any{
+		"protocolVersion": 1,
+		"clientCapabilities": map[string]any{
+			"fs": map[string]any{"readTextFile": true, "writeTextFile": true},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := cl.sessionNew(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop, usage, err := cl.prompt(ctx, sid, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stop != "end_turn" {
+		t.Fatalf("stop=%q", stop)
+	}
+	// 100+200+300 in, 10+20+30 out — billing sum, not occupancy.
+	if usage.InputTokens != 600 || usage.OutputTokens != 60 {
+		t.Fatalf("prompt usage=%+v, want sum 600/60", usage)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	var usageUpdates []string
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		usageUpdates = usageUpdates[:0]
+		for _, u := range updates {
+			if strings.Contains(u, "usage_update") {
+				usageUpdates = append(usageUpdates, u)
+			}
+		}
+		mu.Unlock()
+		if len(usageUpdates) >= 4 { // 3 turns + run end
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(usageUpdates) < 4 {
+		t.Fatalf("usage_update count=%d, want >=4 (per call + run end): %v", len(usageUpdates), usageUpdates)
+	}
+	for i, raw := range usageUpdates {
+		var params struct {
+			Update struct {
+				Used struct {
+					InputTokens  int `json:"inputTokens"`
+					OutputTokens int `json:"outputTokens"`
+				} `json:"used"`
+				Billed *struct {
+					InputTokens      int `json:"inputTokens"`
+					OutputTokens     int `json:"outputTokens"`
+					CachedReadTokens int `json:"cachedReadTokens"`
+				} `json:"billed"`
+			} `json:"update"`
+		}
+		if err := json.Unmarshal([]byte(raw), &params); err != nil {
+			t.Fatal(err)
+		}
+		// Occupancy tracks the latest call (100, 200, 300), never the run sum.
+		if occ := params.Update.Used.InputTokens; occ == 0 || occ > 300 {
+			t.Fatalf("update %d occupancy=%d, want a single call's input ≤300 (not sum 600): %s", i, occ, raw)
+		}
+		if i == len(usageUpdates)-1 && params.Update.Used.InputTokens != 300 {
+			t.Fatalf("final occupancy=%d, want last call 300: %s", params.Update.Used.InputTokens, raw)
+		}
+		if params.Update.Used.OutputTokens != 0 {
+			t.Fatalf("update %d used.outputTokens=%d, occupancy must not include output", i, params.Update.Used.OutputTokens)
+		}
+	}
+	last := usageUpdates[len(usageUpdates)-1]
+	var end struct {
+		Update struct {
+			Billed struct {
+				InputTokens      int `json:"inputTokens"`
+				OutputTokens     int `json:"outputTokens"`
+				CachedReadTokens int `json:"cachedReadTokens"`
+			} `json:"billed"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal([]byte(last), &end); err != nil {
+		t.Fatal(err)
+	}
+	if end.Update.Billed.InputTokens != 600 || end.Update.Billed.OutputTokens != 60 || end.Update.Billed.CachedReadTokens != 6 {
+		t.Fatalf("billed=%+v, want 600/60/6", end.Update.Billed)
 	}
 	cancel()
 	_ = aw.Close()

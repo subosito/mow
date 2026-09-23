@@ -154,8 +154,26 @@ func (a *agentServer) startLiveForward(sid string) *liveForward {
 				update["text"] = ev.Text
 			}
 			a.emitSessionUpdate(sid, update)
+		case mow.EventTurn:
+			// Per model call, not run end: a long /goal must move the chip
+			// as the prompt grows. Occupancy is this call's input (or the
+			// post-compact estimate), never the run sum.
+			occ := ev.InputTokens
+			if a.eng != nil {
+				if cur := a.eng.ContextTokens(); cur > 0 {
+					occ = cur
+				}
+			}
+			a.emitUsage(sid, occ, 0, 0, 0)
 		case mow.EventRunEnd:
-			a.emitUsage(sid, ev.InputTokens, ev.OutputTokens, ev.CachedInputTokens)
+			occ := 0
+			if a.eng != nil {
+				occ = a.eng.ContextTokens()
+			}
+			if occ == 0 {
+				occ = ev.InputTokens
+			}
+			a.emitUsage(sid, occ, ev.InputTokens, ev.OutputTokens, ev.CachedInputTokens)
 		}
 	})
 	f.stop = func() {

@@ -200,11 +200,12 @@ type Event struct {
 	// DurationMs is wall time for the tool (tool.end only).
 	DurationMs int64 `json:"duration_ms,omitempty"`
 
-	// Turn / run completion
+	// Turn / run completion. On loop.turn these are THIS call only (occupancy
+	// is InputTokens). On loop.run.end they are the run sum (billing).
 	HasToolCalls bool   `json:"has_tool_calls,omitempty"`
 	StopReason   string `json:"stop_reason,omitempty"`
-	// Provider-reported token totals for the whole run (run.end only; zero
-	// when the provider sent no usage).
+	// Provider-reported tokens. loop.turn: this call. loop.run.end: the whole
+	// run (zero when the provider sent no usage).
 	InputTokens  int `json:"input_tokens,omitempty"`
 	OutputTokens int `json:"output_tokens,omitempty"`
 	// CachedInputTokens is the share of InputTokens the provider served from
