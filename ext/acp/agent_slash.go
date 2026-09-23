@@ -122,6 +122,13 @@ func (a *agentServer) trySlash(ctx context.Context, sessionID, text string) (bod
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Exclusive commands (/goal) drive engine turns: stream their live
+	// progress like a prompt. Plain commands answer instantly and must not
+	// take the token callback.
+	if cmd.Exclusive && a.eng != nil {
+		fwd := a.startLiveForward(sessionID)
+		defer fwd.stop()
+	}
 	res, err := cmd.Run(ctx, slash.Request{
 		Name:      cmd.Name,
 		Invoked:   strings.TrimPrefix(name, "/"),

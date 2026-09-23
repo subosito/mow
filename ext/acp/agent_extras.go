@@ -347,29 +347,15 @@ func (a *agentServer) handleSlashExtra(ctx context.Context, req request) {
 		ctx = context.Background()
 	}
 	// Exclusive slash commands such as /goal drive Engine work outside a
-	// session/prompt handler. Bridge their lifecycle events here so hosts see
-	// progress before the final slash response.
-	sid := a.boundSID
-	unsub := a.eng.AddOnEvent(func(ev mow.Event) {
-		switch ev.Type {
-		case mow.EventGoalStart, mow.EventGoalStep, mow.EventGoalDone, mow.EventGoalFail, mow.EventGoalPartial, mow.EventGoalBlocked:
-			update := map[string]any{"sessionUpdate": "goal", "type": string(ev.Type)}
-			if ev.Goal != nil {
-				update["goal"] = ev.Goal
-			}
-			if ev.Text != "" {
-				update["text"] = ev.Text
-			}
-			a.emitSessionUpdate(sid, update)
-		case mow.EventFSChange:
-			files := make([]map[string]any, 0, len(ev.Files))
-			for _, f := range ev.Files {
-				files = append(files, map[string]any{"path": f.Path, "op": f.Op})
-			}
-			a.emitSessionUpdate(sid, map[string]any{"sessionUpdate": "fs_change", "files": files})
-		}
-	})
-	defer unsub()
+	// session/prompt handler. Forward the same live stream a prompt gets
+	// (tool calls, model text, delegates, file changes, goal progress) so the
+	// host sees progress before the final slash response. Only exclusive
+	// commands run engine turns; plain slash commands (status, model list)
+	// must not grab the token callback from a concurrently running prompt.
+	if cmd.Exclusive {
+		fwd := a.startLiveForward(a.boundSID)
+		defer fwd.stop()
+	}
 	res, err := cmd.Run(ctx, slash.Request{
 		Name:      cmd.Name,
 		Invoked:   strings.TrimPrefix(token, "/"),

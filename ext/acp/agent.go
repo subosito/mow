@@ -557,148 +557,19 @@ func (a *agentServer) handleRequest(parent context.Context, req request) {
 			return
 		}
 
-		// Stream main-model tokens + delegate peer activity to the client.
-		var streamed atomic.Bool
-		writeAgentText := func(text string) {
-			if text == "" {
-				return
-			}
-			streamed.Store(true)
-			a.write(notification{
-				JSONRPC: "2.0",
-				Method:  "session/update",
-				Params: mustJSON(sessionUpdateParams{
-					SessionID: p.SessionID,
-					Update: sessionUpdate{
-						SessionUpdate: "agent_message_chunk",
-						Content:       &chunkContent{Type: "text", Text: text},
-					},
-				}),
-			})
-		}
-		// writeToolCall emits ACP tool_call / tool_call_update so hosts can show
-		// "read engine.go" / "grep foo in pkg/" instead of bare "→ read".
-		writeToolCall := func(updateKind, callID, kind, title, status string, args json.RawMessage, result, errorText, errorCode string, executed bool, durationMs int64) {
-			if kind == "" && title == "" {
-				return
-			}
-			update := map[string]any{
-				"sessionUpdate": updateKind,
-				"toolCallId":    callID,
-				"kind":          kind,
-				"title":         title,
-				"status":        status,
-			}
-			if len(args) > 0 && string(args) != "null" {
-				update["rawInput"] = json.RawMessage(args)
-			}
-			if durationMs > 0 {
-				update["duration_ms"] = durationMs
-			}
-			if errorText != "" {
-				update["error"] = errorText
-			}
-			if errorCode != "" {
-				update["error_code"] = errorCode
-			}
-			if updateKind == "tool_call_update" {
-				update["executed"] = executed
-				update["is_error"] = status == "failed"
-			}
-			if result != "" && toolCallAttachesResult(kind) {
-				update["rawOutput"] = result
-				update["content"] = []map[string]any{
-					{"type": "content", "content": map[string]any{"type": "text", "text": result}},
-				}
-			}
-			a.emitSessionUpdate(p.SessionID, update)
-		}
-		a.eng.SetOnToken(writeAgentText)
-		// Fan-in peer events while Prompt runs (does not replace host listeners).
-		unsub := a.eng.AddOnEvent(func(ev mow.Event) {
-			switch ev.Type {
-			case mow.EventDelegateChunk:
-				// A nested delegate's answer is NOT this agent's reply.
-				// Forward as an extra update so the ACP host's /peers view can paint it
-				// without committing it as the host answer.
-				agent := strings.TrimSpace(ev.Agent)
-				line := strings.TrimSpace(ev.Delta)
-				if line != "" {
-					a.emitSessionUpdate(p.SessionID, map[string]any{
-						"sessionUpdate": "delegate_chunk",
-						"agent":         agent,
-						"delta":         line,
-					})
-				}
-			case mow.EventDelegateProgress:
-				agent := strings.TrimSpace(ev.Agent)
-				line := strings.TrimSpace(ev.Delta)
-				if line == "" {
-					return
-				}
-				a.emitSessionUpdate(p.SessionID, map[string]any{
-					"sessionUpdate": "delegate_progress",
-					"agent":         agent,
-					"phase":         line,
-				})
-			case mow.EventFSChange:
-				files := make([]map[string]any, 0, len(ev.Files))
-				for _, file := range ev.Files {
-					files = append(files, map[string]any{"path": file.Path, "op": file.Op})
-				}
-				a.emitSessionUpdate(p.SessionID, map[string]any{"sessionUpdate": "fs_change", "files": files})
-			case mow.EventToolStart:
-				kind, title := toolCallKindTitle(ev.Tool, ev.Args)
-				writeToolCall("tool_call", ev.ToolCallID, kind, title, "in_progress", ev.Args, "", "", "", false, 0)
-			case mow.EventToolEnd:
-				kind, title := toolCallKindTitle(ev.Tool, ev.Args)
-				status := "completed"
-				if ev.Denied || strings.TrimSpace(ev.Error) != "" {
-					status = "failed"
-				}
-				writeToolCall("tool_call_update", ev.ToolCallID, kind, title, status, ev.Args, ev.Result, ev.Error, ev.ErrorCode, ev.Executed, ev.DurationMs)
-			case mow.EventCompactStart:
-				a.emitSessionUpdate(p.SessionID, map[string]any{
-					"sessionUpdate": "compact_start",
-					"auto":          ev.Auto,
-				})
-			case mow.EventCompact:
-				a.emitSessionUpdate(p.SessionID, map[string]any{
-					"sessionUpdate":   "compact",
-					"auto":            ev.Auto,
-					"layer":           string(ev.Layer),
-					"chars_before":    ev.CharsBefore,
-					"chars_after":     ev.CharsAfter,
-					"chars_saved":     ev.CharsSaved,
-					"tokens_before":   ev.TokensBefore,
-					"tokens_after":    ev.TokensAfter,
-					"messages_before": ev.MessagesBefore,
-					"messages_after":  ev.MessagesAfter,
-					"over_budget":     ev.OverBudget,
-				})
-			case mow.EventModelWait:
-				a.emitSessionUpdate(p.SessionID, modelStatusUpdate("model_wait", ev))
-			case mow.EventModelRetry:
-				a.emitSessionUpdate(p.SessionID, modelStatusUpdate("model_retry", ev))
-			case mow.EventModelActive:
-				a.emitSessionUpdate(p.SessionID, modelStatusUpdate("model_active", ev))
-			case mow.EventGoalStart, mow.EventGoalStep, mow.EventGoalDone, mow.EventGoalFail, mow.EventGoalPartial, mow.EventGoalBlocked:
-				update := map[string]any{"sessionUpdate": "goal", "type": string(ev.Type)}
-				if ev.Goal != nil {
-					update["goal"] = ev.Goal
-				}
-				a.emitSessionUpdate(p.SessionID, update)
-			case mow.EventRunEnd:
-				a.emitUsage(p.SessionID, ev.InputTokens, ev.OutputTokens, ev.CachedInputTokens)
-			}
-		})
+		// Stream main-model tokens, tool calls, and delegate/goal activity to
+		// the client. Exclusive slash commands (/goal) share this forwarder so
+		// a long goal streams the same live progress as a plain prompt.
+		fwd := a.startLiveForward(p.SessionID)
+		writeAgentText := fwd.writeText
+		streamed := &fwd.streamed
+		unsub := fwd.stop
 		popt := mow.PromptOpts{Ephemeral: p.Ephemeral, AskUser: a.askUser, UserParts: media}
 		if mode == ModeAsk {
 			popt.SystemAppend = "Session mode is ask: confirm with the operator before write, edit, or bash."
 		}
 		res, err := a.eng.PromptWith(ctx, text, popt)
 		unsub()
-		a.eng.SetOnToken(nil)
 		// Release the slot before any terminal response lets a client start
 		// another prompt. Save cancellation first: cleanup cancels ctx too.
 		cancelled := ctx.Err() != nil
