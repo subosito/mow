@@ -161,6 +161,13 @@ type PolicyConfig struct {
 	// MaxToolResultChars caps each tool result stored in history (default 24k).
 	// Protects the model from huge read/bash dumps.
 	MaxToolResultChars int `yaml:"max_tool_result_chars"`
+	// CompactAtTokens lowers the auto-compact tripwire to this many tokens
+	// when it is below 80% of the model's context window. Each model call
+	// re-sends the whole history, so on a 1M-token window a long run can bill
+	// hundreds of thousands of input tokens per call; this bounds what one
+	// call costs. Default 400k; -1 disables the cap (window only). A project
+	// overlay may only lower it.
+	CompactAtTokens int `yaml:"compact_at_tokens"`
 	// CompactSummary replaces the deterministic compaction stub with a
 	// structured summary produced by one extra LLM call (goal, constraints,
 	// progress, decisions, next steps, critical context).
@@ -381,6 +388,7 @@ func defaults() *File {
 			MaxBashTimeoutSec:  900,
 			MaxReadBytes:       512 << 10, // 512 KiB — enough for code files; loop also caps tool results
 			MaxToolResultChars: 24_000,    // ~6k tokens max per tool result in history
+			CompactAtTokens:    400_000,   // per-call input ceiling on large windows
 			MaxParallelTools:   8,         // concurrent tools per assistant batch
 		},
 		Session: SessionConfig{
@@ -491,6 +499,11 @@ func mergeProjectFile(dst *File, path string) error {
 	// host's cap entirely — is not.
 	if !lowersTurnCap(overlay.Policy.MaxTurns, dst.Policy.MaxTurns) {
 		overlay.Policy.MaxTurns = 0
+	}
+	// compact_at_tokens bounds per-call spend: a project may tighten it, not
+	// raise or disable it (-1).
+	if !lowersTurnCap(overlay.Policy.CompactAtTokens, dst.Policy.CompactAtTokens) {
+		overlay.Policy.CompactAtTokens = 0
 	}
 
 	// tools.enable: project may only *add* safe tools; never replace the
@@ -653,6 +666,13 @@ func mergeOverlay(dst *File, overlay *File) {
 	}
 	if overlay.Policy.BashTimeoutSec > 0 {
 		dst.Policy.BashTimeoutSec = overlay.Policy.BashTimeoutSec
+	}
+	// CompactAtTokens: positive sets the cap; negative disables it (→ 0,
+	// window only). 0 is "absent" and keeps the default.
+	if overlay.Policy.CompactAtTokens > 0 {
+		dst.Policy.CompactAtTokens = overlay.Policy.CompactAtTokens
+	} else if overlay.Policy.CompactAtTokens < 0 {
+		dst.Policy.CompactAtTokens = 0
 	}
 	if overlay.Policy.MaxBashTimeoutSec > 0 {
 		dst.Policy.MaxBashTimeoutSec = overlay.Policy.MaxBashTimeoutSec

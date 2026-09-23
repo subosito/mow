@@ -125,10 +125,12 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	maxCtx := 0
 	maxToolRes := 0
 	maxPar := 0
+	compactAt := 0
 	if e.cfg != nil {
 		maxTurns = e.cfg.Policy.MaxTurns
 		maxToolRes = e.cfg.Policy.MaxToolResultChars
 		maxPar = e.cfg.Policy.MaxParallelTools
+		compactAt = max(e.cfg.Policy.CompactAtTokens, 0) // -1 = window only
 	}
 	if opt.MaxTurns > 0 && (maxTurns <= 0 || opt.MaxTurns < maxTurns) {
 		maxTurns = opt.MaxTurns
@@ -138,6 +140,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 	maxCtx = resolveMaxContextChars(e.opt.MaxContextChars, window)
 	if e.opt.MaxContextChars < 0 {
 		window = 0 // compact disabled — do not take the token tripwire
+		compactAt = 0
 	}
 	lastIn := e.lastProviderTokens
 	if e.calib == nil {
@@ -328,6 +331,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		OnToken:            onTok,
 		MaxContextChars:    maxCtx,
 		ContextWindow:      window,
+		CompactAtTokens:    compactAt,
 		LastInputTokens:    lastIn,
 		Calib:              calib,
 		MaxToolResultChars: maxToolRes,

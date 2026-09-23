@@ -565,3 +565,39 @@ policy:
 		t.Fatalf("env_passthrough=%v want [NPM_TOKEN]", f.Policy.EnvPassthrough)
 	}
 }
+
+func TestProjectOverlayCompactAtTokensOnlyLowers(t *testing.T) {
+	cases := []struct {
+		name    string
+		host    string
+		project string
+		want    int
+	}{
+		{"default applies", "", "", 400_000},
+		{"lower wins", "", "compact_at_tokens: 50000", 50_000},
+		{"higher ignored", "", "compact_at_tokens: 900000", 400_000},
+		{"disable ignored", "", "compact_at_tokens: -1", 400_000},
+		{"host disabled may be capped", "compact_at_tokens: -1", "compact_at_tokens: 80000", 80_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateOverlayHome(t)
+			t.Setenv("MOW_TRUST_PROJECT", "1")
+			ws := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(ws, ".mow"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			host := writeYAML(t, t.TempDir(), "user.yaml", "workspace: "+ws+"\npolicy:\n  "+tc.host+"\n")
+			if err := os.WriteFile(filepath.Join(ws, ".mow", "config.yaml"), []byte("policy:\n  "+tc.project+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f, err := config.Load(host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f.Policy.CompactAtTokens != tc.want {
+				t.Fatalf("compact_at_tokens=%d want %d", f.Policy.CompactAtTokens, tc.want)
+			}
+		})
+	}
+}

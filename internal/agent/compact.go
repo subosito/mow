@@ -41,6 +41,17 @@ func CompactTokenBudget(windowTokens int) int {
 	return t
 }
 
+// EffectiveCompactTokens is the auto-compact tripwire: 80% of the window,
+// lowered to compactAt when that is set and smaller. Either may be 0
+// (unknown / unset); 0 is returned only when both are.
+func EffectiveCompactTokens(windowTokens, compactAt int) int {
+	budget := CompactTokenBudget(windowTokens)
+	if compactAt > 0 && (budget == 0 || compactAt < budget) {
+		return compactAt
+	}
+	return budget
+}
+
 // estimateUsedTokens is the pre-call occupancy guess. Prefer the last billed
 // input when it exceeds the char/calib estimate (dense code, uncalibrated
 // seed). Callers must zero lastInput after a compact so a stale bill cannot

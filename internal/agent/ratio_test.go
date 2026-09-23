@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -228,6 +229,44 @@ func TestCompactTokenBudget(t *testing.T) {
 	}
 	if got := CompactTokenBudget(1); got != 1 {
 		t.Fatalf("tiny window → %d", got)
+	}
+}
+
+func TestEffectiveCompactTokens(t *testing.T) {
+	cases := []struct{ window, at, want int }{
+		{0, 0, 0},                     // unknown window, no cap → off
+		{500_000, 0, 400_000},         // window only
+		{1_000_000, 200_000, 200_000}, // cap below 80% wins
+		{100_000, 200_000, 80_000},    // 80% below cap wins
+		{0, 150_000, 150_000},         // cap arms an unknown window
+	}
+	for _, tc := range cases {
+		if got := EffectiveCompactTokens(tc.window, tc.at); got != tc.want {
+			t.Errorf("EffectiveCompactTokens(%d, %d) = %d, want %d", tc.window, tc.at, got, tc.want)
+		}
+	}
+}
+
+// A 1M window alone would not compact ~300k of history; the cap does.
+func TestApplyCompactHonorsCompactAtTokens(t *testing.T) {
+	msgs := []llm.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "start"}}
+	for i := range 60 {
+		id := fmt.Sprint(i)
+		msgs = append(msgs,
+			llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: id, Type: "function", Function: llm.FunctionCall{Name: "read", Arguments: `{}`}}}},
+			llm.Message{Role: "tool", ToolCallID: id, Name: "read", Content: strings.Repeat("x", 20_000)})
+	}
+	opt := Options{ContextWindow: 1_000_000, LastInputTokens: 300_000}
+	if _, compacted, err := applyCompact(t.Context(), msgs, opt, newRatioCalibrator()); err != nil || compacted {
+		t.Fatalf("window only: compacted=%v err=%v, want no compact at 300k of 1M", compacted, err)
+	}
+	opt.CompactAtTokens = 200_000
+	out, compacted, err := applyCompact(t.Context(), msgs, opt, newRatioCalibrator())
+	if err != nil || !compacted {
+		t.Fatalf("capped: compacted=%v err=%v, want compact over 200k", compacted, err)
+	}
+	if got := EstChars(out) / int(defaultCharsPerToken); got >= 200_000 {
+		t.Fatalf("post-compact ~%d tokens, want below the 200k cap", got)
 	}
 }
 

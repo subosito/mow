@@ -90,6 +90,11 @@ type Options struct {
 	// ContextWindow is the model context_window in tokens. Auto-compact
 	// (MaxContextChars == 0) trips at CompactTokenThreshold of this.
 	ContextWindow int
+	// CompactAtTokens caps the auto-compact tripwire in tokens regardless of
+	// window size (0 = window-only). Every call re-sends the whole history,
+	// so on a 1M window the 80% trip lets each call bill ~800k input; this
+	// bounds per-call spend. Also arms auto-compact when the window is unknown.
+	CompactAtTokens int
 	// LastInputTokens is the last provider-billed input for this session.
 	// 0 estimates occupancy from history chars / calibrator. The loop zeros
 	// this after a compact so a stale bill cannot re-trip.

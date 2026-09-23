@@ -237,9 +237,9 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 			return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
 		}
 		target = CompactTarget(CompactResumeBudget(budget), ratio)
-	case opt.ContextWindow > 0:
+	case opt.ContextWindow > 0 || opt.CompactAtTokens > 0:
 		used := estimateUsedTokens(raw+opt.ToolSchemaChars, opt.LastInputTokens, ratio)
-		budgetTok := CompactTokenBudget(opt.ContextWindow)
+		budgetTok := EffectiveCompactTokens(opt.ContextWindow, opt.CompactAtTokens)
 		if used < budgetTok {
 			return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
 		}

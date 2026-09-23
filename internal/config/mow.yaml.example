@@ -116,6 +116,7 @@ policy:
   max_bash_timeout_sec: 900       # ceiling a single call may request via timeout_sec
   max_read_bytes: 524288          # 512 KiB per read (default)
   max_tool_result_chars: 24000    # cap each tool result in model history (default)
+  compact_at_tokens: 400000      # auto-compact by here even on a 1M window (default; -1 = 80% of window only)
   # max_run_tokens: 2000000       # hard ceiling on input+output tokens for ONE prompt.
   #                               # max_turns bounds round-trips; this bounds spend.
   # max_run_usd: 5.00             # same ceiling in USD. Needs published pricing:

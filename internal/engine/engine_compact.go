@@ -54,6 +54,10 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 		toolLim = e.opt.MaxToolResultChars
 	}
 	window := e.limitsLocked().ContextWindow
+	compactAt := 0
+	if e.cfg != nil {
+		compactAt = max(e.cfg.Policy.CompactAtTokens, 0)
+	}
 	// Calibrate chars/token from the last observed request so manual compact
 	// matches the loop's density (code-heavy history tokenizes denser).
 	//
@@ -97,8 +101,8 @@ func (e *Engine) Compact(maxChars int) (CompactReport, error) {
 	var targetRaw int
 	if auto {
 		maxChars = resolveMaxContextChars(configured, window)
-		if maxChars <= 0 && window > 0 && configured >= 0 {
-			resumeTok := agent.CompactResumeBudget(agent.CompactTokenBudget(window))
+		if trip := agent.EffectiveCompactTokens(window, compactAt); maxChars <= 0 && trip > 0 && configured >= 0 {
+			resumeTok := agent.CompactResumeBudget(trip)
 			targetRaw = max(int(float64(resumeTok)*cpt), 1)
 		} else {
 			if maxChars <= 0 {
