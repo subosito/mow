@@ -53,8 +53,8 @@ func runFileChanges(prior, messages []llm.Message) []FileChange {
 		}
 		for key, call := range calls {
 			id := key
-			if i := strings.IndexByte(key, 0); i >= 0 {
-				id = key[:i]
+			if before, _, ok := strings.Cut(key, "\x00"); ok {
+				id = before
 			}
 			if id != m.ToolCallID {
 				continue

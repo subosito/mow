@@ -8,15 +8,15 @@ type WorkerRecord struct {
 	ID        string    `json:"id"`
 	Mode      string    `json:"mode,omitempty"`
 	Status    string    `json:"status"`
-	StartedAt time.Time `json:"started_at,omitempty"`
-	EndedAt   time.Time `json:"ended_at,omitempty"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at"`
 	Summary   string    `json:"summary,omitempty"`
 }
 
 type VerificationRecord struct {
 	Status    string    `json:"status,omitempty"` // pending | passed | failed
 	Note      string    `json:"note,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (st *State) SetPhase(phase string) { st.Phase = boundedText(phase, 80) }

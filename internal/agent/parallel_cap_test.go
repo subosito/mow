@@ -33,7 +33,7 @@ func (c *cappedTool) Exec(context.Context, json.RawMessage) (string, error) {
 func TestPerToolParallelCap(t *testing.T) {
 	tool := &cappedTool{}
 	var calls []llm.ToolCall
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		calls = append(calls, llm.ToolCall{ID: string(rune('a' + i)), Function: llm.FunctionCall{Name: "delegate", Arguments: `{}`}})
 	}
 	out, err := runToolBatch(t.Context(), calls, map[string]Tool{"delegate": tool}, Options{MaxParallelTools: 8})

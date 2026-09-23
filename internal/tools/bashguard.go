@@ -3,6 +3,7 @@ package tools
 import (
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -80,12 +81,7 @@ func isProductiveBash(cmd string) bool {
 }
 
 func looksLikeLS(low string) bool {
-	for _, f := range strings.Fields(low) {
-		if f == "ls" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Fields(low), "ls")
 }
 
 func looksLikeFind(low string) bool {
@@ -97,7 +93,7 @@ func looksLikeSearch(low string) bool {
 }
 
 func hasCmdToken(low, name string) bool {
-	for _, f := range strings.Fields(low) {
+	for f := range strings.FieldsSeq(low) {
 		if strings.ToLower(filepath.Base(f)) == name {
 			return true
 		}

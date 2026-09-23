@@ -125,13 +125,13 @@ type State struct {
 	// Workers records bounded child/worktree attempts for host status and resume.
 	Workers []WorkerRecord `json:"workers,omitempty"`
 	// Verification is the latest independent verification outcome.
-	Verification VerificationRecord `json:"verification,omitempty"`
+	Verification VerificationRecord `json:"verification"`
 	// Partial is a machine-readable summary when Status == StatusPartial:
 	// what is done, what is missing, and the best artifact so far.
 	Partial string `json:"partial,omitempty"`
 	Error   string `json:"error,omitempty"`
 	// Plan is an optional checklist. When set, status=done requires all items done/skipped.
-	Plan Plan `json:"plan,omitempty"`
+	Plan Plan `json:"plan"`
 	// CurrentItem is the plan item id this step should focus (hint; empty = next pending).
 	CurrentItem string    `json:"current_item,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -144,13 +144,13 @@ type State struct {
 	// MaxDurationMs is Spec.MaxDuration as milliseconds for durable JSON (0 = none).
 	MaxDurationMs int64 `json:"max_duration_ms,omitempty"`
 	// StartedAt is when the current run entered running (wall-clock budget).
-	StartedAt time.Time `json:"started_at,omitempty"`
+	StartedAt time.Time `json:"started_at"`
 	// RunOwnerPID / RunOwnerHost / RunLeaseAt identify the process that last
 	// marked this goal StatusRunning. Used to heal stale Running after crash
 	// (owner PID gone) without blocking resume. Empty when not running.
 	RunOwnerPID  int       `json:"run_owner_pid,omitempty"`
 	RunOwnerHost string    `json:"run_owner_host,omitempty"`
-	RunLeaseAt   time.Time `json:"run_lease_at,omitempty"`
+	RunLeaseAt   time.Time `json:"run_lease_at"`
 }
 
 // NodeStatus is the frozen host contract for one goal-plan node. Hosts should
@@ -415,13 +415,13 @@ func slugID(goal string) string {
 // ParseOutcome inspects assistant text for completion markers.
 // Returns (done, failed, reason). reason is non-empty only on failed.
 func ParseOutcome(text string) (done, failed bool, reason string) {
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
 		if line == MarkerDone || strings.HasPrefix(line, MarkerDone+" ") {
 			return true, false, ""
 		}
-		if strings.HasPrefix(line, MarkerFailed) {
-			return false, true, strings.TrimSpace(strings.TrimPrefix(line, MarkerFailed))
+		if after, ok := strings.CutPrefix(line, MarkerFailed); ok {
+			return false, true, strings.TrimSpace(after)
 		}
 	}
 	return false, false, ""
@@ -437,14 +437,14 @@ func contentWithoutMarkers(text string) string {
 			break
 		}
 		rest := text[i+len("```goal-status"):]
-		end := strings.Index(rest, "```")
-		if end < 0 {
+		_, after, ok := strings.Cut(rest, "```")
+		if !ok {
 			text = text[:i]
 			break
 		}
-		text = text[:i] + rest[end+3:]
+		text = text[:i] + after
 	}
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		trim := strings.TrimSpace(line)
 		if trim == "" {
 			continue

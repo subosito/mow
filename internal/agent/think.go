@@ -155,18 +155,13 @@ func indexCloseTag(s, closeTag string) int {
 	return strings.Index(asciiLower(s), asciiLower(closeTag))
 }
 
-// stripThinkingContent is extractThinking for a finished answer (trim outer junk).
-func stripThinkingContent(s string) (visible, thinking string) {
-	vis, th, _ := extractThinking(s)
-	return strings.TrimSpace(vis), strings.TrimSpace(th)
-}
-
 // ExtractThinking is the exported form for the root package / UIs.
 func ExtractThinking(s string) (visible, thinking string, unclosed bool) {
 	return extractThinking(s)
 }
 
-// StripThinking is stripThinkingContent for finished text.
+// StripThinking is extractThinking for a finished answer (trim outer junk).
 func StripThinking(s string) (visible, thinking string) {
-	return stripThinkingContent(s)
+	vis, th, _ := extractThinking(s)
+	return strings.TrimSpace(vis), strings.TrimSpace(th)
 }

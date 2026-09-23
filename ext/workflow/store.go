@@ -227,8 +227,8 @@ type PhaseState struct {
 	Kind      PhaseKind       `json:"kind"`
 	Status    PhaseStatus     `json:"status"`
 	Attempts  int             `json:"attempts"`
-	StartedAt time.Time       `json:"started_at,omitempty"`
-	EndedAt   time.Time       `json:"ended_at,omitempty"`
+	StartedAt time.Time       `json:"started_at"`
+	EndedAt   time.Time       `json:"ended_at"`
 	Output    json.RawMessage `json:"output,omitempty"`
 	ErrorCode string          `json:"error_code,omitempty"`
 }

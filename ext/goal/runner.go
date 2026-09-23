@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -740,11 +741,11 @@ func pickSummary(reportSummary string, eng *mow.Engine, finalText string) string
 	}
 	if eng != nil {
 		msgs := eng.Messages()
-		for i := len(msgs) - 1; i >= 0; i-- {
-			if msgs[i].Role != "assistant" {
+		for _, msg := range slices.Backward(msgs) {
+			if msg.Role != "assistant" {
 				continue
 			}
-			if s := contentWithoutMarkers(msgs[i].Content); s != "" {
+			if s := contentWithoutMarkers(msg.Content); s != "" {
 				return truncateRunes(s, 2000)
 			}
 		}

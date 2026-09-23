@@ -162,10 +162,10 @@ func clearStaleLockFile(path string) bool {
 }
 
 func parseLockPID(s string) int {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "pid=") {
-			n, _ := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pid=")))
+		if after, ok := strings.CutPrefix(line, "pid="); ok {
+			n, _ := strconv.Atoi(strings.TrimSpace(after))
 			return n
 		}
 		// bare pid line (legacy / simple lockers)
@@ -177,10 +177,10 @@ func parseLockPID(s string) int {
 }
 
 func parseLockHost(s string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "host=") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "host="))
+		if after, ok := strings.CutPrefix(line, "host="); ok {
+			return strings.TrimSpace(after)
 		}
 	}
 	return ""

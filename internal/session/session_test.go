@@ -14,7 +14,7 @@ import (
 func TestLoadMessagesDropsMalformedAndCapsToolCalls(t *testing.T) {
 	s := &Store{Dir: t.TempDir(), ID: "malformed"}
 	calls := make([]llm.ToolCall, 0, 67)
-	for i := 0; i < 65; i++ {
+	for i := range 65 {
 		calls = append(calls, llm.ToolCall{ID: fmt.Sprintf("c%d", i), Function: llm.FunctionCall{Name: "read", Arguments: `{}`}})
 	}
 	calls = append(calls, llm.ToolCall{ID: "", Function: llm.FunctionCall{Name: ""}}, llm.ToolCall{ID: "c0", Function: llm.FunctionCall{Name: "read"}})

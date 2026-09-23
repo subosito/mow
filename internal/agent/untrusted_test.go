@@ -38,17 +38,6 @@ func TestFramingFactsMentionsNonce(t *testing.T) {
 	}
 }
 
-type stubTool struct{ name string }
-
-func (t stubTool) Name() string        { return t.name }
-func (t stubTool) Description() string { return t.name }
-func (t stubTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{}`)
-}
-func (t stubTool) Exec(context.Context, json.RawMessage) (string, error) {
-	return "ok", nil
-}
-
 func TestFrameUntrustedResultDelegate(t *testing.T) {
 	out := WrapUntrusted("nonce", "delegate", "peer text")
 	if !strings.Contains(out, `source="delegate"`) || !strings.Contains(out, "peer text") {

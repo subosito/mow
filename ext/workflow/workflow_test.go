@@ -13,8 +13,6 @@ import (
 	"github.com/subosito/mow"
 )
 
-func unique(name string) string { return name + "-" + filepath.Base(os.TempDir()) }
-
 func TestDefinitionRegistryAndSequentialExecution(t *testing.T) {
 	name := "test-sequential"
 	_ = Register(Definition{Name: name, Version: "1", MaxBytes: 1024, Phases: []Phase{

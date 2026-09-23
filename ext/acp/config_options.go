@@ -267,7 +267,7 @@ func (a *agentServer) modelConfigOption(ctx context.Context) map[string]any {
 		}
 		list = []mow.ModelInfo{{ID: cur, Wire: eng.Wire()}}
 	} else {
-		list = filterChatModels(list)
+		list = mow.FilterChatModels(list)
 	}
 	if cur == "" && len(list) == 0 {
 		return nil
@@ -346,11 +346,6 @@ func (a *agentServer) listModels(ctx context.Context) ([]mow.ModelInfo, error) {
 	lctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	return a.eng.ListModels(lctx)
-}
-
-// filterChatModels is the ACP alias for mow.FilterChatModels (chat pickers).
-func filterChatModels(list []mow.ModelInfo) []mow.ModelInfo {
-	return mow.FilterChatModels(list)
 }
 
 // applyModelConfig sets the engine model (+ catalog wire when known).

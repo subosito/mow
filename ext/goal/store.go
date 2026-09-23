@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -286,8 +287,7 @@ func (s *Store) RecentFacts(workspace string, limit int) ([]Fact, error) {
 		if filepath.Clean(st.Workspace) != workspace {
 			continue
 		}
-		for i := len(st.Facts) - 1; i >= 0; i-- {
-			f := st.Facts[i]
+		for _, f := range slices.Backward(st.Facts) {
 			key := strings.ToLower(strings.TrimSpace(f.Claim))
 			if key == "" || seen[key] {
 				continue

@@ -13,7 +13,7 @@ func TestPhaseWorkerAndVerificationRecordsBounded(t *testing.T) {
 	if len([]rune(st.Phase)) > 81 || len([]rune(st.Verification.Note)) > 2001 {
 		t.Fatal("record bounds")
 	}
-	for i := 0; i < 140; i++ {
+	for i := range 140 {
 		st.RecordWorker(WorkerRecord{ID: string(rune(1000 + i)), Status: "done", StartedAt: time.Now()})
 	}
 	if len(st.Workers) != 128 {

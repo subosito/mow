@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -111,8 +112,8 @@ func worktreeEnv(t *testing.T, ws string, write func(dir, item string) error) (*
 
 // hasPlan reports whether a checklist is already present in the prompt.
 func hasPlan(messages []mow.Message) bool {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" && strings.Contains(messages[i].Content, "item a") {
+	for _, message := range slices.Backward(messages) {
+		if message.Role == "user" && strings.Contains(message.Content, "item a") {
 			return true
 		}
 	}

@@ -20,7 +20,7 @@ func TestStoreConcurrentSave(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, n)
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(i int) {
 			defer wg.Done()
 			copy := st
@@ -216,10 +216,8 @@ func TestStoreRemoveResetDoesNotDeadlockWithSaveLoad(t *testing.T) {
 	errCh := make(chan error, 16)
 
 	// Mimic Runner.runState: run lock, then Save/Load/List/AppendEvent.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < rounds; i++ {
+	wg.Go(func() {
+		for i := range rounds {
 			id := ids[i%len(ids)]
 			release, err := acquireRunExclusive(s, id)
 			if err != nil {
@@ -233,11 +231,9 @@ func TestStoreRemoveResetDoesNotDeadlockWithSaveLoad(t *testing.T) {
 			_, _ = s.List()
 			release()
 		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < rounds; i++ {
+	})
+	wg.Go(func() {
+		for i := range rounds {
 			id := ids[i%len(ids)]
 			err := s.Remove(id, i%2 == 0)
 			if err != nil && !errors.Is(err, ErrGoalRunning) && !errors.Is(err, ErrGoalNotFound) {
@@ -248,28 +244,24 @@ func TestStoreRemoveResetDoesNotDeadlockWithSaveLoad(t *testing.T) {
 			}
 			_ = s.Save(State{ID: id, Goal: "g", Status: StatusPending, MaxSteps: 2})
 		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < rounds; i++ {
+	})
+	wg.Go(func() {
+		for i := range rounds {
 			id := ids[i%len(ids)]
 			_, err := s.Reset(id)
 			if err != nil && !errors.Is(err, ErrGoalRunning) && !os.IsNotExist(err) {
 				errCh <- err
 			}
 		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < rounds; i++ {
+	})
+	wg.Go(func() {
+		for i := range rounds {
 			id := ids[i%len(ids)]
 			_, _ = s.Load(id)
 			_, _ = s.List()
 			_ = s.Save(State{ID: id, Goal: "g", Status: StatusPending, MaxSteps: 2})
 		}
-	}()
+	})
 
 	done := make(chan struct{})
 	go func() {

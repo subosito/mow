@@ -3,6 +3,7 @@ package goal_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,9 +67,9 @@ func reportCall(id string, m map[string]any) mow.Message {
 // (the current step prompt); older turns may still be in the transcript.
 func focusItem(messages []mow.Message) string {
 	c := ""
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" {
-			c = messages[i].Content
+	for _, message := range slices.Backward(messages) {
+		if message.Role == "user" {
+			c = message.Content
 			break
 		}
 	}

@@ -49,7 +49,7 @@ type Usage struct {
 type Result struct {
 	Model   string                     `json:"model"`
 	Answers map[string]json.RawMessage `json:"answers"`
-	Usage   Usage                      `json:"usage,omitempty"`
+	Usage   Usage                      `json:"usage"`
 	Extra   map[string]json.RawMessage `json:"-"`
 }
 

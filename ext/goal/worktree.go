@@ -242,7 +242,7 @@ func ListWorktrees(ctx context.Context, dir string) ([]WorktreeInfo, error) {
 	}
 	var res []WorktreeInfo
 	cur := WorktreeInfo{}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		switch {
 		case strings.HasPrefix(line, "worktree "):
 			cur = WorktreeInfo{Dir: strings.TrimSpace(strings.TrimPrefix(line, "worktree "))}
