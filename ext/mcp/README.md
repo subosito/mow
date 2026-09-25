@@ -58,7 +58,7 @@ extensions:
         insecure: false
         headers: {}
         auth:
-          type: bearer   # bearer | oauth2_client_credentials | oauth2_device_code | oauth2_auth_code
+          type: bearer   # bearer | oauth | oauth2_client_credentials | oauth2_device_code | oauth2_auth_code
           token: ""
           token_url: ""
           device_auth_url: ""
@@ -75,6 +75,40 @@ extensions:
 ```
 
 Per-server keys: `name`, `command`, `args`, `env`, `url`, `insecure`, `headers`, `auth`, `min_turns`, `timeout_sec`, `prompt`. Stdio uses `command`; streamable HTTP uses `url`. `timeout_sec` bounds one `tools/call` (default 30s). Set `-1` to wait until the turn is cancelled. A silent stdio server otherwise pins the turn. A stdio server is spawned with the harness credential scrub applied to the parent environment; its own `env` map is applied on top, so use it to hand one server a token deliberately.
+
+### OAuth servers (`auth: {type: oauth}`)
+
+For remote servers that follow the MCP authorization spec — they answer an
+unauthenticated request with `401` and publish OAuth metadata — no client id,
+endpoints, or token go in config:
+
+```yaml
+extensions:
+  mcp:
+    mcpServers:
+      tracker:
+        url: https://mcp.example/v1/mcp
+        auth:
+          type: oauth
+          # scope: ""       # optional; default from the server's challenge
+          # client_id: ""   # optional; default registers mow dynamically
+```
+
+Log in once:
+
+```bash
+mow mcp login tracker     # prints a URL; approve in the browser
+mow mcp logout tracker    # forget the saved login
+```
+
+`login` discovers the authorization server (RFC 9728 resource metadata, then
+RFC 8414 / OpenID metadata), registers mow as a public client (RFC 7591)
+unless `client_id` is set, and runs authorization code + PKCE (S256) on a
+loopback redirect, binding the token to the server with `resource`
+(RFC 8707). The grant is saved to `$MOW_HOME/mcp-auth/<server>.json` (0600)
+and pinned to the server URL; engines use it and refresh it silently, and
+never open a browser. A server that is not logged in yet is skipped with a
+`run mow mcp login <server>` hint rather than stopping mow from starting.
 
 `prompt` is optional operator-authored guidance, appended to the system prompt
 for each request while the server is active. It uses the same `min_turns` and

@@ -131,10 +131,21 @@ func registerAllContext(ctx ext.SetupContext) error {
 	// entry from a prior host setup must not survive (cmdhook does the same).
 	clearRegisteredPrompts()
 	ext.ClearExtensionKind("mcp")
+	servers, err := configuredServers(ctx)
+	if err != nil {
+		return err
+	}
+	return RegisterServers(servers)
+}
+
+// configuredServers resolves the MCP server list the same way for engine
+// setup and `mow mcp login`: extensions.mcp, then home files, then the
+// trusted workspace mcp.json, plus plugin servers.
+func configuredServers(ctx ext.SetupContext) ([]ServerConfig, error) {
 	var c Config
 	ok, err := extcfg.DecodeSection("mcp", ctx.ConfigPaths, &c)
 	if err != nil {
-		return fmt.Errorf("mcp extensions: %w", err)
+		return nil, fmt.Errorf("mcp extensions: %w", err)
 	}
 	if !ok || (len(c.Servers) == 0 && len(c.MCPServers) == 0) {
 		// Home-file fallbacks only when the host opted into user config
@@ -143,17 +154,17 @@ func registerAllContext(ctx ext.SetupContext) error {
 		if ctx.LoadUserConfig {
 			home, herr := loadHomeMCPFiles()
 			if herr != nil {
-				return herr
+				return nil, herr
 			}
 			c = home
 		}
 	}
 	if ctx.LoadUserConfig && len(c.Servers) == 0 && len(c.MCPServers) == 0 {
 		if err := loadWorkspaceMCPJSON(ctx.Workspace, &c); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return RegisterServers(mergePluginMCPServersContext(c.resolved(), ctx.ConfigPaths, ctx.LoadUserConfig))
+	return mergePluginMCPServersContext(c.resolved(), ctx.ConfigPaths, ctx.LoadUserConfig), nil
 }
 
 // loadHomeMCPFiles reads ~/.agents/mcp-settings.json then overlays
@@ -366,6 +377,13 @@ func RegisterServers(servers []ServerConfig) error {
 			initCtx, cancel := withCallTimeout(context.Background(), s.callTimeout())
 			err := ht.initialize(initCtx)
 			cancel()
+			if errors.Is(err, errNotLoggedIn) {
+				// An OAuth server nobody has logged in to yet is skipped, not
+				// fatal: one pending login must not stop mow from starting.
+				_ = tr.Close()
+				fmt.Fprintf(os.Stderr, "mow: %v\n", err)
+				continue
+			}
 			if err != nil {
 				_ = tr.Close()
 				rollbackTransports(registered)

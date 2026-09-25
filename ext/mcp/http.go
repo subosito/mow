@@ -87,6 +87,8 @@ func newHTTPTransport(s ServerConfig) (*httpTransport, error) {
 	}
 	if typ := strings.TrimSpace(s.Auth.Type); typ != "" && !strings.EqualFold(typ, "none") {
 		h.auth = newTokenSource(s.Auth)
+		h.auth.serverName = s.Name
+		h.auth.serverURL = u
 	}
 	return h, nil
 }
@@ -208,6 +210,9 @@ func (h *httpTransport) call(ctx context.Context, method string, params any) (js
 		io.Copy(io.Discard, res.Body) //nolint:errcheck
 		h.auth.mu.Lock()
 		h.auth.expiry = time.Time{} // force refresh
+		if h.auth.oauth != nil {
+			h.auth.oauth.Expiry = time.Time{}
+		}
 		h.auth.mu.Unlock()
 		req2, err := h.newRequest(ctx, body)
 		if err != nil {

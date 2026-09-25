@@ -29,13 +29,21 @@ const mcpProtocolVersion = "2024-11-05"
 func init() {
 	ext.RegisterCommand(ext.Command{
 		Name:    "mcp",
-		Summary: "MCP server on stdin/stdout",
+		Summary: "MCP server on stdin/stdout; login/logout for OAuth servers",
 		Layer:   "ext",
 		Run:     serveCmd,
 	})
 }
 
 func serveCmd(args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "login":
+			return loginCmd(args[1:])
+		case "logout":
+			return logoutCmd(args[1:])
+		}
+	}
 	for _, a := range args {
 		if a == "-h" || a == "--help" || a == "help" {
 			printMCPUsage()
@@ -58,10 +66,12 @@ func serveCmd(args []string) int {
 }
 
 func printMCPUsage() {
-	fmt.Fprintf(os.Stderr, `mow mcp — MCP server on stdio (mow_prompt)
+	fmt.Fprintf(os.Stderr, `mow mcp — MCP server on stdio (mow_prompt), and OAuth login for client servers
 
   mow mcp [engine flags]
-
+`)
+	printLoginUsage(os.Stderr)
+	fmt.Fprintf(os.Stderr, `
 Engine flags: same as mow run.
 
 `)

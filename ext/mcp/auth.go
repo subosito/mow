@@ -79,6 +79,11 @@ func safeOAuthErrorBody(body []byte) string {
 //	  token_url: https://…/token
 //	  client_id: …
 //	  scope: "mcp"
+//	# or (MCP-spec OAuth: discovery + dynamic registration; log in once
+//	# with `mow mcp login <server>`, tokens saved under $MOW_HOME/mcp-auth):
+//	  type: oauth
+//	  scope: ""        # optional; default from the server's challenge
+//	  client_id: ""    # optional; default registers mow dynamically
 //	# or (browser; local callback):
 //	  type: oauth2_auth_code
 //	  authorize_url: https://…/authorize
@@ -89,7 +94,7 @@ func safeOAuthErrorBody(body []byte) string {
 //	  # redirect_uri default http://127.0.0.1:<ephemeral>/callback
 //	  # optional static headers still applied from ServerConfig.Headers
 type AuthConfig struct {
-	Type          string `yaml:"type"` // bearer | oauth2_client_credentials | oauth2_device_code | oauth2_auth_code
+	Type          string `yaml:"type"` // bearer | oauth | oauth2_client_credentials | oauth2_device_code | oauth2_auth_code
 	Token         string `yaml:"token"`
 	TokenURL      string `yaml:"token_url"`
 	DeviceAuthURL string `yaml:"device_auth_url"` // device authorization endpoint
@@ -117,6 +122,12 @@ type tokenSource struct {
 	client  *http.Client
 	// authURLFn overrides printing the authorize URL to stderr (tests).
 	authURLFn func(string)
+
+	// type: oauth — the saved `mow mcp login` grant for serverName, pinned
+	// to serverURL. Loaded lazily on first use.
+	serverName string
+	serverURL  string
+	oauth      *oauthStore
 }
 
 func newTokenSource(cfg AuthConfig) *tokenSource {
@@ -124,7 +135,7 @@ func newTokenSource(cfg AuthConfig) *tokenSource {
 		cfg.Header = "Authorization"
 	}
 	typ := strings.ToLower(strings.TrimSpace(cfg.Type))
-	if cfg.Prefix == "" && (typ == "bearer" ||
+	if cfg.Prefix == "" && (typ == "bearer" || typ == "oauth" ||
 		typ == "oauth2_client_credentials" || typ == "client_credentials" ||
 		typ == "oauth2_device_code" || typ == "device_code" ||
 		typ == "oauth2_auth_code" || typ == "auth_code" || typ == "authorization_code") {
@@ -151,6 +162,13 @@ func (t *tokenSource) apply(req *http.Request) error {
 		}
 		req.Header.Set(t.cfg.Header, t.cfg.Prefix+t.token)
 		return nil
+	case "oauth":
+		tok, err := t.oauthAccessToken(req.Context())
+		if err != nil {
+			return err
+		}
+		req.Header.Set(t.cfg.Header, t.cfg.Prefix+tok)
+		return nil
 	case "oauth2_client_credentials", "client_credentials":
 		tok, err := t.accessToken(req.Context())
 		if err != nil {
@@ -173,7 +191,7 @@ func (t *tokenSource) apply(req *http.Request) error {
 		req.Header.Set(t.cfg.Header, t.cfg.Prefix+tok)
 		return nil
 	default:
-		return fmt.Errorf("mcp auth: unknown type %q (want bearer, oauth2_client_credentials, oauth2_device_code, oauth2_auth_code)", t.cfg.Type)
+		return fmt.Errorf("mcp auth: unknown type %q (want bearer, oauth, oauth2_client_credentials, oauth2_device_code, oauth2_auth_code)", t.cfg.Type)
 	}
 }
 
