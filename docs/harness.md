@@ -184,19 +184,28 @@ These checkpoints complement the exact-repeat backstop above. They live in
 core so stock CLI and ACP hosts receive the same behavior. Optional policy
 extensions may still add result degradation, inventory caps, or workflow rules.
 
-Grep keeps compact default results. Use `max_results: 100` to request up to
-100 matching lines without the default per-file display caps, or
-`files_only: true` to list matching filenames (default 100). `max_results`
-accepts 1–500 for either mode. Filenames count once regardless of matches in
-each file. Truncation is explicit; narrow the path or pattern when the cap is
-reached. Normal file-jail, excluded-directory, file-size, and history-output
-limits still apply.
+Grep keeps compact default results: up to 64 matches, shown as 12 files × 5
+hits. Use `max_results: 100` to request up to 100 matching lines without the
+default per-file display caps, or `files_only: true` to list matching filenames
+(default 100). `max_results` accepts 1–500 for either mode and applies per
+pattern; `max_results: 500` is the mode for "list every caller" questions.
+Filenames count once regardless of matches in each file. A result without a
+`…(` footer is complete; truncation is always explicit. Normal file-jail,
+excluded-directory, file-size, and history-output limits still apply.
 
-The `grep` tool searches literal text by default. Pass `regex: true` for regular
-expressions such as `model|effort` or escaped symbols. Invalid expressions are
-reported as tool errors; literal misses containing regex punctuation include
-an actionable reminder. Both ripgrep and the fallback walker support this mode
-with the same filesystem jail and result caps.
+**Batched searches.** `patterns: [...]` runs up to 8 searches in one call with
+the same path and options, one `## pattern` section each, so a model looking
+up several symbols pays one round trip instead of several. A pattern that is
+an invalid regex is reported in its own section without failing the others.
+
+**Literal, regex, or auto.** `regex: true` is a regular expression,
+`regex: false` an exact literal. When `regex` is omitted, the search is
+literal first; only if that finds nothing and the pattern contains regex
+punctuation (`model|effort`) is it retried as a regex, and that result is
+labeled "searched as a regular expression". Text that exists literally is
+therefore never reinterpreted. Invalid expressions with `regex: true` are tool
+errors. Both ripgrep and the fallback walker support all modes with the same
+filesystem jail and result caps.
 
 **Hosts:** surface `StopStuck` distinctly from `StopMaxTurns`. They mean
 opposite things — out of an explicitly configured budget vs. out of ideas —

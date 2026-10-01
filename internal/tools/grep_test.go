@@ -131,15 +131,24 @@ func TestGrepRegexAndLiteralModes(t *testing.T) {
 		}
 		tool := &grepTool{p: &policy.Policy{Workspace: root}, noRipgrep: walk}
 		for _, tc := range []struct{ args, want string }{
+			// Literal text that exists is matched exactly, never reinterpreted.
 			{`{"pattern":"alpha|beta"}`, "a.go (1)"},
 			{`{"pattern":"alpha|beta","regex":true}`, "a.go (3)"},
 			{`{"pattern":"SessionInfo \\{","regex":true}`, "SessionInfo {"},
-			{`{"pattern":"missing|absent"}`, "Search was literal"},
+			// regex omitted, no literal hit, looks like a regex: auto-retried and labeled.
+			{`{"pattern":"alp.a|bet."}`, "searched as a regular expression"},
+			{`{"pattern":"missing|absent"}`, "No match as a literal or as a regular expression"},
+			// regex:false is a strict literal: no retry, the old hint stays.
+			{`{"pattern":"missing|absent","regex":false}`, "Search was literal"},
+			{`{"pattern":"alp.a|bet.","regex":false}`, "(no matches)"},
 		} {
 			out, err := tool.Exec(t.Context(), json.RawMessage(tc.args))
 			if err != nil || !strings.Contains(out, tc.want) {
 				t.Fatalf("walk=%v args=%s: %q %v", walk, tc.args, out, err)
 			}
+		}
+		if out, _ := tool.Exec(t.Context(), json.RawMessage(`{"pattern":"alpha|beta"}`)); strings.Contains(out, "regular expression") {
+			t.Fatalf("a literal hit must not be relabeled as a regex: %q", out)
 		}
 		if _, err := tool.Exec(t.Context(), json.RawMessage(`{"pattern":"[","regex":true}`)); err == nil {
 			t.Fatal("invalid regex accepted")
@@ -194,5 +203,41 @@ func TestGrepExpandedAndFilenameResults(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// One call can batch several searches; each pattern gets its own section and
+// a bad pattern is reported in place instead of failing the batch.
+func TestGrepBatchedPatterns(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("func Authenticate() {}\nfunc ingressToken() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, walk := range []bool{true, false} {
+		if !walk && lookupRipgrep() == "" {
+			continue
+		}
+		tool := &grepTool{p: &policy.Policy{Workspace: root}, noRipgrep: walk}
+		out, err := tool.Exec(t.Context(), json.RawMessage(`{"patterns":["Authenticate","ingressToken","nowhere","("],"regex":true}`))
+		if err != nil {
+			t.Fatalf("walk=%v: %v", walk, err)
+		}
+		for _, want := range []string{"## Authenticate\na.go (1)", "## ingressToken\na.go (1)", "## nowhere\n(no matches)", "## (\nerror: invalid grep regex"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("walk=%v: missing %q in:\n%s", walk, want, out)
+			}
+		}
+		// pattern + patterns merge, duplicates dropped: a single result has no sections.
+		one, err := tool.Exec(t.Context(), json.RawMessage(`{"pattern":"Authenticate","patterns":["Authenticate"]}`))
+		if err != nil || strings.Contains(one, "## ") || !strings.Contains(one, "a.go (1)") {
+			t.Fatalf("walk=%v dedupe: %q %v", walk, one, err)
+		}
+	}
+	tool := &grepTool{p: &policy.Policy{Workspace: root}, noRipgrep: true}
+	if _, err := tool.Exec(t.Context(), json.RawMessage(`{"patterns":["a","b","c","d","e","f","g","h","i"]}`)); err == nil {
+		t.Fatal("more than grepMaxPatterns accepted")
+	}
+	if _, err := tool.Exec(t.Context(), json.RawMessage(`{"patterns":[]}`)); err == nil {
+		t.Fatal("empty patterns accepted")
 	}
 }

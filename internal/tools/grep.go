@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -27,11 +28,13 @@ type grepTool struct {
 
 const (
 	// grepMaxMatches bounds how many hits we collect while walking.
-	grepMaxMatches = 48
+	grepMaxMatches = 64
 	// grepMaxFiles bounds how many files appear in one result.
-	grepMaxFiles = 8
+	grepMaxFiles = 12
 	// grepMaxPerFile bounds hits printed under one file.
-	grepMaxPerFile = 3
+	grepMaxPerFile = 5
+	// grepMaxPatterns bounds how many searches one call may batch.
+	grepMaxPatterns = 8
 	// grepMaxLineChars bounds ONE hit. Without it a single match inside a
 	// minified bundle, a base64 blob, or a one-line JSON fixture can consume
 	// most of the tool-result budget by itself — the match is what matters,
@@ -70,28 +73,39 @@ var lookupRipgrep = func() string {
 
 func (t *grepTool) Name() string { return "grep" }
 func (t *grepTool) Description() string {
-	return "Repo content search (literal by default; regex:true enables regular expressions) " + pathJailHint(t.p) +
-		". Call this instead of bash rg/grep. Args: pattern, regex (optional boolean; use true for alternatives like foo|bar or escaped symbols), path (optional dir/file, default .; absolute under jail OK). " +
-		"Uses ripgrep when installed (same jail and caps); otherwise a bounded walk. " +
-		"Results default to a compact sample. Set max_results (1–500) to expand matching lines, or files_only:true to list matching filenames (default 100). Truncated results are not exhaustive; narrow path/pattern if needed."
+	return "Repo content search " + pathJailHint(t.p) +
+		". Call this instead of bash rg/grep. Args: pattern, or patterns (up to 8 searches in ONE call; batch related lookups instead of calling grep repeatedly), " +
+		"regex (optional: true = regular expression, false = exact literal; omitted = literal, retried as a regex when the literal finds nothing and the pattern looks like one, e.g. foo|bar), " +
+		"path (optional dir/file, default .; absolute under jail OK). Uses ripgrep when installed (same jail and caps); otherwise a bounded walk. " +
+		"Results default to a compact sample; a result with no …( footer is complete. Set max_results (1–500, per pattern) to expand matching lines; use max_results:500 for \"list every caller/use\" questions. files_only:true lists matching filenames (default 100)."
 }
 func (t *grepTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Maximum matching lines, or filenames with files_only. Omit for a compact sample."},"files_only":{"type":"boolean","description":"Return matching filenames instead of line excerpts; default false."},"regex":{"type":"boolean","description":"Interpret pattern as a regular expression; default false searches the exact literal text."}},"required":["pattern"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"patterns":{"type":"array","items":{"type":"string"},"maxItems":8,"description":"Several searches in one call (same path and options); each gets its own section. Use instead of pattern to batch lookups."},"path":{"type":"string"},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Maximum matching lines per pattern, or filenames with files_only. Omit for a compact sample."},"files_only":{"type":"boolean","description":"Return matching filenames instead of line excerpts; default false."},"regex":{"type":"boolean","description":"true: regular expression. false: exact literal. Omitted: literal, retried as a regex when the literal finds nothing and the pattern looks like one."}}}`)
 }
 
 func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
-		Pattern    string `json:"pattern"`
-		Path       string `json:"path"`
-		Regex      bool   `json:"regex"`
-		MaxResults *int   `json:"max_results"`
-		FilesOnly  bool   `json:"files_only"`
+		Pattern    string   `json:"pattern"`
+		Patterns   []string `json:"patterns"`
+		Path       string   `json:"path"`
+		Regex      *bool    `json:"regex"`
+		MaxResults *int     `json:"max_results"`
+		FilesOnly  bool     `json:"files_only"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	if a.Pattern == "" {
+	var pats []string
+	for _, p := range append([]string{a.Pattern}, a.Patterns...) {
+		if p != "" && !slices.Contains(pats, p) {
+			pats = append(pats, p)
+		}
+	}
+	if len(pats) == 0 {
 		return "", fmt.Errorf("pattern required")
+	}
+	if len(pats) > grepMaxPatterns {
+		return "", fmt.Errorf("at most %d patterns per call (got %d)", grepMaxPatterns, len(pats))
 	}
 	opts := grepOptions{limit: grepMaxMatches, filesOnly: a.FilesOnly, expanded: a.MaxResults != nil}
 	if a.FilesOnly {
@@ -103,15 +117,6 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 		}
 		opts.limit = *a.MaxResults
 	}
-	var re *regexp.Regexp
-	if a.Regex {
-		var err error
-		re, err = regexp.Compile(a.Pattern)
-		if err != nil {
-			return "", fmt.Errorf("invalid grep regex: %w", err)
-		}
-	}
-
 	rel := a.Path
 	if rel == "" {
 		rel = "."
@@ -120,18 +125,72 @@ func (t *grepTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	if err != nil {
 		return "", err
 	}
-	hits, truncated, err := t.search(ctx, a.Pattern, root, re, opts)
+	if len(pats) == 1 {
+		return t.searchOne(ctx, pats[0], a.Regex, root, a.Path, opts)
+	}
+	// Batched: one section per pattern. A bad pattern is reported in its own
+	// section instead of failing the searches that did work.
+	var b strings.Builder
+	for i, p := range pats {
+		out, err := t.searchOne(ctx, p, a.Regex, root, a.Path, opts)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			out = "error: " + err.Error()
+		}
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "## %s\n%s", p, out)
+	}
+	return b.String(), nil
+}
+
+// regexLike reports whether a literal pattern contains regex metacharacters.
+func regexLike(p string) bool { return strings.ContainsAny(p, `|\^$*+?()[]{}`) }
+
+// searchOne runs one pattern. regex nil means auto: literal first, then, only
+// when the literal finds nothing and the pattern looks like a regex, a regex
+// retry labeled so the model knows how it was read. Literal hits are never
+// reinterpreted, so text that exists literally (`a|b`) is matched exactly.
+func (t *grepTool) searchOne(ctx context.Context, pattern string, regex *bool, root, relPath string, opts grepOptions) (string, error) {
+	asRegex := regex != nil && *regex
+	var re *regexp.Regexp
+	if asRegex {
+		var err error
+		re, err = regexp.Compile(pattern)
+		if err != nil {
+			return "", fmt.Errorf("invalid grep regex: %w", err)
+		}
+	}
+	hits, truncated, err := t.search(ctx, pattern, root, re, opts)
 	if err != nil {
 		return "", err
 	}
-	if len(hits) == 0 {
-		out := formatGrepHits(hits, truncated, opts) + emptyResultHint(t.p, a.Path)
-		if !a.Regex && strings.ContainsAny(a.Pattern, `|\^$*+?()[]{}`) {
-			out += "\nSearch was literal. For a regular expression (including alternatives or escaped symbols), retry with regex:true; otherwise search a simpler literal."
-		}
-		return out, nil
+	if len(hits) > 0 {
+		return formatGrepHits(hits, truncated, opts), nil
 	}
-	return formatGrepHits(hits, truncated, opts), nil
+	if regex == nil && regexLike(pattern) {
+		if rx, cerr := regexp.Compile(pattern); cerr == nil {
+			rh, rt, rerr := t.search(ctx, pattern, root, rx, opts)
+			if rerr != nil {
+				return "", rerr
+			}
+			if len(rh) > 0 {
+				return "(no literal match; searched as a regular expression)\n" + formatGrepHits(rh, rt, opts), nil
+			}
+		}
+	}
+	out := formatGrepHits(hits, truncated, opts) + emptyResultHint(t.p, relPath)
+	switch {
+	case asRegex || !regexLike(pattern):
+	case regex == nil:
+		out += "\nNo match as a literal or as a regular expression; search a simpler literal."
+	default:
+		out += "\nSearch was literal. For a regular expression (including alternatives or escaped symbols), retry with regex:true; otherwise search a simpler literal."
+	}
+	return out, nil
 }
 
 func (t *grepTool) ripgrepBin() string {
