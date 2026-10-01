@@ -27,6 +27,12 @@ func init() {
 }
 
 func runCmd(args []string) int {
+	args, err := hoistGoalEngineFlags(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mow goal: %v\n", err)
+		printGoalUsage()
+		return 2
+	}
 	if len(args) == 0 {
 		printGoalUsage()
 		return 2
@@ -313,6 +319,84 @@ func printState(st State, store *Store) {
 		fmt.Printf("events: %s\n", store.eventsPath(st.ID))
 	}
 	printGoalResume(st)
+}
+
+// goalEngineFlagNames are EngineFlags that construct the step Engine.
+// They are legal on run and plan. Parent-level forms
+// (`mow goal --workspace DIR run …`) are hoisted onto the subcommand so
+// they are not reported as an unknown subcommand.
+var goalEngineFlagNames = map[string]bool{
+	"config": true, "workspace": true, "extra-root": true, "model": true,
+	"provider": true, "effort": true, "base-url": true, "system-prefix": true,
+	"skill": true, "max-turns": true, "allow-shell": true, "allow-write": true,
+	"disallow-shell": true, "disallow-write": true, "read-only": true,
+	"sandbox": true, "stream": true, "verbose": true, "session": true,
+	"continue": true, "no-session": true,
+}
+
+// goalBoolEngineFlags take no value in the bare form (`--allow-write`,
+// `--sandbox`). `--sandbox=none` is still a single token.
+var goalBoolEngineFlags = map[string]bool{
+	"allow-shell": true, "allow-write": true, "disallow-shell": true,
+	"disallow-write": true, "read-only": true, "sandbox": true,
+	"stream": true, "verbose": true, "continue": true, "no-session": true,
+}
+
+// hoistGoalEngineFlags moves engine flags that appear before the subcommand
+// onto that subcommand's argv. Flags already after the subcommand are left
+// in place. A leading flag with no subcommand is an error.
+func hoistGoalEngineFlags(args []string) ([]string, error) {
+	if len(args) == 0 || !strings.HasPrefix(args[0], "-") {
+		return args, nil
+	}
+	var flags, rest []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			rest = append(rest, args[i:]...)
+			break
+		}
+		name, hasValue, ok := splitGoalFlag(a)
+		if !ok {
+			rest = append(rest, args[i:]...)
+			break
+		}
+		if !goalEngineFlagNames[name] {
+			return nil, fmt.Errorf("unknown flag %q before subcommand (engine flags belong on run/plan)", a)
+		}
+		flags = append(flags, a)
+		if hasValue || goalBoolEngineFlags[name] {
+			continue
+		}
+		i++
+		if i >= len(args) {
+			return nil, fmt.Errorf("flag --%s needs a value", name)
+		}
+		flags = append(flags, args[i])
+	}
+	if len(rest) == 0 {
+		return nil, fmt.Errorf("engine flags need a subcommand (mow goal run … --workspace DIR)")
+	}
+	switch rest[0] {
+	case "run", "plan":
+		return append(append([]string{rest[0]}, flags...), rest[1:]...), nil
+	case "help", "-h", "--help":
+		return rest, nil
+	default:
+		return nil, fmt.Errorf("engine flags are only valid on run and plan, not %q", rest[0])
+	}
+}
+
+func splitGoalFlag(a string) (name string, hasValue, ok bool) {
+	if a == "-" || !strings.HasPrefix(a, "-") {
+		return "", false, false
+	}
+	body := strings.TrimLeft(a, "-")
+	if body == "" || strings.HasPrefix(a, "---") {
+		return "", false, false
+	}
+	name, _, hasValue = strings.Cut(body, "=")
+	return name, hasValue, name != ""
 }
 
 // printGoalResume writes copy-paste resume hints on stderr.

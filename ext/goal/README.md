@@ -25,11 +25,19 @@ later with `mow goal run --id ID` or `/goal run ID`.
 
 ```bash
 mow goal new --id fix-ci --goal "Make CI green"
-mow goal run --id fix-ci --allow-write --allow-shell
+mow goal run --id fix-ci --workspace /path/to/repo --allow-write --allow-shell
+mow goal run --id fix-ci --extra-root /path/to/other
 mow goal run --goal "Make CI green"
 mow goal run --id fix-ci --answer "use option B"
 mow goal status --id fix-ci
 ```
+
+`--workspace` and `--extra-root` are engine flags on `run` and `plan` (also
+accepted before the subcommand: `mow goal --workspace DIR run --id ID`).
+`--workspace` is a profile name or a directory. `--extra-root` is repeatable
+(`PATH`, `PATH:ro`, `PATH:rw`) and expands the FS path jail the same way as
+`mow run`. `new` does not take them — the workspace is recorded when the
+engine starts.
 
 State lives under `$MOW_HOME/goals`. `--max-steps N` is the outer Prompt budget (default 16, ceiling 64).
 
