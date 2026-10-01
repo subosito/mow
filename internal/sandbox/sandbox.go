@@ -153,6 +153,39 @@ var credentialExact = map[string]bool{
 	"AWS_SESSION_TOKEN": true,
 }
 
+// paneOwnerPrefixes are terminal-multiplexer integration variables that bind
+// a process to the pane mow runs in. Only the top-level agent in that pane
+// may report its state there; a child that inherits them (a delegate peer, a
+// `mow run` started from bash, a background proc) would report for the
+// parent's pane and overwrite its status.
+var paneOwnerPrefixes = []string{
+	"HERDR_",
+}
+
+// IsPaneOwnerName reports whether a variable binds a process to its parent's
+// multiplexer pane (see paneOwnerPrefixes).
+func IsPaneOwnerName(name string) bool {
+	for _, p := range paneOwnerPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// DropPaneOwnerEnv returns env without pane-owner variables. Used for
+// children that must keep everything else, such as ACP delegate peers, which
+// may need provider credentials the shell scrub would remove.
+func DropPaneOwnerEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if k, _, _ := strings.Cut(kv, "="); !IsPaneOwnerName(k) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 // IsCredentialName reports whether a variable name looks like a credential a
 // child process must not inherit. Exact names first, then suffixes; the match
 // is case-sensitive like the environment itself.
@@ -207,7 +240,7 @@ func ScrubEnvWith(env, deny, allow []string) []string {
 			out = append(out, kv)
 			continue
 		}
-		if drop[k] || IsCredentialName(k) {
+		if drop[k] || IsCredentialName(k) || IsPaneOwnerName(k) {
 			continue
 		}
 		out = append(out, kv)

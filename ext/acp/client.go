@@ -18,6 +18,7 @@ import (
 	"github.com/subosito/mow/cliutil"
 	"github.com/subosito/mow/internal/llm"
 	"github.com/subosito/mow/internal/redact"
+	"github.com/subosito/mow/internal/sandbox"
 )
 
 // Client talks to a peer ACP agent (subprocess) as a *client*.
@@ -151,9 +152,7 @@ func (c *Client) startProcess() error {
 	if c.Dir != "" {
 		c.cmd.Dir = c.Dir
 	}
-	if len(c.Env) > 0 {
-		c.cmd.Env = append(os.Environ(), c.Env...)
-	}
+	c.cmd.Env = peerEnv(os.Environ(), c.Env)
 	stdin, err := c.cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -692,4 +691,14 @@ func toolCallKindTitle(tool string, args json.RawMessage) (kind, title string) {
 	}
 	// Unknown shape (e.g. tool renamed in formatter) — keep full line as title.
 	return kind, line
+}
+
+// peerEnv is the environment a delegate peer starts with. A peer is a child
+// of this pane's agent, not the pane owner, so multiplexer pane variables
+// (HERDR_*) are dropped: otherwise the peer would report state for the
+// parent's pane and overwrite it. Everything else is inherited as before (a
+// peer may need provider credentials, so this is not the shell credential
+// scrub), then the peer's configured env entries are appended.
+func peerEnv(parent, extra []string) []string {
+	return append(sandbox.DropPaneOwnerEnv(parent), extra...)
 }

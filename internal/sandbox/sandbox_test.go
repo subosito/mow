@@ -76,6 +76,8 @@ func TestScrubEnv(t *testing.T) {
 		{"drops exact cloud names", []string{"AWS_SESSION_TOKEN=t", "AWS_ACCESS_KEY_ID=id", "PATH=/bin"}, []string{"AWS_ACCESS_KEY_ID=id", "PATH=/bin"}},
 		{"suffix must be whole", []string{"MY_TOKENIZER=ok", "SECRETIVE=ok", "TOKEN=ok"}, []string{"MY_TOKENIZER=ok", "SECRETIVE=ok", "TOKEN=ok"}},
 		{"value containing the name is untouched", []string{"NOTE=MOW_API_KEY=see-docs"}, []string{"NOTE=MOW_API_KEY=see-docs"}},
+		{"drops multiplexer pane-owner vars", []string{"HERDR_ENV=1", "HERDR_PANE_ID=p1", "HERDR_SOCKET_PATH=/s", "HERDR_BIN_PATH=/b", "TERM=xterm"}, []string{"TERM=xterm"}},
+		{"pane prefix must lead", []string{"MY_HERDR_NOTE=1", "NOTE=HERDR_ENV=1"}, []string{"MY_HERDR_NOTE=1", "NOTE=HERDR_ENV=1"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -141,5 +143,24 @@ func TestScrubEnvAllowList(t *testing.T) {
 	// The allow list is exact-name only: a near miss stays scrubbed.
 	if out := ScrubEnv([]string{"OPENAI_API_KEY=b"}, "OPENAI_API_KEY_2"); len(out) != 0 {
 		t.Fatalf("prefix match leaked: %v", out)
+	}
+}
+
+// Delegate peers keep the full environment (they may need provider keys) but
+// never the parent's pane binding.
+func TestDropPaneOwnerEnv(t *testing.T) {
+	in := []string{"HERDR_ENV=1", "PATH=/bin", "OPENAI_API_KEY=k", "HERDR_PANE_ID=p1"}
+	got := DropPaneOwnerEnv(in)
+	want := []string{"PATH=/bin", "OPENAI_API_KEY=k"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("DropPaneOwnerEnv = %v, want %v", got, want)
+	}
+}
+
+// env_passthrough is an explicit host decision and still wins.
+func TestPaneOwnerPassthroughWins(t *testing.T) {
+	got := ScrubEnvWith([]string{"HERDR_PANE_ID=p1", "HERDR_ENV=1"}, nil, []string{"HERDR_PANE_ID"})
+	if len(got) != 1 || got[0] != "HERDR_PANE_ID=p1" {
+		t.Fatalf("passthrough = %v", got)
 	}
 }

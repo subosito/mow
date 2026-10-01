@@ -83,6 +83,7 @@ Non-trivial change: `devenv shell -- just verify` before commit. Docs/fixtures a
 - Workspace trust is out-of-band (`$MOW_HOME/trusted`, `mow trust`) — never a marker in the repo. Project config may not set credentials, `llm.base_url`, headers, `session.dir`, power tools, `extra_roots`, or `env_passthrough`; nor `llm.model`/`effort`/`stream`, `skills.selector`, or a `max_turns` that raises the host ceiling.
 - Instruction files (`AGENTS.md`/`CLAUDE.md`) are read from the workspace up to the enclosing git root (else `$HOME`) — never above; hermetic engines (`LoadUserConfig=false`) read the workspace only.
 - Shell children never inherit credentials: `*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_SECRET_KEY`, `*_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, plus the configured `llm.api_key_env` / provider `api_key_env` names. Applies to `bash`, `proc_start`, the ACP terminal, command hooks, and MCP stdio servers. `policy.env_passthrough` (host/CLI only) is the exact-name opt-out and wins over the deny list.
+- Children never inherit the pane binding (`HERDR_*`): stripped by the shell scrub and from ACP delegate peers, so only the top-level agent reports to the multiplexer pane.
 - No secrets in logs. Config under `$MOW_HOME` (default `~/.mow`). Optional `X-Mow-*` labels (ignored by plain providers).
 
 ## Gotchas

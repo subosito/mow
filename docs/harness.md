@@ -422,6 +422,13 @@ session.
 > scrub. Exact names only, no globs; it is host/user config (stripped from
 > project `.mow/config`, like `policy.extra_roots`).
 >
+> **Pane binding.** Terminal-multiplexer integration variables (`HERDR_*`) bind
+> a process to the pane it runs in, and only the top-level agent in that pane
+> may report state there. They are removed by the same scrub, and also from
+> ACP delegate peers (which otherwise inherit the parent environment
+> unchanged), so a peer, a `mow run` started from `bash`, or a background proc
+> cannot overwrite the parent's pane status.
+>
 > **Opt-in OS jail (`--sandbox`).** `bash`, `proc_start`, and the ACP terminal
 > (`terminal/create`) use
 > Fence on Linux and macOS (config: `policy.sandbox: fence`). Install Fence

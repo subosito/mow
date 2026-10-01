@@ -622,3 +622,18 @@ func TestBashDeniesConfiguredCredentialEnv(t *testing.T) {
 		t.Fatalf("env_passthrough must keep the variable: %q", out)
 	}
 }
+
+// A shell child must not inherit the parent's multiplexer pane binding: a
+// `mow run` started from bash would otherwise report state for this pane.
+func TestBashDropsPaneOwnerEnv(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "pane-probe")
+	p := &policy.Policy{Workspace: t.TempDir(), AllowShell: true}
+	out, err := tools.Registry(p, []string{"bash"})[0].Exec(t.Context(), json.RawMessage(`{"command":"env"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "pane-probe") || strings.Contains(out, "HERDR_ENV=") {
+		t.Fatalf("pane binding leaked into bash: %q", out)
+	}
+}
