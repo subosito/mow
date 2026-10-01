@@ -70,7 +70,7 @@ func TestExecOneToolFramedResultWithinLimit(t *testing.T) {
 	if !strings.HasPrefix(got, "<"+UntrustedTag) || !strings.HasSuffix(got, "</"+UntrustedTag+">") {
 		t.Fatalf("frame broken: %q", got)
 	}
-	if !strings.Contains(got, "(truncated)") {
+	if !strings.Contains(got, "(truncated") {
 		t.Fatalf("expected truncation marker: %q", got)
 	}
 }

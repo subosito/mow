@@ -691,7 +691,13 @@ func alignKeepAtUser(kept []llm.Message) []llm.Message {
 }
 
 // trimAllToolResults returns a copy with tool message contents truncated.
-// recentMax applies to the last half of messages; olderMax to the rest.
+// recentMax applies to the olderAfterToolMsgs most recent tool results;
+// olderMax to the rest. Compaction uses the split to reclaim space from old
+// output. The per-call under-budget path passes recentMax == olderMax: any
+// age-based shrink there rewrites an already-sent message on every call (one
+// result crosses the boundary per new result), which forces the provider to
+// re-cache the prompt from that index — a cache write, billed above plain
+// input — on every turn.
 func trimAllToolResults(messages []llm.Message, recentMax, olderMax int) []llm.Message {
 	if recentMax <= 0 {
 		recentMax = DefaultMaxToolResultChars
@@ -700,31 +706,81 @@ func trimAllToolResults(messages []llm.Message, recentMax, olderMax int) []llm.M
 		olderMax = recentMax / 2
 	}
 	out := append([]llm.Message(nil), messages...)
-	cutoff := len(out) / 2
-	for i := range out {
+	age := 0
+	for i := len(out) - 1; i >= 0; i-- {
 		if out[i].Role != "tool" {
 			continue
 		}
-		lim := olderMax
-		if i >= cutoff {
-			lim = recentMax
+		age++
+		lim := recentMax
+		if age > olderAfterToolMsgs {
+			lim = olderMax
 		}
 		out[i].Content = TruncateToolResult(out[i].Content, lim)
 	}
 	return out
 }
 
+// olderAfterToolMsgs is how many of the most recent tool results keep the
+// full per-result cap before being shrunk to the older cap.
+const olderAfterToolMsgs = 16
+
+// capToolResults applies only the uniform per-result cap. It is the
+// under-budget path taken before every call, so it must be idempotent on
+// history the model has already seen: a result that fit last call fits now,
+// byte-for-byte, and the provider's prompt cache stays warm.
+func capToolResults(messages []llm.Message, maxChars int) []llm.Message {
+	return trimAllToolResults(messages, maxChars, maxChars)
+}
+
 const truncatedMarker = "\n…(truncated)"
 
-// TruncateToolResult shortens a tool result for model history.
+// TruncateToolResult shortens a tool result for model history. It keeps the
+// head AND the tail and elides the middle: tool output puts the answer at the
+// end (the failing assertion, the test summary, read's "continue with offset"
+// footer, bash's own elision note), so a head-only cut discards exactly the
+// part the model needed and it re-runs the call.
 func TruncateToolResult(s string, maxChars int) string {
-	return cutKeepingFrame(s, maxChars, truncateTail)
+	return cutKeepingFrame(s, maxChars, truncateMiddle)
+}
+
+// truncateHeadShare is the fraction of the budget kept from the start; the
+// rest goes to the tail (matching bash's 25/75 split).
+const truncateHeadShare = 4
+
+func truncateMiddle(s string, maxChars int) string {
+	notice := fmt.Sprintf("\n…(truncated: %d chars elided from the middle; head and tail kept)…\n", len(s)-maxChars)
+	room := maxChars - len(notice)
+	// Too small for a useful head+tail: fall back to a plain head cut.
+	if room < 200 {
+		return truncateTail(s, maxChars)
+	}
+	headN := room / truncateHeadShare
+	tailN := room - headN
+	cut := headN
+	if i := strings.LastIndexByte(s[:cut], '\n'); i > cut*3/4 {
+		cut = i
+	}
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	start := len(s) - tailN
+	if i := strings.IndexByte(s[start:], '\n'); i >= 0 && i < tailN/4 {
+		start += i + 1
+	}
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[:cut] + notice + s[start:]
 }
 
 func truncateTail(s string, maxChars int) string {
 	cut := maxChars
 	if i := strings.LastIndexByte(s[:maxChars], '\n'); i > maxChars*3/4 {
 		cut = i
+	}
+	for cut > 0 && cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut--
 	}
 	return s[:cut] + truncatedMarker
 }

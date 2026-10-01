@@ -224,7 +224,7 @@ func toolResultLimit(opt Options) int {
 func applyCompact(ctx context.Context, messages []llm.Message, opt Options, calib *ratioCalibrator) ([]llm.Message, bool, error) {
 	toolLim := toolResultLimit(opt)
 	if opt.MaxContextChars < 0 {
-		return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
+		return capToolResults(messages, toolLim), false, nil
 	}
 	ratio := calib.Ratio()
 	raw := EstChars(messages)
@@ -234,21 +234,21 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 		budget = min(opt.MaxContextChars, MaxContextCharsHardCap)
 		est = budgetChars(raw, ratio)
 		if est <= budget {
-			return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
+			return capToolResults(messages, toolLim), false, nil
 		}
 		target = CompactTarget(CompactResumeBudget(budget), ratio)
 	case opt.ContextWindow > 0 || opt.CompactAtTokens > 0:
 		used := estimateUsedTokens(raw+opt.ToolSchemaChars, opt.LastInputTokens, ratio)
 		budgetTok := EffectiveCompactTokens(opt.ContextWindow, opt.CompactAtTokens)
 		if used < budgetTok {
-			return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
+			return capToolResults(messages, toolLim), false, nil
 		}
 		est = raw
 		budget = int(float64(budgetTok) * clampRatio(ratio))
 		resumeTok := CompactResumeBudget(budgetTok)
 		target = max(int(float64(resumeTok)*clampRatio(ratio)), 1)
 	default:
-		return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
+		return capToolResults(messages, toolLim), false, nil
 	}
 	// Probe first: CompactTiered is pure and cheap; PreCompact is not (hosts
 	// archive the history and may spend an LLM call on a summary). A history
@@ -271,7 +271,7 @@ func applyCompact(ctx context.Context, messages []llm.Message, opt Options, cali
 				return nil, false, err
 			}
 			if d.Skip {
-				return trimAllToolResults(messages, toolLim, toolLim/2), false, nil
+				return capToolResults(messages, toolLim), false, nil
 			}
 			if d.Summary != "" {
 				summary = d.Summary
