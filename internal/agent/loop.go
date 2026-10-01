@@ -240,6 +240,9 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		truncatedBatches int
 		drift            prefixTracker
 		driftSum         driftSummary
+		// overflowRetries counts forced compactions after the provider
+		// rejected a request as over its context window.
+		overflowRetries int
 	)
 	if calib == nil {
 		calib = newRatioCalibrator()
@@ -385,6 +388,24 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 					}
 					// The interrupted call produced nothing; the reissue is the
 					// same turn, so it must not consume MaxTurns budget.
+					turn--
+					continue
+				}
+			}
+			// The provider rejected the request as over its context window.
+			// Our occupancy estimate is only an estimate (unknown window,
+			// compact_at disabled, a tokenizer denser than calibrated), so
+			// recover by forcing compaction to about half of what we just
+			// sent and reissuing the same turn — at most maxOverflowRetries
+			// times per run. Dropped turns still go through PreCompact, so
+			// hosts archive them as usual.
+			if IsContextOverflow(err) && overflowRetries < maxOverflowRetries {
+				forced := opt
+				forced.MaxContextChars = max(budgetChars(EstChars(send), calib.Ratio())/2, 1)
+				if shrunk, did, cerr := applyCompact(ctx, messages, forced, calib); cerr == nil && did && EstChars(shrunk) < EstChars(send) {
+					overflowRetries++
+					messages = shrunk
+					opt.LastInputTokens = 0
 					turn--
 					continue
 				}
