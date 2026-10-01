@@ -65,9 +65,7 @@ func (c *Client) chatAnthropicStream(ctx context.Context, messages []Message, to
 	req.Header.Set("Content-Type", "application/json")
 	c.setAnthropicAuth(req)
 	req.Header.Set("Accept", "text/event-stream")
-	for k, v := range c.ExtraHeaders {
-		req.Header.Set(k, v)
-	}
+	c.applyHeaders(req)
 
 	res, err := c.doHTTPStream(req)
 	if err != nil {

@@ -190,6 +190,9 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 
 	// Tools (e.g. delegate) can Emit via EngineFromContext without a stored pointer.
 	ctx = ContextWithEngine(ctx, e)
+	// Label every model request of this run with the session id (gateways
+	// key server-side conversation state on X-Mow-Session).
+	ctx = llm.WithSessionID(ctx, sid)
 
 	// Per-call system append (packs: goal protocol, etc.).
 	if s := strings.TrimSpace(opt.SystemAppend); s != "" {

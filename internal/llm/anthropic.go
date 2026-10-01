@@ -76,9 +76,7 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message, tools []
 	}
 	req.Header.Set("Content-Type", "application/json")
 	c.setAnthropicAuth(req)
-	for k, v := range c.ExtraHeaders {
-		req.Header.Set(k, v)
-	}
+	c.applyHeaders(req)
 	status, respBody, err := c.doJSON(req)
 	if err != nil {
 		return Message{}, err

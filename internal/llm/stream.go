@@ -371,9 +371,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Accept", "text/event-stream")
-	for k, v := range c.ExtraHeaders {
-		req.Header.Set(k, v)
-	}
+	c.applyHeaders(req)
 
 	res, err := c.doHTTPStream(req)
 	if err != nil {

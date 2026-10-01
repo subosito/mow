@@ -405,9 +405,7 @@ func (c *Client) chatOpenAI(ctx context.Context, messages []Message, tools []Too
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	for k, v := range c.ExtraHeaders {
-		req.Header.Set(k, v)
-	}
+	c.applyHeaders(req)
 
 	status, respBody, err := c.doJSON(req)
 	if err != nil {

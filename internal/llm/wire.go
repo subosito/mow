@@ -1,6 +1,10 @@
 package llm
 
-import "strings"
+import (
+	"context"
+	"net/http"
+	"strings"
+)
 
 // Client wire ids for llm.wire config.
 // OpenAI-compatible gateways often select protocol by path; body "model" selects the model.
@@ -44,3 +48,39 @@ const (
 	HeaderSession   = "X-Mow-Session"
 	HeaderComponent = "X-Mow-Component"
 )
+
+type sessionKey struct{}
+
+// WithSessionID returns ctx carrying the mow session id. Requests made with
+// that context send it as X-Mow-Session, so a gateway can keep server-side
+// conversation state (e.g. an agent per session) without guessing from the
+// transcript.
+func WithSessionID(ctx context.Context, sid string) context.Context {
+	sid = strings.TrimSpace(sid)
+	if sid == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, sessionKey{}, sid)
+}
+
+// SessionIDFrom returns the session id set by WithSessionID, or "".
+func SessionIDFrom(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	sid, _ := ctx.Value(sessionKey{}).(string)
+	return sid
+}
+
+// applyHeaders sets the client's extra headers, then the session header from
+// the request context unless the operator configured one explicitly.
+func (c *Client) applyHeaders(req *http.Request) {
+	for k, v := range c.ExtraHeaders {
+		req.Header.Set(k, v)
+	}
+	if req.Header.Get(HeaderSession) == "" {
+		if sid := SessionIDFrom(req.Context()); sid != "" {
+			req.Header.Set(HeaderSession, sid)
+		}
+	}
+}

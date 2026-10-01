@@ -96,9 +96,7 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		req.Header.Set("x-api-key", c.APIKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
 	}
-	for k, v := range c.ExtraHeaders {
-		req.Header.Set(k, v)
-	}
+	c.applyHeaders(req)
 	hc := c.HTTP
 	if hc == nil {
 		hc = &http.Client{Timeout: 30 * time.Second}
