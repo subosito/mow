@@ -665,19 +665,18 @@ func TestStallOnNoNewEvidence(t *testing.T) {
 	if err == nil || !errors.Is(err, agent.ErrStuck) {
 		t.Fatalf("err=%v want ErrStuck", err)
 	}
-	// Batch 1 is new evidence; batches 2-4 are barren → stop on the 4th.
-	if turns != 4 {
-		t.Fatalf("stopped after %d turns, want 4 (1 novel + 3 barren)", turns)
+	// Batch 1 is new evidence; allow 20 barren batches before stopping.
+	if turns != 21 {
+		t.Fatalf("stopped after %d turns, want 21 (1 novel + 20 barren)", turns)
 	}
 }
 
-// Two identical batches are a plausible retry, not a stall: the loop must
-// still be running after them.
-func TestTwoBarrenBatchesDoNotStall(t *testing.T) {
+// Several identical polling results must not abort a run that can recover.
+func TestRepeatedPollingCanRecover(t *testing.T) {
 	n := 0
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
 		n++
-		if n > 3 {
+		if n > 8 {
 			return llm.Message{Role: "assistant", Content: "done"}, nil
 		}
 		return llm.Message{

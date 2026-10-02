@@ -508,6 +508,9 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			barrenRuns = 0
 		} else {
 			barrenRuns++
+			if barrenRuns == sameToolWarnAfter {
+				messages = append(messages, llm.Message{Role: "user", Synthetic: true, Content: "Several tool batches returned only previously seen results. This is an advisory checkpoint, not a stop: if polling or retrying is necessary, continue with an appropriate wait; otherwise use the evidence collected or change strategy."})
+			}
 			if barrenRuns >= stallBarrenBatches {
 				return Result{
 						Text:       strings.TrimSpace(msg.Content),
@@ -699,14 +702,11 @@ func (m *modelWaitMonitor) abort() {
 	})
 }
 
-// stallBarrenBatches is how many consecutive barren tool batches end the run
-// with ErrStuck. Three, not two: two identical batches are a plausible retry
-// (a flaky command, a re-read after a failed edit), three is a loop. This is a
-// package-level backstop, not a tuning knob. With max_turns unlimited by
-// default this is an exact-repeat liveness guard: it catches a spinning loop in
-// three batches rather than after a hundred, and it keys on evidence rather
-// than on elapsed turns, so legitimately long work is never cut short.
-const stallBarrenBatches = 3
+// stallBarrenBatches bounds sustained exact-repeat loops, after early advisory
+// warnings have given the model room to recover. Polling and retries can
+// legitimately produce unchanged output for several batches; three is not
+// enough evidence to abort useful work.
+const stallBarrenBatches = 20
 
 // maxTruncatedBatches bounds the retry of a batch whose tool arguments the
 // provider cut at its output limit. Retrying once or twice is worthwhile — the
