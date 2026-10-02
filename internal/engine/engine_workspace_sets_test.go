@@ -45,7 +45,7 @@ func TestWorkspaceProfileNameResolvesWorkspaceAndRoots(t *testing.T) {
 	if got := eng.Workspace(); got != workspace {
 		t.Fatalf("Workspace() = %q, want %q", got, workspace)
 	}
-	if got := eng.ExtraRoots(); len(got) != 2 || got[0] != extra || got[1] != filepath.Join(home, "workspaces", "monorepo", "docs") {
+	if got := eng.ExtraRoots(); len(got) != 3 || got[2] != eng.scratchDir || got[0] != extra || got[1] != filepath.Join(home, "workspaces", "monorepo", "docs") {
 		t.Fatalf("ExtraRoots() = %v, want workspace root and profile docs", got)
 	}
 	if got := eng.ExtraRootsReadOnly(); len(got) != 1 || got[0] != readOnly {

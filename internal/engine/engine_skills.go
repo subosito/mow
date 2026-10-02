@@ -98,7 +98,7 @@ func (e *Engine) recomposeSystemLocked() string {
 	return contextload.ComposeSystem(
 		contextload.PathJailFacts(e.cfg.Workspace, e.pol.ExtraRoots, ro),
 		agent.FramingFacts(e.untrustedNonce),
-		e.agents, e.skillsText, e.opt.SystemAppend,
+		e.agents, e.skillsText, e.opt.SystemAppend, e.scratchFacts(),
 	)
 }
 

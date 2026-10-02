@@ -156,14 +156,13 @@ Two consequences worth knowing:
 - **Distinct calls that return the same string are still distinct evidence.**
   Two greps that both find nothing are two facts, not one.
 
-**Three barren batches, then stop.** The run ends with `ErrStuck` →
-`StopStuck`, plus a `loop.stall` event carrying the reason. Three, not two:
-two identical batches are a plausible retry after a flaky command or a failed
-edit; three is a loop.
-
-This is a **backstop, not a knob** — it is a package-level constant with no
-config surface, on purpose. It exists to stop pathological spin, not to tune
-how persistent an agent is.
+**Warn early; stop only after sustained repetition.** After three barren
+batches the model receives an advisory checkpoint and can continue polling,
+retrying, or changing strategy. Only **20 consecutive barren batches** end the
+run with `ErrStuck` → `StopStuck` and a `loop.stall` event. Any new call/result
+pair resets the streak. This backstop prevents unlimited exact-repeat loops;
+it is not a three-batch limit on legitimate work. Explicit turn/spend limits
+and cancellation remain independent.
 
 Exploration also has built-in checkpoints, with no configuration required:
 
@@ -601,3 +600,24 @@ requires separate validation on a macOS host.
 
 The former `bwrap`/`bubblewrap` backend values are rejected with migration guidance.
 Use `--sandbox`, `--sandbox=fence`, or `policy.sandbox: fence` instead.
+
+### Per-session scratch storage
+
+Each engine exposes a private `mow-scratch-<hash>` directory under the OS
+temporary directory (usually `/tmp`). Its exact absolute path is supplied
+in the system instructions. Use it for source clones, generated artifacts,
+and experiments, rather than arbitrary paths elsewhere in `/tmp`.
+
+Only this directory is added to the file-tool jail. Writes still require
+write permission; shell permission remains a separate trust decision. On Unix,
+the root must be owned by the current user with `0700` permissions; links and
+unsafe existing roots are rejected. Other sessions cannot read it through the
+default file-tool jail unless the operator explicitly grants a broader root.
+
+The path is derived from the storage home, resolved workspace, and session ID.
+Resume reuses it while available. Starting a new session switches the jail to
+a new scratch directory without deleting previous work. Engines without stored
+sessions receive temporary scratch identities. No files are loaded into context
+automatically. OS cleanup or a changed temporary-directory setting may remove
+access to old scratch files; a missing directory is recreated empty. Do not
+rely on scratch for durable notes: use workspace-profile `docs/` instead.

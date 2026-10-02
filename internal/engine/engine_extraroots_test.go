@@ -45,7 +45,7 @@ func TestEngineExtraRootsJailAndSystem(t *testing.T) {
 	defer eng.Close()
 
 	roots := eng.ExtraRoots()
-	if len(roots) != 1 {
+	if len(roots) != 2 || roots[1] != eng.scratchDir {
 		t.Fatalf("ExtraRoots()=%v", roots)
 	}
 	// Absolute under extra root is allowed.

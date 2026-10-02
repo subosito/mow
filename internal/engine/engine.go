@@ -61,6 +61,7 @@ type Engine struct {
 	explicitSkills []string
 	opt            Options
 	sess           *session.Store
+	scratchDir     string
 	sid            string
 	prior          []llm.Message
 	transcript     []Message // user/assistant only (session resume)
@@ -833,6 +834,10 @@ func New(opt Options) (*Engine, error) {
 		}
 	}
 
+	if err := e.setScratchLocked(e.sid); err != nil {
+		return nil, err
+	}
+
 	for _, fn := range e.life.onSessionStart {
 		if fn == nil {
 			continue
@@ -1005,6 +1010,9 @@ func (e *Engine) BeginSession() (string, error) {
 	e.lastProviderTokens = 0
 	e.lastCtxEstimate = 0
 	if e.noSess {
+		if err := e.setScratchLocked(""); err != nil {
+			return "", err
+		}
 		e.sid = ""
 		e.sess = nil
 		return "", nil
@@ -1023,6 +1031,9 @@ func (e *Engine) BeginSession() (string, error) {
 		sid = fmt.Sprintf("%s-%d", sid, time.Now().UnixNano()%1_000_000)
 	}
 	if err := session.ValidateID(sid); err != nil {
+		return "", err
+	}
+	if err := e.setScratchLocked(sid); err != nil {
 		return "", err
 	}
 	e.sid = sid
