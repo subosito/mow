@@ -3,7 +3,7 @@
 **Rule:** if a capability is not required for a read-only agent over compatible
 LLM HTTP, it is detachable. Stock Engine *surfaces* (CLI, TTY, ACP) live under
 `ext/`. Workflow/domain applications can live in external modules built on the
-public API; [custom-host](https://github.com/subosito/mow) is one such application.
+public API.
 
 Customization modes:
 
@@ -223,6 +223,6 @@ that load workspace or user state should register with
 
 ## External applications
 
-Domain workflows and full user applications are outside this module. See
-[external application modules](https://github.com/subosito/mow) for the companion
-application built on mow's public API.
+Domain workflows and full user applications are outside this module. Build
+them as separate Go modules that import `github.com/subosito/mow` and the
+`ext/*` packages they need; the root module never imports them.

@@ -43,7 +43,7 @@ func runMow(t *testing.T, args ...string) (string, int) {
 }
 
 // Stock mow links acp, tty, proc, cmdhook, mcp, goal and must not
-// show custom-host application packs (ops/review/job/media) in help.
+// show optional application packs (ops/review/job/media) in help.
 func TestLeanHelpListsLeanCommands(t *testing.T) {
 	output, code := runMow(t, "help")
 	if code != 0 {

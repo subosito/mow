@@ -31,13 +31,11 @@
 - fix(goal): `goal_process_start` requires `--allow-shell`; retry counter and wall-clock budget reset correctly; partial/blocked goals resume instead of being overwritten.
 - fix(media): `generate_*` require `--allow-write`; size caps checked before reading.
 - fix(review): scope content is framed as untrusted input; `--diff/--base` reject option-like values; `exit` omitted from clean JSON reports.
-- fix(release): `custom-host` binaries included in SHA256SUMS and GitHub Releases.
 
 ## 1.0.0
 
 First stable release. ACP v1 is the host protocol (`mow acp` plus optional extras). `mow rpc` is gone.
 
-- Lean `mow` (acp, cli, tty, focus, proc, cmdhook, mcp) vs full `custom-host` (+ goal, job, review, ops, media).
 - `extensions.acp.peers`: each row is `command` (external ACP) or `model` (native `mow acp`).
 - Session **mode** (`ask`|`code`) confirms power tools; it does not strip them. `--read-only` disables write/shell and wins over yaml.
 - Session **approvals** (`prompt`|`always`) skip `session/request_permission`; still gated by allow-write/shell.

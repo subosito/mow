@@ -90,7 +90,7 @@ a profile switch.
 - `ext/goal`: durable outer loop over Prompt (checklist, worktrees, parallel steps).
 
 Application workflows (review, job, ops, media) are maintained separately in
-[custom-host](https://github.com/subosito/mow).
+external modules built on the public API.
 
 ## Binaries
 

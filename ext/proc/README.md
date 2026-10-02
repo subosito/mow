@@ -8,7 +8,7 @@ Background-process **tools**: start a long-lived process (dev server, watcher, m
 import _ "github.com/subosito/mow/ext/proc"
 ```
 
-Stock `cmd/mow` and `cmd/custom-host` blank-import this package. Host UIs over `mow acp` see the same tools; ACP extras can list running procs.
+Stock `cmd/mow` blank-imports this package. Host UIs over `mow acp` see the same tools; ACP extras can list running procs.
 
 ## Tools
 

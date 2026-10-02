@@ -9,7 +9,6 @@ context: |
 
   Stock binary cmd/mow blank-imports ext/{acp,cli,tty,proc,cmdhook,mcp,goal}.
   Application workflows (job, ops, review, media) live in external application modules.
-  Focus exists in custom-host as opt-in hooks and is not linked by either default host.
 
   Public samples (docs, README, CLI help, fixtures, this openspec/ tree) must
   not name private host products, fleet peers, or stale model generations.

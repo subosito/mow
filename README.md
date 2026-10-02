@@ -85,7 +85,7 @@ export OPENAI_MODEL=gpt-5-mini
 **Extension-owned subcommands:** the stock binary blank-imports linked extensions. Remove an
 import (for example `_ "github.com/subosito/mow/ext/acp"`) and its tools and
 subcommand disappear from that binary and help. Optional application workflows
-live in the separate [custom-host project](https://github.com/subosito/mow).
+live in separate external modules built on the public API.
 
 Secure default tools: **read**, **glob**, **grep**. Power tools need
 `--allow-write` / `--allow-shell`. `--allow-shell` is the trust cliff:
@@ -130,8 +130,8 @@ import (
 ```
 
 Import only `github.com/subosito/mow` for the Engine library. Add individual
-`ext/*` imports as needed. Application packs are maintained by
-[custom-host](https://github.com/subosito/mow).
+`ext/*` imports as needed. Application packs are maintained in
+separate external modules.
 
 Config: `extensions.<pack>` (see `internal/config/mow.yaml.example`).
 Docs: [docs/extensions.md](docs/extensions.md).

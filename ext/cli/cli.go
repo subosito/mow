@@ -324,7 +324,7 @@ func preferFirst(cmds []ext.Command, name string) []ext.Command {
 }
 
 // packEnvHelp is env that only exists when the matching pack is linked
-// (cmd/custom-host, not the lean cmd/mow).
+// (custom hosts, not the stock cmd/mow).
 func packEnvHelp() string {
 	if _, ok := ext.LookupCommand("ops"); ok {
 		return "  MOW_OPS"

@@ -17,7 +17,7 @@ integrate against; the CLI and every pack are thin shells over it. So:
   re-export it deliberately rather than leaking the internal path.
 - A frontend, protocol, or heavy optional feature → a **core extension** under
   `ext/`, or an external host that imports mow. Application workflows belong
-  in an external module such as [custom-host](https://github.com/subosito/mow).
+  in an external module that imports mow's public API.
 
 Read [docs/architecture.md](docs/architecture.md) once for the public/internal
 line, then [docs/embedding.md](docs/embedding.md) to see the API from an
