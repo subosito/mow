@@ -1,6 +1,6 @@
 # Mow documentation
 
-**mow** is a minimal Go agentic harness: secure by default, configured with files or extended programmatically via packs. Standalone module — no other product required.
+**mow** is a minimal Go agentic harness: secure by default, configured with files or extended programmatically via extensions. Standalone module — no other product required.
 
 ## Where to start
 

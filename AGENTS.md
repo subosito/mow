@@ -31,7 +31,7 @@ Source of truth: [docs/architecture.md](docs/architecture.md).
 |------|------|
 | `mow.go` | Public aliases: `Engine`, `Run`, events, hooks, providers |
 | `internal/engine/` | Engine + behavior tests |
-| `cliutil/` | CLI flags → Engine (**not** a pack) |
+| `cliutil/` | CLI flags → Engine (**not** a extension) |
 | `extcfg/` | Decode `extensions.<name>` |
 | `testutil/` | Shared tests (pin `$MOW_HOME`) |
 | `ext/` | Registration + core extensions: acp, cli, tty, proc, cmdhook, mcp, goal, workflow, worktree |

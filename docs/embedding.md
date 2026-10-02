@@ -1,6 +1,6 @@
 # Embedding mow in Go
 
-The library **is** the product. `mow run` and the packs are thin shells over
+The library **is** the product. `mow run` and the extensions are thin shells over
 the same `mow.Engine` you get by importing the module. This page is the
 how-to for that path: put an agent loop inside your own Go program, feed it a
 custom HTTP client or LLM backend, add tools, watch events, and account for
@@ -239,7 +239,7 @@ for `Chat` only for quick fakes.
 ## 6. Hooks
 
 Hooks are the lifecycle seams — enough to deny/rewrite tools, compress
-results, and inject system text without a bespoke pack. Pass them per engine:
+results, and inject system text without a bespoke extension. Pass them per engine:
 
 ```go
 eng, _ := mow.New(mow.Options{

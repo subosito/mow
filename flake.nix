@@ -28,7 +28,7 @@
               "-X github.com/subosito/mow/internal/engine.Version=${version}"
             ];
             meta = {
-              description = "Minimal, secure-by-default agentic harness (lean)";
+              description = "Minimal, secure-by-default agentic harness";
               homepage = "https://github.com/subosito/mow";
               license = lib.licenses.mit;
               mainProgram = "mow";

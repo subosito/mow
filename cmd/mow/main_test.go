@@ -10,10 +10,10 @@ import (
 
 var mowBinary string
 
-// TestMain builds the lean binary once so these tests cover the real binary's
-// linked pack set, not an in-process approximation.
+// TestMain builds the stock binary once so these tests cover the real binary's
+// linked extension set, not an in-process approximation.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "mow-lean-test-*")
+	dir, err := os.MkdirTemp("", "mow-stock-test-*")
 	if err != nil {
 		panic(err)
 	}
@@ -22,7 +22,7 @@ func TestMain(m *testing.M) {
 	mowBinary = filepath.Join(dir, "mow")
 	build := exec.Command("go", "build", "-o", mowBinary, ".")
 	if output, err := build.CombinedOutput(); err != nil {
-		panic("build lean mow: " + err.Error() + "\n" + string(output))
+		panic("build stock mow: " + err.Error() + "\n" + string(output))
 	}
 	os.Exit(m.Run())
 }
@@ -43,7 +43,7 @@ func runMow(t *testing.T, args ...string) (string, int) {
 }
 
 // Stock mow links acp, tty, proc, cmdhook, mcp, goal and must not
-// show optional application packs (ops/review/job/media) in help.
+// show optional application extensions (ops/review/job/media) in help.
 func TestLeanHelpListsLeanCommands(t *testing.T) {
 	output, code := runMow(t, "help")
 	if code != 0 {
@@ -51,11 +51,11 @@ func TestLeanHelpListsLeanCommands(t *testing.T) {
 	}
 	for _, want := range []string{"mow acp", "mow mcp", "mow tty", "mow goal", "mow workflow", "Extensions (this binary):"} {
 		if !strings.Contains(output, want) {
-			t.Errorf("lean help missing %q:\n%s", want, output)
+			t.Errorf("stock help missing %q:\n%s", want, output)
 		}
 	}
 	if strings.Contains(output, "Packs (this binary):") {
-		t.Errorf("stock binary must not link application packs:\n%s", output)
+		t.Errorf("stock binary must not link application extensions:\n%s", output)
 	}
 	for _, notWant := range []string{"mow ops", "mow review", "mow job", "mow media", "mow proc", "mow plugin", "mow chat"} {
 		if strings.Contains(output, notWant) {
@@ -96,8 +96,8 @@ func TestDoctorReportsUnregisteredMediaTool(t *testing.T) {
 	}
 }
 
-// Full-pack command names stay reserved even when the pack is not linked:
-// `mow ops` on the lean binary must be an unknown command, not a free-form
+// Optional application command names stay reserved even when the extension is not linked:
+// `mow ops` on the stock binary must be an unknown command, not a free-form
 // prompt to the model.
 func TestLeanReservedFullPackTokens(t *testing.T) {
 	for _, tok := range []string{"ops", "review", "media", "job"} {

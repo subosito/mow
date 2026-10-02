@@ -127,6 +127,6 @@ use the workspace/extra-root jail; shell is a separate explicit trust decision.
 
 - [embedding.md](embedding.md) — public API and custom integrations
 - [harness.md](harness.md) — loop, tools, config, sessions
-- [extensions.md](extensions.md) — extension and pack details
+- [extensions.md](extensions.md) — extension and extension details
 - [workspace-profiles.md](workspace-profiles.md) — `$MOW_HOME/workspaces/<name>/`
 - [openspec/specs/](../openspec/specs/) — behavior contracts (composition, trust, goal, guards)

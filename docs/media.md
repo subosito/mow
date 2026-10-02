@@ -1,6 +1,6 @@
 # Media inputs and generated artifacts
 
-Mow's stock binary is a lean text/code harness. The built-in `read` tool reads
+Mow's stock binary is a standalone text/code harness. The built-in `read` tool reads
 UTF-8 text only. Images, audio, video, PDFs and archives are binary and require a
 compatible client/model or an optional extension/tool specific to the file type.
 

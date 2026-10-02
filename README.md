@@ -130,10 +130,10 @@ import (
 ```
 
 Import only `github.com/subosito/mow` for the Engine library. Add individual
-`ext/*` imports as needed. Application packs are maintained in
+`ext/*` imports as needed. Application extensions are maintained in
 separate external modules.
 
-Config: `extensions.<pack>` (see `internal/config/mow.yaml.example`).
+Config: `extensions.<name>` (see `internal/config/mow.yaml.example`).
 Docs: [docs/extensions.md](docs/extensions.md).
 
 ## Docs

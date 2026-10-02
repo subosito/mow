@@ -11,13 +11,28 @@ Customization modes:
 2. **Program** — `mow.Options`, custom tools/provider, `ext.Register*`.
 3. **Link** — blank-import core extensions into a binary.
 
+## Terminology
+
+- **Stock binary**: the standalone `mow` executable built from `cmd/mow`.
+- **Embedding application**: a Go application that imports mow’s public API;
+  it may link its own set of extensions. No separate application is required
+  to use mow.
+- **ACP client**: an application that launches or connects to `mow acp` and
+  owns its user interface, rather than embedding the Go engine.
+- **Extension**: a registered capability such as tools, commands, or hooks.
+- **Agent Plugin**: an operator-installed manifest with skills and optional
+  MCP servers or command hooks; distinct from a Go extension.
+
+“Host” refers to the application controlling an engine’s configuration and
+policy. It does not imply a remote server or a companion product.
+
 ## Layers and imports
 
 | Layer | Imports | Examples |
 |---|---|---|
 | Public Engine | `github.com/subosito/mow` | `Engine`, `Run`, hooks, events, providers |
 | Registration | `github.com/subosito/mow/ext` | `RegisterTool`, `RegisterCommand`, lifecycle hooks |
-| Core extensions | `github.com/subosito/mow/ext/<name>` | cli, tty, acp, proc, cmdhook, mcp, goal, workflow; one-pager in each `ext/<name>/README.md` |
+| Core extensions | `github.com/subosito/mow/ext/<name>` | cli, tty, acp, proc, cmdhook, mcp, goal, workflow, worktree; one-pager in each `ext/<name>/README.md` |
 
 ```go
 import (
@@ -36,7 +51,7 @@ tools it actually has.
 ## Linked binaries
 
 - `cmd/mow` is an import list over `ext/cli.Main`, linking tty, acp, proc,
-  cmdhook, mcp, goal, and workflow. Drop an import and that surface is gone.
+  cmdhook, mcp, goal, workflow, and worktree. Drop an import and that surface is gone.
 - External hosts launch `mow acp` (`ext/acp`), own presentation, and receive
   registered command/tool events over ACP + extras.
 - Native `agents` (`model:`) start the currently running executable
@@ -46,13 +61,13 @@ tools it actually has.
 
 ### CLI (`ext/cli`)
 
-Unix host skeleton. Import (not blank) and call `cli.Main`:
+Unix CLI entry point for embedding applications. Import (not blank) and call `cli.Main`:
 
 - Dispatcher: no-args TTY → `ext.DefaultInteractiveCommand` if registered, else usage.
   Free-form args become `mow run -p …`. Other names go to `ext.LookupCommand`.
 - Commands: `run` (one-shot; `mow.NewHarness`), `models` (catalog list), `trust`,
   `doctor`, `approvals`, `version`, `help`.
-- `cliutil` stays flags → Options / `NewHarness` (not a command, not a pack).
+- `cliutil` stays flags → Options / `NewHarness` (not a command, not a extension).
 
 Stock binaries compose surfaces in `cmd/` by blank-importing `ext/tty`, `ext/acp`,
 and core extensions. See [ext/cli/README.md](../ext/cli/README.md).

@@ -8,10 +8,10 @@ change a rule.
 ## The one thing to internalize
 
 **The library is the product.** `mow.Engine` / `mow.Run` is the API people
-integrate against; the CLI and every pack are thin shells over it. So:
+integrate against; the CLI and every extension are thin shells over it. So:
 
 - New capability an integrator needs → it goes on the **public `mow` package**
-  (or a pack), never buried where you'd have to tell someone "just import
+  (or a extension), never buried where you'd have to tell someone "just import
   `internal/`".
 - Implementation detail → `internal/*`. If an integrator ends up needing it,
   re-export it deliberately rather than leaking the internal path.

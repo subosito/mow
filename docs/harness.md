@@ -23,7 +23,7 @@ Stack context: [architecture.md](architecture.md). Embedding in Go: [embedding.m
 - Not a multi-provider model gateway or credential broker (point at one HTTP endpoint).
 - Not a chat-channel product (hosts that need channels import mow or call its API).
 - Not a full IDE application (review/ops/media workflows belong in external hosts).
-- Not ACP by default in the core library — ACP is the **`ext/acp` pack**.
+- Not ACP by default in the core library — ACP is the **`ext/acp` extension**.
 
 ---
 
@@ -86,7 +86,7 @@ mow loop ──tool delegate──▶ peer ACP process
 |---------|----------------|
 | `mow` | `New`, `NewHarness`, `Engine`, `Run`, options/result types, `Tool`/`Message`/`ChatFunc`, `Engine.Extension` (`mow.go` re-exports `internal/engine/`) |
 | `ext` | Register tools, hooks, **CLI commands**, BeforeNew (registration only) |
-| `cliutil` | Shared CLI flags / `--long` help / `NewEngine` → `NewHarness` — **not** a pack |
+| `cliutil` | Shared CLI flags / `--long` help / `NewEngine` → `NewHarness` — **not** a extension |
 | `extcfg` | Decode `extensions.<name>` for linked extensions |
 | `ext/cli` | Unix dispatcher (`Main`) + `run`, `trust`, `doctor`, `approvals`, version, help |
 | `ext/tty` | Optional line REPL (`mow tty`) |
@@ -567,7 +567,7 @@ the engine), and mow's own `Engine.Sessions()` listing covers resume.
 
 ### MCP as untrusted output
 
-MCP tool results are external server text. The MCP pack marks every `mcp_*`
+MCP tool results are external server text. The MCP extension marks every `mcp_*`
 tool with `Untrusted() bool` so the agent loop frames results in
 `<untrusted-output>` the same way as `bash` and `delegate`.
 
