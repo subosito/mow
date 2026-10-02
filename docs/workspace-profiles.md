@@ -10,6 +10,7 @@ $MOW_HOME/workspaces/<name>/
   AGENTS.md       # optional profile instructions
   skills/         # optional profile skills
   plugins/        # optional Agent Plugins (MCP + hooks from host-owned roots)
+  docs/           # local working notes, reviews, and experiments (not in checkout)
 ```
 
 `<name>` is an identifier, not a path: non-empty, trimmed,
@@ -74,3 +75,28 @@ a skill name activates that skill before running its prompt. `$ARGUMENTS`
 is replaced with the invocation arguments; otherwise arguments are appended.
 Templates are prompt text: shell interpolation and command-file permission
 directives are not executed. Invalid command files are skipped.
+
+## Internal workspace docs
+
+Selecting a named profile creates its `docs/` directory outside the project
+checkout and exposes only that directory as an additional file-tool root.
+The agent receives its location, not the contents: use `glob`, `grep`, and
+`read` on demand, and store working notes with `write` only when write
+permission is enabled. Read-only engines can consult existing notes.
+
+Use this for reviews, experiments, scratch plans, and local operational notes
+that do not belong in public project documentation. Keep user guides and
+behavior contracts in the repository. Profile configuration and credentials
+are not exposed along with docs, and another profile or a plain directory
+workspace does not inherit these notes. Hermetic engines never create or load
+profile docs. Shell permission remains a separate trust decision.
+
+“Internal” means outside the checkout, **not secret from the model provider**:
+notes read by tools may enter model requests and persisted session history.
+Do not put credentials in them. Archive or remove stale notes yourself; mow
+neither publishes them nor automatically deletes them. A profile and a
+symlink to its docs must be controlled by the operator, not by the repository.
+`docs/` may be a symlink to another directory, but engine construction fails
+when it resolves to the filesystem root, the profile directory, `$MOW_HOME`,
+or any ancestor of those, since that would expose profile config or
+credentials to file tools.

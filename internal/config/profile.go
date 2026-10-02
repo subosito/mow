@@ -27,6 +27,7 @@ type WorkspaceSet struct {
 //	AGENTS.md       optional profile instructions
 //	skills/         optional profile skills
 //	plugins/        optional profile Agent Plugins
+//	docs/           operator notes; created on use and exposed as a file-tool root
 //
 // Profiles replace the single flat $MOW_HOME/workspaces.yaml registry: each
 // profile is self-contained, and per-profile config is what makes ACP
