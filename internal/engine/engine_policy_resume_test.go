@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,6 +26,9 @@ func TestContinueRestoresReadOnlyPolicy(t *testing.T) {
 		DisableWrite:   true,
 		DisableShell:   true,
 		DeferLLM:       true,
+		Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+			return mow.Message{Role: "assistant", Content: "ok"}, nil
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -35,6 +39,9 @@ func TestContinueRestoresReadOnlyPolicy(t *testing.T) {
 	}
 	if first.AllowWrite() || first.AllowShell() {
 		t.Fatalf("seed session should be read-only: write=%v shell=%v", first.AllowWrite(), first.AllowShell())
+	}
+	if _, err := first.Prompt(t.Context(), "saved conversation"); err != nil {
+		t.Fatal(err)
 	}
 	first.Close()
 

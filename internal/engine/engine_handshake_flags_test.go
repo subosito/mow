@@ -155,7 +155,7 @@ func TestHandshakeFlagMatrix(t *testing.T) {
 
 	// A session whose last effort is a catalog-only tier ("xhigh" is not in
 	// the static none|low|medium|high list). Persisted through the real
-	// client path: SetEffort records the runtime event even with no Prompt.
+	// client path: SetEffort records the runtime event after a durable turn.
 	sidTier := "sess-handshake-tier"
 	{
 		opt := mow.Options{
@@ -166,8 +166,20 @@ func TestHandshakeFlagMatrix(t *testing.T) {
 			ExplicitModel:  true,
 			DeferLLM:       true,
 			SessionID:      sidTier,
+			Chat: func(context.Context, []mow.Message, []mow.ToolSpec) (mow.Message, error) {
+				return mow.Message{Role: "assistant", Content: "ok"}, nil
+			},
 		}
 		eng, err := mow.New(opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := eng.Prompt(t.Context(), "saved conversation"); err != nil {
+			t.Fatal(err)
+		}
+		eng.Close()
+		opt.Chat = nil
+		eng, err = mow.New(opt)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -78,10 +78,13 @@ func TestSetEffortPersistsRuntimeEvent(t *testing.T) {
 		})
 	}
 
-	// No Prompt: an effort change must reach the session file on its own,
+	// After a durable turn, an effort change must reach the session file on its own,
 	// or quitting right after /effort resumes a stale tier.
 	eng1, err := newEng("", false)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng1.Prompt(t.Context(), "saved conversation"); err != nil {
 		t.Fatal(err)
 	}
 	if err := eng1.SetEffort("high"); err != nil {

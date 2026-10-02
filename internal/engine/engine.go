@@ -823,7 +823,10 @@ func New(opt Options) (*Engine, error) {
 		}
 		e.sid = sid
 		e.sess = &session.Store{Dir: sessDir, ID: sid}
-		if !opt.DeferSessionWrite {
+		// A fresh engine is not a conversation yet. PromptWith writes runtime
+		// and history together for the first durable prompt. Preserve policy
+		// updates on resume only when a session file already exists.
+		if _, err := os.Stat(e.sess.Path()); err == nil && !opt.DeferSessionWrite {
 			if aerr := e.sess.Append(sessionPolicyEvent(e, e.Model(), e.Wire(), e.Effort())); aerr != nil {
 				e.log().Warn("mow: session runtime append failed (resume may use default policy)", "err", aerr)
 			}

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -386,6 +387,10 @@ func (e *Engine) SetEffort(effort string) error {
 	sess := e.sess
 	e.mu.Unlock()
 	if sess != nil {
+		if _, err := os.Stat(sess.Path()); os.IsNotExist(err) {
+			// Keep choices in memory until the first durable conversation.
+			return nil
+		}
 		// Persist the choice so --continue / --session restore it even when
 		// the operator quits before the next prompt — the turn-boundary
 		// runtime event in PromptWith is the only other writer. File I/O

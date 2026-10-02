@@ -91,3 +91,34 @@ func TestDeferSessionWrite(t *testing.T) {
 		})
 	}
 }
+
+func TestUnusedSessionIsNotStored(t *testing.T) {
+	t.Setenv("MOW_HOME", t.TempDir())
+	eng, err := New(Options{LoadUserConfig: true, Workspace: t.TempDir(), Chat: func(context.Context, []Message, []ToolSpec) (Message, error) {
+		return Message{Role: "assistant", Content: "reply"}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.Close() })
+	path := eng.sess.Path()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("unused session created: %v", err)
+	}
+	if err := eng.SetEffort("low"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("effort choice created unused session: %v", err)
+	}
+	if _, err := eng.Prompt(t.Context(), "first conversation"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte("first conversation")) || !bytes.Contains(data, []byte(`"type":"runtime"`)) {
+		t.Fatal("durable prompt did not persist session")
+	}
+}
