@@ -18,6 +18,9 @@ func TestSessionScratchIsolationResumeAndRotation(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = eng.Close() })
 	scratch := eng.scratchDir
+	if got := eng.ScratchDir(); got == "" || got != scratch {
+		t.Fatalf("ScratchDir() = %q, want %q", got, scratch)
+	}
 	note := filepath.Join(scratch, "artifact.txt")
 	if _, err := eng.WriteFile(note, []byte("no")); err == nil {
 		t.Fatal("scratch bypassed write permission")

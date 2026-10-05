@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -548,48 +549,84 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 	if strings.TrimSpace(reply) == "" {
 		reply = "(peer returned no agent_message_chunk text; stopReason=" + stop + ")"
 	}
-	return formatDelegateResult(spec.Name, stop, reply), nil
+	spill := ""
+	if eng := mow.EngineFromContext(ctx); eng != nil {
+		spill = eng.ScratchDir()
+	}
+	return formatDelegateResult(spec.Name, stop, reply, spill), nil
 }
 
-// defaultDelegateSummaryChars caps the parent-visible peer body. Full reply is
-// still streamed to the host via harness.delegate.chunk; the tool result keeps
-// a compact summary so a deep peer dive does not bloat parent context.
-const defaultDelegateSummaryChars = 4000
+// delegateReplyChars caps the peer reply placed in the tool result. It stays
+// under the loop's uniform per-result cap so the loop never cuts it again.
+// Head and tail are both kept: peers put verdicts and last findings at the end.
+const delegateReplyChars = 20_000
 
-func formatDelegateResult(agentName, stop, reply string) string {
+// delegateTailChars is the share of the cap kept from the end of the reply.
+const delegateTailChars = 8_000
+
+// formatDelegateResult renders a peer reply for the parent model. The body is
+// never replaced by an extracted section. When the reply exceeds the cap, the
+// middle is elided and the full text is written to spillDir (the session
+// scratch directory, inside the read jail) so the model can page through it.
+func formatDelegateResult(agentName, stop, reply, spillDir string) string {
 	body := strings.TrimRight(reply, " \t\r\n")
-	runess := []rune(body)
-	if len(runess) > defaultDelegateSummaryChars {
-		body = string(runess[:defaultDelegateSummaryChars]) + "\n…(peer reply summarized for parent context; full stream was emitted live)"
+	header := fmt.Sprintf("agent: %s\nstop: %s\n\n", agentName, stop)
+	runes := []rune(body)
+	if len(runes) <= delegateReplyChars {
+		return header + body
 	}
-	if sum := extractPeerSummary(reply); sum != "" {
-		return fmt.Sprintf("agent: %s\nstop: %s\n\n## Peer summary\n%s", agentName, stop, sum)
+	headN := delegateReplyChars - delegateTailChars
+	elided := len(runes) - delegateReplyChars
+	where := "the full text was not saved (no session scratch directory); ask the peer to resend the elided part"
+	if path, err := spillDelegateReply(spillDir, agentName, body); err == nil {
+		where = "full reply saved to " + path + "; page through it with read offset/limit"
 	}
-	return fmt.Sprintf("agent: %s\nstop: %s\n\n%s", agentName, stop, body)
+	return fmt.Sprintf("%s%s\n\n…(%d chars elided from the middle of the peer reply; head and tail kept; %s)…\n\n%s",
+		header, string(runes[:headN]), elided, where, string(runes[len(runes)-delegateTailChars:]))
 }
 
-func extractPeerSummary(reply string) string {
-	lines := strings.Split(reply, "\n")
-	start := -1
-	for i, line := range lines {
-		trim := strings.TrimSpace(line)
-		low := strings.ToLower(trim)
-		if strings.HasPrefix(low, "## summary") || low == "summary:" || strings.HasPrefix(low, "summary:") {
-			start = i
+// spillDelegateReply writes the full reply under dir/delegate and returns the
+// file path. dir must be an existing private directory.
+func spillDelegateReply(dir, agentName, body string) (string, error) {
+	if strings.TrimSpace(dir) == "" {
+		return "", errors.New("no spill directory")
+	}
+	sub := filepath.Join(dir, "delegate")
+	if err := os.MkdirAll(sub, 0o700); err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp(sub, safeFileComponent(agentName)+"-*.md")
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.WriteString(body + "\n"); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+// safeFileComponent keeps [A-Za-z0-9._-] so a peer name cannot escape the
+// spill directory or produce odd file names.
+func safeFileComponent(s string) string {
+	out := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			return r
 		}
+		return '_'
+	}, s)
+	for strings.Contains(out, "..") {
+		out = strings.ReplaceAll(out, "..", "_")
 	}
-	if start < 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, line := range lines[start:] {
-		b.WriteString(line)
-		b.WriteByte('\n')
-	}
-	out := strings.TrimSpace(b.String())
-	runess := []rune(out)
-	if len(runess) > defaultDelegateSummaryChars {
-		out = string(runess[:defaultDelegateSummaryChars]) + "\n…(truncated)"
+	out = strings.TrimLeft(out, ".")
+	if out == "" {
+		return "peer"
 	}
 	return out
 }

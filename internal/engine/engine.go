@@ -977,6 +977,17 @@ func (e *Engine) ResolvePathFor(rel string, write bool) (string, error) {
 	return e.pol.ResolvePathFor(rel, write)
 }
 
+// ScratchDir returns the session's private scratch directory (inside the
+// file-tool jail), or "" when none is set up.
+func (e *Engine) ScratchDir() string {
+	if e == nil {
+		return ""
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.scratchDir
+}
+
 // SessionID returns the active session id, if any.
 func (e *Engine) SessionID() string {
 	if e == nil {
