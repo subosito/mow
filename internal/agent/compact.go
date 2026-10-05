@@ -744,12 +744,22 @@ func TruncateToolResult(s string, maxChars int) string {
 	return cutKeepingFrame(s, maxChars, truncateMiddle)
 }
 
+// TruncateToolResultSpilled is TruncateToolResult whose notice names path,
+// where the full text was saved, so nothing is unrecoverable.
+func TruncateToolResultSpilled(s string, maxChars int, path string) string {
+	return cutKeepingFrame(s, maxChars, func(s string, n int) string {
+		return truncateMiddleNote(s, n, "; full text: "+path+" (read with offset/limit)")
+	})
+}
+
 // truncateHeadShare is the fraction of the budget kept from the start; the
 // rest goes to the tail (matching bash's 25/75 split).
 const truncateHeadShare = 4
 
-func truncateMiddle(s string, maxChars int) string {
-	notice := fmt.Sprintf("\n…(truncated: %d chars elided from the middle; head and tail kept)…\n", len(s)-maxChars)
+func truncateMiddle(s string, maxChars int) string { return truncateMiddleNote(s, maxChars, "") }
+
+func truncateMiddleNote(s string, maxChars int, extra string) string {
+	notice := fmt.Sprintf("\n…(truncated: %d chars elided from the middle; head and tail kept%s)…\n", len(s)-maxChars, extra)
 	room := maxChars - len(notice)
 	// Too small for a useful head+tail: fall back to a plain head cut.
 	if room < 200 {

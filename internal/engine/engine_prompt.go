@@ -151,6 +151,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		maxToolRes = e.opt.MaxToolResultChars
 	}
 	chat := e.chat
+	spillDir := e.scratchDir
 	tools := append([]agent.Tool(nil), e.tools...)
 	prior := e.prior
 	hooks := e.hooks
@@ -338,6 +339,7 @@ func (e *Engine) PromptWith(ctx context.Context, text string, opt PromptOpts) (o
 		LastInputTokens:    lastIn,
 		Calib:              calib,
 		MaxToolResultChars: maxToolRes,
+		SpillDir:           spillDir,
 		MaxOutputTokens:    e.maxOutputTokens(),
 		OnPrefixDrift:      e.prefixDriftReporter(),
 		MaxParallelTools:   maxPar,

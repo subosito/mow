@@ -107,6 +107,10 @@ type Options struct {
 	Calib *RatioCalibrator
 	// MaxToolResultChars caps each tool result in history (0 = DefaultMaxToolResultChars).
 	MaxToolResultChars int
+	// SpillDir, when set, receives the full text of any tool result cut by
+	// the per-result cap; the elision notice names the file so the model can
+	// page through it with read. Must be inside the read jail. Empty = no spill.
+	SpillDir string
 	// OnPrefixDrift, when set, is called whenever an already-sent message
 	// changes between turns — the event that forces a provider to re-cache
 	// the prompt from that point on. Diagnostic only; the loop does not act

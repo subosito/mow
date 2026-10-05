@@ -170,7 +170,13 @@ func execOneTool(ctx context.Context, tc llm.ToolCall, byName map[string]Tool, o
 		if framed {
 			lim = max(lim-len(WrapUntrusted(opt.UntrustedNonce, name, ""))-len(truncatedMarker)-1, 1)
 		}
-		s = TruncateToolResult(s, lim)
+		if len(s) > lim {
+			if path := spillToolResult(opt.SpillDir, name, s); path != "" {
+				s = TruncateToolResultSpilled(s, lim, path)
+			} else {
+				s = TruncateToolResult(s, lim)
+			}
+		}
 		if framed && s != "" {
 			return WrapUntrusted(opt.UntrustedNonce, name, s)
 		}
