@@ -24,6 +24,9 @@ type responsesReq struct {
 	// store:false keeps the harness stateless (sessions own history).
 	Store           *bool `json:"store,omitempty"`
 	MaxOutputTokens int   `json:"max_output_tokens,omitempty"`
+	// Include asks for reasoning.encrypted_content so reasoning survives
+	// between steps under store:false (replayed from client-held history).
+	Include []string `json:"include,omitempty"`
 }
 
 // responsesContentPart is one content part inside a message output item.
@@ -43,6 +46,22 @@ type responsesOutputItem struct {
 	// function_call may also use id as item id; call_id is what we replay.
 	ID      string                 `json:"id,omitempty"`
 	Content []responsesContentPart `json:"content,omitempty"`
+	// EncryptedContent is set on reasoning items when include asked for it.
+	EncryptedContent string `json:"encrypted_content,omitempty"`
+	// raw is the item exactly as received, replayed verbatim for reasoning.
+	raw json.RawMessage
+}
+
+// UnmarshalJSON keeps the raw bytes so reasoning items replay verbatim.
+func (it *responsesOutputItem) UnmarshalJSON(b []byte) error {
+	type plain responsesOutputItem
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	*it = responsesOutputItem(p)
+	it.raw = append(json.RawMessage(nil), b...)
+	return nil
 }
 
 // responsesAPIResponse is the non-stream Responses object we care about.
@@ -76,7 +95,11 @@ func responsesURL(baseURL string) string {
 // toResponsesInput maps mow history to Responses input items + instructions.
 // System turns become top-level instructions; assistant tool_calls become
 // function_call items; tool results become function_call_output.
-func toResponsesInput(messages []Message) (instructions string, input []map[string]any) {
+//
+// model is the request model: reasoning items are replayed only to the model
+// that produced them (encrypted reasoning is model-bound), and only then are
+// function_call item ids sent, since the provider pairs them with reasoning.
+func toResponsesInput(messages []Message, model string) (instructions string, input []map[string]any) {
 	for _, m := range messages {
 		switch m.Role {
 		case "system":
@@ -108,6 +131,18 @@ func toResponsesInput(messages []Message) (instructions string, input []map[stri
 				"content": content,
 			})
 		case "assistant":
+			replay := false
+			for _, r := range m.Reasoning {
+				if r.Model != model || len(r.Item) == 0 {
+					continue
+				}
+				var item map[string]any
+				if json.Unmarshal(r.Item, &item) != nil || item["type"] != "reasoning" {
+					continue
+				}
+				input = append(input, item)
+				replay = true
+			}
 			if m.Content != "" {
 				input = append(input, map[string]any{
 					"role":    "assistant",
@@ -123,12 +158,16 @@ func toResponsesInput(messages []Message) (instructions string, input []map[stri
 				if callID == "" {
 					callID = "call_" + tc.Function.Name
 				}
-				input = append(input, map[string]any{
+				call := map[string]any{
 					"type":      "function_call",
 					"call_id":   callID,
 					"name":      tc.Function.Name,
 					"arguments": args,
-				})
+				}
+				if replay && tc.ItemID != "" {
+					call["id"] = tc.ItemID
+				}
+				input = append(input, call)
 			}
 			// Pure-empty assistant (no content, no tools) is a no-op.
 		case "tool":
@@ -188,14 +227,15 @@ func toResponsesTools(tools []ToolSpec) []map[string]any {
 }
 
 func (c *Client) buildResponsesBody(messages []Message, tools []ToolSpec, stream bool) responsesReq {
-	instructions, input := toResponsesInput(messages)
+	model := c.requestModel()
+	instructions, input := toResponsesInput(messages, model)
 	// Empty input is invalid; providers need at least one user turn.
 	if len(input) == 0 {
 		input = []map[string]any{{"role": "user", "content": ""}}
 	}
 	storeFalse := false
 	body := responsesReq{
-		Model:        c.requestModel(),
+		Model:        model,
 		Input:        input,
 		Instructions: instructions,
 		Tools:        toResponsesTools(tools),
@@ -204,6 +244,12 @@ func (c *Client) buildResponsesBody(messages []Message, tools []ToolSpec, stream
 	}
 	if c.MaxTokens > 0 {
 		body.MaxOutputTokens = c.MaxTokens
+	}
+	// Reasoning on: ask for the encrypted reasoning so it can be replayed
+	// (store:false keeps nothing server-side). Not sent otherwise: some
+	// non-reasoning models and gateways reject the include.
+	if ResolveEffort(c.Model, c.Wire, c.Effort, c.modelEfforts()).ReasoningEffort != "" {
+		body.Include = []string{"reasoning.encrypted_content"}
 	}
 	return body
 }
@@ -234,16 +280,24 @@ func messageFromResponses(parsed responsesAPIResponse) Message {
 			if id == "" {
 				continue
 			}
-			msg.ToolCalls = append(msg.ToolCalls, ToolCall{
+			tc := ToolCall{
 				ID:   id,
 				Type: "function",
 				Function: FunctionCall{
 					Name:      item.Name,
 					Arguments: args,
 				},
-			})
+			}
+			if item.CallID != "" && item.ID != "" && item.ID != item.CallID {
+				tc.ItemID = item.ID
+			}
+			msg.ToolCalls = append(msg.ToolCalls, tc)
 		case "reasoning":
-			// UI-only in stream path; non-stream we ignore (no history leak).
+			// Kept for replay only when encrypted (store:false has no server
+			// copy to refer to). Never shown or put into Content.
+			if item.EncryptedContent != "" && len(item.raw) > 0 {
+				msg.Reasoning = append(msg.Reasoning, ReasoningItem{Item: item.raw})
+			}
 		default:
 			if isProviderToolCallItem(item.Type) {
 				// Provider-executed tool call (web_search_call,
@@ -333,11 +387,14 @@ func (c *Client) chatOpenAIResponses(ctx context.Context, messages []Message, to
 	if parsed.Status == "failed" {
 		return Message{}, fmt.Errorf("llm: response failed")
 	}
-	return messageFromResponses(parsed), nil
+	msg := messageFromResponses(parsed)
+	tagReasoning(&msg, c.requestModel())
+	return msg, nil
 }
 
 type responsesToolAcc struct {
 	callID, name string
+	itemID       string // fc_… item id, replayed with reasoning
 	// args accumulates streamed argument fragments; `args += delta` per SSE
 	// event is O(n^2) copying for a large tool call.
 	args strings.Builder
@@ -463,14 +520,16 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 			args = "{}"
 		}
 		msg.ToolCalls = append(msg.ToolCalls, ToolCall{
-			ID:   a.callID,
-			Type: "function",
+			ID:     a.callID,
+			ItemID: a.itemID,
+			Type:   "function",
 			Function: FunctionCall{
 				Name:      a.name,
 				Arguments: args,
 			},
 		})
 	}
+	tagReasoning(&msg, c.requestModel())
 	if msg.StopReason == "" {
 		if len(msg.ToolCalls) > 0 {
 			msg.StopReason = "tool_calls"
@@ -574,6 +633,22 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 			})
 			return nil
 		}
+		if ev.Item.Type == "reasoning" {
+			// Keep the finished item for replay when it carries encrypted
+			// reasoning; the summary text already went to OnReasoning.
+			if typ == "response.output_item.done" {
+				var raw struct {
+					Item json.RawMessage `json:"item"`
+				}
+				var enc struct {
+					EncryptedContent string `json:"encrypted_content"`
+				}
+				if json.Unmarshal([]byte(data), &raw) == nil && json.Unmarshal(raw.Item, &enc) == nil && enc.EncryptedContent != "" {
+					msg.Reasoning = append(msg.Reasoning, ReasoningItem{Item: raw.Item})
+				}
+			}
+			return nil
+		}
 		if ev.Item.Type != "function_call" {
 			return nil
 		}
@@ -587,6 +662,9 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 		}
 		if ev.Item.CallID != "" {
 			a.callID = ev.Item.CallID
+			if ev.Item.ID != "" && ev.Item.ID != ev.Item.CallID {
+				a.itemID = ev.Item.ID
+			}
 		}
 		if a.callID == "" && ev.Item.ID != "" {
 			a.callID = ev.Item.ID
@@ -658,6 +736,11 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 		if full.StopReason != "" {
 			msg.StopReason = full.StopReason
 		}
+		// Gateways that skip output_item events still send the reasoning
+		// items in the completed envelope.
+		if len(msg.Reasoning) == 0 && len(full.Reasoning) > 0 {
+			msg.Reasoning = full.Reasoning
+		}
 		// If stream deltas were empty but completed carries full text/tools
 		// (some gateways batch), fill gaps without duplicating.
 		if content.Len() == 0 && full.Content != "" {
@@ -671,6 +754,7 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 				a := &responsesToolAcc{
 					callID: tc.ID,
 					name:   tc.Function.Name,
+					itemID: tc.ItemID,
 				}
 				a.args.WriteString(tc.Function.Arguments)
 				toolsByIdx[i] = a
@@ -699,4 +783,12 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 		return fmt.Errorf("llm: response failed")
 	}
 	return nil
+}
+
+// tagReasoning records the request model on each reasoning item: encrypted
+// reasoning may only be replayed to the model that produced it.
+func tagReasoning(msg *Message, model string) {
+	for i := range msg.Reasoning {
+		msg.Reasoning[i].Model = model
+	}
 }

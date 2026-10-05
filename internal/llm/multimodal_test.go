@@ -25,7 +25,7 @@ func TestMultimodalPartsReachProviderWires(t *testing.T) {
 			t.Fatalf("anthropic missing %q: %s", want, text)
 		}
 	}
-	_, responses := toResponsesInput([]Message{msg})
+	_, responses := toResponsesInput([]Message{msg}, "")
 	raw, _ = json.Marshal(responses[0])
 	text = string(raw)
 	for _, want := range []string{"input_image", "input_audio", "data:image/png;base64,aW1hZ2U="} {

@@ -52,6 +52,19 @@ type Message struct {
 	// loop would try to execute tools it does not have. Reporting only —
 	// response-only, never sent on the wire, never replayed.
 	ProviderCalls []ProviderCall `json:"-"`
+	// Reasoning holds provider reasoning items that must be replayed with
+	// this assistant turn (OpenAI Responses with store:false: id plus
+	// encrypted_content). Persisted with the session so resume keeps them;
+	// ignored by wires that have no such items.
+	Reasoning []ReasoningItem `json:"reasoning,omitempty"`
+}
+
+// ReasoningItem is one opaque provider reasoning item. Item is the raw wire
+// object; Model is the request model that produced it, since encrypted
+// reasoning may only be replayed to the same model.
+type ReasoningItem struct {
+	Model string          `json:"model"`
+	Item  json.RawMessage `json:"item"`
 }
 
 // openAIMessage is the chat/completions wire shape. Content is always a JSON
@@ -184,6 +197,10 @@ type ToolCall struct {
 	// be echoed when replaying that call in later turns. Empty on most
 	// providers; omitempty keeps ordinary payloads clean.
 	ThoughtSignature string `json:"thought_signature,omitempty"`
+	// ItemID is the Responses function_call item id (fc_…), distinct from
+	// the call_id in ID. Replayed only together with the turn's reasoning
+	// items, which the provider pairs with it.
+	ItemID string `json:"item_id,omitempty"`
 }
 
 // FunctionCall holds name + JSON arguments string.

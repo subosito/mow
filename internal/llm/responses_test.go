@@ -38,7 +38,7 @@ func TestToResponsesInputToolLoop(t *testing.T) {
 		{Role: "tool", ToolCallID: "call_1", Name: "read", Content: "package a"},
 		{Role: "assistant", Content: "done"},
 	}
-	instructions, items := toResponsesInput(in)
+	instructions, items := toResponsesInput(in, "")
 	if instructions != "sys" {
 		t.Fatalf("instructions=%q", instructions)
 	}
@@ -520,7 +520,7 @@ func TestProviderCallsNotSerializedOutbound(t *testing.T) {
 	}
 
 	// Responses wire: only content may survive.
-	_, items := toResponsesInput([]Message{msg})
+	_, items := toResponsesInput([]Message{msg}, "")
 	if len(items) != 1 {
 		t.Fatalf("items=%+v want 1", items)
 	}
