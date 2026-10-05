@@ -145,6 +145,17 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 			})
 		}
 	}
+	if !opt.DisableExtensionHooks {
+		for _, fn := range ext.BeforeFinishHooksForEngine(loadUser) {
+			h.BeforeFinish = append(h.BeforeFinish, func(ctx context.Context, e agent.BeforeFinishEvent) (agent.BeforeFinishDecision, error) {
+				d, err := fn(ctx, ext.BeforeFinishEvent{AssistantText: e.AssistantText, Continuations: e.Continuations})
+				if err != nil {
+					return agent.BeforeFinishDecision{}, err
+				}
+				return agent.BeforeFinishDecision{Continue: d.Continue}, nil
+			})
+		}
+	}
 	for _, fn := range hooks.OnAfterTurn {
 		h.AfterTurn = append(h.AfterTurn, func(ctx context.Context, e agent.AfterTurnEvent) {
 			fn(ctx, AfterTurnEvent{AssistantText: e.AssistantText, HasToolCalls: e.HasToolCalls})

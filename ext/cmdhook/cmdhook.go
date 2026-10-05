@@ -658,8 +658,29 @@ func (b *bridge) register() {
 		})
 	}
 	if len(b.events["Stop"]) > 0 {
-		ext.RegisterStopSource(hookSource, func(ctx context.Context, e ext.StopEvent) {
+		// Claude's Stop contract: decision "block" (with a reason) or
+		// additionalContext keeps the agent going. The loop caps consecutive
+		// continuations (agent.MaxFinishContinuations), mirroring Claude's 8.
+		ext.RegisterBeforeFinishSource(hookSource, func(ctx context.Context, e ext.BeforeFinishEvent) (ext.BeforeFinishDecision, error) {
 			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+				return ext.BeforeFinishDecision{}, nil
+			}
+			payload := b.basePayload(ctx, "Stop")
+			payload["stop_hook_active"] = e.Continuations > 0
+			payload["last_assistant_message"] = e.AssistantText
+			out := b.run(ctx, "Stop", "", payload)
+			var parts []string
+			if out.blocked && strings.TrimSpace(out.reason) != "" {
+				parts = append(parts, "Stop hook feedback: "+out.reason)
+			}
+			parts = append(parts, out.contexts...)
+			return ext.BeforeFinishDecision{Continue: strings.Join(parts, "\n\n")}, nil
+		})
+		// A Run that ends with an error never reaches the before-finish
+		// seam; fire Stop for it here (observe-only) so the hook still runs
+		// once per prompt. Successful runs were handled above.
+		ext.RegisterStopSource(hookSource, func(ctx context.Context, e ext.StopEvent) {
+			if e.Err == nil || !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return
 			}
 			payload := b.basePayload(ctx, "Stop")

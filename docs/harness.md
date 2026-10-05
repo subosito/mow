@@ -483,7 +483,7 @@ completion from genuine mid-response cancellation when recording status 499.
 |------|-----------|
 | Config-only | yaml, env, skills markdown |
 | Tool extension | `ext.RegisterTool` in `init` (blank-import) |
-| Hooks | `RegisterPreTool` / `PostTool` / `UserPrompt` / `SessionStart` / `PreCompact` / `AfterTurn` / `Stop` |
+| Hooks | `RegisterPreTool` / `PostTool` / `UserPrompt` / `SessionStart` / `PreCompact` / `AfterTurn` / `BeforeFinish` (may keep the run going; capped at 8 in a row) / `Stop` |
 | CLI extension | `ext.RegisterCommand` + blank-import in the host binary |
 | Pre-New setup | `ext.RegisterBeforeNewContext` (register config-driven tools with resolved authority) |
 | Custom binary | `mow.New` + choose which extensions to import |

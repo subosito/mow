@@ -28,7 +28,15 @@ Hooks inherit the rest of the environment, minus credentials: `MOW_API_KEY`,
 the hook runs (same rule as the bash tool). Plugin hooks are third-party shell
 snippets; they should not be handed the key mow authenticates with.
 
-Supported hook events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`, `PreCompact`. Tool names are translated to Claude conventions for matchers (`read` → `Read`, `mcp_srv_x` → `mcp__srv_x`). A PreToolUse `permissionDecision` of `"ask"` is treated as deny.
+Supported hook events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`, `PreCompact`. Tool names are translated to Claude conventions for matchers (`read` → `Read`, `mcp_srv_x` → `mcp__srv_x`).
+
+- **Decisions:** a PreToolUse `permissionDecision` of `"ask"` or `"defer"` is treated as deny. mow has no interactive prompt and cannot resume a deferred call.
+- **Plain stdout** (not a JSON object) is added as model context only on `UserPromptSubmit` and `SessionStart`, as in Claude Code. On other events it is ignored (debug log), so a hook that prints cannot put text into tool results. Use `hookSpecificOutput.additionalContext` for context on tool events.
+- **Stop hooks can keep the agent going:**
+  - **Inputs:** they receive `last_assistant_message` and `stop_hook_active`, which is true once a Stop hook has already continued the turn.
+  - **Continuing:** returning `{"decision":"block","reason":"…"}`, `hookSpecificOutput.additionalContext`, or exit 2 with a stderr reason sends that text to the model and the run continues.
+  - **Cap:** at most 8 continuations in a row.
+  - **Errors:** a run that ends in an error still fires Stop, observe-only.
 
 Default is **fail-open** on timeout / non-2 exit (warn only). Hook stdout/stderr are capped (~64 KiB); diagnostics redact common secrets.
 

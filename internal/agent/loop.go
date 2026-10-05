@@ -242,8 +242,11 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 		// truncatedBatches counts consecutive turns where the provider cut
 		// the tool-call arguments at its output limit.
 		truncatedBatches int
-		drift            prefixTracker
-		driftSum         driftSummary
+		// finishContinuations counts consecutive before-finish continuations.
+		// It resets when the model makes progress with tool calls.
+		finishContinuations int
+		drift               prefixTracker
+		driftSum            driftSummary
 		// overflowRetries counts forced compactions after the provider
 		// rejected a request as over its context window.
 		overflowRetries int
@@ -451,8 +454,17 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			if text == "" && msg.Truncated() {
 				return res, fmt.Errorf("%w: provider stopped at the token limit with no answer (raise llm.max_tokens)", ErrTruncated)
 			}
+			if cont, err := beforeFinish(ctx, opt.Hooks.BeforeFinish, text, finishContinuations); err != nil {
+				return res, err
+			} else if cont != "" {
+				finishContinuations++
+				messages = append(messages, llm.Message{Role: "user", Content: cont, Synthetic: true})
+				continue
+			}
 			return res, nil
 		}
+
+		finishContinuations = 0
 
 		// The provider hit its output limit while emitting this batch, so the
 		// last call's arguments are cut mid-value. Syntactically broken JSON

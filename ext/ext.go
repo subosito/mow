@@ -166,6 +166,25 @@ type AfterTurnDecision struct {
 // publicly and must not break external observers.
 type AfterTurnDecisionFunc func(ctx context.Context, e AfterTurnEvent) (AfterTurnDecision, error)
 
+// BeforeFinishEvent is emitted when the model gives a final answer (no tool
+// calls), before the Run returns it. Continuations counts how many times
+// before-finish hooks already kept this Run going in a row.
+type BeforeFinishEvent struct {
+	AssistantText string
+	Continuations int
+}
+
+// BeforeFinishDecision may keep the Run going: a non-empty Continue is
+// injected as a synthetic user message and the loop calls the model again.
+// The loop caps consecutive continuations, so a hook cannot loop forever.
+type BeforeFinishDecision struct {
+	Continue string
+}
+
+// BeforeFinishFunc runs before the final answer is returned. Returning an
+// error aborts the Run.
+type BeforeFinishFunc func(ctx context.Context, e BeforeFinishEvent) (BeforeFinishDecision, error)
+
 // StopEvent is emitted when Prompt returns (success or error).
 type StopEvent struct {
 	Text      string
@@ -233,6 +252,7 @@ var (
 	preModel         []hookEntry[PreModelFunc]
 	afterTurn        []hookEntry[AfterTurnFunc]
 	afterTurnDecide  []hookEntry[AfterTurnDecisionFunc]
+	beforeFinish     []hookEntry[BeforeFinishFunc]
 	stop             []hookEntry[StopFunc]
 	sysSegments      []hookEntry[SystemSegmentFunc]
 
@@ -362,6 +382,7 @@ func ClearHookSource(source string) {
 	preModel = filterHookSource(preModel, source)
 	afterTurn = filterHookSource(afterTurn, source)
 	afterTurnDecide = filterHookSource(afterTurnDecide, source)
+	beforeFinish = filterHookSource(beforeFinish, source)
 	stop = filterHookSource(stop, source)
 	sysSegments = filterHookSource(sysSegments, source)
 }
@@ -645,6 +666,16 @@ func RegisterAfterTurnDecisionSource(source string, fn AfterTurnDecisionFunc) {
 	afterTurnDecide = append(afterTurnDecide, hookEntry[AfterTurnDecisionFunc]{fn: fn, gen: currentRegGen(), source: source})
 }
 
+// RegisterBeforeFinishSource appends a before-finish hook with a pack source id.
+func RegisterBeforeFinishSource(source string, fn BeforeFinishFunc) {
+	if fn == nil {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	beforeFinish = append(beforeFinish, hookEntry[BeforeFinishFunc]{fn: fn, gen: currentRegGen(), source: source})
+}
+
 // RegisterStop appends a global stop hook (after Prompt finishes).
 func RegisterStop(fn StopFunc) { RegisterStopSource("", fn) }
 
@@ -831,6 +862,13 @@ func AfterTurnDecisionHooksForEngine(loadUserConfig bool) []AfterTurnDecisionFun
 	mu.Lock()
 	defer mu.Unlock()
 	return collectHooks(afterTurnDecide, loadUserConfig, true)
+}
+
+// BeforeFinishHooksForEngine is the Engine-scoped filter for before-finish hooks.
+func BeforeFinishHooksForEngine(loadUserConfig bool) []BeforeFinishFunc {
+	mu.Lock()
+	defer mu.Unlock()
+	return collectHooks(beforeFinish, loadUserConfig, true)
 }
 
 // StopHooks returns every registered stop hook.
@@ -1111,6 +1149,7 @@ func BeginSetup(ctx SetupContext) (release func(), err error) {
 		preModel = filterHookGeneration(preModel, gen)
 		afterTurn = filterHookGeneration(afterTurn, gen)
 		afterTurnDecide = filterHookGeneration(afterTurnDecide, gen)
+		beforeFinish = filterHookGeneration(beforeFinish, gen)
 		stop = filterHookGeneration(stop, gen)
 		sysSegments = filterHookGeneration(sysSegments, gen)
 		extInstances = instancesBefore
@@ -1142,6 +1181,7 @@ func Reset() {
 	preModel = nil
 	afterTurn = nil
 	afterTurnDecide = nil
+	beforeFinish = nil
 	stop = nil
 	sysSegments = nil
 	extInstances = nil

@@ -560,14 +560,34 @@ func driveAllEvents(t *testing.T, root string) {
 		}
 	}
 
-	// Stop: fire-and-forget; verify the command ran. Also an empty session id.
+	// Stop on a successful run fires through the before-finish seam; a
+	// silent hook lets the agent finish.
 	stopMarker := filepath.Join(root, "stop-ran")
-	for _, fn := range ext.StopHooks() {
-		fn(ctx, ext.StopEvent{SessionID: "s1"})
-		fn(ctx, ext.StopEvent{})
+	for _, fn := range ext.BeforeFinishHooksForEngine(true) {
+		d, err := fn(ctx, ext.BeforeFinishEvent{AssistantText: "done"})
+		if err != nil || d.Continue != "" {
+			t.Fatalf("silent Stop hook: %+v err=%v", d, err)
+		}
 	}
 	if _, err := os.Stat(stopMarker); err != nil {
 		t.Fatalf("Stop hook did not run: %v", err)
+	}
+	// A run that ended in error fires Stop (observe-only) via the stop
+	// hooks instead; a successful run does not fire it a second time.
+	if err := os.Remove(stopMarker); err != nil {
+		t.Fatal(err)
+	}
+	for _, fn := range ext.StopHooks() {
+		fn(ctx, ext.StopEvent{SessionID: "s1"})
+	}
+	if _, err := os.Stat(stopMarker); err == nil {
+		t.Fatal("Stop fired twice for a successful run")
+	}
+	for _, fn := range ext.StopHooks() {
+		fn(ctx, ext.StopEvent{Err: context.Canceled})
+	}
+	if _, err := os.Stat(stopMarker); err != nil {
+		t.Fatalf("Stop hook did not run for a failed run: %v", err)
 	}
 
 	// PreCompact: runs the command, returns an empty decision.

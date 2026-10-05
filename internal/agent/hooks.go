@@ -121,6 +121,30 @@ type AfterTurnDecision struct {
 // Returning an error aborts the whole Run.
 type AfterTurnDecisionFunc func(ctx context.Context, e AfterTurnEvent) (AfterTurnDecision, error)
 
+// BeforeFinishEvent is emitted when the model answers without tool calls,
+// before the Run returns. Continuations counts consecutive continuations
+// already granted in this Run.
+type BeforeFinishEvent struct {
+	AssistantText string
+	Continuations int
+}
+
+// BeforeFinishDecision keeps the Run going when Continue is non-empty: the
+// text is injected as a synthetic user message and the model is called again.
+type BeforeFinishDecision struct {
+	Continue string
+}
+
+// BeforeFinishFunc runs before a final answer is returned. Returning an error
+// aborts the Run. The loop stops consulting these hooks after
+// MaxFinishContinuations consecutive continuations.
+type BeforeFinishFunc func(ctx context.Context, e BeforeFinishEvent) (BeforeFinishDecision, error)
+
+// MaxFinishContinuations caps consecutive before-finish continuations so a
+// hook that always objects cannot keep a Run alive forever (Claude Code's
+// Stop-hook cap is the same 8).
+const MaxFinishContinuations = 8
+
 // PreModelEvent is emitted immediately before each LLM call.
 //
 // This is the loop's only gate on the model call itself. Tools have had
@@ -177,4 +201,7 @@ type Hooks struct {
 	AfterTurn    []AfterTurnFunc
 	// AfterTurnDecide runs after AfterTurn observers and may inject text.
 	AfterTurnDecide []AfterTurnDecisionFunc
+	// BeforeFinish runs when the model gives a final answer and may keep the
+	// Run going (bounded by MaxFinishContinuations).
+	BeforeFinish []BeforeFinishFunc
 }
