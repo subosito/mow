@@ -9,7 +9,11 @@
 // JSON on stdout, exit code 2 = block with stderr as the reason.
 //
 // Supported events: PreToolUse, PostToolUse, UserPromptSubmit, SessionStart,
-// Stop, PreCompact. Tool names are translated to Claude conventions for
+// Stop, PreCompact. A Stop hook's decision "block" (with reason) or
+// additionalContext keeps the agent going, capped at 8 continuations in a row.
+// Plain (non-JSON) stdout is model context only on UserPromptSubmit and
+// SessionStart. permissionDecision "defer" denies: mow cannot resume deferred
+// calls. Tool names are translated to Claude conventions for
 // matchers and payloads (read → Read, mcp_srv_x → mcp__srv_x). A PreToolUse
 // permissionDecision of "ask" is treated as deny — mow's engine has no
 // interactive prompt; hosts with approval UIs gate power tools themselves.
@@ -255,6 +259,14 @@ func (b *bridge) run(ctx context.Context, event, matchName string, payload map[s
 				if out.reason == "" {
 					out.reason = firstNonEmpty(hs.PermissionDecisionReason, "denied by cmdhook")
 				}
+			case "defer":
+				// Claude pauses the session so an outside process can resume
+				// the call later. mow has no deferred resume, so the call must
+				// not run now: deny it and say why.
+				out.blocked = true
+				if out.reason == "" {
+					out.reason = firstNonEmpty(hs.PermissionDecisionReason, "deferred by hook") + " (mow cannot resume deferred tool calls)"
+				}
 			}
 			if ho.Decision == "block" {
 				out.blocked = true
@@ -381,11 +393,25 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 		return ho, false, "", true
 	}
 	if err := json.Unmarshal(body, &ho); err != nil {
-		// Plain-text stdout on some events is additional context in Claude;
-		// treat it the same way. Cap is already enforced by cappedBuffer.
-		ho.HookSpecificOutput.AdditionalContext = string(body)
+		// Plain-text stdout reaches the model only on the events where Claude
+		// Code adds it as context. Elsewhere (tool events, Stop, PreCompact)
+		// it is debug output: injecting it would let any hook that prints
+		// put text into tool results.
+		event, _ := payload["hook_event_name"].(string)
+		if plainTextIsContext(event) {
+			ho.HookSpecificOutput.AdditionalContext = string(body)
+		} else {
+			slog.Debug("cmdhook: plain stdout ignored", "event", event, "bytes", len(body))
+		}
 	}
 	return ho, false, "", true
+}
+
+// plainTextIsContext reports whether non-JSON stdout is model context for
+// event (Claude Code: UserPromptSubmit and SessionStart among the events
+// cmdhook emits).
+func plainTextIsContext(event string) bool {
+	return event == "UserPromptSubmit" || event == "SessionStart"
 }
 
 // cappedBuffer retains at most max bytes while still accepting all writes so

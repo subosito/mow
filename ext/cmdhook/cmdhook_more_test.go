@@ -145,6 +145,7 @@ func TestRunDecisionVariants(t *testing.T) {
 		blocked    bool
 		reasonHas  string
 		contextHas string
+		noContext  bool
 	}{
 		{
 			name:      "decision-block-with-reason",
@@ -198,10 +199,12 @@ func TestRunDecisionVariants(t *testing.T) {
 			blocked: false,
 		},
 		{
-			name:       "plain-text-stdout-is-context",
-			script:     `echo "hello plain"`,
-			blocked:    false,
-			contextHas: "hello plain",
+			// Plain stdout on a tool event is debug output, never context
+			// (Claude Code: context only on UserPromptSubmit/SessionStart).
+			name:      "plain-text-stdout-is-not-context-on-tool-event",
+			script:    `echo "hello plain"`,
+			blocked:   false,
+			noContext: true,
 		},
 		{
 			name:    "empty-stdout-is-noop",
@@ -237,6 +240,9 @@ func TestRunDecisionVariants(t *testing.T) {
 				if len(out.contexts) != 1 || !strings.Contains(out.contexts[0], tc.contextHas) {
 					t.Fatalf("contexts=%v", out.contexts)
 				}
+			}
+			if tc.noContext && len(out.contexts) != 0 {
+				t.Fatalf("plain stdout became context: %v", out.contexts)
 			}
 		})
 	}
@@ -279,7 +285,8 @@ func TestRunCompositionAndOrdering(t *testing.T) {
 	if !out.blocked || out.reason != "reason-A" {
 		t.Fatalf("ordering: %+v", out)
 	}
-	if len(out.contexts) != 1 || out.contexts[0] != "plain" {
+	// third.sh prints plain text: on a tool event that is not context.
+	if len(out.contexts) != 0 {
 		t.Fatalf("matcher-mid contexts: %+v", out)
 	}
 }
@@ -358,7 +365,7 @@ func TestClaudePluginRootAndEnv(t *testing.T) {
 	// Both the literal ${CLAUDE_PLUGIN_ROOT} substitution and the env vars
 	// must resolve to the plugin root / project dir. CLAUDE_CONFIG_DIR
 	// defaults to $MOW_HOME when the process did not set it.
-	sh := scriptAt(t, root, "env.sh", `printf '%s|%s|%s|%s' "${CLAUDE_PLUGIN_ROOT}" "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PROJECT_DIR" "$CLAUDE_CONFIG_DIR"`)
+	sh := scriptAt(t, root, "env.sh", `printf '{"hookSpecificOutput":{"additionalContext":"%s|%s|%s|%s"}}' "${CLAUDE_PLUGIN_ROOT}" "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PROJECT_DIR" "$CLAUDE_CONFIG_DIR"`)
 	writeHooksJSON(t, root, oneEntry("", sh+" "+`'`+`dummy`+`'`)) // silence unused
 	writeHooksJSON(t, root, oneEntry("", sh))
 	b := mustLoad(t, PluginConfig{Root: root})
@@ -833,7 +840,8 @@ func TestClaudePluginRootExpandedByShell(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	scriptAt(t, root, "env.sh", `printf '%s' "$CLAUDE_PLUGIN_ROOT"`)
+	// JSON output: plain stdout is not model context on tool events.
+	scriptAt(t, root, "env.sh", `printf '{"hookSpecificOutput":{"additionalContext":"%s"}}' "$CLAUDE_PLUGIN_ROOT"`)
 	writeHooksJSON(t, root, oneEntry("", `\"${CLAUDE_PLUGIN_ROOT}/env.sh\"`))
 	b := mustLoad(t, PluginConfig{Root: root})
 	out := b.run(t.Context(), "PreToolUse", "Bash", map[string]any{"cwd": root})
