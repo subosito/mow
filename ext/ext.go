@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Tool is a host-executed function (same shape as mow.Tool).
@@ -42,6 +43,9 @@ type PreToolDecision struct {
 	Args              json.RawMessage
 	RewriteArgs       bool
 	AdditionalContext string
+	// Halt denies this call and ends the run cleanly after the current
+	// batch (Claude Code's continue:false). Implies Deny.
+	Halt bool
 }
 
 // PreToolFunc runs before each tool call. Returning error aborts the Prompt.
@@ -55,6 +59,8 @@ type PostToolEvent struct {
 	Result     string
 	Denied     bool
 	ExecErr    error
+	// Duration is wall time for this tool (hooks + Exec), when measured.
+	Duration time.Duration
 }
 
 // PostToolDecision may replace the tool result string shown to the model.
@@ -89,6 +95,8 @@ type SessionStartEvent struct {
 	SessionID string
 	Model     string
 	System    string
+	// Resumed is true when the Engine loaded prior history for SessionID.
+	Resumed bool
 }
 
 // SessionStartDecision may append system text for this Engine lifetime.

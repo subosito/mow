@@ -847,6 +847,7 @@ func New(opt Options) (*Engine, error) {
 			SessionID: e.sid,
 			Model:     e.cfg.LLM.Model,
 			System:    e.sys,
+			Resumed:   len(e.prior) > 0,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("session start hook: %w", err)

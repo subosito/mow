@@ -314,7 +314,7 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 	start := time.Now()
 
 	var extra string
-	denied := false
+	denied, halt := false, false
 	denyMsg := ""
 
 	for _, h := range hooks.PreTool {
@@ -333,6 +333,10 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 				extra += "\n"
 			}
 			extra += d.AdditionalContext
+		}
+		if d.Halt {
+			halt = true
+			d.Deny = true
 		}
 		if d.Deny {
 			denied = true
@@ -396,7 +400,7 @@ func runTool(ctx context.Context, tool Tool, name, callID string, args json.RawM
 			out = d.Result
 		}
 	}
-	if errors.Is(execErr, ErrDone) {
+	if errors.Is(execErr, ErrDone) || halt {
 		return out, ErrDone
 	}
 	return out, nil

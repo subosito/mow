@@ -28,7 +28,7 @@ Hooks inherit the rest of the environment, minus credentials: `MOW_API_KEY`,
 the hook runs (same rule as the bash tool). Plugin hooks are third-party shell
 snippets; they should not be handed the key mow authenticates with.
 
-Supported hook events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`, `PreCompact`. Tool names are translated to Claude conventions for matchers (`read` → `Read`, `mcp_srv_x` → `mcp__srv_x`).
+Supported hook events: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `SessionStart`, `Stop`, `StopFailure`, `PreCompact`. Other events, non-`command` handler types (`http`, `prompt`, `agent`, `mcp_tool`) and Claude mod `modules` are skipped **with a message** on stderr naming them. Tool names are translated to Claude conventions for matchers (`read` → `Read`, `mcp_srv_x` → `mcp__srv_x`).
 
 - **Decisions:** a PreToolUse `permissionDecision` of `"ask"` or `"defer"` is treated as deny. mow has no interactive prompt and cannot resume a deferred call.
 - **Plain stdout** (not a JSON object) is added as model context only on `UserPromptSubmit` and `SessionStart`, as in Claude Code. On other events it is ignored (debug log), so a hook that prints cannot put text into tool results. Use `hookSpecificOutput.additionalContext` for context on tool events.
@@ -38,7 +38,16 @@ Supported hook events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Session
   - **Cap:** at most 8 continuations in a row.
   - **Errors:** a run that ends in an error still fires Stop, observe-only.
 
-Default is **fail-open** on timeout / non-2 exit (warn only). Hook stdout/stderr are capped (~64 KiB); diagnostics redact common secrets.
+**Claude's contract, as implemented:**
+- **Exit codes:** exit 2 blocks with stderr as the reason. On any other non-zero exit, a valid JSON object on stdout still decides; without one it is a non-blocking failure (`fail_closed` turns failures into blocks).
+- **`continue: false`** stops the run after the current batch (not just this call), with `stopReason` as the message.
+- **Timeouts:** defaults per event are 60 s for PreToolUse and Stop, 30 s for UserPromptSubmit, and 600 s otherwise. A plugin-wide or per-entry `timeout` overrides them. A timed-out hook gives **no decision** (logged, and policy still applies) unless the plugin is `fail_closed`.
+- **Payloads:**
+  - tool events carry `tool_use_id`;
+  - PostToolUse and PostToolUseFailure carry `duration_ms`;
+  - SessionStart reports `source: resume` when history was loaded;
+  - PreCompact `block` skips the automatic compaction.
+- **Caps:** `additionalContext` is capped at 10,000 characters per hook (head and tail kept). Hook stdout/stderr are capped (~64 KiB), and diagnostics redact common secrets.
 
 ## Docs
 

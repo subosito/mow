@@ -116,14 +116,18 @@ func TestLoadTimeoutConfig(t *testing.T) {
 	if err != nil || b == nil {
 		t.Fatal(err)
 	}
-	if b.timeout.Seconds() != 10 {
-		t.Fatalf("default timeout = %v", b.timeout)
+	// No plugin-wide timeout: per-event defaults (Claude Code's, with a
+	// 60 s PreToolUse gate per D-41).
+	for event, want := range map[string]float64{"PreToolUse": 60, "UserPromptSubmit": 30, "Stop": 60, "PostToolUse": 600, "SessionStart": 600} {
+		if got := b.timeoutFor(event).Seconds(); got != want {
+			t.Fatalf("default %s timeout = %vs want %vs", event, got, want)
+		}
 	}
 	b, err = load(PluginConfig{Root: root, TimeoutSec: 3})
 	if err != nil || b == nil {
 		t.Fatal(err)
 	}
-	if b.timeout.Seconds() != 3 {
+	if b.timeoutFor("PostToolUse").Seconds() != 3 {
 		t.Fatalf("configured timeout = %v", b.timeout)
 	}
 }

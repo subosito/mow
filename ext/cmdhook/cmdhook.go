@@ -26,10 +26,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -84,7 +86,21 @@ func hostPluginHooks(configPaths []string) []PluginConfig {
 
 type hooksFile struct {
 	Hooks map[string][]matcherEntry `json:"hooks"`
+	// Modules lists Claude Code mod entry points (JS). mow does not run
+	// them; they are only counted so the skip is reported, not silent.
+	Modules []string `json:"modules"`
 }
+
+// supportedEventList is the Claude hook events cmdhook bridges.
+var supportedEventList = []string{"PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "SessionStart", "Stop", "StopFailure", "PreCompact"}
+
+var supportedEvents = func() map[string]bool {
+	m := map[string]bool{}
+	for _, e := range supportedEventList {
+		m[e] = true
+	}
+	return m
+}()
 
 type matcherEntry struct {
 	Matcher string     `json:"matcher"`
@@ -173,16 +189,25 @@ func load(p PluginConfig) (*bridge, error) {
 	if err := json.Unmarshal(raw, &file); err != nil {
 		return nil, fmt.Errorf("cmdhook: %s: %w", hf, err)
 	}
-	timeout := time.Duration(p.TimeoutSec) * time.Second
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
+	// 0 = per-event defaults (defaultEventTimeout); a plugin-wide value
+	// overrides them, and an entry's own timeout overrides both.
+	timeout := max(time.Duration(p.TimeoutSec)*time.Second, 0)
 	b := &bridge{
 		name: p.Name, root: root, timeout: timeout, minTurns: p.MinTurns,
 		failClosed: p.FailClosed, events: map[string][]compiled{},
 	}
 	n := 0
+	skipped := map[string]int{} // unsupported handler types, by type
+	var unsupported []string
+	for event := range file.Hooks {
+		if !supportedEvents[event] {
+			unsupported = append(unsupported, event)
+		}
+	}
 	for event, entries := range file.Hooks {
+		if !supportedEvents[event] {
+			continue
+		}
 		for _, me := range entries {
 			var re *regexp.Regexp
 			if m := strings.TrimSpace(me.Matcher); m != "" {
@@ -195,6 +220,7 @@ func load(p PluginConfig) (*bridge, error) {
 			var cmds []cmdEntry
 			for _, ce := range me.Hooks {
 				if ce.Type != "" && ce.Type != "command" {
+					skipped[ce.Type]++
 					continue
 				}
 				if strings.TrimSpace(ce.Command) == "" {
@@ -208,6 +234,12 @@ func load(p PluginConfig) (*bridge, error) {
 			}
 		}
 	}
+	if len(skipped) > 0 || len(unsupported) > 0 || (len(file.Hooks) == 0 && len(file.Modules) > 0) {
+		slices.Sort(unsupported)
+		types := slices.Sorted(maps.Keys(skipped))
+		fmt.Fprintf(os.Stderr, "cmdhook: %q: skipped unsupported hooks (handler types %v, events %v, js modules %d); mow runs command hooks for %v\n",
+			root, types, unsupported, len(file.Modules), supportedEventList)
+	}
 	if n == 0 {
 		return nil, nil
 	}
@@ -215,9 +247,48 @@ func load(p PluginConfig) (*bridge, error) {
 	return b, nil
 }
 
+// defaultEventTimeout mirrors Claude Code's hook defaults: 600 s on most
+// events, 30 s on UserPromptSubmit (it blocks every prompt), and a short
+// budget for SessionEnd-like teardown. PreToolUse is 60 s (D-41): a gate that
+// stalls should not hold a tool call for ten minutes; a timeout there is
+// "no decision" unless the plugin is fail_closed.
+func defaultEventTimeout(event string) time.Duration {
+	switch event {
+	case "UserPromptSubmit":
+		return 30 * time.Second
+	case "PreToolUse":
+		return 60 * time.Second
+	case "Stop":
+		return 60 * time.Second
+	default:
+		return 600 * time.Second
+	}
+}
+
+func (b *bridge) timeoutFor(event string) time.Duration {
+	if b.timeout > 0 {
+		return b.timeout
+	}
+	return defaultEventTimeout(event)
+}
+
+// maxContextChars caps each additionalContext a hook returns (Claude Code:
+// 10,000 characters per field). Longer text keeps head and tail.
+const maxContextChars = 10_000
+
+func capContext(s string) string {
+	r := []rune(s)
+	if len(r) <= maxContextChars {
+		return s
+	}
+	head, tail := maxContextChars*3/4, maxContextChars/4
+	return string(r[:head]) + fmt.Sprintf("\n…(hook context: %d chars elided)…\n", len(r)-head-tail) + string(r[len(r)-tail:])
+}
+
 // outcome aggregates one event's command results.
 type outcome struct {
 	blocked      bool
+	halt         bool // continue:false — stop the run, not just this call
 	reason       string
 	contexts     []string
 	updatedInput json.RawMessage
@@ -275,13 +346,14 @@ func (b *bridge) run(ctx context.Context, event, matchName string, payload map[s
 				}
 			}
 			if ho.Continue != nil && !*ho.Continue {
+				out.halt = true
 				out.blocked = true
 				if out.reason == "" {
 					out.reason = firstNonEmpty(ho.StopReason, "stopped by cmdhook")
 				}
 			}
 			if s := strings.TrimSpace(hs.AdditionalContext); s != "" {
-				s = normalizeClaudeToolNames(s, b.name)
+				s = capContext(normalizeClaudeToolNames(s, b.name))
 				out.contexts = append(out.contexts, s)
 			}
 			if len(hs.UpdatedInput) > 0 {
@@ -296,7 +368,8 @@ func (b *bridge) run(ctx context.Context, event, matchName string, payload map[s
 // non-blockingly (timeout, bad JSON, nonzero-but-not-2 exit) and was logged,
 // unless failClosed turns the failure into a block.
 func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]any) (ho hookOut, blocked bool, reason string, ok bool) {
-	timeout := b.timeout
+	event, _ := payload["hook_event_name"].(string)
+	timeout := b.timeoutFor(event)
 	if ce.Timeout > 0 {
 		timeout = time.Duration(ce.Timeout) * time.Second
 	}
@@ -340,6 +413,12 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 	}
 	in, err := json.Marshal(payload)
 	if err != nil {
+		// The hook never saw the event, so it could not evaluate it. A gate
+		// must not be skipped silently: block under fail_closed, warn otherwise.
+		if b.failClosed {
+			return ho, true, "cmdhook: event could not be encoded for the hook", true
+		}
+		slog.Warn("cmdhook: event could not be encoded; hook skipped", "err", err)
 		return ho, false, "", false
 	}
 	cmd.Stdin = bytes.NewReader(in)
@@ -370,7 +449,7 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 		}
 		cmdLabel := sanitizeHookDiag(firstNonEmpty(truncate(ce.Command, 80), ce.Command))
 		if errors.Is(runErr, context.DeadlineExceeded) || tctx.Err() != nil {
-			msg := "cmdhook: hook timed out"
+			msg := "cmdhook: hook timed out; no decision"
 			if b.failClosed {
 				return ho, true, firstNonEmpty(stderrText, "cmdhook timed out"), true
 			}
@@ -379,6 +458,12 @@ func (b *bridge) execOne(ctx context.Context, ce cmdEntry, payload map[string]an
 				"timeout", timeout,
 				"stderr", truncate(stderrText, 200))
 			return ho, false, "", false
+		}
+		// Claude contract: on any other exit, a valid JSON object on stdout
+		// still decides (standard decision events). Only without one is the
+		// exit a failure.
+		if body := bytes.TrimSpace(stdout.Bytes()); len(body) > 0 && body[0] == '{' && json.Unmarshal(body, &ho) == nil {
+			return ho, false, "", true
 		}
 		if b.failClosed {
 			return ho, true, firstNonEmpty(stderrText, "cmdhook failed: "+runErr.Error()), true
@@ -533,6 +618,12 @@ func redactKeyValue(s, key string) string {
 }
 
 func (b *bridge) runSessionStart(ctx context.Context) string {
+	return b.runSessionStartSource(ctx, "startup")
+}
+
+// runSessionStartSource fires SessionStart with Claude's source value:
+// "startup" for a new session, "resume" when prior history was loaded.
+func (b *bridge) runSessionStartSource(ctx context.Context, source string) string {
 	b.mu.Lock()
 	b.sessionStarted = true
 	b.mu.Unlock()
@@ -541,7 +632,12 @@ func (b *bridge) runSessionStart(ctx context.Context) string {
 		return ""
 	}
 	payload := b.basePayload(ctx, "SessionStart")
-	payload["source"] = "startup"
+	payload["source"] = source
+	if m, _ := payload["model"].(string); m == "" {
+		if eng := mow.EngineFromContext(ctx); eng != nil {
+			payload["model"] = eng.Model()
+		}
+	}
 	out := b.run(ctx, "SessionStart", "", payload)
 	return strings.Join(out.contexts, "\n\n")
 }
@@ -584,9 +680,13 @@ func (b *bridge) register() {
 			payload := b.basePayload(ctx, "PreToolUse")
 			payload["tool_name"] = claudeToolName(e.Name)
 			payload["tool_input"] = rawOrEmpty(e.Args)
+			if e.ToolCallID != "" {
+				payload["tool_use_id"] = e.ToolCallID
+			}
 			out := b.run(ctx, "PreToolUse", claudeToolName(e.Name), payload)
 			d := ext.PreToolDecision{
 				Deny:              out.blocked,
+				Halt:              out.halt,
 				Message:           out.reason,
 				AdditionalContext: strings.Join(out.contexts, "\n\n"),
 			}
@@ -597,14 +697,46 @@ func (b *bridge) register() {
 			return d, nil
 		})
 	}
+	if len(b.events["PostToolUseFailure"]) > 0 {
+		// Claude: fires instead of PostToolUse when the tool failed; output
+		// may add context next to the error.
+		ext.RegisterPostToolSource(hookSource, func(ctx context.Context, e ext.PostToolEvent) (ext.PostToolDecision, error) {
+			if e.ExecErr == nil || e.Denied || !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+				return ext.PostToolDecision{}, nil
+			}
+			payload := b.basePayload(ctx, "PostToolUseFailure")
+			payload["tool_name"] = claudeToolName(e.Name)
+			payload["tool_input"] = rawOrEmpty(e.Args)
+			payload["error"] = e.ExecErr.Error()
+			payload["is_interrupt"] = errors.Is(e.ExecErr, context.Canceled)
+			if e.ToolCallID != "" {
+				payload["tool_use_id"] = e.ToolCallID
+			}
+			if e.Duration > 0 {
+				payload["duration_ms"] = e.Duration.Milliseconds()
+			}
+			out := b.run(ctx, "PostToolUseFailure", claudeToolName(e.Name), payload)
+			if len(out.contexts) > 0 {
+				return ext.PostToolDecision{Result: e.Result + "\n\n" + strings.Join(out.contexts, "\n\n"), Rewrite: true}, nil
+			}
+			return ext.PostToolDecision{}, nil
+		})
+	}
 	if len(b.events["PostToolUse"]) > 0 {
 		ext.RegisterPostToolSource(hookSource, func(ctx context.Context, e ext.PostToolEvent) (ext.PostToolDecision, error) {
-			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+			// Failed calls go to PostToolUseFailure (Claude fires one or the other).
+			if (e.ExecErr != nil && !e.Denied) || !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return ext.PostToolDecision{}, nil
 			}
 			payload := b.basePayload(ctx, "PostToolUse")
 			payload["tool_name"] = claudeToolName(e.Name)
 			payload["tool_input"] = rawOrEmpty(e.Args)
+			if e.ToolCallID != "" {
+				payload["tool_use_id"] = e.ToolCallID
+			}
+			if e.Duration > 0 {
+				payload["duration_ms"] = e.Duration.Milliseconds()
+			}
 			// Bound tool_response before shipping it to an untrusted shell hook.
 			payload["tool_response"] = truncate(e.Result, maxHookIOBytes)
 			out := b.run(ctx, "PostToolUse", claudeToolName(e.Name), payload)
@@ -653,7 +785,11 @@ func (b *bridge) register() {
 			if !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return ext.SessionStartDecision{}, nil
 			}
-			sys := b.runSessionStart(ctx)
+			source := "startup"
+			if e.Resumed {
+				source = "resume"
+			}
+			sys := b.runSessionStartSource(ctx, source)
 			return ext.SessionStartDecision{SystemAppend: sys}, nil
 		})
 	}
@@ -680,7 +816,9 @@ func (b *bridge) register() {
 		// seam; fire Stop for it here (observe-only) so the hook still runs
 		// once per prompt. Successful runs were handled above.
 		ext.RegisterStopSource(hookSource, func(ctx context.Context, e ext.StopEvent) {
-			if e.Err == nil || !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+			// Claude fires StopFailure instead of Stop when the turn ends on
+			// an API error; plugins that declare it get that one.
+			if e.Err == nil || len(b.events["StopFailure"]) > 0 || !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
 				return
 			}
 			payload := b.basePayload(ctx, "Stop")
@@ -689,6 +827,25 @@ func (b *bridge) register() {
 				payload["session_id"] = e.SessionID
 			}
 			_ = b.run(ctx, "Stop", "", payload)
+		})
+	}
+	if len(b.events["StopFailure"]) > 0 {
+		// Claude: runs instead of Stop when the turn ends on an error; output
+		// and exit code are ignored.
+		ext.RegisterStopSource(hookSource, func(ctx context.Context, e ext.StopEvent) {
+			if e.Err == nil || errors.Is(e.Err, context.Canceled) || !ext.IsExtensionActive(target, ext.TurnFromContext(ctx)) {
+				return
+			}
+			payload := b.basePayload(ctx, "StopFailure")
+			payload["error"] = "unknown"
+			payload["error_details"] = e.Err.Error()
+			if e.Text != "" {
+				payload["last_assistant_message"] = e.Text
+			}
+			if e.SessionID != "" {
+				payload["session_id"] = e.SessionID
+			}
+			_ = b.run(context.WithoutCancel(ctx), "StopFailure", "", payload)
 		})
 	}
 	if len(b.events["PreCompact"]) > 0 {
@@ -701,7 +858,14 @@ func (b *bridge) register() {
 			payload["est_chars"] = e.EstChars
 			payload["max_chars"] = e.MaxChars
 			payload["message_count"] = e.MessageCount
-			_ = b.run(ctx, "PreCompact", "", payload)
+			payload["custom_instructions"] = nil
+			out := b.run(ctx, "PreCompact", "", payload)
+			// Claude: decision "block" (or exit 2) stops compaction. Only the
+			// loop's automatic path fires PreCompact, so trigger is "auto".
+			if out.blocked {
+				slog.Info("cmdhook: compaction skipped by PreCompact hook", "plugin", b.name, "reason", out.reason)
+				return ext.PreCompactDecision{Skip: true}, nil
+			}
 			return ext.PreCompactDecision{}, nil
 		})
 	}

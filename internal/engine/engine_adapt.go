@@ -186,6 +186,7 @@ func adaptPreTool(fn PreToolFunc) agent.PreToolFunc {
 		return agent.PreToolDecision{
 			Deny: d.Deny, Message: d.Message, Args: d.Args,
 			RewriteArgs: d.RewriteArgs, AdditionalContext: d.AdditionalContext,
+			Halt: d.Halt,
 		}, nil
 	}
 }
@@ -209,6 +210,7 @@ func adaptPostToolExt(fn ext.PostToolFunc) agent.PostToolFunc {
 		d, err := fn(ctx, ext.PostToolEvent{
 			Name: e.Name, Args: e.Args, ToolCallID: e.ToolCallID,
 			Result: e.Result, Denied: e.Denied, ExecErr: e.ExecErr,
+			Duration: e.Duration,
 		})
 		if err != nil {
 			return agent.PostToolDecision{}, err

@@ -22,6 +22,9 @@ type PreToolDecision struct {
 	Args              json.RawMessage
 	RewriteArgs       bool
 	AdditionalContext string
+	// Halt denies this call and ends the run cleanly after the current
+	// batch (Claude Code's continue:false). Implies Deny.
+	Halt bool
 }
 
 // PreToolFunc runs before each tool call. Returning error aborts the whole Run.
