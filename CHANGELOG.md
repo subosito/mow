@@ -12,6 +12,7 @@
 - feat(workflow): add registered sequential prompt/verify procedures with bounded typed JSON, durable locked run state, interruption blocking, and optional CLI/slash composition.
 - fix(agent): cap one tool batch at 64, ignore orphan Responses argument events, sanitize malformed resumed tool calls, and require synthesis after bounded delegate fan-out.
 - fix(acp): a native delegate peer returns when the model answers. Stop-hook continuations stay on the parent. Queued calls take a cancellable peer lock and start `timeout_sec` only after they hold it. The native model check is capped at 5s and emits progress first. Identical delegate batches stop after 3 barren rounds.
+- fix(llm): a Responses stream that ends on `response.done`, or an HTTP 200 JSON body, is a finished reply. A typeless error object is the provider error. A cut stream records how many frames arrived.
 
 - feat(goal): stock `mow goal` outer loop (checklist, worktrees, parallel steps); bash refuses WIP-discard and discover-tool dumps.
 - docs: OpenSpec behavior contracts for stock composition, trust, goal, and baked-in guards (`openspec/specs/`).

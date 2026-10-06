@@ -317,6 +317,10 @@ func TestResponsesStreamFailsOnEOFBeforeCompleted(t *testing.T) {
 	if !errors.Is(err, errStreamIncomplete) {
 		t.Fatalf("err=%v want errStreamIncomplete", err)
 	}
+	inc, ok := errors.AsType[*streamIncompleteError](err)
+	if !ok || inc.Frames != 1 || inc.ContentBytes != 2 {
+		t.Fatalf("detail=%v", err)
+	}
 }
 
 func TestChatOpenAIResponsesNonStreamStatusFailed(t *testing.T) {
@@ -589,5 +593,81 @@ func TestResponsesStreamReturnsAtCompletedWithoutEOF(t *testing.T) {
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("stream waited %s for EOF after response.completed", d)
+	}
+}
+
+func TestResponsesStreamAcceptsResponseDone(t *testing.T) {
+	// xAI ends a turn with response.done. Reasoning deltas are not assistant
+	// text, so the answer lives in that envelope. Missing it looks like a
+	// cut stream with content_bytes=0.
+	const body = "" +
+		"event: response.reasoning_text.delta\n" +
+		"data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"thinking\"}\n\n" +
+		"event: response.done\n" +
+		"data: {\"type\":\"response.done\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":4,\"output_tokens\":2},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"from-done\"}]}]}}\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
+	var got strings.Builder
+	msg, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{
+		OnContent: func(d string) { got.WriteString(d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Content != "from-done" || got.String() != "from-done" {
+		t.Fatalf("content=%q delta=%q", msg.Content, got.String())
+	}
+	if msg.Usage.InputTokens != 4 || msg.Usage.OutputTokens != 2 || msg.StopReason != "completed" {
+		t.Fatalf("msg=%+v", msg)
+	}
+}
+
+func TestResponsesStreamAcceptsJSONBody(t *testing.T) {
+	// A gateway that ignores stream:true returns one JSON object. That is a
+	// finished answer, not a cut stream.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"status":"completed","usage":{"input_tokens":2,"output_tokens":1},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"plain ok"}]}]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
+	msg, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Content != "plain ok" || msg.StopReason != "completed" || msg.Usage.InputTokens != 2 {
+		t.Fatalf("msg=%+v", msg)
+	}
+}
+
+func TestResponsesStreamJSONErrorIsNotIncomplete(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"error":{"message":"model rejected the include"}}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
+	_, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err == nil || errors.Is(err, errStreamIncomplete) || !strings.Contains(err.Error(), "model rejected the include") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestResponsesStreamTypelessErrorFrame(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"error\":{\"message\":\"rate limited\"}}\n\n")
+	}))
+	t.Cleanup(srv.Close)
+
+	c := &Client{Wire: WireOpenAIResponses, BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTP: srv.Client(), Stream: true}
+	_, err := c.ChatWithStream(t.Context(), []Message{{Role: "user", Content: "x"}}, nil, StreamHooks{})
+	if err == nil || errors.Is(err, errStreamIncomplete) || !strings.Contains(err.Error(), "rate limited") {
+		t.Fatalf("err=%v", err)
 	}
 }

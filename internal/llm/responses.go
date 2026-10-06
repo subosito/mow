@@ -373,6 +373,12 @@ func (c *Client) chatOpenAIResponses(ctx context.Context, messages []Message, to
 	if err != nil {
 		return Message{}, err
 	}
+	return decodeResponsesBody(status, respBody, c.requestModel())
+}
+
+// decodeResponsesBody turns one Responses JSON object into a message.
+// A top-level error object and status "failed" are errors, not empty answers.
+func decodeResponsesBody(status int, respBody []byte, model string) (Message, error) {
 	var parsed responsesAPIResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return Message{}, fmt.Errorf("llm: responses decode: %w (status %d body %s)", err, status, truncate(string(respBody), 200))
@@ -388,7 +394,7 @@ func (c *Client) chatOpenAIResponses(ctx context.Context, messages []Message, to
 		return Message{}, fmt.Errorf("llm: response failed")
 	}
 	msg := messageFromResponses(parsed)
-	tagReasoning(&msg, c.requestModel())
+	tagReasoning(&msg, model)
 	return msg, nil
 }
 
@@ -449,13 +455,38 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 
 	streamBody := &idleReader{r: res.Body, idle: streamIdleTimeout, ctx: ctx}
 	defer streamBody.abandon()
-	sc := bufio.NewScanner(streamBody)
+	br := bufio.NewReader(streamBody)
+	activity := onceActivity(hooks.OnActivity)
+	// A gateway that ignores stream:true answers with one JSON response
+	// object (or a JSON error). SSE never starts with '{', so decode that
+	// body here instead of skipping every line and reporting a cut stream.
+	if head, _ := br.Peek(16); sseLooksLikeJSON(head) {
+		b, err := io.ReadAll(io.LimitReader(br, jsonBodyLimit))
+		if err != nil {
+			return Message{}, err
+		}
+		msg, err := decodeResponsesBody(res.StatusCode, b, c.requestModel())
+		if err != nil {
+			return Message{}, err
+		}
+		if activity != nil {
+			activity()
+		}
+		if msg.Content != "" && hooks.OnContent != nil {
+			hooks.OnContent(msg.Content)
+		}
+		complete = true
+		return msg, nil
+	}
+	sc := bufio.NewScanner(br)
 	sc.Buffer(make([]byte, 0, 64*1024), 2<<20)
 	var eventName string
-	activity := onceActivity(hooks.OnActivity)
-	// terminal: a response.completed / response.incomplete envelope arrived.
-	// A clean EOF before one is a dropped connection, not an empty answer.
+	// terminal: response.completed, response.done, or response.incomplete
+	// arrived. xAI ends a turn with response.done; OpenAI uses
+	// response.completed. A clean EOF before one of those is a dropped
+	// connection, not an empty answer.
 	terminal := false
+	frames, malformed := 0, 0
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
@@ -476,13 +507,17 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 		if data == "" || data == "[DONE]" {
 			continue
 		}
+		frames++
+		if !json.Valid([]byte(data)) {
+			malformed++
+		}
 		// response.created / response.in_progress only acknowledge the
 		// request — they arrive when the stream opens, before the model has
 		// produced anything, so they are not activity. Later frames (output
 		// items, deltas, completed, error) are real upstream work.
 		switch resolveSSEType(eventName, data) {
 		case "", "response.created", "response.in_progress":
-		case "response.completed", "response.incomplete":
+		case "response.completed", "response.done", "response.incomplete":
 			terminal = true
 			fallthrough
 		default:
@@ -503,8 +538,8 @@ func (c *Client) chatOpenAIResponsesStream(ctx context.Context, messages []Messa
 		return Message{}, err
 	}
 	if !terminal {
-		return Message{}, &streamIncompleteError{Wire: "openai-responses", ContentBytes: content.Len(),
-			ToolCalls: len(toolsByIdx), Elapsed: time.Since(started)}
+		return Message{}, &streamIncompleteError{Wire: "openai-responses", Frames: frames, Malformed: malformed,
+			ContentBytes: content.Len(), ToolCalls: len(toolsByIdx), Elapsed: time.Since(started)}
 	}
 
 	msg.Content = content.String()
@@ -553,6 +588,19 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 	typ := base.Type
 	if typ == "" {
 		typ = event
+	}
+	if typ == "" {
+		// Chat-shaped error objects have no Responses "type". Leaving them
+		// for EOF reports a cut stream and retries a request the provider
+		// already rejected.
+		var errBody struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal([]byte(data), &errBody) == nil && errBody.Error.Message != "" {
+			return fmt.Errorf("llm: %s", errBody.Error.Message)
+		}
 	}
 	switch typ {
 	case "error":
@@ -721,12 +769,21 @@ func applyResponsesSSE(data, event string, msg *Message, content *strings.Builde
 			a.args.WriteString(ev.Arguments)
 		}
 
-	case "response.completed":
+	case "response.completed", "response.done":
+		// response.done is the xAI terminal envelope (same shape as
+		// response.completed). The answer often arrives only here, after
+		// reasoning deltas that are not assistant text.
 		var ev struct {
 			Response responsesAPIResponse `json:"response"`
 		}
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
 			return nil
+		}
+		if ev.Response.Status == "failed" || (ev.Response.Error != nil && ev.Response.Error.Message != "") {
+			if ev.Response.Error != nil && ev.Response.Error.Message != "" {
+				return fmt.Errorf("llm: %s", ev.Response.Error.Message)
+			}
+			return fmt.Errorf("llm: response failed")
 		}
 		// Prefer usage / stop reason from the completed envelope.
 		full := messageFromResponses(ev.Response)

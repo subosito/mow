@@ -227,6 +227,13 @@ func onceActivity(fn func()) func() {
 	return sync.OnceFunc(fn)
 }
 
+// sseLooksLikeJSON reports whether the first bytes of an HTTP 200 body are a
+// JSON object. SSE frames begin with "data:", "event:", or ":" — never '{'.
+func sseLooksLikeJSON(head []byte) bool {
+	head = bytes.TrimLeft(head, " \t\r\n")
+	return len(head) > 0 && head[0] == '{'
+}
+
 // resolveSSEType names one SSE frame: the event: line when present, else the
 // data payload's "type" field (some proxies strip event lines). "" means the
 // frame could not be classified — the loops treat it as junk, not activity.
@@ -405,7 +412,7 @@ func (c *Client) ChatStreamHooks(ctx context.Context, messages []Message, tools 
 	// object. SSE never starts with '{' (frames begin with data:/event:/:),
 	// so decode that body as a plain completion instead of scanning it for
 	// frames that never come and failing as an incomplete stream.
-	if head, _ := br.Peek(16); len(bytes.TrimLeft(head, " \t\r\n")) > 0 && bytes.TrimLeft(head, " \t\r\n")[0] == '{' {
+	if head, _ := br.Peek(16); sseLooksLikeJSON(head) {
 		b, err := io.ReadAll(io.LimitReader(br, jsonBodyLimit))
 		if err != nil {
 			return Message{}, err
