@@ -73,6 +73,11 @@ type Options struct {
 	// after turn, stop). Options.Hooks still run. Combine with
 	// SkipExtensionSetup for strict read-only workflows.
 	DisableExtensionHooks bool
+	// DelegatePeer marks a process spawned by the delegate tool (mow acp
+	// --delegate-peer). Before-finish hooks still run on the parent. They do
+	// not continue this process, so a Stop hook cannot hold the parent's
+	// delegate call open after the model has answered.
+	DelegatePeer bool
 	// DeferLLM, when true, skips the API-key / model / provider handshake in
 	// New. Control-plane hosts (mow acp initialize) can start without
 	// credentials. The first Prompt / ListModels / chat call still requires a

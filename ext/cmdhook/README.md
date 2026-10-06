@@ -36,6 +36,7 @@ Supported hook events: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserP
   - **Inputs:** they receive `last_assistant_message` and `stop_hook_active`, which is true once a Stop hook has already continued the turn.
   - **Continuing:** returning `{"decision":"block","reason":"…"}`, `hookSpecificOutput.additionalContext`, or exit 2 with a stderr reason sends that text to the model and the run continues.
   - **Cap:** at most 8 continuations in a row.
+  - **Delegate peers:** a native peer (`mow acp --delegate-peer`) does not apply these continuations. The peer returns when the model answers, and the parent is the run a Stop hook can keep going.
   - **Errors:** a run that ends in an error still fires Stop, observe-only.
 
 **Claude's contract, as implemented:**

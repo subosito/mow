@@ -145,7 +145,9 @@ func mergeHooks(opt Options) (agent.Hooks, lifeHooks) {
 			})
 		}
 	}
-	if !opt.DisableExtensionHooks {
+	// A delegate peer returns when the model answers. Stop continuations stay
+	// on the parent, which is the process the user is waiting on.
+	if !opt.DisableExtensionHooks && !opt.DelegatePeer {
 		for _, fn := range ext.BeforeFinishHooksForEngine(loadUser) {
 			h.BeforeFinish = append(h.BeforeFinish, func(ctx context.Context, e agent.BeforeFinishEvent) (agent.BeforeFinishDecision, error) {
 				d, err := fn(ctx, ext.BeforeFinishEvent{AssistantText: e.AssistantText, Continuations: e.Continuations})

@@ -37,6 +37,7 @@ func runCmd(args []string) int {
 	fs := cliutil.NewFlagSet("acp")
 	var ef cliutil.EngineFlags
 	ef.Bind(fs)
+	delegatePeer := fs.Bool("delegate-peer", false, "spawned by delegate; do not continue the run from Stop hooks")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -49,6 +50,7 @@ func runCmd(args []string) int {
 	cliutil.EnableVerbose(ef.Verbose)
 	opt := ef.Options()
 	opt.Stream = true
+	opt.DelegatePeer = *delegatePeer
 	eng, err := mow.New(opt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mow acp: %v\n", err)
@@ -75,6 +77,7 @@ func printUsage() {
 
   Config: mode (ask|code), approvals (prompt|always), model, effort.
   Peers:  extensions.acp.peers → delegate.
+  Native peers are started with --delegate-peer so a Stop hook continues the parent, not the peer.
 
 Engine flags: same as mow run.
 

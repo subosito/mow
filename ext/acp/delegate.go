@@ -449,40 +449,41 @@ func (t *delegateTool) Exec(ctx context.Context, args json.RawMessage) (string, 
 		dir = resolved
 	}
 
-	to := time.Duration(spec.TimeoutSec) * time.Second
-	pctx, cancel := context.WithTimeout(ctx, to)
-	defer cancel()
-
 	host := hostPolicyFromContext(ctx, t.workspace)
 	cmd := peerCommand(spec, host, dir)
 	perm := effectivePermissionMode(spec)
 	key := peerKey(spec.Name, dir, cmd, perm)
-	// Fail fast on a native peer naming a model the catalog never advertised:
-	// without this a typo spawns a peer that can never succeed, and the call
-	// looks "ok" (running…) until the full timeout expires.
-	if err := validateNativePeerModel(pctx, spec); err != nil {
+	agentName = spec.Name
+	// Show movement before the catalog check. That check used to run on the
+	// full peer timeout, so a slow GET /models looked like a hung delegate.
+	emitDelegateProgress(ctx, agentName, "prompt", "starting…")
+	mctx, mcancel := modelCheckContext(ctx)
+	err := validateNativePeerModel(mctx, spec)
+	mcancel()
+	if err != nil {
 		return "", err
 	}
-	slot, err := t.getOrStart(pctx, spec, dir, host, cmd, perm, key)
+	slot, err := t.getOrStart(ctx, spec, dir, host, cmd, perm, key)
 	if err != nil {
 		return "", err
 	}
 
 	// One delegate call at a time per peer: a peer is a single stdio
 	// conversation, so OnChunk and the reply accumulator must not be shared.
-	slot.mu.Lock()
+	// Wait on the parent context, not the prompt timeout: queue time must not
+	// consume timeout_sec, and cancel must unblock a waiter immediately.
+	emitDelegateProgress(ctx, agentName, "prompt", "waiting for peer…")
+	if err := lockSlot(ctx, &slot.mu); err != nil {
+		return "", fmt.Errorf("delegate: agent %q cancelled while waiting for the peer", spec.Name)
+	}
 	defer slot.mu.Unlock()
 
-	agentName = spec.Name
+	to := time.Duration(spec.TimeoutSec) * time.Second
+	pctx, cancel := context.WithTimeout(ctx, to)
+	defer cancel()
+
 	// Immediate UI signal so hosts show "claude: prompt running…" during TTFT.
-	if eng := mow.EngineFromContext(ctx); eng != nil {
-		eng.Emit(mow.Event{
-			Type:  mow.EventDelegateProgress,
-			Agent: agentName,
-			Tool:  "prompt",
-			Delta: "running…",
-		})
-	}
+	emitDelegateProgress(ctx, agentName, "prompt", "running…")
 	slot.client.SetOnChunk(func(delta string) {
 		if eng := mow.EngineFromContext(ctx); eng != nil {
 			eng.Emit(mow.Event{
@@ -637,6 +638,57 @@ func delegatePromptError(agent string, timeoutSec int, alive bool, err error) er
 		msg += ": " + err.Error()
 	}
 	return errors.New(msg)
+}
+
+// nativeModelCheckTimeout bounds the catalog lookup before a native peer
+// spawns. A hung GET /models must not sit on the peer's timeout_sec.
+var nativeModelCheckTimeout = 5 * time.Second
+
+func modelCheckContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(ctx, nativeModelCheckTimeout)
+}
+
+func emitDelegateProgress(ctx context.Context, agent, tool, delta string) {
+	eng := mow.EngineFromContext(ctx)
+	if eng == nil || delta == "" {
+		return
+	}
+	eng.Emit(mow.Event{
+		Type:  mow.EventDelegateProgress,
+		Agent: agent,
+		Tool:  tool,
+		Delta: delta,
+	})
+}
+
+// lockSlot locks mu unless ctx ends first. A cancelled waiter does not keep
+// the mutex: the goroutine that eventually acquires it unlocks again.
+func lockSlot(ctx context.Context, mu *sync.Mutex) error {
+	if ctx == nil {
+		mu.Lock()
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	locked := make(chan struct{})
+	go func() {
+		mu.Lock()
+		close(locked)
+	}()
+	select {
+	case <-locked:
+		return nil
+	case <-ctx.Done():
+		go func() {
+			<-locked
+			mu.Unlock()
+		}()
+		return ctx.Err()
+	}
 }
 
 // validateNativePeerModel rejects a native peer whose model is not in the

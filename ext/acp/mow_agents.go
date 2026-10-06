@@ -65,7 +65,9 @@ func resolveOnePeer(i int, a PeerSpec) (PeerSpec, error) {
 func buildMowAgentCommand(spec PeerSpec, host *hostPeerPolicy, peerCwd string) []string {
 	bin := mowAgentBinary()
 	model := strings.TrimSpace(spec.Model)
-	cmd := []string{bin, "acp", "--model", model}
+	// --delegate-peer: this process returns when the model answers. Stop-hook
+	// continuations stay on the parent so they cannot hold the delegate call open.
+	cmd := []string{bin, "acp", "--delegate-peer", "--model", model}
 	prov := strings.TrimSpace(spec.Provider)
 	if prov == "" && host != nil {
 		prov = strings.TrimSpace(host.provider)

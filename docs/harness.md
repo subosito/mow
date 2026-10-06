@@ -159,10 +159,11 @@ Two consequences worth knowing:
 **Warn early; stop only after sustained repetition.** After three barren
 batches the model receives an advisory checkpoint and can continue polling,
 retrying, or changing strategy. Only **20 consecutive barren batches** end the
-run with `ErrStuck` → `StopStuck` and a `loop.stall` event. Any new call/result
-pair resets the streak. This backstop prevents unlimited exact-repeat loops;
-it is not a three-batch limit on legitimate work. Explicit turn/spend limits
-and cancellation remain independent.
+run with `ErrStuck` → `StopStuck` and a `loop.stall` event. A batch that is
+only `delegate` calls stops after **3** barren rounds: repeating the same peer
+prompt is not a poll. Any new call/result pair resets the streak. This backstop
+prevents unlimited exact-repeat loops; it is not a three-batch limit on
+legitimate work. Explicit turn/spend limits and cancellation remain independent.
 
 Exploration also has built-in checkpoints, with no configuration required:
 

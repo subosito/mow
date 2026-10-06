@@ -524,10 +524,13 @@ func Run(ctx context.Context, chat ChatFn, userPrompt string, opt Options) (Resu
 			barrenRuns = 0
 		} else {
 			barrenRuns++
-			if barrenRuns == sameToolWarnAfter {
+			limit := stallLimit(msg.ToolCalls)
+			// The advisory is only useful when the run will continue. A
+			// delegate-only streak stops at the same count the warning uses.
+			if barrenRuns == sameToolWarnAfter && barrenRuns < limit {
 				messages = append(messages, llm.Message{Role: "user", Synthetic: true, Content: "Several tool batches returned only previously seen results. This is an advisory checkpoint, not a stop: if polling or retrying is necessary, continue with an appropriate wait; otherwise use the evidence collected or change strategy."})
 			}
-			if barrenRuns >= stallBarrenBatches {
+			if barrenRuns >= limit {
 				return Result{
 						Text:       strings.TrimSpace(msg.Content),
 						Messages:   messages,
@@ -723,6 +726,25 @@ func (m *modelWaitMonitor) abort() {
 // legitimately produce unchanged output for several batches; three is not
 // enough evidence to abort useful work.
 const stallBarrenBatches = 20
+
+// stallDelegateBatches is the barren-batch stop for a batch that is only
+// delegate calls. A repeated peer prompt is not a poll: three identical
+// rounds is enough to stop, instead of holding the parent for twenty.
+const stallDelegateBatches = 3
+
+// stallLimit is how many consecutive barren batches end the run. Delegate-only
+// batches use the shorter cap; anything else keeps the polling backstop.
+func stallLimit(calls []llm.ToolCall) int {
+	if len(calls) == 0 {
+		return stallBarrenBatches
+	}
+	for _, tc := range calls {
+		if tc.Function.Name != "delegate" {
+			return stallBarrenBatches
+		}
+	}
+	return stallDelegateBatches
+}
 
 // maxTruncatedBatches bounds the retry of a batch whose tool arguments the
 // provider cut at its output limit. Retrying once or twice is worthwhile — the

@@ -44,7 +44,7 @@ func TestResolveAgentsNativeAndExternal(t *testing.T) {
 
 	hostRW := &hostPeerPolicy{workspace: "/ws", allowWrite: true, allowShell: true, provider: "gateway"}
 	cmdA := buildMowAgentCommand(specs[0], hostRW, "/ws")
-	wantA := []string{"mow", "acp", "--model", "gemini-2.5-flash", "--provider", "gateway", "--workspace", "/ws", "--effort", "high", "--system-prefix", "You are a reviewer.", "--stream"}
+	wantA := []string{"mow", "acp", "--delegate-peer", "--model", "gemini-2.5-flash", "--provider", "gateway", "--workspace", "/ws", "--effort", "high", "--system-prefix", "You are a reviewer.", "--stream"}
 	if got := cmdA; !slices.Equal(got, wantA) {
 		t.Fatalf("peer-a command=%v want %v", got, wantA)
 	}

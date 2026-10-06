@@ -29,6 +29,18 @@ func (echoTool) Exec(_ context.Context, args json.RawMessage) (string, error) {
 	return a.Text, nil
 }
 
+// delegateEcho is a stand-in for the delegate tool: same name, constant result.
+type delegateEcho struct{}
+
+func (delegateEcho) Name() string        { return "delegate" }
+func (delegateEcho) Description() string { return "delegate" }
+func (delegateEcho) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"}}}`)
+}
+func (delegateEcho) Exec(context.Context, json.RawMessage) (string, error) {
+	return "peer said the same thing", nil
+}
+
 func TestRunWithPriorMessages(t *testing.T) {
 	var got []llm.Message
 	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
@@ -668,6 +680,32 @@ func TestStallOnNoNewEvidence(t *testing.T) {
 	// Batch 1 is new evidence; allow 20 barren batches before stopping.
 	if turns != 21 {
 		t.Fatalf("stopped after %d turns, want 21 (1 novel + 20 barren)", turns)
+	}
+}
+
+// Identical delegate rounds are not a poll. Stop after three barren batches
+// so a parent does not sit on the same peer prompt for twenty cycles.
+func TestStallOnRepeatedDelegateStopsSoon(t *testing.T) {
+	turns := 0
+	chat := func(ctx context.Context, messages []llm.Message, tools []llm.ToolSpec) (llm.Message, error) {
+		turns++
+		return llm.Message{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "delegate", Arguments: `{"agent":"peer","prompt":"same"}`},
+			}},
+		}, nil
+	}
+	_, err := agent.Run(t.Context(), chat, "hi", agent.Options{
+		MaxTurns: 50,
+		Tools:    []agent.Tool{delegateEcho{}},
+	})
+	if err == nil || !errors.Is(err, agent.ErrStuck) {
+		t.Fatalf("err=%v want ErrStuck", err)
+	}
+	if turns != 4 {
+		t.Fatalf("stopped after %d turns, want 4 (1 novel + 3 barren delegate batches)", turns)
 	}
 }
 

@@ -1,9 +1,13 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/subosito/mow"
 )
@@ -40,6 +44,78 @@ func TestApplyModelConfigRejectsUnknownModel(t *testing.T) {
 	if err := a.applyModelConfig(t.Context(), "gateway/other-model-high"); err != nil {
 		t.Fatalf("provider-prefixed tiered model rejected: %v", err)
 	}
+}
+
+type blockingListProv struct {
+	model string
+}
+
+func (p *blockingListProv) Chat(context.Context, []mow.Message, []mow.ToolSpec, mow.ChatHooks) (mow.Message, error) {
+	return mow.Message{Role: "assistant", Content: "ok"}, nil
+}
+
+func (p *blockingListProv) ListModels(ctx context.Context) ([]mow.ModelInfo, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (p *blockingListProv) SetModel(id string) error {
+	p.model = id
+	return nil
+}
+
+func TestDelegateModelCheckDoesNotUsePeerTimeout(t *testing.T) {
+	prev := nativeModelCheckTimeout
+	nativeModelCheckTimeout = 40 * time.Millisecond
+	t.Cleanup(func() { nativeModelCheckTimeout = prev })
+
+	eng, err := mow.New(mow.Options{
+		NoSession: true, Workspace: t.TempDir(), Model: "real-model",
+		Provider: &blockingListProv{model: "real-model"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.Close() })
+
+	// An unavailable catalog is skipped, but the wait must be the short model
+	// check — not the peer's timeout_sec (30s on this spec's usual budget).
+	ctx, cancel := modelCheckContext(mow.ContextWithEngine(t.Context(), eng))
+	defer cancel()
+	start := time.Now()
+	if err := validateNativePeerModel(ctx, PeerSpec{Name: "peer", Model: "other-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("catalog check took %s; peer timeout leaked into the model check", time.Since(start))
+	}
+}
+
+func TestLockSlotUnblocksOnCancel(t *testing.T) {
+	var mu sync.Mutex
+	mu.Lock()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- lockSlot(ctx, &mu) }()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("lockSlot ignored cancel")
+	}
+	mu.Unlock()
+	deadline := time.Now().Add(time.Second)
+	for !mu.TryLock() {
+		if time.Now().After(deadline) {
+			t.Fatal("mutex left locked after cancel")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Unlock()
 }
 
 func TestDelegateRejectsUnknownNativeModelFast(t *testing.T) {
