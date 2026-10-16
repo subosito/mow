@@ -22,7 +22,6 @@
 | [media.md](media.md) | Hosts and operators | Binary media inputs, optional understand/generate tools, client gaps |
 | [orchestration.md](orchestration.md) | Orchestrator authors | Goal, loop, scheduler, and workflow boundaries and contracts |
 | [workspace-profiles.md](workspace-profiles.md) | CLI operators | `$MOW_HOME/workspaces/<name>/`: roots, overlay, skills, plugins, internal docs, scoped ACP peers |
-| [../openspec/specs/](../openspec/specs/) | Humans and agents | Behavior contracts: what ships in stock mow, trust, goal, baked-in guards |
 
 Per-extension one-pagers live next to the code (`ext/*/README.md`). Longer how-tos stay here.
 

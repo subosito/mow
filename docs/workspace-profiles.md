@@ -85,11 +85,11 @@ The agent receives its location, not the contents: use `glob`, `grep`, and
 permission is enabled. Read-only engines can consult existing notes.
 
 Use this for reviews, experiments, scratch plans, and local operational notes
-that do not belong in public project documentation. Keep user guides and
-behavior contracts in the repository. Profile configuration and credentials
-are not exposed along with docs, and another profile or a plain directory
-workspace does not inherit these notes. Hermetic engines never create or load
-profile docs. Shell permission remains a separate trust decision.
+that do not belong in public project documentation. Keep user guides in the
+repository. Profile configuration and credentials are not exposed along with
+docs, and another profile or a plain directory workspace does not inherit
+these notes. Hermetic engines never create or load profile docs. Shell
+permission remains a separate trust decision.
 
 “Internal” means outside the checkout, **not secret from the model provider**:
 notes read by tools may enter model requests and persisted session history.

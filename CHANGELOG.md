@@ -32,7 +32,6 @@ This release slims mow down to a focused core harness, adds durable workflows, g
 - **Workspace profile notes.** Notes kept in a workspace profile are available to the file tools when permitted, without living in the project checkout.
 - **`X-Mow-Session` on every request,** so gateways can keep server-side conversation state. A header you configure still takes precedence.
 - **Decision client.** The optional `decision` package evaluates choices and scores against a `/v1/decisions` endpoint. The agent loop does not use it.
-- **Behavior contracts.** `openspec/specs/` documents how the engine, trust, goals, guards, and stock composition are meant to behave.
 
 ### Security
 
