@@ -131,7 +131,7 @@ func runHelperMarker() {
 				"jsonrpc": "2.0", "id": req.ID,
 				"result": map[string]any{"tools": []any{}},
 			})
-			select {}
+			helperHang()
 		}
 	}
 }
@@ -164,7 +164,7 @@ func runHelperHangCall() {
 				},
 			})
 		case "tools/call":
-			select {}
+			helperHang()
 		}
 	}
 }
@@ -183,7 +183,7 @@ func runHelperHangAt(method string) {
 			continue
 		}
 		if req.Method == method {
-			select {}
+			helperHang()
 		}
 		switch req.Method {
 		case "initialize":
@@ -197,6 +197,16 @@ func runHelperHangAt(method string) {
 				"result": map[string]any{"tools": []any{}},
 			})
 		}
+	}
+}
+
+// helperHang parks the helper until the test kills it. A bare select{} is
+// not enough: with no timer pending, the runtime's deadlock detector exits
+// the helper ("all goroutines are asleep"), and the caller sees EOF instead of
+// its own deadline. Whether a timer happens to exist differs by platform.
+func helperHang() {
+	for {
+		time.Sleep(time.Hour)
 	}
 }
 
