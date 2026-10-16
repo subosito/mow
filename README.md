@@ -14,7 +14,7 @@ extensions detach by removing a blank import; secure defaults (read-only tools,
 workspace path jail, out-of-band project trust). OpenTelemetry remains optional
 and never enters a library-only embed.
 
-> Version is the single line in [`VERSION`](VERSION) (currently `1.0.0`).
+> Version is the single line in [`VERSION`](VERSION) (currently `1.5.0`).
 > Tag `v$(cat VERSION)` after bumping that file. Nix and GitHub Releases read
 > the same file. Highlights: [CHANGELOG.md](CHANGELOG.md).
 

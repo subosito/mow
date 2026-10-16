@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0
 
 This release slims mow down to a focused core harness, adds durable workflows, git worktrees, MCP OAuth, and image/audio input, and closes a long list of reliability and security gaps in streaming, delegation, and session storage. Read **Before you upgrade** first: a few settings and APIs changed.
 
