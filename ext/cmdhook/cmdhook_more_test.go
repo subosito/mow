@@ -392,8 +392,13 @@ func TestClaudePluginRootAndEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(string(raw)) != root {
-		t.Fatalf("cwd = %q want %q", strings.TrimSpace(string(raw)), root)
+	// pwd prints the physical directory (macOS /var → /private/var).
+	wantCwd, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(raw)) != wantCwd {
+		t.Fatalf("cwd = %q want %q", strings.TrimSpace(string(raw)), wantCwd)
 	}
 }
 

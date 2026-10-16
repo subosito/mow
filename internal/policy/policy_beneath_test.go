@@ -10,8 +10,10 @@ import (
 // TestBeneath: Beneath must select the same root as ResolvePathFor (longest
 // match) and return a jail-relative path safe for descriptor-relative open.
 func TestBeneath(t *testing.T) {
-	ws := t.TempDir()
-	ro := t.TempDir()
+	// Beneath takes resolved paths (ResolvePath output); t.TempDir may sit
+	// under a symlink (macOS /var → /private/var).
+	ws := realTempDir(t)
+	ro := realTempDir(t)
 
 	pol := &policy.Policy{
 		Workspace:          ws,
@@ -59,4 +61,15 @@ func TestBeneath(t *testing.T) {
 	if _, _, ok := (&policy.Policy{}).Beneath(ws); ok {
 		t.Fatal("unset workspace must not be beneath")
 	}
+}
+
+// realTempDir is t.TempDir with symlinks resolved, matching the jail's
+// resolved paths.
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	d, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
 }

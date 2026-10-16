@@ -63,7 +63,10 @@ func TestOpenJailedUsesKernelPath(t *testing.T) {
 	if !openat2Supported() {
 		t.Skip("kernel lacks openat2")
 	}
-	ws := t.TempDir()
+	ws, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}

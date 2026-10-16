@@ -74,7 +74,7 @@ func TestPolicyNestedRootsMostSpecificWins(t *testing.T) {
 }
 
 func TestResolvePathJail(t *testing.T) {
-	root := t.TempDir()
+	root := realTempDir(t)
 	p := &policy.Policy{Workspace: root}
 
 	ok, err := p.ResolvePath("foo.txt")
@@ -144,8 +144,8 @@ func TestResolvePathSymlinkEscapeNewFile(t *testing.T) {
 }
 
 func TestResolvePathExtraRoots(t *testing.T) {
-	ws := t.TempDir()
-	extra := t.TempDir()
+	ws := realTempDir(t)
+	extra := realTempDir(t)
 	if err := os.WriteFile(filepath.Join(extra, "lib.go"), []byte("package lib\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

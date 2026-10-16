@@ -390,8 +390,16 @@ func (t *globTool) Exec(ctx context.Context, args json.RawMessage) (string, erro
 	full := pat
 	if !filepath.IsAbs(pat) {
 		full = filepath.Join(root, pat)
-	} else if jail, _, ok := t.p.Beneath(filepath.Clean(pat)); ok {
-		root = jail
+	} else {
+		// Jail roots compare in resolved form, so an absolute pattern under a
+		// symlinked root (macOS /var → /private/var) must be resolved too, or
+		// it matches no root and walks the workspace instead.
+		if r, err := policy.ResolveSymlinks(pat); err == nil {
+			full = r
+		}
+		if jail, _, ok := t.p.Beneath(full); ok {
+			root = jail
+		}
 	}
 	var matches []string
 	var err error

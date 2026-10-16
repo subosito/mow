@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -34,8 +35,13 @@ func TestTrustCommandGrantListRevoke(t *testing.T) {
 			t.Fatalf("list code=%d", code)
 		}
 	})
-	if !strings.Contains(out, workspace) {
-		t.Fatalf("list missing workspace %q: %s", workspace, out)
+	// The trust store records the resolved path (macOS /var → /private/var).
+	want, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, want) {
+		t.Fatalf("list missing workspace %q: %s", want, out)
 	}
 	captureStderr(t, func() {
 		if code := TrustCommand("mowi", []string{"--revoke", workspace}); code != 0 {

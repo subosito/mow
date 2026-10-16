@@ -305,10 +305,7 @@ func parseRipgrepJSON(r io.Reader, p *policy.Policy, root string, options ...gre
 		if _, err := p.ResolvePath(full); err != nil {
 			continue
 		}
-		relp, err := filepath.Rel(p.Workspace, full)
-		if err != nil {
-			relp = full
-		}
+		relp := workspaceRel(p.Workspace, full)
 		if opts.filesOnly && seen[relp] {
 			continue
 		}
@@ -381,7 +378,7 @@ func (t *grepTool) grepWalk(ctx context.Context, pattern, root string, re *regex
 		}
 		sc := bufio.NewScanner(io.LimitReader(br, int64(lim)))
 		sc.Buffer(make([]byte, 64*1024), maxReadLineBytes)
-		relp, _ := filepath.Rel(t.p.Workspace, path)
+		relp := workspaceRel(t.p.Workspace, path)
 		lineNo := 0
 		for sc.Scan() {
 			lineNo++

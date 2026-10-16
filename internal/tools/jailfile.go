@@ -389,10 +389,15 @@ func VerifyFDInJailFor(p *policy.Policy, f *os.File, write bool) error {
 // workspaceRel renders a resolved path relative to the workspace for display:
 // in-workspace files show a clean relative path ("internal/tools/x.go"),
 // extra-root files show "../sibling/…". Falls back to the raw path when Rel
-// cannot produce a useful result.
+// cannot produce a useful result. The workspace is resolved first: abs comes
+// from the jail and is symlink-free, so a workspace reached through a symlink
+// (macOS /var → /private/var) would otherwise render as "../../../private/…".
 func workspaceRel(ws, abs string) string {
 	if ws == "" || abs == "" {
 		return abs
+	}
+	if r, err := filepath.EvalSymlinks(ws); err == nil {
+		ws = r
 	}
 	if rel, err := filepath.Rel(ws, abs); err == nil {
 		return rel

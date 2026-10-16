@@ -174,7 +174,12 @@ session:
 	}
 	// Relative skills-local under workspace should be kept (absolute under ws).
 	foundLocal := false
-	wantLocal := filepath.Join(ws, "skills-local")
+	// Skill dirs are recorded resolved (macOS /var → /private/var).
+	realWS, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLocal := filepath.Join(realWS, "skills-local")
 	if slices.Contains(f.Skills.Dirs, wantLocal) {
 		foundLocal = true
 	}

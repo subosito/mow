@@ -70,6 +70,7 @@ This release slims mow down to a focused core harness, adds durable workflows, g
 - Plain (non-JSON) hook output becomes model context only for `UserPromptSubmit` and `SessionStart`. `permissionDecision: defer` now denies the call, since mow cannot resume it later.
 - Calls to one MCP stdio server are serialized, servers restart only after transport errors, refresh tokens are tried before asking for a new sign-in, and tool names from servers with dashes in their names are sanitized and de-duplicated.
 - glob matches patterns that contain `/` correctly with fd 10.5.
+- When the workspace or an extra root is reached through a symlink (as temporary and home directories often are on macOS), grep, edit, write, and `apply_patch` show workspace-relative paths again, and absolute glob patterns under such a root find their files.
 - Stopping a background process never signals an unrelated process that reused its PID.
 - Goals reset their retry and time budgets on each run, resume partial or blocked runs instead of overwriting them, and fail when their state cannot be saved.
 

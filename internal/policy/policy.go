@@ -323,6 +323,14 @@ func (p *Policy) jailRoots() ([]JailRoot, error) {
 
 const maxSymlinkDepth = 40
 
+// ResolveSymlinks resolves symlinks in path the way the jail does: the nearest
+// existing ancestor is resolved and the not-yet-existing remainder (a new file,
+// or glob metacharacters) is re-appended. Callers use it to match a path to a
+// jail root, whose paths are compared in resolved form.
+func ResolveSymlinks(path string) (string, error) {
+	return resolveSymlinks(filepath.Clean(path), 0)
+}
+
 // resolveSymlinks is EvalSymlinks that also handles not-yet-existing paths:
 // the nearest existing ancestor is resolved and the remainder re-appended, and
 // a dangling symlink component is followed manually. depth counts symlinks
