@@ -4,7 +4,7 @@ mow is a **standalone** Go module: OpenAI/Anthropic-compatible HTTP. No gateway 
 
 ## Build, test, run
 
-Requires **Go 1.26.4+** (`go.mod`). Prefer `devenv shell` (`GOTOOLCHAIN=local`).
+Requires **Go 1.26.9+** (`go.mod`). Prefer `devenv shell` (`GOTOOLCHAIN=local`).
 
 ```bash
 devenv shell -- just verify    # vet + go test -race + build — gate before commit

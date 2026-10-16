@@ -27,7 +27,7 @@ after those two. Behavior contracts for what ships in stock mow live under
 
 ## Build, test, verify
 
-Requires **Go 1.26.4+** (pinned in `go.mod`). `devenv shell` sets
+Requires **Go 1.26.9+** (pinned in `go.mod`). `devenv shell` sets
 `GOTOOLCHAIN=local`. Public version is the one line in [`VERSION`](VERSION);
 `just build` and the release workflow stamp it via ldflags. Handshake
 strings use `mow.Version` — do not hardcode the number.

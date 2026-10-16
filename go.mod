@@ -1,6 +1,6 @@
 module github.com/subosito/mow
 
-go 1.26.6
+go 1.26.9
 
 require (
 	github.com/creack/pty v1.1.24

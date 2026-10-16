@@ -3,7 +3,7 @@ schema: spec-driven
 context: |
   Language: English. Keep OpenSpec headings and SHALL/MUST keywords in English.
 
-  Module: github.com/subosito/mow — standalone Go 1.26.4+ agent harness.
+  Module: github.com/subosito/mow — standalone Go 1.26.9+ agent harness.
   LLM access is OpenAI-compatible or Anthropic-compatible HTTP. No gateway,
   sibling repo, or host UI is required to build, test, or run Engine.
 
